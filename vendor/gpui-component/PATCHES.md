@@ -14,3 +14,4 @@ Upstream: crates.io `gpui-component 0.7.1`. Wired in via `[patch.crates-io]` in 
 | `src/tooltip.rs` | `PopupTriggerTooltip` (`popup_trigger_tooltip`, `popup_trigger_tooltip_text`): no tooltip while the element's popup is open | a tooltip never covers the menu its trigger opened, and does not come back while it is open |
 | `src/button/button.rs` | no managed tooltip while the button is held `open` by its popover or dropdown menu | same, for Button triggers |
 | `src/tooltip.rs` | managed tooltip requests carry a liveness token from the trigger's element state (`while_alive`); `TOOLTIP_DEBUG_SELECTOR` on `Tooltip` | a tooltip closes when its trigger is no longer rendered (e.g. "Jump to newest" after the button vanished); tests find tooltips |
+| `src/message_scroller.rs` | `wheel_mask(bool)` builder, default on; off skips the `ScrollableMask` child | the mask scrolls the list in the capture phase, so an editor inside a row (channel thread reply) never got the wheel |

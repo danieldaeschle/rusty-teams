@@ -4079,6 +4079,7 @@ impl Render for ConversationView {
             },
         )
         .with_row_style(StyleRefinement::default().px(px(0.)).pb(px(0.)))
+        .wheel_mask(false)
         .jump_button(!in_feed)
         .force_jump_button(detached)
         .with_jump_button_label(jump::JUMP_TO_NEWEST_LABEL)
