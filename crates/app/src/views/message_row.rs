@@ -65,7 +65,7 @@ const BUBBLE_PADDING_Y: f32 = 8.;
 const META_BOTTOM_INSET: f32 = 4.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
-const TICK_BASELINE_DROP: f32 = 0.75;
+const TICK_BASELINE_DROP: f32 = 0.5;
 const SAVED_MARK_SIZE: f32 = 12.;
 const FORWARDED_SIZE: f32 = 11.;
 const IMPORTANCE_LABEL_SIZE: f32 = 12.;
@@ -493,7 +493,7 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
                     )
                     .into_any_element(),
                 };
-                // The tick glyph ends under a pixel above the time baseline; measured on Windows at 125 % and Linux at 100 %.
+                // The tick glyph ends about half a pixel above the time baseline (measured at 100 % and 125 %).
                 let holder = div()
                     .id(ElementId::Name(format!("{}-receipt", row.key).into()))
                     .relative()
@@ -858,8 +858,12 @@ pub fn render_message_row(
         .child(
             div()
                 .id(ElementId::Name(format!("row-{index}").into()))
-                .w_full()
+                .mx(px(-ROW_PADDING))
+                .px(px(ROW_PADDING))
                 .pt(spacing)
+                .when(checked && !highlighted, |element| {
+                    element.bg(theme::accent().opacity(SELECTED_TINT))
+                })
                 .map(|element| match (open_context, reply) {
                     (Some(open_context), _) => element.on_mouse_down(MouseButton::Right, move |event, _, cx| {
                         cx.stop_propagation();
@@ -869,15 +873,7 @@ pub fn render_message_row(
                     (None, None) => element,
                 })
                 .children(context_menu)
-                .child(
-                    div()
-                        .w_full()
-                        .rounded(px(10.))
-                        .when(checked && !highlighted, |element| {
-                            element.bg(theme::accent().opacity(SELECTED_TINT))
-                        })
-                        .child(body),
-                ),
+                .child(body),
         )
         .into_any_element()
 }
