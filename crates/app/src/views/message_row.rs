@@ -349,21 +349,20 @@ fn bubble(
     }));
     content = content.children(cards);
     if has_reactions {
+        let pills = reaction_pills(
+            &row.reactions,
+            index,
+            own,
+            directory,
+            extras.react.clone(),
+            extras.controls.as_ref(),
+        );
         content = content.child(
             h_flex()
                 .gap(px(8.))
                 .items_end()
-                .child(
-                    reaction_pills(
-                        &row.reactions,
-                        index,
-                        own,
-                        directory,
-                        extras.react.clone(),
-                        extras.controls.as_ref(),
-                    )
-                    .flex_auto(),
-                )
+                .when(jumbo.is_some() && own, |line| line.justify_end())
+                .child(if jumbo.is_some() { pills } else { pills.flex_auto() })
                 .child(
                     h_flex()
                         .flex_none()
