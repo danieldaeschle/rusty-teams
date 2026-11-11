@@ -48,6 +48,7 @@ webview = { path = "crates/webview" }
 gpui-base = { path = "vendor/gpui-base" }
 gpui-component = { path = "vendor/gpui-component" }
 webrtc-sys = { path = "vendor/webrtc-sys" }
+libwebrtc = { path = "vendor/libwebrtc" }
 
 [profile.dev]
 debug = "line-tables-only"

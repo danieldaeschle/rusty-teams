@@ -32,6 +32,13 @@ pub mod ffi {
         type MediaStream = crate::media_stream::ffi::MediaStream;
     }
 
+    pub struct RtpSourceEntry {
+        pub source_id: u32,
+        pub is_csrc: bool,
+        pub audio_level: i16,
+        pub timestamp_ms: i64,
+    }
+
     unsafe extern "C++" {
         include!("livekit/rtp_receiver.h");
 
@@ -49,6 +56,7 @@ pub mod ffi {
         fn id(self: &RtpReceiver) -> String;
         fn get_parameters(self: &RtpReceiver) -> RtpParameters;
         fn set_jitter_buffer_minimum_delay(self: &RtpReceiver, is_some: bool, delay_seconds: f64);
+        fn get_sources(self: &RtpReceiver) -> Vec<RtpSourceEntry>;
 
         fn _shared_rtp_receiver() -> SharedPtr<RtpReceiver>;
     }

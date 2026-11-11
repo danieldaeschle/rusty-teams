@@ -62,6 +62,8 @@ class RtpReceiver {
   void set_jitter_buffer_minimum_delay(bool is_some,
                                        double delay_seconds) const;
 
+  rust::Vec<RtpSourceEntry> get_sources() const;
+
   webrtc::scoped_refptr<webrtc::RtpReceiverInterface> rtc_receiver() const {
     return receiver_;
   }

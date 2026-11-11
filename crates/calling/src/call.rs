@@ -17,6 +17,7 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, interval, sleep_until, timeout};
 
+use crate::active_speakers;
 use crate::audio::{SAMPLE_RATE, rms, tone_ratio, write_wav};
 use crate::audio_io::{AudioMode, AudioSetup};
 use crate::background::{BackgroundChoice, BackgroundPicture};
@@ -1019,6 +1020,8 @@ async fn drive(
     }
 
     let mut stats_tick = interval(STATS_PERIOD);
+    let mut speaking_sources: Vec<u32> = Vec::new();
+    let mut speaker_sources_seen = false;
     let hard_deadline = options.hard_limit.map(|limit| call_started + limit);
     let mut leave_at = hard_deadline;
     let mut reconnect_deadline: Option<Instant> = None;
@@ -2297,6 +2300,22 @@ async fn drive(
                 }
             },
             _ = stats_tick.tick(), if remote_set => {
+                let speaking = active_speakers::speaking_sources(&active_speakers::audio_sources(&current.peer));
+                if speaking != speaking_sources {
+                    if speaking_sources.is_empty() && !speaker_sources_seen {
+                        speaker_sources_seen = true;
+                        timeline.record("active speakers", format!("{} source(s) from RTP", speaking.len()));
+                    }
+                    speaking_sources = speaking;
+                    let mut speakers = roster.mris_for_sources(&speaking_sources);
+                    if speakers.is_empty() && !speaking_sources.is_empty() && layout == Layout::OneToOne {
+                        speakers = roster.entries().into_iter().map(|entry| entry.mri).filter(|mri| *mri != own_mri).collect();
+                    }
+                    if video.note_speakers(&speakers) {
+                        send_receive_change(control, video.reselect(&roster));
+                    }
+                    control.send(CallUpdate::Speakers(speakers));
+                }
                 let snapshot = collect_stats(&current.peer, &layout_plan.screen_share_mids).await;
                 ticks += 1;
                 if caption_deadline.is_some_and(|deadline| Instant::now() >= deadline) {

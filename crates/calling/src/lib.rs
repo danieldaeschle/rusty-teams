@@ -1,3 +1,4 @@
+pub mod active_speakers;
 pub mod audio;
 pub mod audio_io;
 pub mod awake;

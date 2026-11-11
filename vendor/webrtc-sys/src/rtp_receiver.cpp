@@ -78,4 +78,17 @@ void RtpReceiver::set_jitter_buffer_minimum_delay(bool is_some,
       is_some ? absl::make_optional(delay_seconds) : absl::nullopt);
 }
 
+rust::Vec<RtpSourceEntry> RtpReceiver::get_sources() const {
+  rust::Vec<RtpSourceEntry> entries;
+  for (const auto& source : receiver_->GetSources()) {
+    auto level = source.audio_level();
+    entries.push_back(RtpSourceEntry{
+        source.source_id(),
+        source.source_type() == webrtc::RtpSourceType::CSRC,
+        level ? static_cast<int16_t>(*level) : static_cast<int16_t>(-1),
+        source.timestamp().ms()});
+  }
+  return entries;
+}
+
 }  // namespace livekit_ffi
