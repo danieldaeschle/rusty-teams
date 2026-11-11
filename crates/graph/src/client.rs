@@ -236,16 +236,23 @@ impl Graph {
                 .await?
                 .items);
         }
-        let mut request = Request::get(urls::people_search(query, PEOPLE_PAGE_SIZE));
+        match self.search_users(query, true, &scope).await {
+            Ok(users) => Ok(users),
+            Err(_) => self.search_users(query, false, &scope).await,
+        }
+    }
+
+    async fn search_users(&self, query: &str, with_alias: bool, scope: &Scope) -> Result<Vec<User>> {
+        let mut request = Request::get(urls::people_search(query, PEOPLE_PAGE_SIZE, with_alias));
         request
             .headers
             .push(("ConsistencyLevel".to_owned(), "eventual".to_owned()));
         let answer = self
             .session
-            .batch(std::slice::from_ref(&request), &scope)
+            .batch(std::slice::from_ref(&request), scope)
             .await?
             .remove(0);
-        self.collect_pages::<User>(&request.url, answer, &scope)
+        self.collect_pages::<User>(&request.url, answer, scope)
             .await
     }
 

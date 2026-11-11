@@ -294,6 +294,9 @@ fn directory_person(user: User) -> PersonCandidate {
     }
 }
 
+/// The directory matched it on a field we do not hold, like the alias "bto"; Teams lists it too.
+const DIRECTORY_MATCH_TIER: u8 = 5;
+
 /// Keeps matches only. Best match first, the incoming order breaks ties.
 fn ranked(
     candidates: impl Iterator<Item = MentionCandidate>,
@@ -326,11 +329,11 @@ fn match_tier(candidate: &MentionCandidate, query: &str) -> Option<u8> {
     let MentionCandidate::Person(person) = candidate else {
         return None;
     };
-    let mail = person.mail.as_deref()?.to_lowercase();
-    if mail.starts_with(query) {
-        Some(3)
-    } else {
-        mail.contains(query).then_some(4)
+    let mail = person.mail.as_deref().map(str::to_lowercase);
+    match mail {
+        Some(mail) if mail.starts_with(query) => Some(3),
+        Some(mail) if mail.contains(query) => Some(4),
+        _ => (person.source == PersonSource::Directory).then_some(DIRECTORY_MATCH_TIER),
     }
 }
 
@@ -344,7 +347,7 @@ mod tests {
             display_name: name.to_owned(),
             mail: mail.map(str::to_owned),
             job_title: None,
-            source: PersonSource::Directory,
+            source: PersonSource::Member,
         })
     }
 
@@ -384,6 +387,24 @@ mod tests {
             "ada",
         );
         assert_eq!(names(ranked), ["Ada", "Zed"]);
+    }
+
+    #[test]
+    fn a_directory_hit_on_the_alias_stays_after_the_name_matches() {
+        let MentionCandidate::Person(mut alias_hit) = person("1", "Bogdan Example", None) else {
+            unreachable!()
+        };
+        alias_hit.source = PersonSource::Directory;
+        let ranked = ranked(
+            [
+                MentionCandidate::Person(alias_hit),
+                person("2", "Bto Member", None),
+                person("3", "Nobody", None),
+            ]
+            .into_iter(),
+            "bto",
+        );
+        assert_eq!(names(ranked), ["Bto Member", "Bogdan Example"]);
     }
 
     #[test]

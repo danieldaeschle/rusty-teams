@@ -381,9 +381,18 @@ pub fn channel_delta(
     url
 }
 
-pub fn people_search(query: &str, top: usize) -> String {
+pub fn people_search(query: &str, top: usize, with_alias: bool) -> String {
     let term = query.replace('"', "");
-    let search = segment(&format!("\"displayName:{term}\" OR \"mail:{term}\""));
+    let fields: &[&str] = if with_alias {
+        &["displayName", "mail", "mailNickname", "userPrincipalName"]
+    } else {
+        &["displayName", "mail"]
+    };
+    let clauses: Vec<String> = fields
+        .iter()
+        .map(|field| format!("\"{field}:{term}\""))
+        .collect();
+    let search = segment(&clauses.join(" OR "));
     format!(
         "{GRAPH}/v1.0/users?$search={search}&$select=id,displayName,mail,userPrincipalName,jobTitle,department&$top={top}"
     )
