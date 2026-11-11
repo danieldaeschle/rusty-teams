@@ -27,6 +27,7 @@ fn fast_watchdog() -> WatchdogConfig {
         died_wait: Duration::from_millis(30),
         probe_interval: Duration::from_millis(50),
         probe_failures: 2,
+        login_grace: Duration::ZERO,
     }
 }
 
@@ -105,14 +106,57 @@ async fn login_window_restarts_visible_and_headless_goes_back() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
     harness.browser.login_window().await.unwrap();
-    assert_eq!(harness.mock.urls(), [TEAMS, OUTLOOK]);
+    assert_eq!(harness.mock.urls(), [TEAMS]);
     let status = harness.browser.status().await.unwrap();
     assert_eq!(status.mode, Mode::Visible);
     assert!(!harness.launcher.requests.lock().unwrap().last().unwrap().headless);
 
+    // Calling login_window() again while already visible must not restart Chrome.
+    harness.browser.login_window().await.unwrap();
+    assert_eq!(harness.launcher.requests.lock().unwrap().len(), 2);
+
     harness.browser.headless().await.unwrap();
     assert_eq!(harness.browser.status().await.unwrap().mode, Mode::Headless);
     assert_eq!(harness.launcher.requests.lock().unwrap().len(), 3);
+
+    harness.browser.headless().await.unwrap();
+    assert_eq!(harness.launcher.requests.lock().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn login_window_without_teams_tab_opens_only_teams() {
+    let harness = harness().await;
+    harness.browser.login_window().await.unwrap();
+    assert_eq!(harness.mock.urls(), [TEAMS]);
+
+    // Also when restarting from a headless browser stuck on the login page.
+    harness.mock.set_urls(&[LOGIN]);
+    std::fs::write(&harness.mode_file, "headless").unwrap();
+    harness.browser.login_window().await.unwrap();
+    assert_eq!(harness.mock.urls(), [TEAMS]);
+}
+
+#[tokio::test]
+async fn watchdog_ignores_brief_login_redirect_within_grace() {
+    let harness = harness().await;
+    harness.mock.start(&[TEAMS, OUTLOOK]).await;
+    let config = WatchdogConfig {
+        login_grace: Duration::from_millis(250),
+        ..fast_watchdog()
+    };
+    let mut watchdog = Watchdog::spawn(harness.browser.clone(), config);
+    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+
+    // Brief silent SSO redirect clears before login_grace elapses.
+    harness.mock.set_urls(&[TEAMS, LOGIN]);
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    harness.mock.set_urls(&[TEAMS, OUTLOOK]);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(watchdog.events.try_recv().is_err());
+
+    // Sustained login page past login_grace fires LoginRequired.
+    harness.mock.set_urls(&[LOGIN]);
+    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::LoginRequired);
 }
 
 #[tokio::test]
