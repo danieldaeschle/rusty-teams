@@ -152,10 +152,16 @@ impl RosterEvent {
     /// Teams wording; `name_of` gets each user id with the name the event carries.
     pub fn text(&self, name_of: impl Fn(Option<&str>, Option<&str>) -> String) -> String {
         let initiator = name_of(self.initiator_id.as_deref(), self.initiator_name.as_deref());
+        let initiator_among_others = self.change == RosterChange::Added
+            && self.member_ids.len() > 1
+            && self.initiator_id.is_some();
         let targets: Vec<String> = self
             .member_ids
             .iter()
             .zip(&self.member_names)
+            .filter(|(user_id, _)| {
+                !initiator_among_others || self.initiator_id.as_deref() != Some(user_id.as_str())
+            })
             .map(|(user_id, name)| name_of(Some(user_id), name.as_deref()))
             .collect();
         let targets = join_targets(&targets);
@@ -381,6 +387,22 @@ mod tests {
             four.text(plain_names),
             "Daniel added ann and 3 others to the chat."
         );
+    }
+
+    #[test]
+    fn the_creator_of_a_chat_is_not_listed_among_the_added() {
+        let event = RosterEvent {
+            change: RosterChange::Added,
+            initiator_id: Some("me".to_owned()),
+            initiator_name: Some("Daniel".to_owned()),
+            member_ids: vec!["me".to_owned(), "nr".to_owned()],
+            member_names: vec![Some("Daniel".to_owned()), Some("Nataliia".to_owned())],
+            history: SharedHistory::None,
+            topic: None,
+            app_name: None,
+        };
+        let names = |_: Option<&str>, name: Option<&str>| name.unwrap_or_default().to_owned();
+        assert_eq!(event.text(names), "Daniel added Nataliia to the chat.");
     }
 
     #[test]
