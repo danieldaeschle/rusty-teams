@@ -1,190 +1,149 @@
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
-use gpui_kit::assets::IconName;
-use gpui_kit::base::POPUP_PRIORITY;
+use gpui_kit::base::{GlobalState, POPUP_PRIORITY};
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
-use super::message_actions::{Action, MessageMenu, picker_button, reaction_button};
-use super::widgets::icon;
-use crate::forward_selection::FORWARD_LABEL;
-use crate::post_follow::follow_label;
-use crate::share_outlook::SHARE_TO_OUTLOOK_LABEL;
-use crate::theme::{self, ElevatedSurface as _};
+use super::message_actions::{MenuActions, MessageMenu, picker_button, reaction_button};
+use super::toolbar_placement::TOOLBAR_HEIGHT;
+use crate::theme::ElevatedSurface as _;
 
 pub const CONTEXT_MENU_TAG: &str = "message-context-menu";
-const MENU_WIDTH: f32 = 220.;
 const PANEL_GAP: f32 = 6.;
-const PILL_PADDING: f32 = 4.;
-const LIST_PADDING: f32 = 4.;
-const ITEM_HEIGHT: f32 = 32.;
-const ITEM_ICON: f32 = 16.;
+const BAR_PADDING: f32 = 3.;
 const WINDOW_MARGIN: f32 = 8.;
-const SELECT_LABEL: &str = "Select";
+const LIST_OPEN: Duration = Duration::from_millis(160);
+const REACTION_OPEN: Duration = Duration::from_millis(140);
+const REACTION_STAGGER: Duration = Duration::from_millis(35);
+const LIST_SLIDE: f32 = 6.;
+const REACTION_RISE: f32 = 8.;
 
-pub type Close = Rc<dyn Fn(&mut Window, &mut App)>;
+pub type Close = Rc<dyn Fn(&mut App)>;
 
-struct Entry {
-    label: SharedString,
-    glyph: IconName,
-    action: Action,
-    danger: bool,
+/// One open right-click menu: the menu entity lives as long as the menu is open, so hover and submenus keep their state.
+#[derive(Clone)]
+pub struct OpenContextMenu {
+    pub key: String,
+    pub position: Point<Pixels>,
+    pub serial: u64,
+    popup: Rc<RefCell<Option<(Entity<PopupMenu>, Subscription)>>>,
+    bar_pressed: Rc<Cell<bool>>,
 }
 
-fn entry(label: impl Into<SharedString>, glyph: IconName, action: Action) -> Entry {
-    Entry {
-        label: label.into(),
-        glyph,
-        action,
-        danger: false,
+impl OpenContextMenu {
+    pub fn new(key: &str, position: Point<Pixels>, serial: u64) -> Self {
+        OpenContextMenu {
+            key: key.to_owned(),
+            position,
+            serial,
+            popup: Rc::default(),
+            bar_pressed: Rc::default(),
+        }
+    }
+
+    fn popup(&self, menu: &MessageMenu, close: Close, window: &mut Window, cx: &mut App) -> Entity<PopupMenu> {
+        if let Some((popup, _)) = self.popup.borrow().as_ref() {
+            return popup.clone();
+        }
+        let actions = MenuActions::of(menu);
+        let popup = PopupMenu::build(window, cx, move |popup, window, cx| {
+            actions.fill(popup, true, window, cx)
+        });
+        popup.focus_handle(cx).focus(window, cx);
+        let bar_pressed = self.bar_pressed.clone();
+        let subscription = cx.subscribe(&popup, move |_, _: &DismissEvent, cx| {
+            if !bar_pressed.replace(false) {
+                close(cx);
+            }
+        });
+        *self.popup.borrow_mut() = Some((popup.clone(), subscription));
+        popup
     }
 }
 
-fn entries(menu: &MessageMenu) -> Vec<Entry> {
-    let mut list = Vec::new();
-    if let Some(reply) = menu.reply.clone() {
-        list.push(entry("Reply", IconName::Reply, reply));
-    }
-    if let Some(edit) = menu.edit.clone() {
-        list.push(entry("Edit", IconName::Pencil, edit));
-    }
-    if let Some(toggle_pinned) = menu.toggle_pinned.clone() {
-        list.push(if menu.pinned {
-            entry("Unpin", IconName::PinOff, toggle_pinned)
-        } else {
-            entry("Pin", IconName::Pin, toggle_pinned)
-        });
-    }
-    list.push(entry("Copy text", IconName::Copy, menu.copy.clone()));
-    if let Some(copy_link) = menu.copy_link.clone() {
-        list.push(entry("Copy link", IconName::Link, copy_link));
-    }
-    if let Some(forward) = menu.forward.clone() {
-        list.push(entry(FORWARD_LABEL, IconName::Forward, forward));
-    }
-    if let Some(save) = menu.save.clone() {
-        list.push(if menu.saved {
-            entry("Unsave", IconName::BookmarkOff, save)
-        } else {
-            entry("Save", IconName::Bookmark, save)
-        });
-    }
-    if let Some(toggle_follow) = menu.toggle_follow.clone() {
-        let glyph = if menu.followed { IconName::BellOff } else { IconName::Bell };
-        list.push(entry(follow_label(menu.followed), glyph, toggle_follow));
-    }
-    if let Some(mark_unread) = menu.mark_unread.clone() {
-        list.push(entry("Mark as unread", IconName::EyeOff, mark_unread));
-    }
-    if let Some(translate) = menu.translate.clone() {
-        list.push(entry(menu.translate_label, IconName::Languages, translate));
-    }
-    if let Some(share_to_outlook) = menu.share_to_outlook.clone() {
-        list.push(entry(SHARE_TO_OUTLOOK_LABEL, IconName::Mail, share_to_outlook));
-    }
-    if let Some(refresh_card) = menu.refresh_card.clone() {
-        list.push(entry("Refresh card", IconName::RefreshCw, refresh_card));
-    }
-    for delegate in &menu.delegate {
-        list.push(entry(delegate.label.clone(), IconName::Bot, delegate.action.clone()));
-    }
-    if let Some(delete) = menu.delete.clone() {
-        list.push(Entry {
-            danger: true,
-            ..entry("Delete", IconName::Trash, delete)
-        });
-    }
-    if let Some(select) = menu.forward_multiple.clone() {
-        list.push(entry(SELECT_LABEL, IconName::CircleCheck, select));
-    }
-    list
-}
-
-fn item(key: &str, index: usize, entry: Entry, close: Close) -> AnyElement {
-    let color = if entry.danger { theme::red() } else { theme::text() };
-    let action = entry.action;
-    h_flex()
-        .id(ElementId::Name(format!("context-item-{index}-{key}").into()))
-        .debug_selector(|| format!("{CONTEXT_MENU_TAG}/item").into())
-        .h(px(ITEM_HEIGHT))
-        .px(px(10.))
-        .gap(px(12.))
-        .items_center()
-        .rounded(px(6.))
-        .cursor_pointer()
-        .text_size(px(13.))
-        .text_color(color)
-        .hover(|row| row.bg(theme::popup_hover()))
-        .child(icon(entry.glyph, ITEM_ICON, if entry.danger { theme::red() } else { theme::text_soft() }))
-        .child(div().flex_1().min_w_0().truncate().child(entry.label))
-        .on_click(move |_, window, cx| {
-            cx.stop_propagation();
-            close(window, cx);
-            action(window, cx);
-        })
+fn animated_reaction(button: AnyElement, index: usize, serial: u64) -> AnyElement {
+    let delay = REACTION_STAGGER * index as u32;
+    let total = delay + REACTION_OPEN;
+    let start = delay.as_secs_f32() / total.as_secs_f32();
+    div()
+        .relative()
+        .child(button)
+        .with_animation(
+            ElementId::Name(format!("context-reaction-{serial}-{index}").into()),
+            Animation::new(total).with_easing(ease_out_quint()),
+            move |element, delta| {
+                let local = ((delta - start) / (1. - start)).clamp(0., 1.);
+                element.opacity(local).top(px((1. - local) * REACTION_RISE))
+            },
+        )
         .into_any_element()
 }
 
-/// Telegram-style message menu: opens at the cursor, quick reactions on top, the actions below.
+/// Telegram's behaviour in our look: quick reactions right above the cursor, the message menu right below it.
 pub fn message_context_menu(
     mut menu: MessageMenu,
-    position: Point<Pixels>,
+    open: &OpenContextMenu,
     close: Close,
     close_from_outside: Close,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> AnyElement {
+    let popup = open.popup(&menu, close_from_outside, window, cx);
     let picked = menu.done.clone();
     let after_pick = close.clone();
     menu.done = Rc::new(move |window, cx| {
         picked(window, cx);
-        after_pick(window, cx);
+        after_pick(cx);
     });
-    let key = menu.key.clone();
+    let serial = open.serial;
     let mut reactions: Vec<AnyElement> = menu
         .quick
         .iter()
         .enumerate()
-        .map(|(index, glyph)| reaction_button(&menu, glyph, index))
+        .map(|(index, glyph)| animated_reaction(reaction_button(&menu, glyph, index), index, serial))
         .collect();
-    reactions.push(picker_button(&menu, cx));
-    let items: Vec<AnyElement> = entries(&menu)
-        .into_iter()
-        .enumerate()
-        .map(|(index, entry)| item(&key, index, entry, close.clone()))
-        .collect();
+    reactions.push(animated_reaction(picker_button(&menu, cx), menu.quick.len(), serial));
+    let bar_pressed = open.bar_pressed.clone();
+    let bar = h_flex()
+        .debug_selector(|| format!("{CONTEXT_MENU_TAG}/reactions").into())
+        .h(px(TOOLBAR_HEIGHT))
+        .px(px(BAR_PADDING))
+        .gap(px(1.))
+        .items_center()
+        .rounded(px(10.))
+        .flyout_surface()
+        .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+            bar_pressed.set(true);
+            GlobalState::suppress_text_selection(cx);
+        })
+        .children(reactions);
+    let list = div()
+        .relative()
+        .debug_selector(|| format!("{CONTEXT_MENU_TAG}/list").into())
+        .child(popup)
+        .with_animation(
+            ElementId::Name(format!("context-list-{serial}").into()),
+            Animation::new(LIST_OPEN).with_easing(ease_out_quint()),
+            |element, delta| element.opacity(delta).top(px((delta - 1.) * LIST_SLIDE)),
+        );
+    let lifted = open.position - point(px(0.), px(TOOLBAR_HEIGHT + PANEL_GAP));
     deferred(
         anchored()
-            .position(position)
+            .position(lifted)
             .snap_to_window_with_margin(px(WINDOW_MARGIN))
             .child(
                 v_flex()
-                    .id(ElementId::Name(format!("{CONTEXT_MENU_TAG}-{key}").into()))
+                    .id(ElementId::Name(format!("{CONTEXT_MENU_TAG}-{}", open.key).into()))
                     .debug_selector(|| CONTEXT_MENU_TAG.into())
-                    .w(px(MENU_WIDTH))
+                    .items_start()
                     .gap(px(PANEL_GAP))
                     .occlude()
-                    .on_mouse_down_out(move |_, window, cx| close_from_outside(window, cx))
                     .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-                    .child(
-                        h_flex()
-                            .debug_selector(|| format!("{CONTEXT_MENU_TAG}/reactions").into())
-                            .self_start()
-                            .p(px(PILL_PADDING))
-                            .gap(px(1.))
-                            .items_center()
-                            .rounded_full()
-                            .flyout_surface()
-                            .children(reactions),
-                    )
-                    .child(
-                        v_flex()
-                            .debug_selector(|| format!("{CONTEXT_MENU_TAG}/list").into())
-                            .w_full()
-                            .p(px(LIST_PADDING))
-                            .rounded(px(10.))
-                            .flyout_surface()
-                            .children(items),
-                    ),
+                    .child(bar)
+                    .child(list),
             ),
     )
     .with_priority(POPUP_PRIORITY)

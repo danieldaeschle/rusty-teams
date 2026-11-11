@@ -59,6 +59,7 @@ use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPrevi
 use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
 use super::group_name::{GroupNameSlot, group_name_button};
 use super::message_actions::{Action, DelegateEntry, MessageMenu};
+use super::message_context_menu::OpenContextMenu;
 use super::message_row::{
     AVATAR_GAP, AVATAR_SIZE, JUMP_HIGHLIGHT_PERIOD, render_message_row, render_skeleton_row,
 };
@@ -239,7 +240,8 @@ pub struct ConversationView {
     downloads: Downloads,
     hovered_message: Option<String>,
     toolbar_hovered: Option<String>,
-    context_menu: Option<(String, Point<Pixels>)>,
+    context_menu: Option<OpenContextMenu>,
+    context_serial: u64,
     timeline_bounds: TimelineBounds,
     header_width: Rc<Cell<f32>>,
     toolbar_pinned: Option<String>,
@@ -592,6 +594,7 @@ impl ConversationView {
             hovered_message: None,
             toolbar_hovered: None,
             context_menu: None,
+            context_serial: 0,
             timeline_bounds: TimelineBounds::default(),
             header_width: Rc::default(),
             toolbar_pinned: None,
@@ -2859,23 +2862,21 @@ impl ConversationView {
                 == Some(key)
     }
 
-    pub(crate) fn context_menu_at(&self, key: &str) -> Option<Point<Pixels>> {
-        self.context_menu
-            .as_ref()
-            .filter(|(open, _)| open == key)
-            .map(|(_, position)| *position)
+    pub(crate) fn context_menu_for(&self, key: &str) -> Option<OpenContextMenu> {
+        self.context_menu.clone().filter(|open| open.key == key)
     }
 
     fn open_context_menu(&mut self, key: &str, position: Point<Pixels>, cx: &mut Context<Self>) {
-        self.context_menu = Some((key.to_owned(), position));
+        self.context_serial += 1;
+        self.context_menu = Some(OpenContextMenu::new(key, position, self.context_serial));
         cx.notify();
     }
 
     fn close_context_menu(&mut self, from_outside: bool, cx: &mut Context<Self>) {
-        let Some((key, _)) = &self.context_menu else {
+        let Some(open) = &self.context_menu else {
             return;
         };
-        if from_outside && self.toolbar_pinned.as_deref() == Some(key.as_str()) {
+        if from_outside && self.toolbar_pinned.as_deref() == Some(open.key.as_str()) {
             return;
         }
         self.context_menu = None;

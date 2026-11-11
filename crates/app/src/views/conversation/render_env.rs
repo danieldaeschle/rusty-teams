@@ -254,7 +254,7 @@ impl RenderEnv {
             .filter(|_| actionable)
             .and_then(|entity| {
                 let this = entity.read(cx);
-                let position = this.context_menu_at(&message.key)?;
+                let open = this.context_menu_for(&message.key)?;
                 let mine = message
                     .reactions
                     .iter()
@@ -263,17 +263,21 @@ impl RenderEnv {
                     .collect();
                 let menu = this.message_menu(message, mine, None, view.clone(), cx);
                 let (closing, outside) = (view.clone(), view.clone());
-                Some(message_context_menu(
+                Some((menu, open, closing, outside))
+            })
+            .map(|(menu, open, closing, outside)| {
+                message_context_menu(
                     menu,
-                    position,
-                    Rc::new(move |_, cx| {
+                    &open,
+                    Rc::new(move |cx| {
                         closing.update(cx, |this, cx| this.close_context_menu(false, cx)).ok();
                     }),
-                    Rc::new(move |_, cx| {
+                    Rc::new(move |cx| {
                         outside.update(cx, |this, cx| this.close_context_menu(true, cx)).ok();
                     }),
+                    window,
                     cx,
-                ))
+                )
             });
         let reply = (is_real && !message.deleted && !right_click_opens_actions).then(|| {
             let (view, key, handle) = (view.clone(), message.key.clone(), window.window_handle());
