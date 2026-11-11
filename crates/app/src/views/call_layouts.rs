@@ -288,9 +288,8 @@ fn overflow_tile(
         )
         .content(move |_, _, cx| {
             let popover = cx.entity().downgrade();
-            v_flex()
+            let list = v_flex()
                 .id("call-hidden-list")
-                .w(px(HIDDEN_LIST_WIDTH))
                 .max_h(px(HIDDEN_LIST_HEIGHT))
                 .overflow_y_scrollbar()
                 .gap(px(2.))
@@ -300,6 +299,7 @@ fn overflow_tile(
                     let pinned_mri = mri.clone();
                     h_flex()
                         .id(SharedString::from(format!("call-hidden-{mri}")))
+                        .flex_none()
                         .w_full()
                         .px(px(8.))
                         .py(px(6.))
@@ -322,7 +322,8 @@ fn overflow_tile(
                                 .update(cx, |state, cx| state.dismiss(window, cx))
                                 .ok();
                         })
-                }))
+                }));
+            v_flex().w(px(HIDDEN_LIST_WIDTH)).child(list)
         })
         .into_any_element()
 }
