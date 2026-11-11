@@ -128,6 +128,9 @@ impl NativeHttp {
                 builder = builder.header("Content-Type", "application/json");
             }
             builder = builder.body(body.to_string());
+        } else if request.method != Method::Get {
+            // Some Teams fronts answer a bodyless DELETE or POST with 411 Length Required.
+            builder = builder.header(reqwest::header::CONTENT_LENGTH, 0);
         }
         let response = builder.send().await?;
         let status = response.status().as_u16();
@@ -217,6 +220,24 @@ mod tests {
         assert!((3470..=3480).contains(&left), "{left}");
         assert!(usable_until(&token_expiring_at(now + 60), Duration::from_secs(120)).is_none());
         assert!(usable_until("not-a-jwt", Duration::from_secs(120)).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_bodyless_delete_says_its_length_is_zero() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/messages/1?behavior=softDelete", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut head = vec![0; 4096];
+            let read = socket.read(&mut head).await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").await.unwrap();
+            String::from_utf8_lossy(&head[..read]).to_lowercase()
+        });
+        let http = NativeHttp::new(Duration::from_secs(5), 1024).unwrap();
+        let answer = http.exchange(&Request::delete(&url), None).await.unwrap();
+        assert_eq!(answer.status, 200);
+        assert!(server.await.unwrap().contains("content-length: 0"));
     }
 
     #[test]
