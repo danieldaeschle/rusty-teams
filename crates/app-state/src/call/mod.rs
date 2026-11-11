@@ -62,7 +62,7 @@ pub use preview::{CameraPreview, preview_backgrounds};
 pub use reminder::{MeetingToasts, ReminderPhase, subtitle as meeting_subtitle};
 pub use ring::{MissedCall, RingEntry, Rings};
 pub use stage_split::{
-    GRID_PADDING, STRIP_GAP, SpeakerSplit, StripSplit, TILE_GAP, gallery_split,
+    GRID_PADDING, STRIP_GAP, GalleryPage, SpeakerSplit, StripSplit, TILE_GAP, gallery_page,
     measured_stage, speaker_split, strip_split, video_wants,
 };
 pub use stage_layout::{contain_size, focus_stage_size, gallery_grid};

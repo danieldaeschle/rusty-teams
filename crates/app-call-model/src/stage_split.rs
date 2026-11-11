@@ -2,7 +2,7 @@ use calling::{TileDetail, VideoWant};
 
 use crate::model::{ActiveCall, CallModel, Focus, Tile};
 use crate::stage_layout::{
-    FILMSTRIP_MAX, Filmstrip, GALLERY_MAX, Overflow, filmstrip, share_strip, split_overflow,
+    FILMSTRIP_MAX, Filmstrip, filmstrip, gallery_page_range, gallery_pages, share_strip,
 };
 use crate::view_settings::CallLayout;
 
@@ -20,10 +20,25 @@ pub fn measured_stage(call: &ActiveCall) -> (f32, f32) {
     (width, height)
 }
 
-pub fn gallery_split(model: &CallModel) -> (Vec<&Tile>, Overflow) {
+pub struct GalleryPage<'a> {
+    pub tiles: Vec<&'a Tile>,
+    pub own: bool,
+    pub page: usize,
+    pub pages: usize,
+}
+
+pub fn gallery_page(model: &CallModel) -> GalleryPage<'_> {
     let others = model.layout_tiles();
-    let overflow = split_overflow(others.len(), model.own_cells(), GALLERY_MAX);
-    (others, overflow)
+    let own_cells = model.own_cells();
+    let pages = gallery_pages(others.len(), own_cells);
+    let page = model.gallery_page.min(pages - 1);
+    let range = gallery_page_range(others.len(), own_cells, page);
+    GalleryPage {
+        tiles: others[range].to_vec(),
+        own: own_cells > 0 && page == 0,
+        page,
+        pages,
+    }
 }
 
 pub struct SpeakerSplit<'a> {
@@ -100,9 +115,9 @@ pub fn video_wants(model: &CallModel, stage: (f32, f32), strip_width: f32) -> Ve
             .chain(split.others[..split.plan.overflow.shown].iter().map(|tile| want(tile, TileDetail::Small)))
             .collect();
     }
-    let (others, overflow) = gallery_split(model);
-    let detail = if overflow.shown <= LARGE_GALLERY_TILES { TileDetail::Stage } else { TileDetail::Small };
-    others[..overflow.shown].iter().map(|tile| want(tile, detail)).collect()
+    let page = gallery_page(model);
+    let detail = if page.tiles.len() <= LARGE_GALLERY_TILES { TileDetail::Stage } else { TileDetail::Small };
+    page.tiles.iter().map(|tile| want(tile, detail)).collect()
 }
 
 #[cfg(test)]
@@ -114,7 +129,7 @@ mod tests {
     use super::{FILMSTRIP_TILE_MAX, GRID_PADDING, TILE_GAP, video_wants};
     use crate::model::CallModel;
     use crate::share_view::STRIP_DEFAULT_WIDTH;
-    use crate::stage_layout::{GALLERY_MAX, filmstrip, split_overflow};
+    use crate::stage_layout::{filmstrip, first_page_size};
     use crate::view_settings::CallLayout;
 
     const STAGE: (f32, f32) = (1400., 800.);
@@ -158,10 +173,10 @@ mod tests {
     }
 
     #[test]
-    fn a_big_gallery_asks_for_small_pictures_and_skips_the_plus_n_people() {
+    fn a_big_gallery_asks_for_small_pictures_and_skips_the_other_pages() {
         let model = crowd(14);
         let wants = video_wants(&model, STAGE, STRIP_DEFAULT_WIDTH);
-        assert_eq!(wants.len(), split_overflow(14, 1, GALLERY_MAX).shown);
+        assert_eq!(wants.len(), first_page_size(14, 1));
         assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Small));
         let hidden: Vec<&str> = model.layout_tiles()[wants.len()..].iter().map(|tile| tile.mri.as_str()).collect();
         assert!(wants.iter().all(|want| !hidden.contains(&want.mri.as_str())));

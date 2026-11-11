@@ -2389,14 +2389,12 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn picking_another_chat_moves_the_call_to_the_mini_window(cx: &mut TestAppContext) {
+    fn picking_another_chat_keeps_the_call_window_showing_the_call(cx: &mut TestAppContext) {
         let app = app_with_call(cx);
         cx.update(|cx| {
             app.update(cx, |state, cx| {
                 assert!(state.viewing_call());
                 state.select(Selection::Chat("c1".into()), cx);
-                assert!(!state.viewing_call());
-                state.show_call(true, cx);
                 assert!(state.viewing_call());
             })
         });

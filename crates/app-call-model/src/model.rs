@@ -18,7 +18,9 @@ use super::health::{HealthBanner, HealthState};
 use super::bubbles::ChatBubble;
 use super::fullscreen::FullscreenState;
 use super::pictures::CallPictures;
-use super::stage_layout::{FILMSTRIP_MAX, GALLERY_MAX, RECENT_SPEAKER, SPEAKER_HOLD, VisibleRotation, split_overflow};
+use super::stage_layout::{
+    FILMSTRIP_MAX, RECENT_SPEAKER, SPEAKER_HOLD, VisibleRotation, first_page_size, split_overflow,
+};
 use super::transcript::{Transcript, TranscriptEntry};
 use super::view_settings::{CallLayout, ViewSettings};
 use super::options_dialog::OptionsDialog;
@@ -331,6 +333,7 @@ pub struct CallModel {
     reaction_serial: u64,
     pub meeting_chat: Option<String>,
     pub view: ViewSettings,
+    pub gallery_page: usize,
     rotation: VisibleRotation,
     stage_speaker: Option<String>,
     recent_speakers: Vec<String>,
@@ -400,6 +403,7 @@ impl CallModel {
             reaction_serial: 0,
             meeting_chat: None,
             view: ViewSettings::default(),
+            gallery_page: 0,
             rotation: VisibleRotation::default(),
             stage_speaker: None,
             recent_speakers: Vec::new(),
@@ -993,7 +997,7 @@ impl CallModel {
         let cells = match self.effective_layout() {
             _ if self.has_content() => return others,
             CallLayout::Speaker => FILMSTRIP_MAX,
-            CallLayout::Gallery | CallLayout::Content => GALLERY_MAX,
+            CallLayout::Gallery | CallLayout::Content => return first_page_size(others, self.own_cells()),
         };
         split_overflow(others, self.own_cells(), cells).shown
     }
@@ -1678,8 +1682,8 @@ mod tests {
     #[test]
     fn a_pinned_person_outside_the_grid_moves_into_it() {
         let mut model = crowd(12);
-        let grid = split_overflow(12, 1, GALLERY_MAX).shown;
-        assert_eq!(grid, 7);
+        let grid = first_page_size(12, 1);
+        assert_eq!(grid, 8);
         assert!(!shown_mris(&model)[..grid].contains(&"8:orgid:p11".to_owned()));
         model.toggle_pin("8:orgid:p11");
         assert!(shown_mris(&model)[..grid].contains(&"8:orgid:p11".to_owned()));
@@ -1692,7 +1696,7 @@ mod tests {
         assert_eq!(model.own_cells(), 1);
         model.view.hide_me = true;
         assert_eq!(model.own_cells(), 0);
-        assert_eq!(split_overflow(12, model.own_cells(), GALLERY_MAX).shown, 8);
+        assert_eq!(first_page_size(12, model.own_cells()), 9);
     }
 
     #[test]

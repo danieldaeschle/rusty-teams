@@ -64,6 +64,25 @@ pub fn split_overflow(others: usize, own_cells: usize, capacity: usize) -> Overf
     }
 }
 
+/// The first gallery page holds the own tile and the speakers; later pages hold the rest, a full grid each, like Teams.
+pub fn first_page_size(others: usize, own_cells: usize) -> usize {
+    others.min(GALLERY_MAX.saturating_sub(own_cells).max(1))
+}
+
+pub fn gallery_pages(others: usize, own_cells: usize) -> usize {
+    let rest = others - first_page_size(others, own_cells);
+    1 + rest.div_ceil(GALLERY_MAX)
+}
+
+pub fn gallery_page_range(others: usize, own_cells: usize, page: usize) -> std::ops::Range<usize> {
+    let first = first_page_size(others, own_cells);
+    if page == 0 {
+        return 0..first;
+    }
+    let start = (first + (page - 1) * GALLERY_MAX).min(others);
+    start..(start + GALLERY_MAX).min(others)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Filmstrip {
     pub tile_width: f32,
@@ -368,6 +387,19 @@ mod tests {
     fn tiles_stay_sixteen_by_nine() {
         let grid = gallery_grid(7, 1234., 777., 20.);
         assert!((grid.tile_width / grid.tile_height - 16. / 9.).abs() < 0.001);
+    }
+
+    #[test]
+    fn a_big_gallery_pages_through_everyone_once() {
+        assert_eq!(gallery_pages(8, 1), 1);
+        assert_eq!(gallery_pages(9, 1), 2);
+        assert_eq!(gallery_pages(9, 0), 1);
+        assert_eq!(gallery_pages(26, 1), 3);
+        assert_eq!(gallery_page_range(26, 1, 0), 0..8);
+        assert_eq!(gallery_page_range(26, 1, 1), 8..17);
+        assert_eq!(gallery_page_range(26, 1, 2), 17..26);
+        assert_eq!(gallery_page_range(0, 1, 0), 0..0);
+        assert_eq!(gallery_pages(0, 1), 1);
     }
 
     #[test]

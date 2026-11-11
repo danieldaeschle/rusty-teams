@@ -19,7 +19,7 @@ use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{
     ActiveCall, CallLayout, CallModel, GRID_PADDING, STRIP_GAP, SpeakerSplit,
-    StripSplit, TILE_GAP, Tile, TileSize, focus_stage_size, gallery_grid, gallery_split,
+    StripSplit, TILE_GAP, Tile, TileSize, focus_stage_size, gallery_grid, gallery_page,
     measured_stage, shown_bubbles, speaker_split, strip_split,
 };
 use crate::theme;
@@ -42,6 +42,10 @@ const BUBBLE_FADE_FROM: f32 = 0.9;
 const BUBBLE_BACKGROUND: f32 = 0.72;
 const CHIP_BACKGROUND: f32 = 0.6;
 pub const FULLSCREEN_HINT: &str = "Press Esc to exit full screen";
+pub const GALLERY_PAGER_TAG: &str = "shell/islands/main/call-stage/pager";
+const PAGER_HEIGHT: f32 = 32.;
+const PAGER_BUTTON: f32 = 28.;
+const PAGER_ICON: f32 = 16.;
 
 fn measure_stage(call: &ActiveCall) -> impl IntoElement {
     let stage_size = call.stage_size.clone();
@@ -350,6 +354,58 @@ fn rows_of(cells: Vec<AnyElement>, columns: usize) -> Vec<Div> {
     }
 }
 
+fn pager_button(
+    app: &Entity<AppState>,
+    id: &'static str,
+    glyph: IconName,
+    tooltip: &'static str,
+    forward: bool,
+    enabled: bool,
+) -> AnyElement {
+    let app = app.clone();
+    let color = if enabled { theme::text() } else { theme::text_faint() };
+    div()
+        .id(id)
+        .size(px(PAGER_BUTTON))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .child(icon(glyph, PAGER_ICON, color))
+        .when(enabled, |button| {
+            button
+                .cursor_pointer()
+                .hover(|button| button.bg(theme::row_hover()))
+                .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+                .on_click(move |_, _, cx| {
+                    app.update(cx, |state, cx| state.turn_call_gallery_page(forward, cx));
+                })
+        })
+        .into_any_element()
+}
+
+fn gallery_pager(app: &Entity<AppState>, page: usize, pages: usize) -> AnyElement {
+    h_flex()
+        .debug_selector(|| GALLERY_PAGER_TAG.into())
+        .h(px(PAGER_HEIGHT))
+        .px(px(2.))
+        .gap(px(4.))
+        .items_center()
+        .rounded_full()
+        .bg(theme::row_hover())
+        .child(pager_button(app, "call-gallery-previous", IconName::ChevronLeft, "Previous page", false, page > 0))
+        .child(
+            div()
+                .min_w(px(40.))
+                .text_center()
+                .text_size(px(12.))
+                .text_color(theme::text_soft())
+                .child(format!("{} / {}", page + 1, pages)),
+        )
+        .child(pager_button(app, "call-gallery-next", IconName::ChevronRight, "Next page", true, page + 1 < pages))
+        .into_any_element()
+}
+
 fn gallery_body(
     app: &Entity<AppState>,
     state: &AppState,
@@ -357,29 +413,27 @@ fn gallery_body(
     now: Instant,
     stage: (f32, f32),
 ) -> AnyElement {
-    let (others, overflow) = gallery_split(model);
-    let own_cells = model.own_cells();
-    let cells = overflow.shown + own_cells + usize::from(overflow.hidden > 0);
+    let page = gallery_page(model);
+    let paged = page.pages > 1;
+    let pager_room = if paged { PAGER_HEIGHT + TILE_GAP } else { 0. };
+    let cells = page.tiles.len() + usize::from(page.own);
     let grid = gallery_grid(
         cells,
         stage.0 - 2. * GRID_PADDING,
-        stage.1 - 2. * GRID_PADDING,
+        stage.1 - 2. * GRID_PADDING - pager_room,
         TILE_GAP,
     );
     let size = TileSize::sixteen_by_nine(grid.tile_width.floor());
-    let shown = &others[..overflow.shown];
-    let mut tiles: Vec<AnyElement> = shown
+    let mut tiles: Vec<AnyElement> = page
+        .tiles
         .iter()
         .map(|tile| person_tile(app, state, model, tile, size, now))
         .collect();
-    if own_cells > 0 {
+    if page.own {
         tiles.insert(
-            own_slot(model, shown),
+            own_slot(model, &page.tiles),
             own_tile(app, state, model, size, now),
         );
-    }
-    if overflow.hidden > 0 {
-        tiles.push(overflow_tile(app, state, size, &others[overflow.shown..]));
     }
     v_flex()
         .absolute()
@@ -388,6 +442,7 @@ fn gallery_body(
         .justify_center()
         .gap(px(TILE_GAP))
         .children(rows_of(tiles, grid.columns))
+        .when(paged, |body| body.child(gallery_pager(app, page.page, page.pages)))
         .into_any_element()
 }
 

@@ -4,7 +4,7 @@ use calling::CallCommand;
 use gpui_kit::*;
 
 use super::caption_style::{CaptionPosition, CaptionSize};
-use super::{measured_stage, video_wants};
+use super::{gallery_page, measured_stage, video_wants};
 use super::bubbles::{BUBBLE_SHOWN, ChatBubble, push_bubble};
 use super::fullscreen::{FullscreenState, HINT_SHOWN};
 use super::view_settings::{CallLayout, ViewSettings};
@@ -40,6 +40,21 @@ impl AppState {
 
     pub fn set_call_layout(&mut self, layout: CallLayout, cx: &mut Context<Self>) {
         self.change_call_view(|view| view.choose(layout), cx);
+    }
+
+    pub fn turn_call_gallery_page(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
+        let pages = gallery_page(&call.model).pages;
+        let page = call.model.gallery_page.min(pages - 1);
+        call.model.gallery_page = if forward {
+            (page + 1).min(pages - 1)
+        } else {
+            page.saturating_sub(1)
+        };
+        self.sync_video_wants();
+        cx.notify();
     }
 
     pub fn toggle_call_hide_no_video(&mut self, cx: &mut Context<Self>) {
