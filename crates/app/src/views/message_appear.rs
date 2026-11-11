@@ -2,17 +2,12 @@ use std::time::Duration;
 
 use gpui_kit::*;
 
-pub const OWN_APPEAR: Duration = Duration::from_millis(420);
-pub const INCOMING_APPEAR: Duration = Duration::from_millis(340);
+pub const OWN_APPEAR: Duration = Duration::from_millis(320);
+pub const INCOMING_APPEAR: Duration = Duration::from_millis(240);
 
-const OWN_RISE: f32 = 16.;
-const OWN_DRIFT: f32 = 8.;
-const OWN_FADE_SHARE: f32 = 0.35;
-const INCOMING_SLIDE: f32 = 18.;
-const INCOMING_RISE: f32 = 4.;
-const INCOMING_FADE_SHARE: f32 = 0.6;
-const SPRING_DECAY: f32 = 6.;
-const SPRING_FREQUENCY: f32 = 8.;
+const OWN_RISE: f32 = 56.;
+const OWN_START_OPACITY: f32 = 0.5;
+const OWN_FADE_SHARE: f32 = 0.4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppearKind {
@@ -40,21 +35,18 @@ pub fn appear_frame(kind: AppearKind, progress: f32) -> AppearFrame {
     let progress = progress.clamp(0., 1.);
     match kind {
         AppearKind::Own => {
-            let remaining = 1. - spring_settle(progress);
+            let fade = ease_out_cubic(progress / OWN_FADE_SHARE);
             AppearFrame {
-                offset_x: remaining * OWN_DRIFT,
-                offset_y: remaining * OWN_RISE,
-                opacity: ease_out_cubic(progress / OWN_FADE_SHARE),
+                offset_x: 0.,
+                offset_y: (1. - ease_out_quart(progress)) * OWN_RISE,
+                opacity: OWN_START_OPACITY + (1. - OWN_START_OPACITY) * fade,
             }
         }
-        AppearKind::Incoming => {
-            let remaining = 1. - ease_out_quint(progress);
-            AppearFrame {
-                offset_x: -remaining * INCOMING_SLIDE,
-                offset_y: remaining * INCOMING_RISE,
-                opacity: ease_out_cubic(progress / INCOMING_FADE_SHARE),
-            }
-        }
+        AppearKind::Incoming => AppearFrame {
+            offset_x: 0.,
+            offset_y: 0.,
+            opacity: ease_out_cubic(progress),
+        },
     }
 }
 
@@ -71,21 +63,12 @@ pub fn appear(body: Div, message_key: &str, kind: AppearKind) -> AnimationElemen
     )
 }
 
-fn spring_settle(progress: f32) -> f32 {
-    if progress >= 1. {
-        return 1.;
-    }
-    let angle = SPRING_FREQUENCY * progress;
-    let ratio = SPRING_DECAY / SPRING_FREQUENCY;
-    1. - (-SPRING_DECAY * progress).exp() * (angle.cos() + ratio * angle.sin())
-}
-
 fn ease_out_cubic(progress: f32) -> f32 {
     1. - (1. - progress.clamp(0., 1.)).powi(3)
 }
 
-fn ease_out_quint(progress: f32) -> f32 {
-    1. - (1. - progress.clamp(0., 1.)).powi(5)
+fn ease_out_quart(progress: f32) -> f32 {
+    1. - (1. - progress.clamp(0., 1.)).powi(4)
 }
 
 #[cfg(test)]
@@ -93,13 +76,10 @@ mod tests {
     use super::{AppearFrame, AppearKind, OWN_RISE, appear_frame};
 
     #[test]
-    fn both_kinds_start_hidden_and_settle_on_the_resting_place() {
+    fn both_kinds_settle_on_the_resting_place() {
         for kind in [AppearKind::Own, AppearKind::Incoming] {
-            let start = appear_frame(kind, 0.);
-            assert_eq!(start.opacity, 0.);
-            let end = appear_frame(kind, 1.);
             assert_eq!(
-                end,
+                appear_frame(kind, 1.),
                 AppearFrame {
                     offset_x: 0.,
                     offset_y: 0.,
@@ -110,19 +90,21 @@ mod tests {
     }
 
     #[test]
-    fn own_messages_rise_from_the_bottom_right_and_overshoot_slightly() {
+    fn own_messages_glide_up_from_behind_the_composer_without_overshoot() {
         let start = appear_frame(AppearKind::Own, 0.);
-        assert!(start.offset_x > 0. && start.offset_y > 0.);
-        let deepest = (1..100)
-            .map(|step| appear_frame(AppearKind::Own, step as f32 / 100.).offset_y)
-            .fold(f32::MAX, f32::min);
-        assert!(deepest < 0. && deepest > -OWN_RISE * 0.15);
+        assert_eq!(start.offset_y, OWN_RISE);
+        assert!((1..100).all(|step| {
+            let frame = appear_frame(AppearKind::Own, step as f32 / 100.);
+            frame.offset_y >= 0. && frame.offset_x == 0.
+        }));
     }
 
     #[test]
-    fn incoming_messages_slide_in_from_the_left_without_overshoot() {
-        let start = appear_frame(AppearKind::Incoming, 0.);
-        assert!(start.offset_x < 0.);
-        assert!((1..100).all(|step| appear_frame(AppearKind::Incoming, step as f32 / 100.).offset_x <= 0.));
+    fn incoming_messages_only_fade_in() {
+        assert_eq!(appear_frame(AppearKind::Incoming, 0.).opacity, 0.);
+        assert!((0..=100).all(|step| {
+            let frame = appear_frame(AppearKind::Incoming, step as f32 / 100.);
+            frame.offset_x == 0. && frame.offset_y == 0.
+        }));
     }
 }
