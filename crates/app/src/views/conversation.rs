@@ -146,6 +146,7 @@ const PROGRESS_BAR_WIDTH: f32 = 0.35;
 const TYPING_BUBBLE_HEIGHT: f32 = 28.;
 const TYPING_BUBBLE_PADDING: f32 = 12.;
 const TYPING_SIDE_INSET: f32 = 20.;
+const COMPOSER_TOP_GAP: f32 = 8.;
 const TYPING_BOTTOM_GAP: f32 = 8.;
 pub const TYPING_TAG: &str = "shell/islands/main/typing";
 const TYPING_DOT_SIZE: f32 = 5.;
@@ -4118,11 +4119,13 @@ impl Render for ConversationView {
                 view.update(cx, |this, cx| this.leave_detached(cx)).ok();
             })
         })
-        .when(typing_line.is_some(), |scroller| {
-            scroller.with_list_style(
-                StyleRefinement::default().pb(px(TYPING_BUBBLE_HEIGHT + 2. * TYPING_BOTTOM_GAP)),
-            )
-        })
+        .with_list_style(StyleRefinement::default().pb(px(if typing_line.is_some() {
+            TYPING_BUBBLE_HEIGHT + 2. * TYPING_BOTTOM_GAP
+        } else if in_feed {
+            0.
+        } else {
+            COMPOSER_TOP_GAP
+        })))
         .with_top_inset(timeline_top_inset);
 
         root = match self.current.as_ref().filter(|_| !drafting) {
@@ -4249,7 +4252,9 @@ impl Render for ConversationView {
                     None => column.child(runway(
                         v_flex()
                             .w_full()
-                            .children(self.render_proposal_card(cx))
+                            .children(self.render_proposal_card(cx).map(|card| {
+                                div().w_full().pb(px(COMPOSER_TOP_GAP)).child(card)
+                            }))
                             .child(self.composer.clone()),
                         comfy,
                     )),

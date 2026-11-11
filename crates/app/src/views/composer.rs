@@ -3138,7 +3138,7 @@ impl Render for Composer {
         let (inset, top, bottom) = if self.inline {
             (0., 0., 0.)
         } else {
-            (20., 8., 16.)
+            (20., 0., 16.)
         };
         v_flex()
             .w_full()
