@@ -34,10 +34,14 @@ fn audio_error(what: &str, error: impl std::fmt::Display) -> Error {
 
 fn named_input(choice: &DeviceChoice) -> Option<Device> {
     let DeviceChoice::Device(wanted) = choice else { return None };
-    cpal::default_host()
-        .input_devices()
-        .ok()?
-        .find(|device| device.description().is_ok_and(|description| description.name() == wanted))
+    let host = cpal::default_host();
+    let mut devices = host.input_devices().ok()?;
+    devices.find(|device| {
+        device.description().is_ok_and(|description| {
+            let name = description.name();
+            name == *wanted || name.contains(wanted) || wanted.contains(&name)
+        })
+    })
 }
 
 pub struct MicrophoneStart {
@@ -56,24 +60,37 @@ pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<Mic
             })
         }
         Err(error) => {
-            let capture = start_cpal_microphone(choice, queue)?;
-            Ok(MicrophoneStart { capture, source: format!("cpal, wasapi communications failed: {error}") })
+            let (capture, name) = start_cpal_microphone(choice, queue)?;
+            Ok(MicrophoneStart {
+                capture,
+                source: format!("cpal ({name}), wasapi communications failed: {error}"),
+            })
         }
     }
 }
 
 #[cfg(not(windows))]
 pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<MicrophoneStart> {
-    let capture = start_cpal_microphone(choice, queue)?;
-    Ok(MicrophoneStart { capture, source: "cpal".into() })
+    let (capture, name) = start_cpal_microphone(choice, queue)?;
+    Ok(MicrophoneStart { capture, source: format!("cpal ({name})") })
 }
 
-fn start_cpal_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<Capture> {
-    let device = named_input(choice)
-        .or_else(|| cpal::default_host().default_input_device())
-        .ok_or_else(|| Error::Audio("no microphone".into()))?;
+fn start_cpal_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<(Capture, String)> {
+    let device = match choice {
+        DeviceChoice::SystemDefault => cpal::default_host()
+            .default_input_device()
+            .ok_or_else(|| Error::Audio("no microphone".into()))?,
+        DeviceChoice::Device(wanted) => named_input(choice).ok_or_else(|| {
+            Error::Audio(format!("microphone `{wanted}` not found for capture; pick Default device or another mic"))
+        })?,
+    };
+    let name = device
+        .description()
+        .map(|description| description.name().to_owned())
+        .unwrap_or_else(|_| "unknown".into());
     let config = device.default_input_config().map_err(|error| audio_error("microphone format", error))?;
-    start_cpal_input(device, config.sample_format(), config.config(), queue)
+    let capture = start_cpal_input(device, config.sample_format(), config.config(), queue)?;
+    Ok((capture, name))
 }
 
 #[cfg(windows)]

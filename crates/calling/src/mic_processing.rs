@@ -72,8 +72,12 @@ impl MicSettings {
         self.uses_device_track_on(cfg!(windows))
     }
 
+    /// On Linux, Auto and Low keep the Pulse ADM device track (same path Web Teams uses).
+    /// Music mode and Off still run the software chain; Windows always does.
     pub fn uses_device_track_on(self, windows: bool) -> bool {
-        !windows && !self.music_mode && self.noise_suppression == NoiseSuppression::Low
+        !windows
+            && !self.music_mode
+            && matches!(self.noise_suppression, NoiseSuppression::Auto | NoiseSuppression::Low)
     }
 
     pub fn ml_noise_suppression(self) -> bool {
@@ -86,9 +90,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_leaves_noise_to_the_ml_stage_and_keeps_the_rest_of_the_apm() {
+    fn auto_uses_the_device_track_on_linux_and_keeps_ml_for_the_windows_chain() {
         let settings = MicSettings::default();
-        assert!(!settings.uses_device_track_on(false));
+        assert!(settings.uses_device_track_on(false));
+        assert!(!settings.uses_device_track_on(true));
         assert!(settings.ml_noise_suppression());
         assert_eq!(
             settings.apm_config(),
@@ -120,7 +125,9 @@ mod tests {
             for music_mode in [false, true] {
                 let settings = MicSettings { noise_suppression, music_mode };
                 assert!(!settings.uses_device_track_on(true));
-                assert_eq!(settings.uses_device_track_on(false), !music_mode && noise_suppression == NoiseSuppression::Low);
+                let linux_device = !music_mode
+                    && matches!(noise_suppression, NoiseSuppression::Auto | NoiseSuppression::Low);
+                assert_eq!(settings.uses_device_track_on(false), linux_device);
             }
         }
     }

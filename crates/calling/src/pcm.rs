@@ -18,12 +18,14 @@ impl SampleQueue {
         queued.drain(..excess);
     }
 
-    pub fn next_frame(&self) -> (Vec<i16>, bool) {
+    /// Returns a full 10 ms frame when enough samples are queued. Partial frames stay queued
+    /// so AEC and the encoder never see zero-padded speech.
+    pub fn next_frame(&self) -> Option<Vec<i16>> {
         let mut queued = self.samples.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let available = queued.len().min(FRAME_SAMPLES);
-        let mut frame: Vec<i16> = queued.drain(..available).collect();
-        frame.resize(FRAME_SAMPLES, 0);
-        (frame, available > 0)
+        if queued.len() < FRAME_SAMPLES {
+            return None;
+        }
+        Some(queued.drain(..FRAME_SAMPLES).collect())
     }
 }
 
@@ -67,14 +69,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn frames_come_out_in_order_and_pad_with_silence() {
+    fn partial_frames_stay_queued_until_a_full_frame_is_ready() {
         let queue = SampleQueue::default();
         queue.push(&[1, 2, 3]);
-        let (frame, had_data) = queue.next_frame();
-        assert!(had_data);
+        assert!(queue.next_frame().is_none());
+        queue.push(&vec![4; FRAME_SAMPLES - 3]);
+        let frame = queue.next_frame().expect("full frame");
         assert_eq!(frame.len(), FRAME_SAMPLES);
-        assert_eq!(&frame[..4], &[1, 2, 3, 0]);
-        assert!(!queue.next_frame().1);
+        assert_eq!(&frame[..4], &[1, 2, 3, 4]);
+        assert!(queue.next_frame().is_none());
     }
 
     #[test]
@@ -82,11 +85,11 @@ mod tests {
         let queue = SampleQueue::default();
         queue.push(&vec![1; MAX_QUEUED_SAMPLES]);
         queue.push(&vec![2; FRAME_SAMPLES]);
-        let (frame, _) = queue.next_frame();
+        let frame = queue.next_frame().expect("full frame");
         assert_eq!(frame[0], 1);
         let mut last = frame;
         for _ in 1..MAX_QUEUED_SAMPLES / FRAME_SAMPLES {
-            last = queue.next_frame().0;
+            last = queue.next_frame().expect("full frame");
         }
         assert_eq!(last[FRAME_SAMPLES - 1], 2);
     }

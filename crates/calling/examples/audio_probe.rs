@@ -172,7 +172,7 @@ mod probe {
         let started = Instant::now();
         let mut next = Instant::now();
         while started.elapsed() < Duration::from_secs(seconds) {
-            let (frame, _) = queue.next_frame();
+            let frame = queue.next_frame().unwrap_or_else(|| vec![0; FRAME_SAMPLES]);
             dump.write(&frame);
             window.extend_from_slice(&frame);
             if window.len() >= frames_per_window * FRAME_SAMPLES {
