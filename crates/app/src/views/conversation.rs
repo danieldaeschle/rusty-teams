@@ -2520,8 +2520,10 @@ impl ConversationView {
         self.notice = None;
         self.rebuild(false, cx);
         if self.in_feed() {
-            self.scroller
-                .update(cx, |scroller, cx| scroller.scroll_to_item(0, cx));
+            if thread_root_id.is_none() {
+                self.scroller
+                    .update(cx, |scroller, cx| scroller.scroll_to_item(0, cx));
+            }
         } else {
             self.scroller
                 .update(cx, |scroller, cx| scroller.scroll_to_end(cx));
