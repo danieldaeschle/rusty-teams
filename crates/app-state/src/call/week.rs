@@ -27,6 +27,7 @@ impl AppState {
 
     pub fn open_calendar(&mut self, cx: &mut Context<Self>) {
         self.calendar_week.start = Some(self.calendar_start());
+        self.request_calendar_scroll_to_now(cx);
         self.load_calendar_week(cx);
     }
 
@@ -41,6 +42,14 @@ impl AppState {
         self.open_calendar(cx);
     }
 
+    pub fn request_calendar_scroll_to_now(&mut self, cx: &mut Context<Self>) {
+        if !crate::call::calendar_now::shows_hour_grid(self.calendar_week.span) {
+            return;
+        }
+        self.calendar_scroll_to_now = self.calendar_scroll_to_now.wrapping_add(1);
+        cx.notify();
+    }
+
     pub fn set_calendar_span(&mut self, span: CalendarSpan, cx: &mut Context<Self>) {
         let today = Local::now().date_naive();
         let start = self.calendar_start();
@@ -48,6 +57,9 @@ impl AppState {
             start <= today && today < start + Duration::days(self.calendar_week.span.days());
         self.calendar_week.span = span;
         self.calendar_week.start = Some(span.start_for(if shown { today } else { start }));
+        if crate::call::calendar_now::shows_hour_grid(span) {
+            self.request_calendar_scroll_to_now(cx);
+        }
         self.load_calendar_week(cx);
     }
 
