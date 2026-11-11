@@ -58,6 +58,7 @@ pub mod task_dialog;
 pub mod team_admin;
 pub mod translation_actions;
 pub mod typing;
+mod warm_chats;
 pub mod urgent_ack;
 
 pub use app_ui_kit::render;

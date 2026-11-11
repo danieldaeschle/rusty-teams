@@ -105,6 +105,7 @@ impl AppState {
             .filter(|_| removed)
             .and_then(|chat_id| self.next_chat_after(chat_id));
         self.adopt_loaded_sidebar(loaded, cx);
+        self.warm_recent_chats();
         if removed {
             self.leave_removed_selection(next, cx);
         }
