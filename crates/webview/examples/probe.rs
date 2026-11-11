@@ -21,6 +21,7 @@ async fn main() {
     let transport = webview::start(webview::HostConfig {
         user_data_folder: folder,
         window_title: "Rusty Teams probe - Sign in".into(),
+        log: |line| println!("{line}"),
     });
     let session = match Session::with_transport(transport, SessionConfig::default()).await {
         Ok(session) => session,

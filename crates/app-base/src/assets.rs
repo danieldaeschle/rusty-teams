@@ -381,7 +381,7 @@ const LUCIDE_AS_MATERIAL: [(&str, &str); 159] = [
     ("icons/zap.svg", "symbols/bolt.svg"),
 ];
 
-const MATERIAL_VIEW_BOX: &[u8] = b"viewBox=\"0 -960 960 960\"";
+const VIEW_BOX_START: &[u8] = b"viewBox=\"";
 const LUCIDE_SIZED_VIEW_BOX: &[u8] = b"viewBox=\"80 -880 800 800\"";
 
 fn symbol_bytes(path: &str) -> Option<&'static [u8]> {
@@ -389,10 +389,14 @@ fn symbol_bytes(path: &str) -> Option<&'static [u8]> {
 }
 
 fn at_lucide_size(svg: &[u8]) -> Vec<u8> {
-    match svg.windows(MATERIAL_VIEW_BOX.len()).position(|window| window == MATERIAL_VIEW_BOX) {
-        Some(start) => [&svg[..start], LUCIDE_SIZED_VIEW_BOX, &svg[start + MATERIAL_VIEW_BOX.len()..]].concat(),
-        None => svg.to_vec(),
-    }
+    let Some(start) = svg.windows(VIEW_BOX_START.len()).position(|window| window == VIEW_BOX_START) else {
+        return svg.to_vec();
+    };
+    let values_start = start + VIEW_BOX_START.len();
+    let Some(values_length) = svg[values_start..].iter().position(|&byte| byte == b'"') else {
+        return svg.to_vec();
+    };
+    [&svg[..start], LUCIDE_SIZED_VIEW_BOX, &svg[values_start + values_length + 1..]].concat()
 }
 
 pub const FILLED_PREFIX: &str = "filled/";
