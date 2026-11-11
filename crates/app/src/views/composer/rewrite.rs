@@ -17,7 +17,7 @@ use app_ui_kit::spinner::spinner;
 pub const REWRITE_BUTTON_TAG: &str = "composer/actions/copilot";
 pub const REWRITE_PANEL_TAG: &str = "composer/copilot";
 const BUTTON_LABEL: &str = "Write with Copilot";
-const REWRITE_SYSTEM: &str = "You rewrite a Teams chat draft. Reply with only the new message text. Keep the meaning. Do not add a preamble.";
+const REWRITE_SYSTEM: &str = "You rewrite a Teams chat draft. Reply with only the new message text. Keep the meaning. Do not add a preamble. Write in the same language as the draft.";
 const SWITCH_HINT: &str = "Choose another model under Settings > Agents, Write with.";
 const CLOSE_LABEL: &str = "Close";
 const ADJUST_LABEL: &str = "Adjust";
@@ -25,12 +25,9 @@ const CUSTOM_LABEL: &str = "Customised";
 const CUSTOM_PLACEHOLDER: &str = "Describe how to adjust it, e.g. make it sound friendlier";
 const REPLACE_LABEL: &str = "Replace";
 const DISCLAIMER: &str = "AI-generated content may be incorrect";
-const WORKING: &str = "Copilot is writing ...";
-const FAILED: &str = "Copilot could not rewrite this:";
-const EMPTY_DRAFT: &str = "Type a message first, then let Copilot rewrite it.";
-const TEXT_ONLY: &str =
-    "Copilot rewrites text only. Move images and tables out of the message first.";
+const COPILOT_NAME: &str = "Copilot";
 const BUTTON_ICON: &str = "auto_fix_high";
+const LOCAL_BUTTON_ICON: &str = "smart_toy";
 const PANEL_WIDTH: f32 = 600.;
 const PANEL_PADDING: f32 = 16.;
 const PANEL_RADIUS: f32 = 10.;
@@ -103,6 +100,12 @@ impl Composer {
             return None;
         }
         let open = self.rewrite.open;
+        let writer = local_writer(cx);
+        let local = writer.is_some();
+        let tooltip = writer
+            .as_ref()
+            .map(|profile| format!("Rewrite with {}", profile.name))
+            .unwrap_or_else(|| BUTTON_LABEL.to_owned());
         Some(
             div()
                 .id("composer-copilot")
@@ -116,14 +119,13 @@ impl Composer {
                 .cursor_pointer()
                 .when(open, |button| button.bg(theme::popup_hover()))
                 .hover(|button| button.bg(theme::popup_hover()))
-                .popup_trigger_tooltip_text(
-                    open,
-                    local_writer(cx)
-                        .map(|profile| format!("Rewrite with {}", profile.name))
-                        .unwrap_or_else(|| BUTTON_LABEL.to_owned()),
-                )
+                .popup_trigger_tooltip_text(open, tooltip)
                 .child(symbol(
-                    BUTTON_ICON,
+                    if local {
+                        LOCAL_BUTTON_ICON
+                    } else {
+                        BUTTON_ICON
+                    },
                     COMPOSER_ICON_SIZE,
                     if open {
                         theme::accent_text()
@@ -163,17 +165,19 @@ impl Composer {
         let Some(chat_id) = self.conversation_id.clone() else {
             return;
         };
+        let writer = writer_display_name(cx);
+        let failed = failed_rewrite(&writer);
         let refusal = if draft.is_blank() {
-            Some(EMPTY_DRAFT)
+            Some(empty_draft_message(&writer))
         } else if draft.text().contains([OBJECT_MARK, TABLE_MARK]) {
-            Some(TEXT_ONLY)
+            Some(text_only_message(&writer))
         } else {
             None
         };
         if let Some(refusal) = refusal {
             self.rewrite.result = Some(RewriteResult {
                 action,
-                answer: RewriteAnswer::Failed(refusal.to_owned()),
+                answer: RewriteAnswer::Failed(refusal),
             });
             cx.notify();
             return;
@@ -193,8 +197,8 @@ impl Composer {
             cx.spawn(async move |this, cx| {
                 let answer = match receiver.await {
                     Ok(Ok(text)) => RewriteAnswer::Ready(Draft::from_markdown(&text)),
-                    Ok(Err(error)) => RewriteAnswer::Failed(format!("{FAILED} {error}")),
-                    Err(error) => RewriteAnswer::Failed(format!("{FAILED} {error}")),
+                    Ok(Err(error)) => RewriteAnswer::Failed(format!("{failed} {error}")),
+                    Err(error) => RewriteAnswer::Failed(format!("{failed} {error}")),
                 };
                 this.update(cx, |this, cx| {
                     if this.rewrite.generation == generation
@@ -224,9 +228,9 @@ impl Composer {
                         RewriteAnswer::Ready(Draft::from_spans(&html_to_spans(&html)).trimmed())
                     }
                     Ok(Err(error)) => {
-                        RewriteAnswer::Failed(format!("{FAILED} {error} {SWITCH_HINT}"))
+                        RewriteAnswer::Failed(format!("{failed} {error} {SWITCH_HINT}"))
                     }
-                    Err(error) => RewriteAnswer::Failed(format!("{FAILED} {error} {SWITCH_HINT}")),
+                    Err(error) => RewriteAnswer::Failed(format!("{failed} {error} {SWITCH_HINT}")),
                 },
             };
             this.update(cx, |this, cx| {
@@ -498,7 +502,7 @@ impl Composer {
                         div()
                             .text_size(px(14.))
                             .text_color(theme::text_soft())
-                            .child(WORKING),
+                            .child(working_message(&writer_display_name(cx))),
                     ),
             ),
             RewriteAnswer::Failed(reason) => card.child(
@@ -550,16 +554,29 @@ impl Composer {
 }
 
 fn local_writer(cx: &App) -> Option<agents::AgentProfile> {
-    let runs = crate::agents::runs_handle(cx)?;
-    let settings = runs.read(cx).settings();
-    if settings.write_with.is_empty() {
-        return None;
-    }
-    settings
-        .agents
-        .iter()
-        .find(|agent| agent.id == settings.write_with && agent.is_chat())
-        .cloned()
+    crate::agents::local_writer(cx)
+}
+
+fn writer_display_name(cx: &App) -> String {
+    local_writer(cx)
+        .map(|profile| profile.name)
+        .unwrap_or_else(|| COPILOT_NAME.to_owned())
+}
+
+fn working_message(name: &str) -> String {
+    format!("{name} is writing ...")
+}
+
+fn failed_rewrite(name: &str) -> String {
+    format!("{name} could not rewrite this:")
+}
+
+fn empty_draft_message(name: &str) -> String {
+    format!("Type a message first, then let {name} rewrite it.")
+}
+
+fn text_only_message(name: &str) -> String {
+    format!("{name} rewrites text only. Move images and tables out of the message first.")
 }
 
 fn rewrite_instruction(action: &ComposeAction, draft: &str) -> String {

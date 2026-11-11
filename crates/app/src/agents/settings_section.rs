@@ -970,7 +970,7 @@ impl AgentsSettings {
                         div()
                             .text_size(px(12.))
                             .text_color(theme::text_muted())
-                            .child("Rewrite and proofread in the composer. Microsoft Copilot needs the licence."),
+                            .child("Rewrite in the composer and the chat assistant island. Microsoft Copilot needs the licence."),
                     )
                     .child(dropdown("write-with", write_label, write_entries)),
             )

@@ -64,6 +64,16 @@ fn check_placeholders(item_id: &str, texts: &[&str], problems: &mut Vec<Settings
 }
 
 impl AgentSettings {
+    /// Chat profile chosen under «Write with», or `None` for Microsoft Copilot.
+    pub fn write_with_profile(&self) -> Option<&AgentProfile> {
+        if self.write_with.is_empty() {
+            return None;
+        }
+        self.agents
+            .iter()
+            .find(|agent| agent.id == self.write_with && agent.is_chat())
+    }
+
     pub fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
     }
@@ -278,5 +288,26 @@ mod tests {
         let loaded = AgentSettings::from_json(&settings.to_json()).unwrap();
         assert_eq!(loaded.write_with, "ollama");
         assert!(loaded.validate().is_empty());
+    }
+
+    #[test]
+    fn write_with_profile_is_none_for_microsoft_and_missing_ids() {
+        let mut settings = AgentSettings::default();
+        assert!(settings.write_with_profile().is_none());
+        settings.write_with = "missing".to_owned();
+        assert!(settings.write_with_profile().is_none());
+        settings.agents.push(AgentProfile::ollama());
+        settings.agents.last_mut().unwrap().backend = AgentBackend::OpenAi {
+            base_url: "http://127.0.0.1:11434/v1".to_owned(),
+            model: "qwen3.5:9b".to_owned(),
+            api_key: String::new(),
+        };
+        settings.write_with = "ollama".to_owned();
+        assert_eq!(
+            settings.write_with_profile().map(|profile| profile.name.as_str()),
+            Some("Ollama")
+        );
+        settings.write_with = "claude".to_owned();
+        assert!(settings.write_with_profile().is_none());
     }
 }
