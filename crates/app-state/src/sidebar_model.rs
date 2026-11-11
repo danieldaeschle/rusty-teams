@@ -522,11 +522,7 @@ pub fn step_id(ids: &[&str], current: Option<&str>, step: Step) -> Option<String
     ids.get(target).map(|id| (*id).to_owned())
 }
 
-pub fn step_unread_id(
-    sections: &[Section],
-    current: Option<&str>,
-    step: Step,
-) -> Option<String> {
+pub fn step_unread_id(sections: &[Section], current: Option<&str>, step: Step) -> Option<String> {
     let items: Vec<&ChatItem> = sections
         .iter()
         .filter(|section| !section.collapsed)
@@ -870,7 +866,10 @@ mod tests {
             step_unread_id(&sections, None, Step::Next).as_deref(),
             Some(first_unread)
         );
-        assert_eq!(step_unread_id(&sections, Some(last_unread), Step::Next), None);
+        assert_eq!(
+            step_unread_id(&sections, Some(last_unread), Step::Next),
+            None
+        );
         assert_eq!(
             step_unread_id(&sections, Some(last_unread), Step::Previous).as_deref(),
             Some(first_unread)

@@ -322,9 +322,10 @@ fn recap_date_line(
         });
     format!(
         "{} - {}",
-        slot.start
-            .with_timezone(&clock.offset)
-            .format(&format!("{RECAP_DATE_FORMAT} {}", app_base::format::clock_format())),
+        slot.start.with_timezone(&clock.offset).format(&format!(
+            "{RECAP_DATE_FORMAT} {}",
+            app_base::format::clock_format()
+        )),
         slot.end
             .with_timezone(&clock.offset)
             .format(app_base::format::clock_format())

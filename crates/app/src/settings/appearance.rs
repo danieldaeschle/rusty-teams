@@ -203,7 +203,11 @@ fn scheme_preview(palette: &Palette) -> Div {
                     .rounded(px(6.))
                     .bg(fill(palette.surface))
                     .child(h_flex().child(bubble(palette.bubble_other, 64.)))
-                    .child(h_flex().justify_end().child(bubble(palette.bubble_own, 52.)))
+                    .child(
+                        h_flex()
+                            .justify_end()
+                            .child(bubble(palette.bubble_own, 52.)),
+                    )
                     .child(h_flex().child(bubble(palette.bubble_other, 40.)))
                     .child(
                         h_flex()

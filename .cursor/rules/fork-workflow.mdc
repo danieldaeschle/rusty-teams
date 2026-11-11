@@ -1,0 +1,38 @@
+---
+description: Fork vs Upstream — wo entwickeln, PRs und eigene Releases
+alwaysApply: true
+---
+
+# Fork-Workflow (rusty-teams)
+
+Dieses Repo ist Joes Fork-Arbeitskopie. Remotes und Rollen:
+
+| Remote | Repo | Rolle |
+|---|---|---|
+| `fork` | `d0dg3r/rusty-teams` | Produktlinie — entwickeln, pushen, eigene Releases |
+| `origin` | `danieldaeschle/rusty-teams` | Upstream — nur lesen + gezielt PRs |
+
+## Immer
+
+- Alltagskomits und Feature-Branches nach **`fork`** pushen (`git push -u fork HEAD`), nie nach `origin`.
+- Dauerhafte SoT auf dem Fork: Branch `main` (bzw. der aktuelle Integrationsbranch) auf `fork`.
+- Upstream mitnehmen: `git fetch origin`, dann `merge`/`rebase` von `origin/main` in den Fork-Branch — Konflikte hier lösen.
+
+## PRs an Upstream
+
+- Nur **kleine, thematische Scheiben**, abgezweigt vom aktuellen `origin/main`.
+- Nicht den ganzen Fork-Stand (Agent-Providers, lokale Experimente, …) als einen PR schicken.
+- PR-Quelle: Branch auf `fork` → Ziel `danieldaeschle/rusty-teams`.
+
+## Eigene Releases
+
+- Tags und GitHub Releases auf **`fork`** (`d0dg3r/rusty-teams`).
+- Tag-Namespace nicht mit Upstream kollidieren: `v0.3.0-joe.1` (oder klar eigener Major), nicht denselben `vX.Y.Z`-Inhalt wie Upstream vortäuschen.
+- CI: Tag `v*` → `.github/workflows/build.yml` baut Assets und veröffentlicht das Release am Fork.
+- Lokale Installation: Release-Binary → `/usr/local/bin/rusty-teams` (`teams` ist Symlink).
+
+## Nicht tun
+
+- Alltagskomits auf `origin` pushen
+- Riesen-PR mit vermischten Fork-Features an Daniel
+- Upstream-Tag-Namen für abweichenden Fork-Inhalt wiederverwenden

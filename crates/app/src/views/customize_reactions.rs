@@ -124,9 +124,12 @@ impl CustomizeForm {
             .rounded(px(10.))
             .tooltip(label)
             .map(|button| match &glyph {
-                Some(glyph) => {
-                    button.child(div().text_size(px(SLOT_GLYPH_SIZE)).child(glyph.clone()))
-                }
+                Some(glyph) => button.child(
+                    div()
+                        .text_size(px(SLOT_GLYPH_SIZE))
+                        .font_family(theme::EMOJI_FONT_FAMILY)
+                        .child(glyph.clone()),
+                ),
                 None => button.child(icon(IconName::Plus, 18., theme::text_muted())),
             });
         let (picker, view) = (self.picker.clone(), cx.entity().downgrade());
@@ -196,6 +199,7 @@ impl CustomizeForm {
             .rounded_full()
             .cursor_pointer()
             .text_size(px(TONE_GLYPH_SIZE))
+            .font_family(theme::EMOJI_FONT_FAMILY)
             .when(selected, |choice| choice.bg(theme::reaction_on_own()))
             .when(!selected, |choice| {
                 choice.hover(|choice| choice.bg(theme::popup_hover()))

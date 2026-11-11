@@ -1,5 +1,5 @@
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -135,7 +135,9 @@ impl Render for TranscriptPanel {
                     .into_any_element()
             })
             .collect();
-        let hint = rows.is_empty().then_some(if empty { EMPTY_TEXT } else { NO_MATCH_TEXT });
+        let hint = rows
+            .is_empty()
+            .then_some(if empty { EMPTY_TEXT } else { NO_MATCH_TEXT });
         let app = self.app.clone();
         let search = h_flex()
             .h(px(SEARCH_HEIGHT))

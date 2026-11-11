@@ -11,11 +11,10 @@ use store::{
     Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    ANNOUNCEMENT_BANNER_TYPE,
-    Activity, ActivityHorizons, ActivityItem, ActivitySnapshot, CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language,
-    LanguageSettings, LinkPreview, MentionCandidate, NOTES_CHAT_ID, PersonCandidate, PersonSource,
-    PinnedMessage, SavedMessage, TaskDialog, TaskDialogKind, Translation, TranslationBehavior,
-    TranslationStatus,
+    ANNOUNCEMENT_BANNER_TYPE, Activity, ActivityHorizons, ActivityItem, ActivitySnapshot,
+    CallEvent, CallPhase, CallType, CardActionOutcome, ChatApp, Gif, Language, LanguageSettings,
+    LinkPreview, MentionCandidate, NOTES_CHAT_ID, PersonCandidate, PersonSource, PinnedMessage,
+    SavedMessage, TaskDialog, TaskDialogKind, Translation, TranslationBehavior, TranslationStatus,
 };
 
 use crate::app_state::{AppState, Selection};
@@ -724,7 +723,8 @@ pub fn activity_snapshot() -> ActivitySnapshot {
         activity_subtype: subtype.to_owned(),
         source_thread_id: conversation_id.to_owned(),
         source_message_id: (!source_message_id.is_empty()).then(|| source_message_id.to_owned()),
-        source_reply_chain_id: (!source_message_id.is_empty()).then(|| source_message_id.to_owned()),
+        source_reply_chain_id: (!source_message_id.is_empty())
+            .then(|| source_message_id.to_owned()),
         source_user_id: Some(format!("8:orgid:{}", actor.0)),
         source_user_name: actor.1.to_owned(),
         preview: preview.to_owned(),
@@ -819,7 +819,8 @@ pub fn activity_snapshot() -> ActivitySnapshot {
             source_user_id: None,
             source_app_name: Some("Meeting Recaps".to_owned()),
             preview_template: "previewUnavailable".to_owned(),
-            template_parameters: [("subject".to_owned(), "Following: Sprint Review ".to_owned())].into(),
+            template_parameters: [("subject".to_owned(), "Following: Sprint Review ".to_owned())]
+                .into(),
             event_start_ms: Some(at(1, 10, 0).timestamp_millis()),
             event_end_ms: Some(at(1, 11, 0).timestamp_millis()),
             ..item(

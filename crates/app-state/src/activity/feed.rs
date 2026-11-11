@@ -231,9 +231,8 @@ impl Feed {
             .iter()
             .filter(|entry| filter.admits(entry))
             .collect();
-        admitted.sort_by(|left, right| {
-            (right.updated_at, &right.id).cmp(&(left.updated_at, &left.id))
-        });
+        admitted
+            .sort_by(|left, right| (right.updated_at, &right.id).cmp(&(left.updated_at, &left.id)));
         let mut sections: Vec<Section<'_>> = Vec::new();
         for entry in admitted {
             let bucket = Bucket::of(entry.updated_at, today, offset);
@@ -294,7 +293,11 @@ mod tests {
             .map(|section| {
                 (
                     section.bucket,
-                    section.entries.iter().map(|entry| entry.id.as_str()).collect(),
+                    section
+                        .entries
+                        .iter()
+                        .map(|entry| entry.id.as_str())
+                        .collect(),
                 )
             })
             .collect();
@@ -309,7 +312,13 @@ mod tests {
         let mentions = feed.sections(Filter::Mentions, today, offset);
         assert_eq!(mentions[0].entries.len(), 2);
         let unread = feed.sections(Filter::Unread, today, offset);
-        assert_eq!(unread.iter().map(|section| section.entries.len()).sum::<usize>(), 2);
+        assert_eq!(
+            unread
+                .iter()
+                .map(|section| section.entries.len())
+                .sum::<usize>(),
+            2
+        );
         assert_eq!(feed.unread_count(), 2);
         assert_eq!(feed.bell_count(), 2);
     }

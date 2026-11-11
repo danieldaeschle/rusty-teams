@@ -10,8 +10,8 @@ use teams_core::{ForcedAvailability, ForcedKind};
 use super::Composer;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::views::actions::OpenSwitcher;
-use crate::views::shortcuts::{OpenSettings, ShowShortcuts};
 use crate::views::chat_menu::confirm_leave;
+use crate::views::shortcuts::{OpenSettings, ShowShortcuts};
 
 const GROUP_KIND: &str = "group";
 const WIDTH: f32 = 380.;
@@ -86,9 +86,7 @@ impl SlashCommand {
             SlashCommand::Presence(ForcedKind::Away) => "Set your status to away",
             SlashCommand::Presence(ForcedKind::BeRightBack) => "Set your status to be right back",
             SlashCommand::Presence(ForcedKind::Busy) => "Set your status to busy",
-            SlashCommand::Presence(ForcedKind::DoNotDisturb) => {
-                "Set your status to do not disturb"
-            }
+            SlashCommand::Presence(ForcedKind::DoNotDisturb) => "Set your status to do not disturb",
             SlashCommand::Presence(ForcedKind::Offline) => "Set your status to offline",
             SlashCommand::ResetPresence => "Reset your presence status",
             SlashCommand::Goto => "Go right to a chat or channel",
@@ -451,7 +449,10 @@ mod tests {
 
     #[test]
     fn the_list_is_sorted_by_name_like_teams() {
-        let names: Vec<&str> = matching("", chat()).iter().map(|command| command.name()).collect();
+        let names: Vec<&str> = matching("", chat())
+            .iter()
+            .map(|command| command.name())
+            .collect();
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted);
@@ -476,14 +477,22 @@ mod tests {
             muted: true,
             notes: false,
         };
-        let names: Vec<&str> = matching("", group_muted).iter().map(|command| command.name()).collect();
-        assert!(names.contains(&"leavechat") && names.contains(&"unmute") && !names.contains(&"mute"));
+        let names: Vec<&str> = matching("", group_muted)
+            .iter()
+            .map(|command| command.name())
+            .collect();
+        assert!(
+            names.contains(&"leavechat") && names.contains(&"unmute") && !names.contains(&"mute")
+        );
         let notes = SlashContext {
             chat: true,
             notes: true,
             ..SlashContext::default()
         };
-        let names: Vec<&str> = matching("", notes).iter().map(|command| command.name()).collect();
+        let names: Vec<&str> = matching("", notes)
+            .iter()
+            .map(|command| command.name())
+            .collect();
         assert!(!names.contains(&"mute") && !names.contains(&"schedulemessage"));
         let channel: Vec<&str> = matching("", SlashContext::default())
             .iter()

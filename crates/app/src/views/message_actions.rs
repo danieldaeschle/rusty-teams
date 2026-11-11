@@ -15,8 +15,8 @@ use gpui_kit::*;
 use super::reaction_picker::{DoneHandler, PickHandler, ReactionPicker};
 use super::toolbar_placement::{HoverChange, TOOLBAR_HEIGHT, toolbar_slot};
 use super::widgets::{icon, symbol};
-use crate::post_follow::follow_label;
 use crate::forward_selection::{FORWARD_LABEL, MULTIPLE_MESSAGES_LABEL, THIS_MESSAGE_LABEL};
+use crate::post_follow::follow_label;
 use crate::rows::reaction_glyph;
 use crate::share_outlook::SHARE_TO_OUTLOOK_LABEL;
 use crate::theme::{self, ElevatedSurface as _};
@@ -133,7 +133,12 @@ impl MessageMenu {
     }
 }
 
-fn picker_popover(adder: ReactionAdder, prefix: &str, trigger: Button, anchor: Anchor) -> AnyElement {
+fn picker_popover(
+    adder: ReactionAdder,
+    prefix: &str,
+    trigger: Button,
+    anchor: Anchor,
+) -> AnyElement {
     let ReactionAdder {
         key,
         picker,

@@ -12,11 +12,11 @@ use crate::app_state::Selection;
 use crate::data::Directory;
 use crate::find_in_chat::FIND_IN_CHAT;
 use crate::theme;
+use crate::views::avatar::status_glyph;
 use crate::views::chat_menu::{ChatMenuTarget, MenuContext, chat_menu};
-use crate::views::sidebar::channel_menu;
 use crate::views::composer::plus_menu::chat_invitees;
 use crate::views::new_meeting_dialog::open_new_meeting_with;
-use crate::views::avatar::status_glyph;
+use crate::views::sidebar::channel_menu;
 use crate::views::widgets::{icon, menu_icon, symbol};
 
 pub const CHAT_HEADER_MORE_TAG: &str = "chat-header-more";
@@ -61,7 +61,12 @@ impl ConversationView {
             .sidebar
             .teams
             .iter()
-            .find(|entry| entry.channels.iter().any(|channel| &channel.id == channel_id))?
+            .find(|entry| {
+                entry
+                    .channels
+                    .iter()
+                    .any(|channel| &channel.id == channel_id)
+            })?
             .channel_notifications(channel_id);
         let (state, channel_id) = (self.app.clone(), channel_id.clone());
         Some(
@@ -88,7 +93,11 @@ impl ConversationView {
             && self.header_chat_id().is_some()
     }
 
-    pub(super) fn chat_more_button(&self, overflow: bool, cx: &Context<Self>) -> Option<AnyElement> {
+    pub(super) fn chat_more_button(
+        &self,
+        overflow: bool,
+        cx: &Context<Self>,
+    ) -> Option<AnyElement> {
         let chat_id = self
             .header_chat_id()
             .filter(|_| !self.popped_out && !self.pinned)?;
@@ -157,7 +166,9 @@ fn overflow_items(
             PopupMenuItem::new(details_label)
                 .icon(menu_icon(IconName::PanelRight))
                 .on_click(move |_, _, cx| {
-                    details_view.update(cx, |this, cx| this.toggle_details(cx)).ok();
+                    details_view
+                        .update(cx, |this, cx| this.toggle_details(cx))
+                        .ok();
                 }),
         )
         .separator()

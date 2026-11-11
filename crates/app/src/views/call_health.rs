@@ -93,9 +93,12 @@ fn health_popover(model: &CallModel) -> Div {
         None => v_flex().child(row("Quality", "Measuring...".to_owned())),
     };
     let transport = health.iter().flat_map(|health| {
-        [Some(transport_text(health)), media_text(health, &model.peer_name)]
-            .into_iter()
-            .flatten()
+        [
+            Some(transport_text(health)),
+            media_text(health, &model.peer_name),
+        ]
+        .into_iter()
+        .flatten()
     });
     v_flex()
         .debug_selector(|| "shell/islands/main/call-health-popover".into())
@@ -108,7 +111,12 @@ fn health_popover(model: &CallModel) -> Div {
                 .font_weight(FontWeight::SEMIBOLD)
                 .child("Call health"),
         )
-        .child(v_flex().gap(px(6.)).child(section_title("Network")).child(network))
+        .child(
+            v_flex()
+                .gap(px(6.))
+                .child(section_title("Network"))
+                .child(network),
+        )
         .child(
             v_flex()
                 .gap(px(6.))
@@ -200,8 +208,7 @@ pub fn health_banner(app: &Entity<AppState>, model: &CallModel) -> Option<AnyEle
                     .hover(|button| button.bg(dark_text().opacity(0.12)))
                     .child(symbol("close", 16., dark_text()))
                     .on_click(move |_, _, cx| {
-                        close_app
-                            .update(cx, |state, cx| state.close_call_health_banner(banner, cx))
+                        close_app.update(cx, |state, cx| state.close_call_health_banner(banner, cx))
                     }),
             )
             .into_any_element(),

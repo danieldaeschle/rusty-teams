@@ -35,25 +35,73 @@ pub(super) struct Swatch {
 
 /// Teams' font colour palette (`categoryColors`, shades in the compose bundle).
 pub(super) const FONT_COLORS: [Swatch; 8] = [
-    Swatch { name: "Red", color: 0xB6424C },
-    Swatch { name: "Tuscan orange", color: 0xCD5937 },
-    Swatch { name: "Sunglow", color: 0xFDC030 },
-    Swatch { name: "Pear", color: 0xBDCB4C },
-    Swatch { name: "Eucalyptus", color: 0x2B9B62 },
-    Swatch { name: "Faded jade", color: 0x37797B },
-    Swatch { name: "Fun blue", color: 0x1E53A3 },
-    Swatch { name: "Tyrian purple", color: 0xA5397A },
+    Swatch {
+        name: "Red",
+        color: 0xB6424C,
+    },
+    Swatch {
+        name: "Tuscan orange",
+        color: 0xCD5937,
+    },
+    Swatch {
+        name: "Sunglow",
+        color: 0xFDC030,
+    },
+    Swatch {
+        name: "Pear",
+        color: 0xBDCB4C,
+    },
+    Swatch {
+        name: "Eucalyptus",
+        color: 0x2B9B62,
+    },
+    Swatch {
+        name: "Faded jade",
+        color: 0x37797B,
+    },
+    Swatch {
+        name: "Fun blue",
+        color: 0x1E53A3,
+    },
+    Swatch {
+        name: "Tyrian purple",
+        color: 0xA5397A,
+    },
 ];
 
 pub(super) const HIGHLIGHT_COLORS: [Swatch; 8] = [
-    Swatch { name: "Kobi red", color: 0xDF9299 },
-    Swatch { name: "Rose bud", color: 0xF4A593 },
-    Swatch { name: "Goldenrod", color: 0xFDD472 },
-    Swatch { name: "Primrose", color: 0xE5F18F },
-    Swatch { name: "Mantis", color: 0x82CDA8 },
-    Swatch { name: "Regent St. blue", color: 0x9DD9DB },
-    Swatch { name: "Periwinkle grey", color: 0xC7D4E8 },
-    Swatch { name: "Pale rose", color: 0xEBD3E1 },
+    Swatch {
+        name: "Kobi red",
+        color: 0xDF9299,
+    },
+    Swatch {
+        name: "Rose bud",
+        color: 0xF4A593,
+    },
+    Swatch {
+        name: "Goldenrod",
+        color: 0xFDD472,
+    },
+    Swatch {
+        name: "Primrose",
+        color: 0xE5F18F,
+    },
+    Swatch {
+        name: "Mantis",
+        color: 0x82CDA8,
+    },
+    Swatch {
+        name: "Regent St. blue",
+        color: 0x9DD9DB,
+    },
+    Swatch {
+        name: "Periwinkle grey",
+        color: 0xC7D4E8,
+    },
+    Swatch {
+        name: "Pale rose",
+        color: 0xEBD3E1,
+    },
 ];
 
 pub(super) const PARAGRAPH_STYLES: [(Option<u8>, &str); 4] = [
@@ -312,30 +360,34 @@ impl Composer {
     fn render_color_picker(&self, popup: FormatPopup, cx: &mut Context<Self>) -> Div {
         let current = self.current_color(popup, cx);
         let rows = popup.palette().chunks(SWATCH_COLUMNS).map(|row| {
-            h_flex().gap(px(SWATCH_GAP)).children(row.iter().map(|swatch| {
-                let color = swatch.color;
-                let name = swatch.name;
-                let selected = current == Some(color);
-                swallow_mouse_down(
-                    div()
-                        .id(ElementId::Name(format!("swatch-{popup:?}-{color:06x}").into()))
-                        .size(px(SWATCH))
-                        .rounded(px(SWATCH / 2.))
-                        .bg(rgb(color))
-                        .cursor_pointer()
-                        .border_2()
-                        .border_color(if selected {
-                            theme::text()
-                        } else {
-                            transparent_black()
-                        })
-                        .hover(|swatch| swatch.opacity(0.85))
-                        .tooltip(move |window, cx| Tooltip::new(name).build(window, cx)),
-                )
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.apply_color(popup, Some(color), window, cx)
+            h_flex()
+                .gap(px(SWATCH_GAP))
+                .children(row.iter().map(|swatch| {
+                    let color = swatch.color;
+                    let name = swatch.name;
+                    let selected = current == Some(color);
+                    swallow_mouse_down(
+                        div()
+                            .id(ElementId::Name(
+                                format!("swatch-{popup:?}-{color:06x}").into(),
+                            ))
+                            .size(px(SWATCH))
+                            .rounded(px(SWATCH / 2.))
+                            .bg(rgb(color))
+                            .cursor_pointer()
+                            .border_2()
+                            .border_color(if selected {
+                                theme::text()
+                            } else {
+                                transparent_black()
+                            })
+                            .hover(|swatch| swatch.opacity(0.85))
+                            .tooltip(move |window, cx| Tooltip::new(name).build(window, cx)),
+                    )
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.apply_color(popup, Some(color), window, cx)
+                    }))
                 }))
-            }))
         });
         let clear = swallow_mouse_down(
             div()
@@ -350,9 +402,7 @@ impl Composer {
                 .cursor_pointer()
                 .hover(|row| row.bg(theme::popup_hover())),
         )
-        .on_click(cx.listener(move |this, _, window, cx| {
-            this.apply_color(popup, None, window, cx)
-        }))
+        .on_click(cx.listener(move |this, _, window, cx| this.apply_color(popup, None, window, cx)))
         .child(popup.clear_label());
         v_flex()
             .p(px(POPUP_PADDING))
@@ -365,7 +415,8 @@ impl Composer {
         let selection = self.selection(cx);
         let rows = FONT_SIZES.iter().map(|(size, button, label)| {
             let size = *size;
-            let current = size.is_some() && self.format_state(*button, &selection) == FormatState::On;
+            let current =
+                size.is_some() && self.format_state(*button, &selection) == FormatState::On;
             swallow_mouse_down(
                 div()
                     .id(ElementId::Name(format!("font-size-{label}").into()))
@@ -427,7 +478,10 @@ mod tests {
 
     #[test]
     fn font_sizes_read_like_teams() {
-        assert_eq!(FONT_SIZES.map(|(_, _, label)| label), ["Large", "Medium", "Small"]);
+        assert_eq!(
+            FONT_SIZES.map(|(_, _, label)| label),
+            ["Large", "Medium", "Small"]
+        );
         assert_eq!(
             FONT_SIZES.map(|(size, _, _)| size),
             [Some(SizeStep::Large), None, Some(SizeStep::Small)]

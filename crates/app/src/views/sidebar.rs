@@ -2,11 +2,11 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use chrono::{Local, Offset, Utc};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Icon, Sizable as _, WindowExt as _, h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -18,14 +18,14 @@ use teams_core::team_avatar_key;
 
 use super::activity_panel::ActivityPanel;
 use super::avatar::{spec_avatar, team_avatar, with_presence};
-use super::chat_menu::{ChatMenuTarget, MenuContext, chat_menu};
-use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::channel_admin_dialogs::{confirm_delete_channel, open_edit_channel_dialog};
+use super::chat_menu::{ChatMenuTarget, MenuContext, chat_menu};
 use super::create_channel_dialog::open_create_channel_dialog;
+use super::last_views::LastViews;
+use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::section_dialog::{SectionNameTarget, open_section_name_dialog};
 use super::widgets::{count_badge, icon, menu_icon, page_header, symbol, unread_marker};
 use crate::agents::AgentsPanel;
-use super::last_views::LastViews;
 use crate::app_state::{AppEvent, AppState, QuickView, Selection};
 use crate::channel_menu::{
     ChannelMenuItem, MenuEntry, TeamMenuItem, TeamMenuState, channel_menu_entries,
@@ -559,15 +559,12 @@ impl SidebarView {
             self.last_views.remember(current);
         }
         let first_chat_id = state.sidebar.chats.first().map(|chat| chat.id.as_str());
-        if let Some(selection) =
-            self.last_views
-                .restore(
-                    tab,
-                    state.selection.as_ref(),
-                    first_chat_id,
-                    first_channel_id.as_deref(),
-                )
-        {
+        if let Some(selection) = self.last_views.restore(
+            tab,
+            state.selection.as_ref(),
+            first_chat_id,
+            first_channel_id.as_deref(),
+        ) {
             self.state
                 .update(cx, |state, cx| state.select(selection, cx));
         }
@@ -604,7 +601,9 @@ impl SidebarView {
 
     fn first_channel_id(&self, cx: &App) -> Option<String> {
         let input = self.channel_order_input(self.state.read(cx), None);
-        visible_channel_ids(&input).first().map(|id| (*id).to_owned())
+        visible_channel_ids(&input)
+            .first()
+            .map(|id| (*id).to_owned())
     }
 
     fn channel_order_input<'a>(
@@ -896,7 +895,8 @@ impl SidebarView {
         let mut height = SECTION_GAP + SECTION_HEIGHT;
         if !collapsed {
             for (view, glyph) in QUICK_VIEWS {
-                section = section.child(self.quick_view_row(view, glyph, open_view == Some(view), cx));
+                section =
+                    section.child(self.quick_view_row(view, glyph, open_view == Some(view), cx));
                 height += QUICK_ROW_HEIGHT;
             }
         }
@@ -1527,7 +1527,12 @@ impl SidebarView {
                     cx.notify();
                 }))
                 .context_menu(move |popup, _, _| {
-                    team_menu(popup, team_menu_state.clone(), &team_menu_id, team_menu_flags)
+                    team_menu(
+                        popup,
+                        team_menu_state.clone(),
+                        &team_menu_id,
+                        team_menu_flags,
+                    )
                 }),
         );
         if !expanded {
@@ -1596,7 +1601,11 @@ impl SidebarView {
             .hover(|row| row.bg(theme::row_hover()))
             .text_size(px(13.5))
             .text_color(theme::accent_text())
-            .child(if open { SEE_FEWER_CHANNELS } else { SEE_ALL_CHANNELS })
+            .child(if open {
+                SEE_FEWER_CHANNELS
+            } else {
+                SEE_ALL_CHANNELS
+            })
             .on_click(on_click)
     }
 
@@ -1682,11 +1691,11 @@ impl SidebarView {
                             .child(channel.name.clone()),
                     )
                     .when(is_private_channel(channel), |name| {
-                        name.child(
-                            div()
-                                .flex_none()
-                                .child(symbol("lock", 14., theme::text_muted())),
-                        )
+                        name.child(div().flex_none().child(symbol(
+                            "lock",
+                            14.,
+                            theme::text_muted(),
+                        )))
                     }),
             )
             .children(notification_badge(notifications.level))
@@ -2169,10 +2178,7 @@ impl Render for SidebarView {
 mod tests {
     use std::collections::HashSet;
 
-    use super::{
-        drop_target, parse_collapsed_teams, serialize_collapsed_teams,
-        team_expanded,
-    };
+    use super::{drop_target, parse_collapsed_teams, serialize_collapsed_teams, team_expanded};
     use crate::data::PENDING_FOLDER_PREFIX;
     use crate::sidebar_model::{Section, SectionKind};
 

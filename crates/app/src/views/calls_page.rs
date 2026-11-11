@@ -184,7 +184,10 @@ fn history_filters(state: &Entity<AppState>, current: HistoryFilter) -> AnyEleme
         let selected = filter == current;
         let state = state.clone();
         div()
-            .id(SharedString::from(format!("calls-filter-{}", filter.label())))
+            .id(SharedString::from(format!(
+                "calls-filter-{}",
+                filter.label()
+            )))
             .h(px(24.))
             .px(px(10.))
             .flex()
@@ -206,7 +209,11 @@ fn history_filters(state: &Entity<AppState>, current: HistoryFilter) -> AnyEleme
                 state.update(cx, |state, cx| state.set_call_history_filter(filter, cx))
             })
     });
-    h_flex().gap(px(6.)).items_center().children(pills).into_any_element()
+    h_flex()
+        .gap(px(6.))
+        .items_center()
+        .children(pills)
+        .into_any_element()
 }
 
 fn empty_row(text: &'static str) -> AnyElement {
@@ -409,9 +416,9 @@ impl CallsPage {
             .child(
                 Button::new("speed-dial-empty-add")
                     .label(ADD_LABEL)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_speed_dial_add(window, cx)
-                    })),
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_speed_dial_add(window, cx)),
+                    ),
             )
     }
 
@@ -423,9 +430,7 @@ impl CallsPage {
             .map(|entry| speed_dial_row(&self.app, entry, &state.directory))
             .collect::<Vec<_>>();
         let body = if self.adding_speed_dial {
-            div()
-                .p(px(PAGE_PADDING))
-                .child(self.speed_dial_adder(cx))
+            div().p(px(PAGE_PADDING)).child(self.speed_dial_adder(cx))
         } else if rows.is_empty() {
             self.speed_dial_empty(cx)
         } else {

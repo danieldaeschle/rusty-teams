@@ -33,8 +33,8 @@ use crate::activity::ActivityCenter;
 use crate::agent_api::{self, pending::PendingProposal};
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
 use crate::app_state::{AppEvent, AppState, selection_for};
-use crate::autostart::{self, StartupSettings};
 use crate::appearance::AppIcon;
+use crate::autostart::{self, StartupSettings};
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
 use crate::runtime;
@@ -289,7 +289,11 @@ impl NotificationCenter {
             && let Err(error) = autostart::set_enabled(crate::APP_NAME, enabled)
         {
             self.app.update(cx, |state, cx| {
-                state.raise_notice(format!("Auto-start could not be changed: {error}"), None, cx)
+                state.raise_notice(
+                    format!("Auto-start could not be changed: {error}"),
+                    None,
+                    cx,
+                )
             });
             return;
         }
@@ -539,11 +543,14 @@ impl NotificationCenter {
                 .find(|person| person.user_id == user_id)
                 .map(|person| person.name.clone())
                 .unwrap_or_default();
-            (name, state.one_on_one_chat_with(user_id).unwrap_or_default())
+            (
+                name,
+                state.one_on_one_chat_with(user_id).unwrap_or_default(),
+            )
         };
-        let id = self
-            .stack
-            .push_status_change(user_id, &name, text, &conversation_id, Instant::now());
+        let id =
+            self.stack
+                .push_status_change(user_id, &name, text, &conversation_id, Instant::now());
         if let Some(model) = self.stack.get_mut(id) {
             model.time = chrono::Local::now()
                 .format(crate::format::clock_format())
@@ -1153,7 +1160,8 @@ impl NotificationCenter {
 
     pub fn accept_ring(&mut self, ring_id: u64, mode: calling::AcceptMode, cx: &mut Context<Self>) {
         self.raise_main_window(cx);
-        self.app.update(cx, |state, cx| state.accept_ring(ring_id, mode, cx));
+        self.app
+            .update(cx, |state, cx| state.accept_ring(ring_id, mode, cx));
     }
 
     fn raise_main_window(&mut self, cx: &mut Context<Self>) {

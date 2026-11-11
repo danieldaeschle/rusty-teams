@@ -8,9 +8,9 @@ use serde_json::json;
 use store::Store;
 use teams_core::AdaptiveCard;
 
-use crate::card_inputs::InputField;
 use crate::app_state::{AppHandle, AppState, Mode};
 use crate::card_actions::CardTask;
+use crate::card_inputs::InputField;
 use crate::card_state::{CardScope, Surface};
 use crate::views::adaptive_card::card_view;
 
@@ -129,12 +129,7 @@ fn error_of(cx: &mut VisualTestContext, app: &Entity<AppState>, key: &str) -> Op
     cx.update(|_, cx| app.read(cx).cards.input_error(key).map(str::to_owned))
 }
 
-fn type_name(
-    cx: &mut VisualTestContext,
-    app: &Entity<AppState>,
-    scope: &CardScope,
-    text: &str,
-) {
+fn type_name(cx: &mut VisualTestContext, app: &Entity<AppState>, scope: &CardScope, text: &str) {
     focus_name_field(cx, app, scope);
     cx.simulate_input(text);
 }

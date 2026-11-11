@@ -27,7 +27,13 @@ fn save(store: &Store, entries: &[SpeedDialEntry]) {
 fn serialize(entries: &[SpeedDialEntry]) -> String {
     entries
         .iter()
-        .map(|entry| format!("{}\t{}", entry.user_id, entry.name.replace(['\t', '\n'], " ")))
+        .map(|entry| {
+            format!(
+                "{}\t{}",
+                entry.user_id,
+                entry.name.replace(['\t', '\n'], " ")
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }

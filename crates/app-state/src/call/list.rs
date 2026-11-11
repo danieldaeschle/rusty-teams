@@ -50,7 +50,9 @@ impl HistoryFilter {
         match self {
             HistoryFilter::All => true,
             HistoryFilter::Missed => entry.missed(),
-            HistoryFilter::Incoming => entry.direction == CallDirection::Incoming && !entry.missed(),
+            HistoryFilter::Incoming => {
+                entry.direction == CallDirection::Incoming && !entry.missed()
+            }
             HistoryFilter::Outgoing => entry.direction == CallDirection::Outgoing,
         }
     }
@@ -253,7 +255,10 @@ mod tests {
         let mut list = CallsList::default();
         list.set_filter(HistoryFilter::Missed);
         list.rebuild(&[call("outgoing")], &[], now(), zero());
-        assert_eq!(list.entries().last(), Some(&ListEntry::Empty("No missed calls")));
+        assert_eq!(
+            list.entries().last(),
+            Some(&ListEntry::Empty("No missed calls"))
+        );
     }
 
     #[test]

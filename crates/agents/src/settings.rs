@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::action::AgentAction;
-use crate::profile::AgentProfile;
+use crate::profile::{AgentBackend, AgentProfile};
 use crate::template::{is_known_placeholder, placeholders_in};
 
 pub const SETTINGS_KEY: &str = "agents.settings";
@@ -20,6 +20,8 @@ pub enum SettingsProblem {
         item_id: String,
         placeholder: String,
     },
+    #[error("agent {agent_id} has an empty model")]
+    EmptyModel { agent_id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,6 +31,8 @@ pub struct AgentSettings {
     pub actions: Vec<AgentAction>,
     pub resume_interrupted_runs: bool,
     pub recent_working_dirs: HashMap<String, Vec<String>>,
+    /// Empty means Microsoft Copilot. Otherwise the id of a chat profile.
+    pub write_with: String,
 }
 
 impl Default for AgentSettings {
@@ -41,6 +45,7 @@ impl Default for AgentSettings {
             ],
             resume_interrupted_runs: true,
             recent_working_dirs: HashMap::new(),
+            write_with: String::new(),
         }
     }
 }
@@ -90,8 +95,19 @@ impl AgentSettings {
     pub fn validate(&self) -> Vec<SettingsProblem> {
         let mut problems = Vec::new();
         for agent in &self.agents {
-            if agent.command.trim().is_empty() {
+            if agent.is_command() && agent.command.trim().is_empty() {
                 problems.push(SettingsProblem::EmptyCommand {
+                    agent_id: agent.id.clone(),
+                });
+            }
+            let model = match &agent.backend {
+                AgentBackend::OpenAi { model, .. } | AgentBackend::Anthropic { model, .. } => {
+                    model.as_str()
+                }
+                AgentBackend::Command => "",
+            };
+            if agent.is_chat() && model.trim().is_empty() {
+                problems.push(SettingsProblem::EmptyModel {
                     agent_id: agent.id.clone(),
                 });
             }
@@ -234,5 +250,33 @@ mod tests {
             item_id: "build-this".to_string(),
             placeholder: "nope".to_string(),
         }));
+    }
+
+    #[test]
+    fn a_profile_without_backend_stays_a_command() {
+        let loaded = AgentSettings::from_json(
+            r#"{"agents":[{"id":"legacy","name":"Legacy","command":"claude -p"}]}"#,
+        )
+        .unwrap();
+        assert!(loaded.agents[0].is_command());
+        assert!(loaded.write_with.is_empty());
+    }
+
+    #[test]
+    fn chat_profiles_need_a_model_and_write_with_round_trips() {
+        let mut settings = AgentSettings::default();
+        settings.agents.push(AgentProfile::ollama());
+        assert!(settings.validate().contains(&SettingsProblem::EmptyModel {
+            agent_id: "ollama".to_string(),
+        }));
+        settings.agents.last_mut().unwrap().backend = AgentBackend::OpenAi {
+            base_url: "http://127.0.0.1:11434/v1".to_owned(),
+            model: "qwen3.5:9b".to_owned(),
+            api_key: String::new(),
+        };
+        settings.write_with = "ollama".to_owned();
+        let loaded = AgentSettings::from_json(&settings.to_json()).unwrap();
+        assert_eq!(loaded.write_with, "ollama");
+        assert!(loaded.validate().is_empty());
     }
 }

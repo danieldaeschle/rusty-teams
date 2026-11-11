@@ -140,7 +140,11 @@ fn item_element(item: &RailItem, active: bool) -> Stateful<Div> {
         .when(!active, |button| {
             button.hover(|button| button.bg(theme::row_hover()))
         })
-        .child(if active { filled_icon(item.icon, ICON_SIZE, color) } else { icon(item.icon, ICON_SIZE, color) })
+        .child(if active {
+            filled_icon(item.icon, ICON_SIZE, color)
+        } else {
+            icon(item.icon, ICON_SIZE, color)
+        })
         .child(
             div()
                 .max_w(px(RAIL_ITEM_WIDTH - 2. * LABEL_INSET))
@@ -242,11 +246,7 @@ impl Render for RailView {
             .items_center()
             .gap(px(2.))
             .pt(px(0.))
-            .children(
-                items
-                    .iter()
-                    .map(|item| self.item(item, item.tab == active)),
-            )
+            .children(items.iter().map(|item| self.item(item, item.tab == active)))
     }
 }
 

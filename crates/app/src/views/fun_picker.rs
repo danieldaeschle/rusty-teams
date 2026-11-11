@@ -2,8 +2,8 @@ use crate::views::image_memory::bounded;
 use std::rc::Rc;
 use std::time::Duration;
 
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::base::PopoverState;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     h_flex,
     input::{Input, InputEvent, InputState},
@@ -28,7 +28,8 @@ const HEIGHT: f32 = 380.;
 const PADDING: f32 = 8.;
 const CONTENT_WIDTH: f32 = WIDTH - 2. * PADDING;
 const EMOJI_COLUMNS: usize = 10;
-const EMOJI_CELL: f32 = (CONTENT_WIDTH - EMOJI_GAP * (EMOJI_COLUMNS - 1) as f32) / EMOJI_COLUMNS as f32;
+const EMOJI_CELL: f32 =
+    (CONTENT_WIDTH - EMOJI_GAP * (EMOJI_COLUMNS - 1) as f32) / EMOJI_COLUMNS as f32;
 const EMOJI_GAP: f32 = 2.;
 const EMOJI_SEARCH_LIMIT: usize = 240;
 const GIF_COLUMNS: usize = 3;
@@ -342,7 +343,8 @@ impl FunPicker {
 
     fn pick_tone(&mut self, glyph: &str, tone: u8, cx: &mut Context<Self>) {
         self.skin_tone = tone;
-        self.app.update(cx, |state, cx| state.set_skin_tone(tone, cx));
+        self.app
+            .update(cx, |state, cx| state.set_skin_tone(tone, cx));
         self.pick_emoji(&emoticons::with_tone(glyph, tone), cx);
     }
 

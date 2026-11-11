@@ -11,10 +11,9 @@ use gpui_kit::*;
 
 use super::calendar_date_picker::date_picker_button;
 use super::calendar_month::month_grid;
-use super::meeting_proposal_card::meeting_proposal_cards;
-use super::rsvp_menu::rsvp_menu;
 use super::join_dialog::open_join_with_id;
 use super::new_meeting_dialog::open_new_meeting;
+use super::rsvp_menu::rsvp_menu;
 use crate::app_state::AppState;
 use crate::call::join_available;
 use crate::call::week_grid::{
@@ -48,19 +47,16 @@ pub struct CalendarView {
     scroll: ScrollHandle,
     scrolled_to_morning: bool,
     _observation: Subscription,
-    _agent_observation: Option<Subscription>,
 }
 
 impl CalendarView {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         let observation = cx.observe(&state, |_, _, cx| cx.notify());
-        let agent_observation = crate::agent_api::handle(cx).map(|api| cx.observe(&api, |_, _, cx| cx.notify()));
         CalendarView {
             state,
             scroll: ScrollHandle::new(),
             scrolled_to_morning: false,
             _observation: observation,
-            _agent_observation: agent_observation,
         }
     }
 
@@ -123,19 +119,17 @@ impl CalendarView {
                         forward.update(cx, |state, cx| state.shift_calendar_week(1, cx))
                     }),
             )
-            .child(
-                h_flex().flex_1().min_w_0().child(date_picker_button(
-                    &self.state,
-                    span.title(start),
-                    start,
-                    span.days(),
-                    if span == CalendarSpan::Month {
-                        month_shown(start)
-                    } else {
-                        start
-                    },
-                )),
-            )
+            .child(h_flex().flex_1().min_w_0().child(date_picker_button(
+                &self.state,
+                span.title(start),
+                start,
+                span.days(),
+                if span == CalendarSpan::Month {
+                    month_shown(start)
+                } else {
+                    start
+                },
+            )))
             .child(
                 Button::new("calendar-span")
                     .small()
@@ -600,10 +594,16 @@ impl Render for CalendarView {
             .bg(theme::surface())
             .overflow_hidden()
             .child(self.header(start, span, compact))
-            .children(meeting_proposal_cards(cx))
             .map(|calendar| {
                 if span == CalendarSpan::Month {
-                    calendar.child(month_grid(&self.state, start, &days, &events, today, offset))
+                    calendar.child(month_grid(
+                        &self.state,
+                        start,
+                        &days,
+                        &events,
+                        today,
+                        offset,
+                    ))
                 } else {
                     calendar
                         .child(self.day_headers(&days, today))

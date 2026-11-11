@@ -493,7 +493,12 @@ fn text_view(text: &CardText, id: &str, cx: &App) -> AnyElement {
             (true, Some(lines)) => element.text_ellipsis().line_clamp(lines),
             (true, None) => element,
         })
-        .child(render_blocks(&layout_card_blocks(&text.spans), id, false, cx))
+        .child(render_blocks(
+            &layout_card_blocks(&text.spans),
+            id,
+            false,
+            cx,
+        ))
         .into_any_element()
 }
 

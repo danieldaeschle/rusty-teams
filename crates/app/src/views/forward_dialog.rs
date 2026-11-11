@@ -1,5 +1,5 @@
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -462,7 +462,8 @@ fn preview_quote(item: &ForwardItem, lines: usize) -> Div {
         )
         .child(
             div()
-                .line_clamp(lines).text_ellipsis()
+                .line_clamp(lines)
+                .text_ellipsis()
                 .text_size(px(12.5))
                 .text_color(theme::text_muted())
                 .child(text),

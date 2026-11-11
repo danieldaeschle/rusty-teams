@@ -3,11 +3,11 @@ use std::time::{Duration, Instant};
 use calling::CallCommand;
 use gpui_kit::*;
 
-use super::caption_style::{CaptionPosition, CaptionSize};
-use super::{gallery_page, measured_stage, video_wants};
 use super::bubbles::{BUBBLE_SHOWN, ChatBubble, push_bubble};
+use super::caption_style::{CaptionPosition, CaptionSize};
 use super::fullscreen::{FullscreenState, HINT_SHOWN};
 use super::view_settings::{CallLayout, ViewSettings};
+use super::{measured_stage, video_wants};
 use crate::app_state::{AppEvent, AppState};
 
 const CHROME_TOUCH_THROTTLE: Duration = Duration::from_millis(250);
@@ -40,21 +40,6 @@ impl AppState {
 
     pub fn set_call_layout(&mut self, layout: CallLayout, cx: &mut Context<Self>) {
         self.change_call_view(|view| view.choose(layout), cx);
-    }
-
-    pub fn turn_call_gallery_page(&mut self, forward: bool, cx: &mut Context<Self>) {
-        let Some(call) = self.call.as_mut() else {
-            return;
-        };
-        let pages = gallery_page(&call.model).pages;
-        let page = call.model.gallery_page.min(pages - 1);
-        call.model.gallery_page = if forward {
-            (page + 1).min(pages - 1)
-        } else {
-            page.saturating_sub(1)
-        };
-        self.sync_video_wants();
-        cx.notify();
     }
 
     pub fn toggle_call_hide_no_video(&mut self, cx: &mut Context<Self>) {
@@ -97,12 +82,15 @@ impl AppState {
     }
 
     fn sync_video_wants(&mut self) {
+        let strip_width = self.call_strip_width;
         let Some(call) = self.call.as_mut() else {
             return;
         };
-        let wants = video_wants(&call.model, measured_stage(call));
+        let wants = video_wants(&call.model, measured_stage(call), strip_width);
         if wants != call.sent_wants {
-            let _ = call.commands.send(CallCommand::SetVideoWants(wants.clone()));
+            let _ = call
+                .commands
+                .send(CallCommand::SetVideoWants(wants.clone()));
             call.sent_wants = wants;
         }
     }

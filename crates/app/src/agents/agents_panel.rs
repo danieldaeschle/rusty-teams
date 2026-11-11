@@ -1,5 +1,5 @@
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -178,8 +178,8 @@ impl Render for AgentsPanel {
 #[cfg(test)]
 mod tests {
     use super::split_runs;
-    use crate::agents::runs::RunState;
     use crate::agents::fixtures::finished_run;
+    use crate::agents::runs::RunState;
 
     #[test]
     fn running_runs_go_first_and_done_is_capped_at_fifty() {

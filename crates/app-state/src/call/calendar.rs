@@ -39,12 +39,8 @@ impl AppState {
     pub fn rebuild_calls_list(&mut self, cx: &mut Context<Self>) {
         let now = Utc::now();
         let offset = Local::now().offset().fix();
-        self.calls_list.rebuild(
-            &self.call_history,
-            &self.sidebar.chats,
-            now,
-            offset,
-        );
+        self.calls_list
+            .rebuild(&self.call_history, &self.sidebar.chats, now, offset);
         cx.emit(AppEvent::CallHistory);
         cx.notify();
     }

@@ -154,7 +154,9 @@ fn choice_chip(
         .bg(background)
         .text_color(foreground)
         .text_size(px(13.))
-        .when(!selected, |chip| chip.hover(|chip| chip.bg(theme::row_hover())))
+        .when(!selected, |chip| {
+            chip.hover(|chip| chip.bg(theme::row_hover()))
+        })
         .cursor_pointer()
         .child(label.to_owned())
         .on_click(move |_, _, cx| on_click(cx))
@@ -181,7 +183,10 @@ pub fn open_captions_settings(app: &Entity<AppState>, window: &mut Window, cx: &
             .call
             .as_ref()
             .and_then(|call| call.model.caption_language.clone());
-        let (size, position) = (state.call_view.caption_size, state.call_view.caption_position);
+        let (size, position) = (
+            state.call_view.caption_size,
+            state.call_view.caption_position,
+        );
         let languages = SPOKEN_LANGUAGES
             .iter()
             .map(|(tag, label)| {
@@ -191,7 +196,11 @@ pub fn open_captions_settings(app: &Entity<AppState>, window: &mut Window, cx: &
                     format!("captions-language-{tag}"),
                     label,
                     language.as_deref() == Some(tag),
-                    move |cx| app.update(cx, |state, cx| state.choose_call_caption_language(chosen, cx)),
+                    move |cx| {
+                        app.update(cx, |state, cx| {
+                            state.choose_call_caption_language(chosen, cx)
+                        })
+                    },
                 )
             })
             .collect();
@@ -217,7 +226,9 @@ pub fn open_captions_settings(app: &Entity<AppState>, window: &mut Window, cx: &
                     format!("captions-position-{}", choice.meta()),
                     choice.label(),
                     position == choice,
-                    move |cx| app.update(cx, |state, cx| state.set_call_caption_position(choice, cx)),
+                    move |cx| {
+                        app.update(cx, |state, cx| state.set_call_caption_position(choice, cx))
+                    },
                 )
             })
             .collect();

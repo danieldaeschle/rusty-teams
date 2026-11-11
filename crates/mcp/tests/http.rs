@@ -15,7 +15,9 @@ use rmcp::service::RunningService;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use serde_json::{Value, json};
-use store::{ChannelReadState, ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamRecord};
+use store::{
+    ChannelReadState, ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamRecord,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 

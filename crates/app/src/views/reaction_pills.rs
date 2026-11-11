@@ -2,8 +2,8 @@ use crate::views::image_memory::bounded;
 use std::rc::Rc;
 
 use chrono::Local;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::base::GlobalState;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -120,9 +120,7 @@ fn pill_content(chip: &ReactionChip, background: Hsla, directory: &Directory) ->
                 ),
         )
     } else {
-        content
-            .gap(px(PILL_GAP))
-            .child(chip.count.to_string())
+        content.gap(px(PILL_GAP)).child(chip.count.to_string())
     }
 }
 
@@ -162,7 +160,11 @@ fn pill(
         .h(px(PILL_HEIGHT))
         .flex_none()
         .pl(px(5.))
-        .pr(px(if shows_faces(chip.reactors.len()) { 2. } else { 8. }))
+        .pr(px(if shows_faces(chip.reactors.len()) {
+            2.
+        } else {
+            8.
+        }))
         .items_center()
         .rounded(px(PILL_HEIGHT / 2.))
         .bg(background)

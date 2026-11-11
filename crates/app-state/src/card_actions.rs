@@ -227,12 +227,7 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn replace_card(
-        &mut self,
-        scope: &CardScope,
-        json: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn replace_card(&mut self, scope: &CardScope, json: &str, cx: &mut Context<Self>) -> bool {
         let Some(card) = AdaptiveCard::parse(json) else {
             return false;
         };

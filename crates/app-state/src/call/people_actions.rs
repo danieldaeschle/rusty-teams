@@ -27,7 +27,11 @@ impl AppState {
     }
 
     pub fn set_call_lock(&mut self, locked: bool, _cx: &mut Context<Self>) {
-        if self.call.as_ref().is_some_and(|call| call.model.organizes_meeting()) {
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|call| call.model.organizes_meeting())
+        {
             self.send_call_command(CallCommand::SetLock(locked));
         }
     }
@@ -48,19 +52,43 @@ impl AppState {
         allowed: bool,
         _cx: &mut Context<Self>,
     ) {
-        if self.call.as_ref().is_some_and(|call| call.model.can_change_roles(&mri)) {
-            self.send_call_command(CallCommand::SetAttendeeModality { mri, modality, allowed });
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|call| call.model.can_change_roles(&mri))
+        {
+            self.send_call_command(CallCommand::SetAttendeeModality {
+                mri,
+                modality,
+                allowed,
+            });
         }
     }
 
-    pub fn set_call_attendee_restrictions(&mut self, mic_off: bool, camera_off: bool, _cx: &mut Context<Self>) {
-        if self.call.as_ref().is_some_and(|call| call.model.organizes_meeting()) {
-            self.send_call_command(CallCommand::SetAttendeeRestrictions { mic_off, camera_off });
+    pub fn set_call_attendee_restrictions(
+        &mut self,
+        mic_off: bool,
+        camera_off: bool,
+        _cx: &mut Context<Self>,
+    ) {
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|call| call.model.organizes_meeting())
+        {
+            self.send_call_command(CallCommand::SetAttendeeRestrictions {
+                mic_off,
+                camera_off,
+            });
         }
     }
 
     pub fn open_meeting_options(&mut self, cx: &mut Context<Self>) {
-        let Some(call) = self.call.as_mut().filter(|call| call.model.organizes_meeting()) else {
+        let Some(call) = self
+            .call
+            .as_mut()
+            .filter(|call| call.model.organizes_meeting())
+        else {
             return;
         };
         call.options_dialog = Some(OptionsDialog::loading());
@@ -69,13 +97,21 @@ impl AppState {
     }
 
     pub fn close_meeting_options(&mut self, cx: &mut Context<Self>) {
-        if let Some(call) = self.call.as_mut().filter(|call| call.options_dialog.is_some()) {
+        if let Some(call) = self
+            .call
+            .as_mut()
+            .filter(|call| call.options_dialog.is_some())
+        {
             call.options_dialog = None;
             cx.notify();
         }
     }
 
-    pub fn edit_meeting_options(&mut self, edit: impl FnOnce(&mut MeetingOptions), cx: &mut Context<Self>) {
+    pub fn edit_meeting_options(
+        &mut self,
+        edit: impl FnOnce(&mut MeetingOptions),
+        cx: &mut Context<Self>,
+    ) {
         let Some(draft) = self
             .call
             .as_mut()
@@ -104,7 +140,13 @@ impl AppState {
         let present: Vec<&str> = self
             .call
             .as_ref()
-            .map(|call| call.model.tiles.iter().map(|tile| tile.mri.as_str()).collect())
+            .map(|call| {
+                call.model
+                    .tiles
+                    .iter()
+                    .map(|tile| tile.mri.as_str())
+                    .collect()
+            })
             .unwrap_or_default();
         self.transfer_candidates()
             .into_iter()
@@ -112,12 +154,12 @@ impl AppState {
             .collect()
     }
 
-    pub fn open_invite_picker(
-        &mut self,
-        picker: AnyView,
-        cx: &mut Context<Self>,
-    ) {
-        if self.call.as_ref().is_some_and(|call| call.model.can_invite()) {
+    pub fn open_invite_picker(&mut self, picker: AnyView, cx: &mut Context<Self>) {
+        if self
+            .call
+            .as_ref()
+            .is_some_and(|call| call.model.can_invite())
+        {
             self.transfer_picker = Some(picker);
             cx.notify();
         }
@@ -128,9 +170,14 @@ impl AppState {
         let Some(call) = self.call.as_mut().filter(|call| call.model.can_invite()) else {
             return;
         };
-        let callee = Callee { mri: target.mri.clone(), display_name: target.name.clone() };
+        let callee = Callee {
+            mri: target.mri.clone(),
+            display_name: target.name.clone(),
+        };
         if !call.model.tiles.iter().any(|tile| tile.mri == callee.mri) {
-            call.model.tiles.push(Tile::invited(&callee.mri, &callee.display_name));
+            call.model
+                .tiles
+                .push(Tile::invited(&callee.mri, &callee.display_name));
         }
         let one_to_one = call.model.kind == CallKind::Direct;
         let peer_user_id = call
@@ -143,18 +190,27 @@ impl AppState {
         cx.emit(AppEvent::Call);
         cx.notify();
         if !one_to_one || self.mode.demo {
-            self.send_call_command(CallCommand::Invite { callees: vec![callee], group_thread: None });
+            self.send_call_command(CallCommand::Invite {
+                callees: vec![callee],
+                group_thread: None,
+            });
             return;
         }
         let (Some(engine), Some(peer_user_id), Some(invited_user_id)) =
             (self.engine.clone(), peer_user_id, target.user_id.clone())
         else {
-            let notice = if self.engine.is_none() { NOT_CONNECTED_NOTICE } else { NO_PEER_NOTICE };
+            let notice = if self.engine.is_none() {
+                NOT_CONNECTED_NOTICE
+            } else {
+                NO_PEER_NOTICE
+            };
             self.raise_notice(notice.to_owned(), None, cx);
             return;
         };
         let receiver = runtime::spawn(async move {
-            engine.create_group(&[peer_user_id, invited_user_id], None).await
+            engine
+                .create_group(&[peer_user_id, invited_user_id], None)
+                .await
         });
         cx.spawn(async move |this, cx| {
             let created = receiver.await.ok().and_then(Result::ok);
@@ -179,8 +235,8 @@ mod tests {
     use std::time::Instant;
 
     use calling::{
-        CallCommand, CallControl, CallState, CallUpdate, MeetingCapability, MeetingOptions, MeetingRole,
-        Modality, RosterEntry, call_channel,
+        CallCommand, CallControl, CallState, CallUpdate, MeetingCapability, MeetingOptions,
+        MeetingRole, Modality, RosterEntry, call_channel,
     };
     use gpui_kit::{AppContext as _, Entity, TestAppContext};
     use serde_json::json;
@@ -189,14 +245,21 @@ mod tests {
     use crate::app_state::{AppState, Mode};
     use crate::call::{ActiveCall, CallModel, TransferCandidate};
 
-    fn app_with_meeting(cx: &mut TestAppContext, organizer: bool) -> (Entity<AppState>, CallControl) {
+    fn app_with_meeting(
+        cx: &mut TestAppContext,
+        organizer: bool,
+    ) -> (Entity<AppState>, CallControl) {
         cx.update(gpui_kit::init);
         let store = Arc::new(Store::open_in_memory().unwrap());
         let app = cx.update(|cx| cx.new(|_| AppState::new(store, Mode::default())));
         let (handle, control) = call_channel();
         let mut model = CallModel::meeting("Standup", organizer);
-        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
-        model.apply(CallUpdate::OwnIdentity { mri: "8:orgid:me".into() });
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
+        model.apply(CallUpdate::OwnIdentity {
+            mri: "8:orgid:me".into(),
+        });
         model.apply(CallUpdate::Roster(vec![RosterEntry {
             mri: "8:orgid:a".into(),
             display_name: "Ana".into(),
@@ -218,7 +281,8 @@ mod tests {
     }
 
     fn options() -> MeetingOptions {
-        let option = |name: &str, value: serde_json::Value| json!({"name": name, "currentValue": value});
+        let option =
+            |name: &str, value: serde_json::Value| json!({"name": name, "currentValue": value});
         MeetingOptions::from_response(&json!({"options": [
             option("AutoAdmittedUsers", json!("EveryoneInCompany")),
             option("PresenterOption", json!("Everyone")),
@@ -276,15 +340,25 @@ mod tests {
         assert_eq!(control.try_recv_command(), Some(CallCommand::SetLock(true)));
         assert_eq!(
             control.try_recv_command(),
-            Some(CallCommand::SetRole { mri: "8:orgid:a".into(), role: MeetingRole::Presenter })
+            Some(CallCommand::SetRole {
+                mri: "8:orgid:a".into(),
+                role: MeetingRole::Presenter
+            })
         );
         assert_eq!(
             control.try_recv_command(),
-            Some(CallCommand::SetAttendeeModality { mri: "8:orgid:a".into(), modality: Modality::Camera, allowed: false })
+            Some(CallCommand::SetAttendeeModality {
+                mri: "8:orgid:a".into(),
+                modality: Modality::Camera,
+                allowed: false
+            })
         );
         assert_eq!(
             control.try_recv_command(),
-            Some(CallCommand::SetAttendeeRestrictions { mic_off: true, camera_off: true })
+            Some(CallCommand::SetAttendeeRestrictions {
+                mic_off: true,
+                camera_off: true
+            })
         );
         assert_eq!(control.try_recv_command(), None);
     }
@@ -296,7 +370,10 @@ mod tests {
             app.update(cx, |state, cx| {
                 state.apply_call_update(
                     7,
-                    CallUpdate::Capability(MeetingCapability { locked: true, ..MeetingCapability::default() }),
+                    CallUpdate::Capability(MeetingCapability {
+                        locked: true,
+                        ..MeetingCapability::default()
+                    }),
                     cx,
                 )
             })
@@ -305,16 +382,35 @@ mod tests {
     }
 
     #[gpui_kit::test]
-    fn the_options_dialog_loads_saves_only_changes_and_keeps_errors_inline(cx: &mut TestAppContext) {
+    fn the_options_dialog_loads_saves_only_changes_and_keeps_errors_inline(
+        cx: &mut TestAppContext,
+    ) {
         let (app, mut control) = app_with_meeting(cx, true);
         cx.update(|cx| app.update(cx, |state, cx| state.open_meeting_options(cx)));
-        assert_eq!(control.try_recv_command(), Some(CallCommand::LoadMeetingOptions));
+        assert_eq!(
+            control.try_recv_command(),
+            Some(CallCommand::LoadMeetingOptions)
+        );
         cx.update(|cx| {
             app.update(cx, |state, cx| {
-                state.apply_call_update(7, CallUpdate::MeetingOptions(Err("The options could not be read".into())), cx)
+                state.apply_call_update(
+                    7,
+                    CallUpdate::MeetingOptions(Err("The options could not be read".into())),
+                    cx,
+                )
             })
         });
-        let error = cx.update(|cx| app.read(cx).call.as_ref().unwrap().options_dialog.as_ref().unwrap().error.clone());
+        let error = cx.update(|cx| {
+            app.read(cx)
+                .call
+                .as_ref()
+                .unwrap()
+                .options_dialog
+                .as_ref()
+                .unwrap()
+                .error
+                .clone()
+        });
         assert_eq!(error.as_deref(), Some("The options could not be read"));
         cx.update(|cx| {
             app.update(cx, |state, cx| {
@@ -332,7 +428,13 @@ mod tests {
         assert_eq!(control.try_recv_command(), None);
         cx.update(|cx| {
             app.update(cx, |state, cx| {
-                state.apply_call_update(7, CallUpdate::MeetingOptionsSaved(Err("the service refused AllowMeetingChat".into())), cx)
+                state.apply_call_update(
+                    7,
+                    CallUpdate::MeetingOptionsSaved(Err(
+                        "the service refused AllowMeetingChat".into()
+                    )),
+                    cx,
+                )
             })
         });
         assert!(cx.update(|cx| app.read(cx).call.as_ref().unwrap().options_dialog.is_some()));
@@ -354,7 +456,11 @@ mod tests {
             chat_id: "19:bo".into(),
         };
         cx.update(|cx| app.update(cx, |state, cx| state.invite_call_person(candidate, cx)));
-        let Some(CallCommand::Invite { callees, group_thread }) = control.try_recv_command() else {
+        let Some(CallCommand::Invite {
+            callees,
+            group_thread,
+        }) = control.try_recv_command()
+        else {
             panic!("an invite command");
         };
         assert_eq!(callees.len(), 1);
@@ -362,7 +468,9 @@ mod tests {
         assert_eq!(group_thread, None);
         let ringing = cx.update(|cx| {
             let tiles = &app.read(cx).call.as_ref().unwrap().model.tiles;
-            tiles.iter().any(|tile| tile.mri == "8:orgid:bo" && tile.invited)
+            tiles
+                .iter()
+                .any(|tile| tile.mri == "8:orgid:bo" && tile.invited)
         });
         assert!(ringing);
     }

@@ -111,8 +111,9 @@ dependencies = [
 
 [[package]]
 name = "agents"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "reqwest 0.13.5",
  "serde",
  "serde_json",
  "tempfile",
@@ -273,7 +274,7 @@ checksum = "fb5dfbc6d8d2675589ccbe4d0fd61df2419075625f8c1a62325e718e2b0049f9"
 
 [[package]]
 name = "app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "agents",
  "app-base",
@@ -305,7 +306,7 @@ dependencies = [
 
 [[package]]
 name = "app-base"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "agents",
  "calling",
@@ -327,6 +328,7 @@ dependencies = [
  "session",
  "sha2 0.10.9",
  "store",
+ "sys-locale",
  "teams-core",
  "tempfile",
  "tokio",
@@ -337,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "app-call-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "agents",
  "app-base",
@@ -363,7 +365,7 @@ dependencies = [
 
 [[package]]
 name = "app-state"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "agents",
  "app-base",
@@ -392,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "app-ui-kit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "app-base",
  "gpui-kit",
@@ -1086,7 +1088,7 @@ dependencies = [
 
 [[package]]
 name = "browser"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "directories",
  "futures-util",
@@ -1195,7 +1197,7 @@ dependencies = [
 
 [[package]]
 name = "calling"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chatsvc",
@@ -1361,12 +1363,13 @@ dependencies = [
 
 [[package]]
 name = "chatsvc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures-util",
  "percent-encoding",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "session",
@@ -1454,7 +1457,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "clap",
@@ -4147,7 +4150,7 @@ dependencies = [
 
 [[package]]
 name = "graph"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4489,6 +4492,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -5188,8 +5192,6 @@ dependencies = [
 [[package]]
 name = "libwebrtc"
 version = "0.3.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14f9145a63a8439508a9b5b51dffa4b1c12f812f49fcc4310ebae3d467f639ab"
 dependencies = [
  "cxx",
  "glib 0.21.5",
@@ -5493,7 +5495,7 @@ dependencies = [
 
 [[package]]
 name = "mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -7674,6 +7676,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -8474,9 +8477,12 @@ dependencies = [
 
 [[package]]
 name = "session"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
+ "reqwest 0.13.5",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -8741,7 +8747,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "directories",
@@ -9188,12 +9194,13 @@ dependencies = [
 
 [[package]]
 name = "teams-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chatsvc",
  "chrono",
  "futures-util",
  "graph",
+ "iana-time-zone",
  "percent-encoding",
  "regex",
  "scraper",
@@ -9442,7 +9449,11 @@ checksum = "d25a406cddcc431a75d3d9afc6a7c0f7428d4891dd973e4d54c56b46127bf857"
 dependencies = [
  "futures-util",
  "log",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
  "tungstenite",
 ]
 
@@ -9940,6 +9951,8 @@ dependencies = [
  "httparse",
  "log",
  "rand 0.9.5",
+ "rustls",
+ "rustls-pki-types",
  "sha1",
  "thiserror 2.0.21",
  "utf-8",
@@ -10576,7 +10589,7 @@ dependencies = [
 
 [[package]]
 name = "webview"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "session",

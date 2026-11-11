@@ -18,9 +18,9 @@ use crate::scheduled_rows::{
 };
 use crate::views::composer::{EditPreview, Outgoing};
 use crate::views::message_actions::Action;
-use crate::views::toolbar_placement::HoverChange;
 use crate::views::message_row::{DeliveryActions, RowAction};
 use crate::views::scheduled_toolbar::ScheduledMenu;
+use crate::views::toolbar_placement::HoverChange;
 use std::sync::Arc;
 
 const EXCERPT_CHARS: usize = 140;

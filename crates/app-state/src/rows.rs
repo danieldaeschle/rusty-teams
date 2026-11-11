@@ -7,13 +7,11 @@ use gpui_kit::Image;
 use store::{MessageImportance, MessageRecord};
 use teams_core::roster_event::{RosterEvent, roster_event};
 use teams_core::{
-    AnnouncementBanner, attachments,
-    JumboEmoji, jumbo_emoji,
-    AdaptiveCard, CallEvent, CallPhase, Draft, FileCard, ForwardHeader, ForwardInfo,
-    ImageRef, LinkPreview, forwards,
-    ReactionInfo, Span, adaptive_cards, call_event, card_texts, files,
-    forwarded_texts, images, is_forwarded, link_preview, linked_message_spans_with, meeting_link_in_html, message_spans, quotes,
-    reactions, readable_text, translated_spans,
+    AdaptiveCard, AnnouncementBanner, CallEvent, CallPhase, Draft, FileCard, ForwardHeader,
+    ForwardInfo, ImageRef, JumboEmoji, LinkPreview, ReactionInfo, Span, adaptive_cards,
+    attachments, call_event, card_texts, files, forwarded_texts, forwards, images, is_forwarded,
+    jumbo_emoji, link_preview, linked_message_spans_with, meeting_link_in_html, message_spans,
+    quotes, reactions, readable_text, translated_spans,
 };
 
 pub use crate::call_rows::{
@@ -140,7 +138,10 @@ pub enum Receipt {
 pub fn receipt_label(state: &teams_core::ReceiptState) -> Option<String> {
     match state {
         teams_core::ReceiptState::Sent => Some("Sent".to_owned()),
-        teams_core::ReceiptState::Read { readers, total_others } if *total_others > 1 => {
+        teams_core::ReceiptState::Read {
+            readers,
+            total_others,
+        } if *total_others > 1 => {
             if readers.len() >= *total_others {
                 Some("Seen by everyone".to_owned())
             } else {
@@ -816,8 +817,16 @@ pub fn quoted_texts(records: &[MessageRecord]) -> HashMap<String, String> {
             if text.is_empty() {
                 text = forwarded_texts(record).join("\n");
             }
-            let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
-            let mut shown = lines.iter().take(QUOTE_LINES).copied().collect::<Vec<_>>().join("\n");
+            let lines: Vec<&str> = text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .collect();
+            let mut shown = lines
+                .iter()
+                .take(QUOTE_LINES)
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n");
             if lines.len() > QUOTE_LINES {
                 shown.push_str(" …");
             }
@@ -1104,7 +1113,10 @@ fn is_blank_system_record(record: &MessageRecord) -> bool {
     record.sender_id.is_none()
         && record.call_event_json.is_none()
         && record.body_html.trim().is_empty()
-        && record.subject.as_deref().is_none_or(|subject| subject.trim().is_empty())
+        && record
+            .subject
+            .as_deref()
+            .is_none_or(|subject| subject.trim().is_empty())
         && record.attachments_json.trim() == "[]"
 }
 
@@ -1263,12 +1275,21 @@ mod tests {
             at: Utc::now(),
         };
         let read = |readers: Vec<teams_core::ReceiptReader>, total_others| {
-            receipt_label(&teams_core::ReceiptState::Read { readers, total_others })
+            receipt_label(&teams_core::ReceiptState::Read {
+                readers,
+                total_others,
+            })
         };
         assert_eq!(read(vec![reader("Bea")], 1).as_deref(), Some("Seen"));
-        assert_eq!(read(vec![reader("Bea"), reader("Cy")], 2).as_deref(), Some("Seen by everyone"));
+        assert_eq!(
+            read(vec![reader("Bea"), reader("Cy")], 2).as_deref(),
+            Some("Seen by everyone")
+        );
         assert_eq!(read(vec![reader("Bea")], 3).as_deref(), Some("Seen by Bea"));
-        assert_eq!(receipt_label(&teams_core::ReceiptState::Sent).as_deref(), Some("Sent"));
+        assert_eq!(
+            receipt_label(&teams_core::ReceiptState::Sent).as_deref(),
+            Some("Sent")
+        );
         assert_eq!(receipt_label(&teams_core::ReceiptState::Unknown), None);
     }
 
@@ -1309,7 +1330,9 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        let Some(Block::Reply { children, .. }) = reply.first() else { panic!("{reply:?}") };
+        let Some(Block::Reply { children, .. }) = reply.first() else {
+            panic!("{reply:?}")
+        };
         let text = format!("{children:?}");
         assert!(text.contains(r"first link\nsecond link"), "{text}");
     }
@@ -1383,15 +1406,26 @@ mod tests {
         assert_eq!(reaction_text(key), ":absolute-cinema:");
         assert_eq!(reaction_text("like"), "\u{1F44D}");
         let image = custom_emoji_image(key).expect("image");
-        assert!(image.url.ends_with("/0-wcde-d3-5f5e4f463d6bb959b08614fd1d9680b8/views/imgt2_anim"));
+        assert!(
+            image
+                .url
+                .ends_with("/0-wcde-d3-5f5e4f463d6bb959b08614fd1d9680b8/views/imgt2_anim")
+        );
         assert_eq!(custom_emoji_image("like"), None);
     }
 
     #[test]
     fn teams_only_emoticon_loads_its_cdn_image() {
         let image = custom_emoji_image("oreoyum").expect("image");
-        assert!(image.url.ends_with("/oreoyum/default/50_f.png"), "{}", image.url);
-        assert_eq!(custom_emoji_image("(oreoyum)").map(|image| image.url), Some(image.url));
+        assert!(
+            image.url.ends_with("/oreoyum/default/50_f.png"),
+            "{}",
+            image.url
+        );
+        assert_eq!(
+            custom_emoji_image("(oreoyum)").map(|image| image.url),
+            Some(image.url)
+        );
     }
 
     #[test]
@@ -1445,7 +1479,10 @@ mod tests {
         };
         let lines: Vec<String> = children.iter().filter_map(Block::markdown).collect();
         assert!(lines[0].contains("Priya Nair Yesterday 07:00"), "{lines:?}");
-        assert!(lines.iter().any(|line| line.contains("original words")), "{lines:?}");
+        assert!(
+            lines.iter().any(|line| line.contains("original words")),
+            "{lines:?}"
+        );
         assert_eq!(reply_excerpt(&forwarded), "original words");
         assert_eq!(message_text(&forwarded), "original words");
     }
@@ -2361,10 +2398,7 @@ mod tests {
         assert_eq!(post.hidden_reply_count, 0);
         let saved = post.replies[0].call.as_ref().unwrap();
         assert_eq!(saved.icon, CallIcon::Saved);
-        assert_eq!(
-            saved.notice.text,
-            "Recording has been saved to OneDrive."
-        );
+        assert_eq!(saved.notice.text, "Recording has been saved to OneDrive.");
         let thread = thread_rows(&records, &root_id, &call_context());
         let calls = thread
             .iter()

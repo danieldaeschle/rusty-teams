@@ -101,10 +101,16 @@ impl AppState {
             }
             Some(RemoteCommand::HangUp) => self.leave_call(cx),
             Some(RemoteCommand::AdmitAll) => self.admit_all_call_guests(cx),
-            Some(RemoteCommand::Unmute) => self.send_call_command(CallCommand::Mute(MuteCommand::Unmute)),
-            Some(RemoteCommand::Mute) => self.send_call_command(CallCommand::Mute(MuteCommand::Mute)),
+            Some(RemoteCommand::Unmute) => {
+                self.send_call_command(CallCommand::Mute(MuteCommand::Unmute))
+            }
+            Some(RemoteCommand::Mute) => {
+                self.send_call_command(CallCommand::Mute(MuteCommand::Mute))
+            }
             Some(RemoteCommand::Camera(on)) => self.send_call_command(CallCommand::SetCamera(on)),
-            Some(RemoteCommand::RefreshShareSources) => self.send_call_command(CallCommand::RefreshShareSources),
+            Some(RemoteCommand::RefreshShareSources) => {
+                self.send_call_command(CallCommand::RefreshShareSources)
+            }
             Some(RemoteCommand::ShareScreen) => self.share_first_screen(),
             Some(RemoteCommand::StopShare) => self.send_call_command(CallCommand::StopShare),
             Some(RemoteCommand::Input(name)) => self.switch_input_for_test(&name),

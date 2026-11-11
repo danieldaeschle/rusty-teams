@@ -73,7 +73,10 @@ pub struct ReminderUpdate {
 }
 
 pub fn subtitle(toast: &MeetingToast, now: DateTime<Utc>, offset: FixedOffset) -> String {
-    let clock = toast.start.with_timezone(&offset).format(app_base::format::clock_format());
+    let clock = toast
+        .start
+        .with_timezone(&offset)
+        .format(app_base::format::clock_format());
     match toast.phase {
         ReminderPhase::Started => format!("{clock} - started"),
         ReminderPhase::Live => format!("{clock} - live now"),

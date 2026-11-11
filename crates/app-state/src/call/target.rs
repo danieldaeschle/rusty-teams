@@ -133,14 +133,21 @@ mod tests {
         let mut echo = chat(
             "oneOnOne",
             "Echo",
-            &[(Some("me-id"), "Me"), (Some(calling::signaling::ECHO_BOT_MRI), "Echo")],
+            &[
+                (Some("me-id"), "Me"),
+                (Some(calling::signaling::ECHO_BOT_MRI), "Echo"),
+            ],
         );
         assert!(is_echo_chat(&echo));
         echo.members.truncate(1);
         assert!(!is_echo_chat(&echo));
         echo.id = "19:me-id_cf28171e-fcfd-47e4-a1d6-79460b0b3ca0@unq.gbl.spaces".into();
         assert!(is_echo_chat(&echo));
-        let other = chat("oneOnOne", "", &[(Some("me-id"), "Me"), (Some("bea-id"), "Bea")]);
+        let other = chat(
+            "oneOnOne",
+            "",
+            &[(Some("me-id"), "Me"), (Some("bea-id"), "Bea")],
+        );
         assert!(!is_echo_chat(&other));
     }
 

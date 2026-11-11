@@ -12,11 +12,13 @@ const ABANDONED_AFTER: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 
 /// The centered box with the banner's aspect ratio: `(x, y, width, height)`.
 pub fn crop_box(width: u32, height: u32) -> (u32, u32, u32, u32) {
-    let wanted_height = (u64::from(width) * u64::from(BANNER_IMAGE_HEIGHT) / u64::from(BANNER_IMAGE_WIDTH)) as u32;
+    let wanted_height =
+        (u64::from(width) * u64::from(BANNER_IMAGE_HEIGHT) / u64::from(BANNER_IMAGE_WIDTH)) as u32;
     if wanted_height <= height {
         (0, (height - wanted_height) / 2, width, wanted_height.max(1))
     } else {
-        let wanted_width = (u64::from(height) * u64::from(BANNER_IMAGE_WIDTH) / u64::from(BANNER_IMAGE_HEIGHT)) as u32;
+        let wanted_width = (u64::from(height) * u64::from(BANNER_IMAGE_WIDTH)
+            / u64::from(BANNER_IMAGE_HEIGHT)) as u32;
         ((width - wanted_width) / 2, 0, wanted_width.max(1), height)
     }
 }

@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use chrono::{Local, NaiveDate, Offset};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -521,7 +521,8 @@ impl FindPanel {
                 div()
                     .text_size(px(13.))
                     .text_color(theme::text_soft())
-                    .line_clamp(2).text_ellipsis()
+                    .line_clamp(2)
+                    .text_ellipsis()
                     .child(StyledText::new(hit.text.clone()).with_highlights(marks)),
             )
             .on_click(cx.listener(move |panel, _, _, cx| panel.pick(index, cx)))

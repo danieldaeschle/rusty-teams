@@ -81,11 +81,17 @@ impl Render for MeetingToastView {
                 cx.stop_propagation();
                 dismiss_app.update(cx, |state, cx| state.dismiss_meeting_toast(toast_id, cx));
             });
-        let join = answer_button("meeting-join", "Join", IconName::Video, theme::accent(), theme::on_accent())
-            .on_click(move |_, _, cx| {
-                cx.stop_propagation();
-                join_center.update(cx, |center, cx| center.join_meeting_toast(toast_id, cx));
-            });
+        let join = answer_button(
+            "meeting-join",
+            "Join",
+            IconName::Video,
+            theme::accent(),
+            theme::on_accent(),
+        )
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            join_center.update(cx, |center, cx| center.join_meeting_toast(toast_id, cx));
+        });
         let live = toast.phase == ReminderPhase::Live;
         let buttons = if toast.phase == ReminderPhase::Soon {
             h_flex().mt(px(8.)).gap(px(6.)).child(snooze).child(join)

@@ -92,16 +92,16 @@ fn demo_files() -> Vec<CloudFile> {
         ("Architecture review.pdf", 860_000, 2 * DAY),
         ("Budget 2027.xlsx", 74_000, 9 * DAY),
     ]
-        .into_iter()
-        .map(|(name, size, age)| CloudFile {
-            name: name.to_owned(),
-            size,
-            web_url: format!("https://example.com/demo/{name}"),
-            drive_id: None,
-            item_id: None,
-            last_opened: Some(now - chrono::Duration::seconds(age)),
-        })
-        .collect()
+    .into_iter()
+    .map(|(name, size, age)| CloudFile {
+        name: name.to_owned(),
+        size,
+        web_url: format!("https://contoso.sharepoint.com/demo/{name}"),
+        drive_id: None,
+        item_id: None,
+        last_opened: Some(now - chrono::Duration::seconds(age)),
+    })
+    .collect()
 }
 
 impl Composer {
@@ -123,7 +123,11 @@ impl Composer {
             .child(symbol(
                 "attach_file",
                 COMPOSER_ICON_SIZE,
-                if open { theme::accent_text() } else { theme::text_muted() },
+                if open {
+                    theme::accent_text()
+                } else {
+                    theme::text_muted()
+                },
             ))
             .on_mouse_down(MouseButton::Left, |_, window, cx| {
                 window.prevent_default();
@@ -145,7 +149,11 @@ impl Composer {
         cx.notify();
     }
 
-    pub(super) fn close_attach_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+    pub(super) fn close_attach_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !self.attach_menu.open {
             return false;
         }
@@ -161,17 +169,22 @@ impl Composer {
         true
     }
 
-    fn attach_search_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<InputState> {
+    fn attach_search_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<InputState> {
         if let Some(input) = &self.attach_menu.search_input {
             return input.clone();
         }
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(SEARCH_PLACEHOLDER));
-        let subscription = cx.subscribe_in(&input, window, |this, input, event: &InputEvent, _, cx| {
-            if matches!(event, InputEvent::Change) {
-                let text = input.read(cx).value().trim().to_owned();
-                this.search_cloud_files(text, cx);
-            }
-        });
+        let subscription =
+            cx.subscribe_in(&input, window, |this, input, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let text = input.read(cx).value().trim().to_owned();
+                    this.search_cloud_files(text, cx);
+                }
+            });
         self.attach_menu.search_input = Some(input.clone());
         self.attach_menu._search_events = Some(subscription);
         input
@@ -197,7 +210,9 @@ impl Composer {
                 _ => Listing::Failed,
             };
             this.update(cx, |this, cx| {
-                if !matches!(listing, Listing::Failed) || !matches!(this.attach_menu.recent, Listing::Ready(_)) {
+                if !matches!(listing, Listing::Failed)
+                    || !matches!(this.attach_menu.recent, Listing::Ready(_))
+                {
                     this.attach_menu.recent = listing;
                 }
                 cx.notify();
@@ -230,11 +245,18 @@ impl Composer {
         let Some(engine) = state.engine.clone() else {
             return;
         };
-        let search_session = self.attach_menu.search_session.get_or_insert_with(SearchSession::new).clone();
+        let search_session = self
+            .attach_menu
+            .search_session
+            .get_or_insert_with(SearchSession::new)
+            .clone();
         self.attach_menu.found = Some(Listing::Loading);
         self.attach_menu.search_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-            let receiver = runtime::spawn(async move { engine.search_cloud_files(&search_session, &text).await });
+            let receiver =
+                runtime::spawn(
+                    async move { engine.search_cloud_files(&search_session, &text).await },
+                );
             let listing = match receiver.await {
                 Ok(Ok(files)) => Listing::Ready(files),
                 _ => Listing::Failed,
@@ -264,12 +286,16 @@ impl Composer {
             cx.notify();
             return;
         }
-        let (Some(engine), Some(conversation_id)) = (state.engine.clone(), self.conversation_id.clone()) else {
+        let (Some(engine), Some(conversation_id)) =
+            (state.engine.clone(), self.conversation_id.clone())
+        else {
             return;
         };
         let task_file = file.clone();
         let receiver =
-            runtime::spawn(async move { engine.attach_cloud_file(&conversation_id, &task_file).await });
+            runtime::spawn(
+                async move { engine.attach_cloud_file(&conversation_id, &task_file).await },
+            );
         cx.spawn(async move |this, cx| {
             let attached = receiver.await;
             this.update(cx, |this, cx| {
@@ -278,7 +304,9 @@ impl Composer {
                         this.tray.add_cloud_file(file.name, file.size, reference);
                         this.schedule_draft_save(cx);
                     }
-                    _ => this.tray.set_notice(format!("{ATTACH_FAILED} {}.", file.name)),
+                    _ => this
+                        .tray
+                        .set_notice(format!("{ATTACH_FAILED} {}.", file.name)),
                 }
                 cx.notify();
             })
@@ -291,18 +319,22 @@ impl Composer {
         self.close_attach_menu(window, cx);
         let app = self.app.clone();
         let picker = cx.new(|cx| CloudPicker::new(app, cx));
-        let subscription = cx.subscribe_in(&picker, window, |this, _, event: &CloudPickerEvent, window, cx| {
-            let files = match event {
-                CloudPickerEvent::Attach(files) => files.clone(),
-                CloudPickerEvent::Close => Vec::new(),
-            };
-            this.cloud_picker = None;
-            for file in files {
-                this.attach_cloud_file(file, window, cx);
-            }
-            this.focus(window, cx);
-            cx.notify();
-        });
+        let subscription = cx.subscribe_in(
+            &picker,
+            window,
+            |this, _, event: &CloudPickerEvent, window, cx| {
+                let files = match event {
+                    CloudPickerEvent::Attach(files) => files.clone(),
+                    CloudPickerEvent::Close => Vec::new(),
+                };
+                this.cloud_picker = None;
+                for file in files {
+                    this.attach_cloud_file(file, window, cx);
+                }
+                this.focus(window, cx);
+                cx.notify();
+            },
+        );
         picker.read(cx).focus_handle(cx).focus(window, cx);
         self.cloud_picker = Some((picker, subscription));
         cx.notify();
@@ -323,7 +355,12 @@ impl Composer {
                 .rounded(px(6.))
                 .bg(theme::surface_raised())
                 .child(symbol("search", 16., theme::text_muted()))
-                .child(div().flex_1().min_w_0().child(Input::new(&input).appearance(false).bordered(false)))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Input::new(&input).appearance(false).bordered(false)),
+                )
         });
         let (title, listing) = match &self.attach_menu.found {
             Some(found) => (RESULTS_TITLE, found),
@@ -334,7 +371,11 @@ impl Composer {
             Listing::Loading => vec![self.menu_note(LOADING)],
             Listing::Failed => vec![self.menu_note(FAILED)],
             Listing::Ready(files) if files.is_empty() => {
-                vec![self.menu_note(if self.attach_menu.found.is_some() { NO_RESULTS } else { NO_RECENT })]
+                vec![self.menu_note(if self.attach_menu.found.is_some() {
+                    NO_RESULTS
+                } else {
+                    NO_RECENT
+                })]
             }
             Listing::Ready(files) => files
                 .iter()
@@ -353,7 +394,12 @@ impl Composer {
             .cursor_pointer()
             .hover(|row| row.bg(theme::popup_hover()))
             .child(symbol("cloud", 16., theme::text_soft()))
-            .child(div().text_size(px(13.)).text_color(theme::text()).child(ATTACH_CLOUD_LABEL))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(theme::text())
+                    .child(ATTACH_CLOUD_LABEL),
+            )
             .on_click(cx.listener(|this, _, window, cx| this.open_cloud_picker(window, cx)));
         let upload = h_flex()
             .id("composer-attach-upload")
@@ -366,7 +412,12 @@ impl Composer {
             .cursor_pointer()
             .hover(|row| row.bg(theme::popup_hover()))
             .child(symbol("upload", 16., theme::text_soft()))
-            .child(div().text_size(px(13.)).text_color(theme::text()).child(UPLOAD_LABEL))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(theme::text())
+                    .child(UPLOAD_LABEL),
+            )
             .on_click(cx.listener(|this, _, window, cx| {
                 this.close_attach_menu(window, cx);
                 this.open_picker(window, cx);
@@ -423,7 +474,13 @@ impl Composer {
             .into_any_element()
     }
 
-    fn cloud_file_row(&self, index: usize, file: &CloudFile, now: DateTime<Utc>, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn cloud_file_row(
+        &self,
+        index: usize,
+        file: &CloudFile,
+        now: DateTime<Utc>,
+        cx: &mut Context<Self>,
+    ) -> Stateful<Div> {
         let picked = file.clone();
         h_flex()
             .id(("composer-attach-file", index))
@@ -455,7 +512,9 @@ impl Composer {
                             .child(opened_label(opened, now))
                     })),
             )
-            .on_click(cx.listener(move |this, _, window, cx| this.attach_cloud_file(picked.clone(), window, cx)))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.attach_cloud_file(picked.clone(), window, cx)
+            }))
     }
 }
 

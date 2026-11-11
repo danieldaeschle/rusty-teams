@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     ActiveTheme as _, h_flex,
     input::{Input, InputEvent, InputState},
