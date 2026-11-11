@@ -108,7 +108,11 @@ impl Composer {
                 .when(open, |button| button.bg(theme::popup_hover()))
                 .hover(|button| button.bg(theme::popup_hover()))
                 .popup_trigger_tooltip_text(open, BUTTON_LABEL)
-                .child(symbol(BUTTON_ICON, COMPOSER_ICON_SIZE, theme::accent_text()))
+                .child(symbol(
+                    BUTTON_ICON,
+                    COMPOSER_ICON_SIZE,
+                    if open { theme::accent_text() } else { theme::text_muted() },
+                ))
                 .on_mouse_down(MouseButton::Left, |_, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
