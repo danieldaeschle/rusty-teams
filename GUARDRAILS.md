@@ -24,7 +24,7 @@ Rules for every change, by people and by agents. If a rule here and a habit else
 | Local bugs | Fix Teams bugs that are purely local (rendering, scroll, focus). Anything touching server data or other people stays as Teams does it. |
 | Performance | Faster, less memory, offline reading from the cache. |
 | Platform | OS-native toasts, tray, title bar and sounds. |
-| Call windows | Daniel-approved (2026-10-17): a call stays in the main window with the sidebar, Teams opens its own meeting window. A window share leaves the main window as it is (side by side), Teams minimizes it. Only our own window behaviour, nothing others see changes. |
+| Call windows | Like Teams (Daniel 2026-11-11, replaces the 2026-10-17 deviation): a call or meeting opens in its own window, the main window stays free for chats; a window share minimizes the call window like Teams. Layout and gallery behaviour match Teams. |
 | Own features | MCP, agents, session inbox: allowed when nobody else can tell. Nothing sent automatically, no own message formats. |
 | Own settings | Settings Teams does not know stay in the local DB, never in Teams account properties. |
 
