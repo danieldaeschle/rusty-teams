@@ -66,12 +66,18 @@ impl Feeder {
     fn run(mut self) {
         let mut chain = MicChain::new(self.processing, self.ml_noise, StageDumps::from_env());
         let mut due = Instant::now();
+        let mut last_capture = Duration::ZERO;
         while self.running.load(Ordering::SeqCst) {
             due += FRAME_PERIOD;
             let now = Instant::now();
             if due > now {
                 std::thread::sleep(due - now);
             } else if now - due > MAX_LAG {
+                eprintln!(
+                    "calls: audio feeder fell {} ms behind, last capture_frame took {} ms; echo canceller re-aligns",
+                    (now - due).as_millis(),
+                    last_capture.as_millis()
+                );
                 due = now;
             }
             let (mut far_end, has_far_end) = self.far_end.next_frame();
@@ -90,9 +96,11 @@ impl Feeder {
                 num_channels: 1,
                 samples_per_channel: FRAME_SAMPLES as u32,
             };
+            let capture_started = Instant::now();
             if self.runtime.block_on(self.source.capture_frame(&frame)).is_err() {
                 break;
             }
+            last_capture = capture_started.elapsed();
         }
     }
 }
