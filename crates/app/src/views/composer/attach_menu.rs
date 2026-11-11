@@ -96,7 +96,7 @@ fn demo_files() -> Vec<CloudFile> {
         .map(|(name, size, age)| CloudFile {
             name: name.to_owned(),
             size,
-            web_url: format!("https://contoso.sharepoint.com/demo/{name}"),
+            web_url: format!("https://example.com/demo/{name}"),
             drive_id: None,
             item_id: None,
             last_opened: Some(now - chrono::Duration::seconds(age)),

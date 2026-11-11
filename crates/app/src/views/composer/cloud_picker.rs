@@ -103,7 +103,7 @@ fn demo_rows() -> Vec<DriveEntry> {
             drive_id: "demo-drive".into(),
             id: format!("demo-{index}"),
             name: (*name).into(),
-            web_url: format!("https://contoso.sharepoint.com/demo/{index}"),
+            web_url: format!("https://example.com/demo/{index}"),
             size: 20_000,
             modified_at: Some(now - chrono::Duration::hours(3 * index as i64 + 1)),
             modified_by: Some("Megan Bowen".into()),
