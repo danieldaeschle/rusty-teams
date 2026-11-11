@@ -15,7 +15,8 @@ use gpui_kit::*;
 use super::avatar::person_avatar;
 use super::call_extras::open_invite_picker;
 use super::call_organizer::{pill, tile_menu};
-use super::call_view::{BANNER_HEIGHT, CHAT_PANEL_WIDTH, MENU_WIDTH, round_control};
+use super::call_toolbar::tool_face;
+use super::call_view::{BANNER_HEIGHT, CHAT_PANEL_WIDTH, MENU_WIDTH};
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use super::scroll_edge::with_top_edge;
 use crate::app_state::AppState;
@@ -45,12 +46,7 @@ fn dark_text() -> Hsla {
 
 pub fn people_button(app: &Entity<AppState>, open: bool, raised_hands: usize) -> Stateful<Div> {
     let app = app.clone();
-    let (background, foreground) = if open {
-        (theme::accent(), theme::on_accent())
-    } else {
-        (theme::surface_raised(), theme::text())
-    };
-    round_control("call-people", IconName::Users, background, foreground)
+    tool_face("call-people", IconName::Users, "People", open)
         .relative()
         .tooltip(move |window, cx| {
             Tooltip::new(if open { "Close the people list" } else { "Show people" }).build(window, cx)

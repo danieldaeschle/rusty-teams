@@ -1,6 +1,5 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    button::{Button, ButtonVariants as _},
     h_flex,
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
     switch::Switch,
@@ -8,7 +7,8 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::call_view::{CONTROL_SIZE, DISABLED_OPACITY, MENU_WIDTH, round_control};
+use super::call_toolbar::{tool_face, tool_trigger};
+use super::call_view::{DISABLED_OPACITY, MENU_WIDTH};
 use super::shortcuts::keys_for_label;
 use crate::app_state::AppState;
 use crate::call::{CallLayout, CallModel};
@@ -137,18 +137,11 @@ pub(super) fn view_button(
 ) -> AnyElement {
     let app = app.clone();
     let model = model.clone();
-    Button::new("call-view")
-        .ghost()
-        .p_0()
-        .size(px(CONTROL_SIZE))
-        .rounded_full()
-        .child(round_control(
-            "call-view-face",
-            IconName::LayoutGrid,
-            theme::surface_raised(),
-            theme::text(),
-        ))
-        .dropdown_menu_with_anchor(Anchor::BottomRight, move |popup, _, _| {
+    tool_trigger(
+        "call-view",
+        tool_face("call-view-face", IconName::LayoutGrid, "View", false),
+    )
+        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
             view_items(popup, &app, &model, fullscreen)
         })
         .into_any_element()

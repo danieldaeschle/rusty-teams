@@ -24,6 +24,7 @@ pub mod call_stage;
 pub mod call_transcript;
 pub mod call_view;
 pub mod call_window;
+pub mod call_toolbar;
 pub mod call_view_menu;
 pub mod calendar_date_picker;
 pub mod calendar_month;

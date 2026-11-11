@@ -17,7 +17,8 @@ use super::call_extras::{
     CameraMenu, background_items, effect_items, open_transfer_picker,
 };
 use super::call_record::{record_items, transcript_and_settings_items};
-use super::call_view::{BANNER_HEIGHT, CONTROL_SIZE, MENU_WIDTH, round_control};
+use super::call_toolbar::{split_chevron, tool_face, tool_trigger};
+use super::call_view::{BANNER_HEIGHT, MENU_WIDTH};
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::{CAPTION_SHOWN, CallModel, CaptionPosition, Focus, contain_size};
@@ -29,7 +30,7 @@ const PILL_HEIGHT: f32 = 26.;
 const LOBBY_LIST_WIDTH: f32 = 340.;
 const LOBBY_NAME_LIMIT: usize = 28;
 const CAPTION_WIDTH: f32 = 720.;
-const CAPTION_BOTTOM: f32 = 2. * 16. + CONTROL_SIZE + 16.;
+const CAPTION_BOTTOM: f32 = 16.;
 const CAPTION_TOP: f32 = 72.;
 const CAPTION_FADE_SECONDS: f32 = 1.;
 const CAPTION_BACKGROUND: f32 = 0.72;
@@ -38,7 +39,6 @@ const FOCUS_BORDER: f32 = 2.;
 const FOCUS_AVATAR: f32 = 140.;
 const CHIP_HEIGHT: f32 = 24.;
 const MORE_SIZE: f32 = 28.;
-pub(super) const CAMERA_MENU_WIDTH: f32 = 28.;
 const NAME_LIMIT: usize = 32;
 
 fn dark_text() -> Hsla {
@@ -449,24 +449,15 @@ pub fn more_button(
     let unread = folded.chat_unread;
     let chat_folded = folded.folds(Foldable::Chat);
     Some(
-        Button::new("call-more")
-            .ghost()
-            .p_0()
-            .size(px(CONTROL_SIZE))
-            .rounded_full()
-            .child(
-                round_control(
-                    "call-more-face",
-                    IconName::Ellipsis,
-                    theme::surface_raised(),
-                    theme::text(),
-                )
+        tool_trigger(
+            "call-more",
+            tool_face("call-more-face", IconName::Ellipsis, "More", false)
                 .relative()
                 .when(chat_folded && unread > 0, |face| {
                     face.child(corner_badge(Corner::TopRight, 4.).child(count_badge(unread, false)))
                 }),
-            )
-            .dropdown_menu_with_anchor(Anchor::BottomRight, move |popup, window, cx| {
+        )
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
                 more_menu(popup, window, cx, &app, &model, &folded)
             })
             .into_any_element(),
@@ -573,25 +564,6 @@ fn meeting_items(
     transcript_and_settings_items(popup, app)
 }
 
-pub fn chevron_button(button_id: &'static str, face_id: &'static str) -> Button {
-    Button::new(button_id)
-        .ghost()
-        .p_0()
-        .w(px(CAMERA_MENU_WIDTH))
-        .h(px(super::call_view::CONTROL_SIZE))
-        .rounded_full()
-        .child(
-            div()
-                .id(face_id)
-                .w(px(CAMERA_MENU_WIDTH))
-                .h(px(super::call_view::CONTROL_SIZE))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(icon(IconName::ChevronUp, 16., theme::text())),
-        )
-}
-
 pub fn camera_menu_button(
     app: &Entity<AppState>,
     model: &CallModel,
@@ -603,8 +575,8 @@ pub fn camera_menu_button(
     let app = app.clone();
     let model = model.clone();
     Some(
-        chevron_button("call-camera-menu", "call-camera-menu-face")
-            .dropdown_menu_with_anchor(Anchor::BottomLeft, move |popup, _, _| {
+        split_chevron("call-camera-menu", "call-camera-menu-face")
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
                 camera_menu(popup, &app, &model, &backgrounds)
             })
             .into_any_element(),

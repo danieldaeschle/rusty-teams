@@ -4,15 +4,14 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 
-use super::call_organizer::CAMERA_MENU_WIDTH;
-use super::call_view::{CONTROL_SIZE, reaction_glyph};
+use super::call_toolbar::{GROUP_GAP, SPLIT_CHEVRON_WIDTH, TOOL_GAP, TOOL_WIDTH};
+use super::call_view::reaction_glyph;
 use super::call_view_menu::view_items;
 use crate::app_state::AppState;
 use crate::call::CallModel;
 
-pub(super) const CONTROL_GAP: f32 = 12.;
-pub(super) const CONTROLS_PADDING: f32 = 16.;
-const LEAVE_WIDTH: f32 = 116.;
+pub(super) const TITLE_RESERVE: f32 = 280.;
+const LEAVE_WIDTH: f32 = 96.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Foldable {
@@ -39,27 +38,28 @@ impl FoldedControls {
 }
 
 pub fn fixed_controls_width(has_camera_menu: bool, has_more: bool, has_leave_menu: bool) -> f32 {
-    let mut widths = vec![
-        CONTROL_SIZE + CAMERA_MENU_WIDTH,
-        CONTROL_SIZE + if has_camera_menu { CAMERA_MENU_WIDTH } else { 0. },
-        CONTROL_SIZE,
-        LEAVE_WIDTH,
+    let devices = [
+        TOOL_WIDTH + if has_camera_menu { SPLIT_CHEVRON_WIDTH } else { 0. },
+        TOOL_WIDTH + SPLIT_CHEVRON_WIDTH,
+        TOOL_WIDTH,
     ];
-    if has_more {
-        widths.push(CONTROL_SIZE);
-    }
-    if has_leave_menu {
-        widths.push(CONTROL_SIZE);
-    }
-    widths.iter().sum::<f32>() + CONTROL_GAP * (widths.len() - 1) as f32
+    let devices_width = devices.iter().sum::<f32>() + TOOL_GAP * (devices.len() - 1) as f32;
+    let more_width = if has_more { TOOL_WIDTH } else { 0. };
+    let leave_width = LEAVE_WIDTH
+        + if has_leave_menu {
+            SPLIT_CHEVRON_WIDTH + 4. + 1.
+        } else {
+            0.
+        };
+    devices_width + more_width + leave_width + 2. * GROUP_GAP
 }
 
 pub fn folded_for_width(available: f32, fixed: f32, present: &[Foldable]) -> Vec<Foldable> {
-    let room = available - 2. * CONTROLS_PADDING - fixed;
+    let room = available - TITLE_RESERVE - fixed;
     let fitting = if room <= 0. {
         0
     } else {
-        (room / (CONTROL_SIZE + CONTROL_GAP)).floor() as usize
+        (room / (TOOL_WIDTH + TOOL_GAP)).floor() as usize
     };
     let folded_count = present.len().saturating_sub(fitting);
     present[..folded_count].to_vec()
@@ -173,7 +173,7 @@ fn chat_item(popup: PopupMenu, app: &Entity<AppState>, folded: &FoldedControls) 
 
 #[cfg(test)]
 mod tests {
-    use super::{CONTROLS_PADDING, Foldable, fixed_controls_width, folded_for_width};
+    use super::{Foldable, TITLE_RESERVE, fixed_controls_width, folded_for_width};
 
     const ALL: [Foldable; 5] = [
         Foldable::View,
@@ -182,11 +182,11 @@ mod tests {
         Foldable::People,
         Foldable::Chat,
     ];
-    const SLOT: f32 = 44. + 12.;
+    const SLOT: f32 = 56. + 2.;
     const FIXED: f32 = 400.;
 
     fn width_for(fitting: f32) -> f32 {
-        FIXED + 2. * CONTROLS_PADDING + fitting * SLOT
+        FIXED + TITLE_RESERVE + fitting * SLOT
     }
 
     #[test]
@@ -223,8 +223,8 @@ mod tests {
     #[test]
     fn fixed_width_counts_optional_controls() {
         let base = fixed_controls_width(false, false, false);
-        assert_eq!(fixed_controls_width(true, false, false), base + 28.);
-        assert_eq!(fixed_controls_width(false, true, false), base + 44. + 12.);
-        assert_eq!(fixed_controls_width(false, false, true), base + 44. + 12.);
+        assert_eq!(fixed_controls_width(true, false, false), base + 20.);
+        assert_eq!(fixed_controls_width(false, true, false), base + 56.);
+        assert_eq!(fixed_controls_width(false, false, true), base + 25.);
     }
 }

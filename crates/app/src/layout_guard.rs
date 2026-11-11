@@ -261,9 +261,9 @@ mod frames {
     const CALL_GUARDED: &[&str] = &[
         "shell/islands/main/call-header",
         "shell/islands/main/call-stage",
-        "shell/islands/main/call-controls",
-        "shell/islands/main/call-controls/mic",
-        "shell/islands/main/call-controls/leave",
+        "shell/islands/main/call-header/controls",
+        "shell/islands/main/call-header/controls/mic",
+        "shell/islands/main/call-header/controls/leave",
     ];
     const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
     const CALENDAR: &str = "shell/islands/calendar";
