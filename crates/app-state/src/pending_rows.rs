@@ -67,6 +67,7 @@ pub fn pending_row(
                 OutgoingImage::Remote(_) => None,
             })
             .collect(),
+        sent_previews: Vec::new(),
         adaptive_cards: Vec::new(),
         link_preview: outgoing.link_preview.clone(),
         meeting_link: teams_core::meeting_link_in_html(&outgoing.html()),

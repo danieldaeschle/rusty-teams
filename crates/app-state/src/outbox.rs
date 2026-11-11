@@ -51,9 +51,9 @@ pub fn outgoing_of(record: &OutboxRecord) -> Option<Outgoing> {
     decode(&record.payload, &record.images)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Delivered {
-    Complete,
+    Complete { message_id: Option<String> },
     /// The post went out but its announcement banner could not be set.
     WithoutBanner,
 }
@@ -122,7 +122,7 @@ pub async fn deliver(
             .attach_link_preview(conversation_id, &record.message_id, preview)
             .await;
     }
-    Ok(Delivered::Complete)
+    Ok(Delivered::Complete { message_id: Some(record.message_id) })
 }
 
 fn discard_banner_image(banner: &teams_core::AnnouncementBanner) {
@@ -194,7 +194,7 @@ async fn attempt(
 ) -> teams_core::Result<Delivered> {
     // Graph has no idempotency key: a send cut off by the quit may have gone through.
     if already_sent(engine, record, outgoing).await? {
-        return Ok(Delivered::Complete);
+        return Ok(Delivered::Complete { message_id: None });
     }
     deliver(
         engine,

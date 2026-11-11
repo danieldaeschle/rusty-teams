@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -92,7 +92,7 @@ use crate::people::{local_names, resolve_names};
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, missed_before_fetch, plan_read};
 use crate::rows::{
-    Delivery, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
+    Delivery, LocalImage, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
     apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
     forward_sender_ids, has_own_reaction, message_draft, message_text, own_reaction_glyph,
     place_local_rows, placeholder_rows, reaction_glyph, reply_excerpt, set_own_reaction,
@@ -115,6 +115,7 @@ pub const MEMBERS_BUTTON: &str = "shell/islands/main/members-button";
 pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
 pub const TIMELINE_TAG: &str = "shell/islands/main/timeline";
 pub const FEED_EDGE_TAG: &str = "shell/islands/main/timeline/divider-feed";
+const SENT_PREVIEWS_KEPT: usize = 16;
 const POSTED_WITHOUT_BANNER: &str = "Posted, but Teams did not take the banner.";
 const QUIET_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
@@ -243,6 +244,7 @@ pub struct ConversationView {
     saving_edits: HashSet<String>,
     pending_counter: usize,
     pending_outgoing: HashMap<String, Outgoing>,
+    sent_previews: VecDeque<(String, Vec<LocalImage>)>,
     pending_reactions: PendingReactions,
     downloads: Downloads,
     hovered_message: Option<String>,
@@ -597,6 +599,7 @@ impl ConversationView {
             saving_edits: HashSet::new(),
             pending_counter: 0,
             pending_outgoing: HashMap::new(),
+            sent_previews: VecDeque::new(),
             pending_reactions: HashMap::new(),
             downloads: Downloads::default(),
             hovered_message: None,
@@ -1842,6 +1845,9 @@ impl ConversationView {
             {
                 message.receipt = receipts.get(&message.key).copied().unwrap_or_default();
                 message.receipt_label = receipt_labels.get(&message.key).cloned();
+                if let Some((_, previews)) = self.sent_previews.iter().find(|(key, _)| key == &message.key) {
+                    message.sent_previews = previews.clone();
+                }
             }
         }
         if let Some(read_until) = posts_new_after.filter(|_| in_feed) {
@@ -3528,6 +3534,9 @@ impl ConversationView {
         if matches!(result, Ok(Ok(Delivered::WithoutBanner))) {
             self.notice = Some(POSTED_WITHOUT_BANNER.to_owned());
         }
+        if let Ok(Ok(Delivered::Complete { message_id: Some(message_id) })) = &result {
+            self.keep_sent_previews(key, message_id);
+        }
         let failure = match result {
             Ok(Ok(_)) => None,
             Ok(Err(error)) => Some(short_error(&error)),
@@ -3551,6 +3560,19 @@ impl ConversationView {
         self.app
             .update(cx, |state, cx| state.refresh_local_previews(cx));
         self.rebuild(false, cx);
+    }
+
+    fn keep_sent_previews(&mut self, pending_key: &str, message_id: &str) {
+        let Some(row) = self.pending.iter().find(|row| row.key == pending_key) else {
+            return;
+        };
+        if row.local_images.is_empty() {
+            return;
+        }
+        self.sent_previews.push_back((message_id.to_owned(), row.local_images.clone()));
+        if self.sent_previews.len() > SENT_PREVIEWS_KEPT {
+            self.sent_previews.pop_front();
+        }
     }
 
     fn render_drop_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
