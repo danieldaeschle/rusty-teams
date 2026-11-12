@@ -84,7 +84,7 @@
 | Platform | State |
 |---|---|
 | 🪟 Windows | Main target. Login through an embedded WebView2 |
-| 🐧 Linux | Connects to a Chrome started with `--remote-debugging-port=9222` and signed in to Teams on the web. The app opens an Outlook on the web tab next to it when missing (some tenants grant chat scopes only to Outlook). Built-in login is planned |
+| 🐧 Linux | Starts Google Chrome or Chromium on its own (debug port 9222, own profile in the XDG data folder) and keeps it headless in the background. When Teams asks for a login, the Chrome window shows itself and goes back to the background once you are signed in. `--endpoint` connects to a Chrome you started yourself instead. The app opens an Outlook on the web tab next to Teams when missing (some tenants grant chat scopes only to Outlook). Built-in login without Chrome is planned |
 | 🍎 macOS | Experimental. Universal arm64 + x86_64 binary, connects to a Chrome like Linux |
 
 The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).

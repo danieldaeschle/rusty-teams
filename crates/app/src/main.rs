@@ -10,6 +10,8 @@ pub mod call;
 mod inline_video;
 #[cfg(test)]
 mod layout_guard;
+#[cfg(target_os = "linux")]
+mod linux_browser;
 pub mod notify;
 mod settings;
 mod views;
@@ -140,6 +142,10 @@ fn transport(
     }
     #[cfg(not(windows))]
     let _ = database;
+    #[cfg(target_os = "linux")]
+    if endpoint.is_none() {
+        return linux_browser::start(session::DEFAULT_ENDPOINT);
+    }
     Arc::new(session::CdpTransport::new(
         endpoint.unwrap_or(session::DEFAULT_ENDPOINT),
     ))
@@ -254,6 +260,8 @@ fn main() {
                 while let Some(event) = receiver.recv().await {
                     let kind = event.kind();
                     let started = std::time::Instant::now();
+                    #[cfg(target_os = "linux")]
+                    linux_browser::note_backend_event(&event);
                     state.update(cx, |state, cx| state.apply(event, cx));
                     app_base::diagnostics::record_if_slow(&kind, started.elapsed());
                 }
@@ -299,6 +307,8 @@ fn main() {
         .detach();
     });
     presence_link::unregister_on_exit(ENDPOINT_UNREGISTER_TIMEOUT);
+    #[cfg(target_os = "linux")]
+    linux_browser::stop();
     #[cfg(windows)]
     updater::exit_now();
 }
