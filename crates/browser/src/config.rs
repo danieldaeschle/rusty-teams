@@ -10,18 +10,27 @@ const CHROME_RELATIVE: &str = r"Google\Chrome\Application\chrome.exe";
 const WINDOWS_VARIABLES: [&str; 4] = ["LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "TEMP"];
 const LINUX_CHROME_NAMES: [&str; 5] =
     ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"];
+const MACOS_CHROME_NAMES: [&str; 3] = ["google-chrome", "chromium", "chrome"];
+const MACOS_CHROME_APP_PATHS: [&str; 2] = [
+    "Google Chrome.app/Contents/MacOS/Google Chrome",
+    "Chromium.app/Contents/MacOS/Chromium",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Wsl,
     Windows,
     Linux,
+    Macos,
 }
 
 impl Platform {
     pub fn detect() -> Platform {
         if cfg!(windows) {
             return Platform::Windows;
+        }
+        if cfg!(target_os = "macos") {
+            return Platform::Macos;
         }
         let proc_version = std::fs::read_to_string("/proc/version").ok();
         Platform::from_proc_version(proc_version.as_deref())
@@ -33,12 +42,18 @@ impl Platform {
             _ => Platform::Linux,
         }
     }
+
+    pub fn uses_unix_paths(self) -> bool {
+        matches!(self, Platform::Linux | Platform::Macos)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum ChromeSearch {
     Files(Vec<PathBuf>),
     Named(Vec<String>),
+    /// Absolute install paths first, then PATH names (macOS Application bundles + CLI).
+    FilesThenNamed { files: Vec<PathBuf>, names: Vec<String> },
 }
 
 #[derive(Debug, Clone)]
@@ -55,6 +70,7 @@ pub struct Config {
 pub struct ConfigInputs<'a> {
     pub windows_variables: HashMap<String, String>,
     pub linux_data_dir: Option<PathBuf>,
+    pub home_dir: Option<PathBuf>,
     pub to_local: &'a dyn Fn(&str) -> String,
 }
 
@@ -62,14 +78,16 @@ impl Config {
     pub fn detect() -> Result<Config, BrowserError> {
         let platform = Platform::detect();
         let windows_variables = match platform {
-            Platform::Linux => HashMap::new(),
+            Platform::Linux | Platform::Macos => HashMap::new(),
             Platform::Windows => WINDOWS_VARIABLES
                 .iter()
                 .filter_map(|name| std::env::var(name).ok().map(|value| ((*name).to_owned(), value)))
                 .collect(),
             Platform::Wsl => wsl_windows_variables()?,
         };
-        let linux_data_dir = directories::BaseDirs::new().map(|dirs| dirs.data_dir().to_path_buf());
+        let base = directories::BaseDirs::new();
+        let linux_data_dir = base.as_ref().map(|dirs| dirs.data_dir().to_path_buf());
+        let home_dir = base.as_ref().map(|dirs| dirs.home_dir().to_path_buf());
         let to_local = |windows_path: &str| match platform {
             Platform::Wsl => wslpath(windows_path).unwrap_or_else(|| windows_path_to_wsl(windows_path)),
             _ => windows_path.to_owned(),
@@ -77,7 +95,7 @@ impl Config {
         Config::resolve(
             platform,
             DEFAULT_PORT,
-            &ConfigInputs { windows_variables, linux_data_dir, to_local: &to_local },
+            &ConfigInputs { windows_variables, linux_data_dir, home_dir, to_local: &to_local },
         )
     }
 
@@ -102,6 +120,32 @@ impl Config {
                     chrome_search: ChromeSearch::Named(
                         LINUX_CHROME_NAMES.iter().map(|name| (*name).to_owned()).collect(),
                     ),
+                }
+            }
+            Platform::Macos => {
+                let data_dir = inputs.linux_data_dir.clone().ok_or_else(|| {
+                    BrowserError::Environment("no Application Support directory".into())
+                })?;
+                let mut files = Vec::new();
+                for root in [PathBuf::from("/Applications")]
+                    .into_iter()
+                    .chain(inputs.home_dir.iter().map(|home| home.join("Applications")))
+                {
+                    for relative in MACOS_CHROME_APP_PATHS {
+                        files.push(root.join(relative));
+                    }
+                }
+                Config {
+                    platform,
+                    port,
+                    profile: format!("{}/{}", path_text(&data_dir), PROFILE_NAME),
+                    mode_file: data_dir.join(format!("{PROFILE_NAME}.mode")),
+                    profile_parent: path_text(&data_dir),
+                    mode_parent: data_dir,
+                    chrome_search: ChromeSearch::FilesThenNamed {
+                        files,
+                        names: MACOS_CHROME_NAMES.iter().map(|name| (*name).to_owned()).collect(),
+                    },
                 }
             }
             Platform::Windows | Platform::Wsl => {
@@ -131,7 +175,7 @@ impl Config {
     }
 
     pub fn with_profile_name(mut self, name: &str) -> Config {
-        let separator = if self.platform == Platform::Linux { "/" } else { "\\" };
+        let separator = if self.platform.uses_unix_paths() { "/" } else { "\\" };
         self.profile = format!("{}{separator}{name}", self.profile_parent);
         self.mode_file = self.mode_parent.join(format!("{name}.mode"));
         self
@@ -147,6 +191,16 @@ fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+fn find_named_chrome(
+    names: &[String],
+    path_variable: &std::ffi::OsStr,
+    exists: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    std::env::split_paths(path_variable)
+        .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
+        .find(|candidate| exists(candidate))
+}
+
 pub(crate) fn find_chrome(
     search: &ChromeSearch,
     path_variable: &std::ffi::OsStr,
@@ -158,10 +212,18 @@ pub(crate) fn find_chrome(
             .find(|candidate| exists(candidate))
             .cloned()
             .ok_or_else(|| BrowserError::ChromeNotFound("not under Program Files or LocalAppData".into())),
-        ChromeSearch::Named(names) => std::env::split_paths(path_variable)
-            .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
-            .find(|candidate| exists(candidate))
+        ChromeSearch::Named(names) => find_named_chrome(names, path_variable, exists)
             .ok_or_else(|| BrowserError::ChromeNotFound(format!("none of {} on PATH", names.join(", ")))),
+        ChromeSearch::FilesThenNamed { files, names } => files
+            .iter()
+            .find(|candidate| exists(candidate))
+            .cloned()
+            .or_else(|| find_named_chrome(names, path_variable, exists))
+            .ok_or_else(|| {
+                BrowserError::ChromeNotFound(
+                    "not under /Applications, ~/Applications, or PATH".into(),
+                )
+            }),
     }
 }
 
@@ -224,6 +286,7 @@ mod tests {
         ConfigInputs {
             windows_variables: variables.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect(),
             linux_data_dir: None,
+            home_dir: None,
             to_local,
         }
     }
@@ -283,6 +346,7 @@ mod tests {
         let inputs = ConfigInputs {
             windows_variables: [("LOCALAPPDATA".to_owned(), r"D:\L".to_owned())].into(),
             linux_data_dir: None,
+            home_dir: None,
             to_local: &to_local,
         };
         let config = Config::resolve(Platform::Windows, 9222, &inputs).unwrap();
@@ -305,6 +369,7 @@ mod tests {
         let inputs = ConfigInputs {
             windows_variables: HashMap::new(),
             linux_data_dir: Some(PathBuf::from("/home/u/.local/share")),
+            home_dir: None,
             to_local: &to_local,
         };
         let config = Config::resolve(Platform::Linux, 9222, &inputs).unwrap();
@@ -313,10 +378,68 @@ mod tests {
     }
 
     #[test]
+    fn resolves_macos_config_under_application_support() {
+        let to_local = |path: &str| path.to_owned();
+        let inputs = ConfigInputs {
+            windows_variables: HashMap::new(),
+            linux_data_dir: Some(PathBuf::from("/Users/joe/Library/Application Support")),
+            home_dir: Some(PathBuf::from("/Users/joe")),
+            to_local: &to_local,
+        };
+        let config = Config::resolve(Platform::Macos, 9222, &inputs).unwrap();
+        assert_eq!(
+            config.profile,
+            "/Users/joe/Library/Application Support/rusty-teams-chrome"
+        );
+        assert_eq!(
+            config.mode_file,
+            PathBuf::from("/Users/joe/Library/Application Support/rusty-teams-chrome.mode")
+        );
+        let ChromeSearch::FilesThenNamed { files, names } = &config.chrome_search else {
+            panic!("expected files then named")
+        };
+        assert_eq!(
+            files[0],
+            PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        );
+        assert_eq!(
+            files[2],
+            PathBuf::from("/Users/joe/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        );
+        assert!(names.iter().any(|name| name == "google-chrome"));
+        assert_eq!(config.with_profile_name("x").profile, "/Users/joe/Library/Application Support/x");
+    }
+
+    #[test]
     fn missing_localappdata_is_an_error() {
         let to_local = |path: &str| path.to_owned();
-        let inputs = ConfigInputs { windows_variables: HashMap::new(), linux_data_dir: None, to_local: &to_local };
+        let inputs = ConfigInputs {
+            windows_variables: HashMap::new(),
+            linux_data_dir: None,
+            home_dir: None,
+            to_local: &to_local,
+        };
         assert!(Config::resolve(Platform::Windows, 9222, &inputs).is_err());
+    }
+
+    #[test]
+    fn finds_macos_chrome_under_applications_before_path() {
+        let search = ChromeSearch::FilesThenNamed {
+            files: vec![
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into(),
+                "/Users/joe/Applications/Chromium.app/Contents/MacOS/Chromium".into(),
+            ],
+            names: vec!["google-chrome".into()],
+        };
+        let path = std::env::join_paths(["/usr/local/bin"]).unwrap();
+        let found = find_chrome(&search, &path, &|candidate| {
+            candidate.ends_with("Google Chrome") || candidate.ends_with("google-chrome")
+        })
+        .unwrap();
+        assert_eq!(
+            found,
+            PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        );
     }
 
     #[test]

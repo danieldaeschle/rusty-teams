@@ -271,6 +271,7 @@ pub async fn harness() -> Harness {
     let inputs = ConfigInputs {
         windows_variables: Default::default(),
         linux_data_dir: Some(directory.path().to_path_buf()),
+        home_dir: None,
         to_local: &to_local,
     };
     let config = Config::resolve(Platform::Linux, mock.port, &inputs).unwrap();

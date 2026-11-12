@@ -4,12 +4,16 @@
 )]
 
 mod active_appearance;
+mod active_locale;
 mod agent_direct;
+mod i18n;
 pub mod agents;
 pub mod call;
 mod inline_video;
 #[cfg(test)]
 mod layout_guard;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod linux_browser;
 pub mod notify;
 mod settings;
 mod views;
@@ -122,6 +126,7 @@ fn data_path(name: &str) -> PathBuf {
 fn transport(
     endpoint: Option<&str>,
     database: Option<&std::path::Path>,
+    #[cfg(windows)] sign_in_title: String,
 ) -> Arc<dyn session::Transport> {
     #[cfg(windows)]
     if endpoint.is_none() {
@@ -132,7 +137,7 @@ fn transport(
         inline_video::configure(user_data_folder.clone());
         let transport = webview::start(webview::HostConfig {
             user_data_folder,
-            window_title: format!("{APP_NAME} - Sign in"),
+            window_title: sign_in_title,
             log: |line| app_base::diagnostics::record(line),
         });
         task_dialog::install_host(transport.clone());
@@ -140,6 +145,10 @@ fn transport(
     }
     #[cfg(not(windows))]
     let _ = database;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if endpoint.is_none() {
+        return linux_browser::start(session::DEFAULT_ENDPOINT);
+    }
     Arc::new(session::CdpTransport::new(
         endpoint.unwrap_or(session::DEFAULT_ENDPOINT),
     ))
@@ -211,8 +220,24 @@ fn main() {
         open_store(&path)
     };
     let store = Arc::new(store);
+    app_base::ui_locale::apply_locale(app_base::ui_locale::effective_locale(app_base::ui_locale::load(
+        &store,
+    )));
+    #[cfg(windows)]
+    let sign_in_title = format!(
+        "{} - {}",
+        app_base::APP_NAME,
+        app_base::ui_locale::tr("auth.sign_in")
+    );
     let user_input = user_activity::UserInput::new();
     let receiver = (!arguments.demo).then(|| {
+        #[cfg(windows)]
+        let transport = transport(
+            arguments.endpoint.as_deref(),
+            arguments.database.as_deref(),
+            sign_in_title.clone(),
+        );
+        #[cfg(not(windows))]
         let transport = transport(arguments.endpoint.as_deref(), arguments.database.as_deref());
         let activity = user_activity::track(user_input.clone());
         backend::start(store.clone(), transport, !arguments.read_only, activity)
@@ -234,6 +259,7 @@ fn main() {
         .detach();
         theme::load_fonts(cx);
         active_appearance::install(&store, cx);
+        active_locale::install(&store, cx);
         theme::apply(cx);
         bind_keys(cx);
         let state = cx.new(|_| {
@@ -254,6 +280,8 @@ fn main() {
                 while let Some(event) = receiver.recv().await {
                     let kind = event.kind();
                     let started = std::time::Instant::now();
+                    #[cfg(any(target_os = "linux", target_os = "macos"))]
+                    linux_browser::note_backend_event(&event);
                     state.update(cx, |state, cx| state.apply(event, cx));
                     app_base::diagnostics::record_if_slow(&kind, started.elapsed());
                 }
@@ -299,6 +327,8 @@ fn main() {
         .detach();
     });
     presence_link::unregister_on_exit(ENDPOINT_UNREGISTER_TIMEOUT);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    linux_browser::stop();
     #[cfg(windows)]
     updater::exit_now();
 }

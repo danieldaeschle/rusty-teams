@@ -9,7 +9,11 @@ pub enum NoiseSuppression {
 }
 
 impl NoiseSuppression {
-    pub const ALL: [NoiseSuppression; 3] = [NoiseSuppression::Auto, NoiseSuppression::Low, NoiseSuppression::Off];
+    pub const ALL: [NoiseSuppression; 3] = [
+        NoiseSuppression::Auto,
+        NoiseSuppression::Low,
+        NoiseSuppression::Off,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -28,7 +32,9 @@ impl NoiseSuppression {
     }
 
     pub fn from_key(key: &str) -> Option<NoiseSuppression> {
-        NoiseSuppression::ALL.into_iter().find(|level| level.key() == key)
+        NoiseSuppression::ALL
+            .into_iter()
+            .find(|level| level.key() == key)
     }
 }
 
@@ -48,32 +54,55 @@ pub struct ApmConfig {
 
 impl ApmConfig {
     pub fn is_passthrough(self) -> bool {
-        self == ApmConfig { echo_canceller: false, gain_controller: false, high_pass_filter: false, noise_suppression: false }
+        self == ApmConfig {
+            echo_canceller: false,
+            gain_controller: false,
+            high_pass_filter: false,
+            noise_suppression: false,
+        }
     }
 
     pub fn front_module(self) -> Option<AudioProcessingModule> {
-        (self.echo_canceller || self.noise_suppression)
-            .then(|| AudioProcessingModule::new(self.echo_canceller, false, false, self.noise_suppression))
+        (self.echo_canceller || self.noise_suppression).then(|| {
+            AudioProcessingModule::new(self.echo_canceller, false, false, self.noise_suppression)
+        })
     }
-
 }
 
 impl MicSettings {
     pub fn apm_config(self) -> ApmConfig {
         if self.music_mode {
-            return ApmConfig { echo_canceller: true, gain_controller: false, high_pass_filter: false, noise_suppression: false };
+            return ApmConfig {
+                echo_canceller: true,
+                gain_controller: false,
+                high_pass_filter: false,
+                noise_suppression: false,
+            };
         }
         let on = self.noise_suppression != NoiseSuppression::Off;
         let apm_noise_suppression = self.noise_suppression == NoiseSuppression::Low;
-        ApmConfig { echo_canceller: on, gain_controller: on, high_pass_filter: on, noise_suppression: apm_noise_suppression }
+        ApmConfig {
+            echo_canceller: on,
+            gain_controller: on,
+            high_pass_filter: on,
+            noise_suppression: apm_noise_suppression,
+        }
     }
 
     pub fn uses_device_track(self) -> bool {
         self.uses_device_track_on(cfg!(windows))
     }
 
+    /// On Linux and macOS, Auto and Low keep the platform ADM device track
+    /// (Pulse / CoreAudio — same path Web Teams uses). Music mode and Off still
+    /// run the software chain; Windows always does.
     pub fn uses_device_track_on(self, windows: bool) -> bool {
-        !windows && !self.music_mode && self.noise_suppression == NoiseSuppression::Low
+        !windows
+            && !self.music_mode
+            && matches!(
+                self.noise_suppression,
+                NoiseSuppression::Auto | NoiseSuppression::Low
+            )
     }
 
     pub fn ml_noise_suppression(self) -> bool {
@@ -86,48 +115,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_leaves_noise_to_the_ml_stage_and_keeps_the_rest_of_the_apm() {
+    fn auto_uses_the_device_track_on_linux_and_macos_and_keeps_ml_for_the_windows_chain() {
         let settings = MicSettings::default();
-        assert!(!settings.uses_device_track_on(false));
+        // Non-Windows (Pulse on Linux, CoreAudio on macOS) keeps the ADM track.
+        assert!(settings.uses_device_track_on(false));
+        assert!(!settings.uses_device_track_on(true));
         assert!(settings.ml_noise_suppression());
         assert_eq!(
             settings.apm_config(),
-            ApmConfig { echo_canceller: true, gain_controller: true, high_pass_filter: true, noise_suppression: false }
+            ApmConfig {
+                echo_canceller: true,
+                gain_controller: true,
+                high_pass_filter: true,
+                noise_suppression: false
+            }
         );
     }
 
     #[test]
-    fn low_keeps_the_device_track_with_the_apm_noise_suppression() {
-        let settings = MicSettings { noise_suppression: NoiseSuppression::Low, music_mode: false };
+    fn low_keeps_the_coreaudio_or_pulse_device_track_with_the_apm_noise_suppression() {
+        let settings = MicSettings {
+            noise_suppression: NoiseSuppression::Low,
+            music_mode: false,
+        };
         assert!(settings.uses_device_track_on(false));
         assert!(!settings.ml_noise_suppression());
         assert_eq!(
             settings.apm_config(),
-            ApmConfig { echo_canceller: true, gain_controller: true, high_pass_filter: true, noise_suppression: true }
+            ApmConfig {
+                echo_canceller: true,
+                gain_controller: true,
+                high_pass_filter: true,
+                noise_suppression: true
+            }
         );
     }
 
     #[test]
     fn only_auto_outside_music_mode_runs_the_ml_stage() {
         assert!(MicSettings::default().ml_noise_suppression());
-        assert!(!MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false }.ml_noise_suppression());
-        assert!(!MicSettings { noise_suppression: NoiseSuppression::Auto, music_mode: true }.ml_noise_suppression());
+        assert!(
+            !MicSettings {
+                noise_suppression: NoiseSuppression::Off,
+                music_mode: false
+            }
+            .ml_noise_suppression()
+        );
+        assert!(
+            !MicSettings {
+                noise_suppression: NoiseSuppression::Auto,
+                music_mode: true
+            }
+            .ml_noise_suppression()
+        );
     }
 
     #[test]
     fn windows_never_uses_the_device_track() {
         for noise_suppression in NoiseSuppression::ALL {
             for music_mode in [false, true] {
-                let settings = MicSettings { noise_suppression, music_mode };
+                let settings = MicSettings {
+                    noise_suppression,
+                    music_mode,
+                };
                 assert!(!settings.uses_device_track_on(true));
-                assert_eq!(settings.uses_device_track_on(false), !music_mode && noise_suppression == NoiseSuppression::Low);
+                let non_windows_device = !music_mode
+                    && matches!(
+                        noise_suppression,
+                        NoiseSuppression::Auto | NoiseSuppression::Low
+                    );
+                assert_eq!(settings.uses_device_track_on(false), non_windows_device);
             }
         }
     }
 
     #[test]
     fn off_leaves_the_device_track_and_processes_nothing() {
-        let settings = MicSettings { noise_suppression: NoiseSuppression::Off, music_mode: false };
+        let settings = MicSettings {
+            noise_suppression: NoiseSuppression::Off,
+            music_mode: false,
+        };
         assert!(!settings.uses_device_track());
         assert!(settings.apm_config().is_passthrough());
         assert!(settings.apm_config().front_module().is_none());
@@ -136,11 +203,19 @@ mod tests {
     #[test]
     fn music_mode_keeps_only_echo_cancellation_whatever_the_noise_choice() {
         for noise_suppression in NoiseSuppression::ALL {
-            let settings = MicSettings { noise_suppression, music_mode: true };
+            let settings = MicSettings {
+                noise_suppression,
+                music_mode: true,
+            };
             assert!(!settings.uses_device_track());
             assert_eq!(
                 settings.apm_config(),
-                ApmConfig { echo_canceller: true, gain_controller: false, high_pass_filter: false, noise_suppression: false }
+                ApmConfig {
+                    echo_canceller: true,
+                    gain_controller: false,
+                    high_pass_filter: false,
+                    noise_suppression: false
+                }
             );
         }
     }
