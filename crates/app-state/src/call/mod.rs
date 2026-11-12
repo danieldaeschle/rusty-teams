@@ -62,15 +62,12 @@ pub use report::load_enabled as load_report_enabled;
 pub use ring::{MissedCall, RingEntry, Rings};
 pub use schedule::{FormValues, Invitee, default_window, draft_from_form};
 pub use share_actions::ZoomStep;
-pub use share_view::{
-    SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, STRIP_DEFAULT_WIDTH, ShareStage, load_flag,
-    load_strip_width,
-};
+pub use share_view::{SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, ShareStage, load_flag};
 pub use speed_dial::SpeedDialEntry;
 pub use stage_layout::{contain_size, focus_stage_size, gallery_grid};
 pub use stage_split::{
-    GRID_PADDING, STRIP_GAP, SpeakerSplit, StripSplit, TILE_GAP, gallery_split, measured_stage,
-    speaker_split, strip_split, video_wants,
+    GRID_PADDING, STRIP_GAP, GalleryPage, SpeakerSplit, StripSplit, TILE_GAP, gallery_page,
+    measured_stage, speaker_split, strip_split, video_wants,
 };
 pub use target::{is_echo_chat, plan_for_chat};
 pub use transcript::clock_label;
