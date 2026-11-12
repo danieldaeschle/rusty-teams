@@ -143,6 +143,7 @@ pub struct AppState {
     pub live_retry: Option<Arc<tokio::sync::Notify>>,
     pub notice_count: u64,
     pub followed_presence: Vec<crate::presence_follow::FollowedPerson>,
+    pub dismissed_absence_notices: std::collections::HashSet<String>,
     pub followed_changes: Vec<(String, &'static str)>,
     pub keep_unread: Option<String>,
     pub restorable_deletes: crate::restorable_deletes::RestorableDeletes,
@@ -303,6 +304,7 @@ impl AppState {
             live_retry: None,
             notice_count: 0,
             followed_presence: Vec::new(),
+            dismissed_absence_notices: Default::default(),
             followed_changes: Vec::new(),
             keep_unread: None,
             restorable_deletes: Default::default(),
@@ -1000,6 +1002,7 @@ impl AppState {
         cx.notify();
         self.refresh_live_meeting(&conversation_id, cx);
         self.refresh_language_stamps(&conversation_id, cx);
+        self.refresh_partner_absence(&conversation_id, cx);
     }
 
     fn apply_typing(&mut self, event: TypingEvent, cx: &mut Context<Self>) {

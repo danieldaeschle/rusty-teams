@@ -39,6 +39,7 @@ pub mod outbox;
 pub mod outgoing;
 pub mod own_status;
 pub mod presence_follow;
+pub mod absence_notice;
 pub mod pending_rows;
 pub mod people;
 pub mod post_follow;

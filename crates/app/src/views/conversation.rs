@@ -36,6 +36,7 @@ mod forward_select;
 pub use forward_select::{
     FORWARD_FOOTER_BAR_TAG, FORWARD_FOOTER_COUNT_TAG, FORWARD_FOOTER_NEXT_TAG, FORWARD_FOOTER_TAG,
 };
+mod absence;
 mod appear_tracker;
 mod jump;
 mod notes_space;
@@ -4310,6 +4311,7 @@ impl Render for ConversationView {
                     None => column.child(runway(
                         v_flex()
                             .w_full()
+                            .children(self.render_absence_notice(cx))
                             .children(self.render_proposal_card(cx).map(|card| {
                                 div().w_full().pb(px(COMPOSER_TOP_GAP)).child(card)
                             }))
