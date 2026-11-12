@@ -12,6 +12,8 @@ const HALF_HOUR_MINUTES: i64 = 30;
 const DEFAULT_LENGTH_MINUTES: i64 = 30;
 const READ_ONLY_MESSAGE: &str = "Meetings cannot be scheduled in read-only mode.";
 const RESPONSE_FAILED_NOTICE: &str = "Could not send your response";
+const DELETE_FAILED_NOTICE: &str = "Could not delete the meeting";
+const DELETE_READ_ONLY_NOTICE: &str = "Meetings cannot be deleted in read-only mode.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invitee {
@@ -129,6 +131,7 @@ fn demo_event(draft: &MeetingDraft, serial: u64) -> CalendarEvent {
         show_as: Default::default(),
         dial_in: None,
         response: ResponseType::Organizer,
+        ..Default::default()
     }
 }
 
@@ -176,7 +179,11 @@ impl AppState {
             let _ = sender.send(Err(NOT_CONNECTED_NOTICE.to_owned()));
             return receiver;
         };
-        let created = runtime::spawn(async move { launcher.create_meeting(draft).await });
+        let accounts = store::load_calendar_accounts(&self.store);
+        let store = self.store.clone();
+        let created = runtime::spawn(async move {
+            super::meeting_create::create_across_targets(launcher, draft, accounts, store).await
+        });
         cx.spawn(async move |this, cx| {
             let outcome = created
                 .await
@@ -208,6 +215,125 @@ impl AppState {
         self.calls_list.invalidate();
     }
 
+    fn remove_calendar_event(&mut self, event_id: &str) -> Option<CalendarEvent> {
+        let mut removed = None;
+        if let Some(index) = self
+            .calendar_week
+            .events
+            .iter()
+            .position(|event| event.object_id == event_id)
+        {
+            removed = Some(self.calendar_week.events.remove(index));
+        }
+        if let Some(index) = self
+            .calendar_events
+            .iter()
+            .position(|event| event.object_id == event_id)
+        {
+            let event = self.calendar_events.remove(index);
+            if removed.is_none() {
+                removed = Some(event);
+            }
+        }
+        self.calls_list.invalidate();
+        removed
+    }
+
+    fn restore_calendar_event(&mut self, event: CalendarEvent) {
+        if !self
+            .calendar_week
+            .events
+            .iter()
+            .any(|existing| existing.object_id == event.object_id)
+        {
+            self.calendar_week.events.push(event.clone());
+            self.calendar_week
+                .events
+                .sort_by_key(|item| (item.start, item.end));
+        }
+        if !self
+            .calendar_events
+            .iter()
+            .any(|existing| existing.object_id == event.object_id)
+        {
+            self.calendar_events.push(event);
+            self.calendar_events
+                .sort_by_key(|item| (item.start, item.end));
+        }
+        self.calls_list.invalidate();
+    }
+
+    pub fn delete_calendar_event(&mut self, event_key: &str, cx: &mut Context<Self>) {
+        if self.mode.read_only {
+            self.raise_notice(DELETE_READ_ONLY_NOTICE.to_owned(), None, cx);
+            return;
+        }
+        let Some(event) = self
+            .calendar_events
+            .iter()
+            .chain(&self.calendar_week.events)
+            .find(|event| event.object_id == event_key)
+            .cloned()
+        else {
+            return;
+        };
+        let snapshot = event.clone();
+        let (event_id, ical_uid) = (event.object_id.clone(), event.ical_uid.clone());
+        let source = event.source;
+        let account_id = event.account_id.clone();
+        let calendar_id = event.calendar_id.clone();
+        self.remove_calendar_event(&event_id);
+        cx.notify();
+        let launcher = self.call_launcher.clone().filter(|_| !self.mode.demo);
+        let Some(launcher) = launcher else {
+            return;
+        };
+        let send_updates = self.rsvp_send_response;
+        let store = self.store.clone();
+        let deleted = runtime::spawn({
+            let event_id = event_id.clone();
+            async move {
+                match source {
+                    chatsvc::CalendarSource::Outlook => {
+                        launcher
+                            .delete_calendar_event(&event_id, ical_uid.as_deref())
+                            .await
+                    }
+                    chatsvc::CalendarSource::Google => {
+                        let mut accounts = store::load_calendar_accounts(&store);
+                        let account =
+                            account_id.ok_or_else(|| "Google account missing".to_owned())?;
+                        let calendar = calendar_id.unwrap_or_else(|| "primary".to_owned());
+                        let result = crate::google_calendar_sync::delete_google_event(
+                            &mut accounts,
+                            &account,
+                            &calendar,
+                            &event_id,
+                            send_updates,
+                        )
+                        .await;
+                        let _ = store::save_calendar_accounts(&store, &accounts);
+                        result
+                    }
+                }
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let ok = deleted.await.is_ok_and(|result| result.is_ok());
+            this.update(cx, |state, cx| {
+                if ok {
+                    // refresh_calendar nudges agenda poll + reloads the week grid.
+                    state.refresh_calendar(cx);
+                    return;
+                }
+                state.restore_calendar_event(snapshot);
+                state.raise_notice(DELETE_FAILED_NOTICE.to_owned(), None, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub fn respond_to_event(&mut self, event_key: &str, reply: Reply, cx: &mut Context<Self>) {
         if self.mode.read_only {
             self.raise_notice(RESPONSE_FAILED_NOTICE.to_owned(), None, cx);
@@ -223,6 +349,9 @@ impl AppState {
         };
         let previous = event.response;
         let (event_id, ical_uid) = (event.object_id.clone(), event.ical_uid.clone());
+        let source = event.source;
+        let account_id = event.account_id.clone();
+        let calendar_id = event.calendar_id.clone();
         self.set_event_response(&event_id, response_for(reply));
         cx.notify();
         let launcher = self.call_launcher.clone().filter(|_| !self.mode.demo);
@@ -230,12 +359,34 @@ impl AppState {
             return;
         };
         let send_response = self.rsvp_send_response;
+        let store = self.store.clone();
         let answered = runtime::spawn({
             let event_id = event_id.clone();
             async move {
-                launcher
-                    .respond_to_event(&event_id, ical_uid.as_deref(), reply, send_response)
-                    .await
+                match source {
+                    chatsvc::CalendarSource::Outlook => {
+                        launcher
+                            .respond_to_event(&event_id, ical_uid.as_deref(), reply, send_response)
+                            .await
+                    }
+                    chatsvc::CalendarSource::Google => {
+                        let mut accounts = store::load_calendar_accounts(&store);
+                        let account =
+                            account_id.ok_or_else(|| "Google account missing".to_owned())?;
+                        let calendar = calendar_id.unwrap_or_else(|| "primary".to_owned());
+                        let result = crate::google_calendar_sync::respond_google_event(
+                            &mut accounts,
+                            &account,
+                            &calendar,
+                            &event_id,
+                            reply,
+                            send_response,
+                        )
+                        .await;
+                        let _ = store::save_calendar_accounts(&store, &accounts);
+                        result
+                    }
+                }
             }
         });
         cx.spawn(async move |this, cx| {

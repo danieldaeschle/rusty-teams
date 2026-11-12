@@ -73,7 +73,7 @@ impl AppState {
         self.show_calendar_date(date, cx);
     }
 
-    fn load_calendar_week(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn load_calendar_week(&mut self, cx: &mut Context<Self>) {
         let start = self.calendar_start();
         let offset = Local::now().offset().fix();
         let (from, to) = week_range(start, self.calendar_week.span.days(), offset);
@@ -94,17 +94,48 @@ impl AppState {
         let request = self.calendar_week.request;
         self.calendar_week.loading = true;
         cx.notify();
-        let receiver = crate::runtime::spawn(async move { launcher.calendar_view(from, to).await });
+        let store = self.store.clone();
+        let receiver = crate::runtime::spawn(async move {
+            let mut accounts = store::load_calendar_accounts(&store);
+            let mut combined = Vec::new();
+            let mut outlook_failed = false;
+            if accounts.outlook_selected {
+                match launcher.calendar_view(from, to).await {
+                    Ok(events) => combined.extend(events),
+                    Err(error) => {
+                        outlook_failed = true;
+                        crate::diagnostics::record(format!(
+                            "calls: outlook calendar week not loaded: {error}"
+                        ));
+                    }
+                }
+            }
+            match crate::google_calendar_sync::fetch_google_events(&mut accounts, from, to).await {
+                Ok(events) => {
+                    let _ = store::save_calendar_accounts(&store, &accounts);
+                    combined.extend(events);
+                }
+                Err(error) => crate::diagnostics::record(format!(
+                    "calls: google calendar week not loaded: {error}"
+                )),
+            }
+            if combined.is_empty() && outlook_failed && !accounts.has_google() {
+                return Err(CALENDAR_LOAD_FAILURE.to_owned());
+            }
+            Ok(chatsvc::merge_calendar_events(combined))
+        });
         cx.spawn(async move |this, cx| {
-            let loaded = receiver.await.ok().and_then(Result::ok);
+            let loaded = receiver
+                .await
+                .unwrap_or_else(|_| Err(CALENDAR_LOAD_FAILURE.to_owned()));
             this.update(cx, |state, cx| {
                 if state.calendar_week.request != request {
                     return;
                 }
                 state.calendar_week.loading = false;
                 match loaded {
-                    Some(events) => state.calendar_week.events = events,
-                    None => state.raise_notice(CALENDAR_LOAD_FAILURE.to_owned(), None, cx),
+                    Ok(events) => state.calendar_week.events = events,
+                    Err(notice) => state.raise_notice(notice, None, cx),
                 }
                 cx.notify();
             })
@@ -213,6 +244,7 @@ fn demo_week(monday: NaiveDate, offset: FixedOffset) -> Vec<CalendarEvent> {
                 show_as: demo_show_as(subject, *response),
                 dial_in: None,
                 response: *response,
+                ..Default::default()
             }
         })
         .collect()

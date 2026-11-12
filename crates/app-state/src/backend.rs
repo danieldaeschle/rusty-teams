@@ -204,7 +204,11 @@ async fn supervise(
         link,
         live_retry,
     ));
-    tokio::spawn(calendar_loop(session.clone(), events.clone()));
+    tokio::spawn(calendar_loop(
+        session.clone(),
+        store.clone(),
+        events.clone(),
+    ));
     tokio::spawn(pins_loop(session, events.clone()));
     tokio::spawn(presence_resubscribe_loop(engine.clone()));
     refresh_loop(engine, events, nudges).await;
@@ -457,7 +461,7 @@ async fn handle_message_event(
     }
 }
 
-async fn calendar_loop(session: Session, events: EventSender) {
+async fn calendar_loop(session: Session, store: Arc<Store>, events: EventSender) {
     let calendar = Calendar::new(&session);
     let (nudge, mut nudges) = mpsc::unbounded_channel();
     let _ = events.send(BackendEvent::CalendarNudge(nudge));
@@ -483,16 +487,33 @@ async fn calendar_loop(session: Session, events: EventSender) {
         deferred_fetch = None;
         last_fetch = Some(tokio::time::Instant::now());
         let (start, end) = fetch_window(Utc::now(), Local::now().offset().fix());
-        match calendar.calendar_view(start, end).await {
-            Ok(fetched) => {
-                if events.send(BackendEvent::Calendar(fetched)).is_err() {
-                    return;
+        let mut accounts = store::load_calendar_accounts(&store);
+        let mut combined = Vec::new();
+        let mut outlook_failed = false;
+        if accounts.outlook_selected {
+            match calendar.calendar_view(start, end).await {
+                Ok(fetched) => combined.extend(fetched),
+                Err(error) => {
+                    outlook_failed = true;
+                    crate::diagnostics::record(format!(
+                        "calls: outlook calendar not loaded: {}",
+                        shorten(&error.to_string())
+                    ));
                 }
             }
-            Err(error) => crate::diagnostics::record(format!(
-                "calls: calendar not loaded: {}",
-                shorten(&error.to_string())
-            )),
+        }
+        if let Ok(google_events) =
+            crate::google_calendar_sync::fetch_google_events(&mut accounts, start, end).await
+        {
+            let _ = store::save_calendar_accounts(&store, &accounts);
+            combined.extend(google_events);
+        }
+        if combined.is_empty() && outlook_failed && !accounts.has_google() {
+            continue;
+        }
+        let merged = chatsvc::merge_calendar_events(combined);
+        if events.send(BackendEvent::Calendar(merged)).is_err() {
+            return;
         }
     }
 }

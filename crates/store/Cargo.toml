@@ -10,6 +10,7 @@ chrono.workspace = true
 directories.workspace = true
 rusqlite.workspace = true
 scraper.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true
 

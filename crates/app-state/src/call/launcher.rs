@@ -163,16 +163,16 @@ impl CallLauncher {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn create_meeting(
+    pub async fn resolve_new_event(
         &self,
         draft: MeetingDraft,
-    ) -> Result<chatsvc::CreatedEvent, String> {
+    ) -> Result<chatsvc::NewEvent, String> {
         let session = self
             .ready_engine()
             .await
             .ok_or_else(|| NOT_READY.to_owned())?
             .session();
-        let graph = graph::Graph::new(session.clone());
+        let graph = graph::Graph::new(session);
         let mut attendees = Vec::with_capacity(draft.people.len());
         for invitee in &draft.people {
             let looked_up = match invitee.mail {
@@ -181,7 +181,7 @@ impl CallLauncher {
             };
             attendees.push(attendee_for(invitee, looked_up)?);
         }
-        let event = chatsvc::NewEvent {
+        Ok(chatsvc::NewEvent {
             subject: draft.subject,
             start: draft.start,
             end: draft.end,
@@ -191,9 +191,37 @@ impl CallLauncher {
             attendees,
             repeat: draft.repeat,
             details: draft.details,
-        };
+        })
+    }
+
+    pub async fn create_meeting(
+        &self,
+        draft: MeetingDraft,
+    ) -> Result<chatsvc::CreatedEvent, String> {
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
+        let event = self.resolve_new_event(draft).await?;
         chatsvc::Calendar::new(&session)
             .create_event(&event)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn create_meeting_with_join(
+        &self,
+        event: chatsvc::NewEvent,
+        join_url: &str,
+    ) -> Result<chatsvc::CreatedEvent, String> {
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
+        chatsvc::Calendar::new(&session)
+            .create_event_with_join(&event, join_url)
             .await
             .map_err(|error| error.to_string())
     }
@@ -221,6 +249,22 @@ impl CallLauncher {
             .session();
         chatsvc::Calendar::new(&session)
             .respond(event_id, ical_uid, reply, send_response)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn delete_calendar_event(
+        &self,
+        event_id: &str,
+        ical_uid: Option<&str>,
+    ) -> Result<(), String> {
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
+        chatsvc::Calendar::new(&session)
+            .delete_event(event_id, ical_uid)
             .await
             .map_err(|error| error.to_string())
     }

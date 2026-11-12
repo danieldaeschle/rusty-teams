@@ -1,6 +1,7 @@
 mod about;
 mod account;
 mod appearance;
+mod calendar;
 mod calls;
 mod chats;
 mod devices;

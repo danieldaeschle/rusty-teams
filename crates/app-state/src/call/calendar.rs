@@ -17,6 +17,9 @@ pub(crate) fn demo_anchor() -> DateTime<Utc> {
 
 impl AppState {
     pub fn apply_calendar(&mut self, events: Vec<CalendarEvent>, cx: &mut Context<Self>) {
+        // Agenda / reminders poll — must not replace calendar_week.events.
+        // That window is only ~today+7d; overwriting wiped earlier days in the
+        // visible week/month and made entries "vanish" after delete or poll.
         self.calendar_events = events;
         self.calls_list.invalidate();
         cx.emit(AppEvent::CallHistory);
@@ -29,10 +32,17 @@ impl AppState {
             events.extend(self.demo_meetings.iter().cloned());
             events.sort_by_key(|event| (event.start, event.end));
             self.apply_calendar(events, cx);
+            if self.calendar_week.start.is_some() {
+                self.load_calendar_week(cx);
+            }
             return;
         }
         if let Some(nudge) = &self.calendar_nudge {
             let _ = nudge.send(());
+        }
+        // Visible grid SoT is load_calendar_week (full span + Google merge).
+        if self.calendar_week.start.is_some() {
+            self.load_calendar_week(cx);
         }
     }
 

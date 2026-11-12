@@ -12,7 +12,9 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::calendar_date_picker::date_picker_button;
+use super::calendar_event_dialog::open_calendar_event;
 use super::calendar_month::month_grid;
+use super::calendar_picker;
 use super::join_dialog::open_join_with_id;
 use super::meeting_proposal_card::meeting_proposal_cards;
 use super::new_meeting_dialog::open_new_meeting;
@@ -23,10 +25,10 @@ use crate::call::calendar_now::{
     DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION,
     now_scroll_offset_y, offset_differs, shows_hour_grid,
 };
-use crate::call::join_available;
 use crate::call::week_grid::{
     CalendarSpan, EventLook, WeekBlock, WeekDay, event_look, hour_label, month_shown, week_days,
 };
+use crate::i18n::tr;
 use crate::theme;
 
 const HOUR_HEIGHT: f32 = 120.;
@@ -352,7 +354,12 @@ impl CalendarView {
             }))
     }
 
-    fn all_day_row(&self, days: &[WeekDay], events: &[CalendarEvent]) -> Option<Div> {
+    fn all_day_row(
+        &self,
+        days: &[WeekDay],
+        events: &[CalendarEvent],
+        send_response: bool,
+    ) -> Option<Div> {
         if days.iter().all(|day| day.all_day.is_empty()) {
             return None;
         }
@@ -371,16 +378,36 @@ impl CalendarView {
                         .border_l_1()
                         .border_color(theme::border())
                         .children(day.all_day.iter().map(|&index| {
+                            let event = events[index].clone();
+                            let open_state = self.state.clone();
+                            let (menu_state, menu_event) = (self.state.clone(), event.clone());
+                            // Day-qualified id: multi-day all-day chips share object_id.
                             div()
+                                .id(SharedString::from(format!(
+                                    "calendar-all-day-{}-{}",
+                                    event.object_id, day.date
+                                )))
                                 .h(px(ALL_DAY_HEIGHT - 2. * BLOCK_GAP))
                                 .px(px(6.))
                                 .flex()
                                 .items_center()
                                 .rounded(px(4.))
-                                .bg(event_fill(event_look(&events[index])))
+                                .bg(event_fill(event_look(&event)))
                                 .text_size(px(12.))
                                 .truncate()
-                                .child(event_title(&events[index]))
+                                .cursor_pointer()
+                                .child(event_title(&event))
+                                .on_click(move |_, window, cx| {
+                                    open_calendar_event(
+                                        open_state.clone(),
+                                        event.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                })
+                                .context_menu(move |menu, _, _| {
+                                    event_menu(menu, &menu_state, &menu_event, send_response)
+                                })
                         }))
                 })),
         )
@@ -390,7 +417,7 @@ impl CalendarView {
         &self,
         block: &WeekBlock,
         event: &CalendarEvent,
-        now: DateTime<Utc>,
+        day: NaiveDate,
         send_response: bool,
     ) -> impl IntoElement {
         let top = block.start_minute as f32 / 60. * HOUR_HEIGHT;
@@ -401,11 +428,10 @@ impl CalendarView {
         let compact = height < 36.;
         let small = height < SMALL_TITLE_HEIGHT;
         let look = event_look(event);
-        let can_join = event.online
-            && !event.cancelled
-            && event.join_url.is_some()
-            && join_available(event.start, event.end, now);
-        let (open_state, thread_id) = (self.state.clone(), event.thread_id.clone());
+        // Join on the block whenever a Teams link exists (same as detail dialog).
+        let can_join = event.online && !event.cancelled && event.join_url.is_some();
+        let open_state = self.state.clone();
+        let open_event = event.clone();
         let (menu_state, menu_event) = (self.state.clone(), event.clone());
         let (join_state, join_url, subject) = (
             self.state.clone(),
@@ -416,10 +442,11 @@ impl CalendarView {
             EventLook::Busy => (theme::text(), theme::text_soft()),
             EventLook::Free | EventLook::Tentative => (theme::text_soft(), theme::text_muted()),
         };
+        // Day-qualified id: overnight / multi-day spans reuse object_id per column.
         div()
             .id(SharedString::from(format!(
-                "calendar-event-{}",
-                event.object_id
+                "calendar-event-{}-{}",
+                event.object_id, day
             )))
             .absolute()
             .top(px(top))
@@ -471,12 +498,12 @@ impl CalendarView {
                         block.child(
                             div().flex_none().pr(px(4.)).pt(px(3.)).h_full().child(
                                 Button::new(SharedString::from(format!(
-                                    "calendar-join-{}",
-                                    event.object_id
+                                    "calendar-join-{}-{}",
+                                    event.object_id, day
                                 )))
                                 .xsmall()
                                 .primary()
-                                .label("Join")
+                                .label(tr("common.join"))
                                 .on_click(move |_, _, cx| {
                                     cx.stop_propagation();
                                     join_state.update(cx, |state, cx| {
@@ -491,10 +518,8 @@ impl CalendarView {
                         )
                     }),
             )
-            .on_click(move |_, _, cx| {
-                open_state.update(cx, |state, cx| {
-                    state.open_meeting_chat(thread_id.as_deref(), cx)
-                });
+            .on_click(move |_, window, cx| {
+                open_calendar_event(open_state.clone(), open_event.clone(), window, cx);
             })
             .context_menu(move |menu, _, _| {
                 event_menu(menu, &menu_state, &menu_event, send_response)
@@ -571,7 +596,7 @@ impl CalendarView {
                                 self.event_block(
                                     block,
                                     &events[block.event_index],
-                                    now,
+                                    day.date,
                                     send_response,
                                 )
                             }))
@@ -680,11 +705,34 @@ fn status_bar(look: EventLook) -> Option<Div> {
 }
 
 fn event_title(event: &CalendarEvent) -> String {
-    if event.cancelled {
+    let subject = if event.cancelled {
         format!("{CANCELED_PREFIX}{}", event.subject)
     } else {
         event.subject.clone()
+    };
+    let label = source_label(event);
+    if label.is_empty() {
+        subject
+    } else {
+        format!("{subject} · {label}")
     }
+}
+
+fn source_label(event: &CalendarEvent) -> String {
+    let mut sources = event.sources.clone();
+    if sources.is_empty() {
+        sources.push(event.source);
+    }
+    sources.sort_by_key(|source| source.label());
+    sources.dedup();
+    if sources.len() == 1 && sources[0] == chatsvc::CalendarSource::Outlook {
+        return String::new();
+    }
+    sources
+        .iter()
+        .map(|source| source.label())
+        .collect::<Vec<_>>()
+        .join("+")
 }
 
 impl Render for CalendarView {
@@ -700,7 +748,8 @@ impl Render for CalendarView {
         let days = week_days(&events, start, span.days(), offset);
         let today = Local::now().date_naive();
         let now = Utc::now();
-        v_flex()
+        let show_picker = !compact;
+        h_flex()
             .debug_selector(|| "shell/islands/calendar".into())
             .flex_1()
             .w_full()
@@ -709,24 +758,33 @@ impl Render for CalendarView {
             .rounded(px(10.))
             .bg(theme::surface())
             .overflow_hidden()
-            .child(self.header(start, span, compact))
-            .children(meeting_proposal_cards(cx))
-            .map(|calendar| {
-                if span == CalendarSpan::Month {
-                    calendar.child(month_grid(
-                        &self.state,
-                        start,
-                        &days,
-                        &events,
-                        today,
-                        offset,
-                    ))
-                } else {
-                    calendar
-                        .child(self.day_headers(&days, today))
-                        .children(self.all_day_row(&days, &events))
-                        .child(self.grid(&days, &events, today, now, send_response, cx))
-                }
+            .when(show_picker, |row| {
+                row.child(calendar_picker::render(&self.state, cx))
             })
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .child(self.header(start, span, compact))
+                    .children(meeting_proposal_cards(cx))
+                    .map(|calendar| {
+                        if span == CalendarSpan::Month {
+                            calendar.child(month_grid(
+                                &self.state,
+                                start,
+                                &days,
+                                &events,
+                                today,
+                                offset,
+                            ))
+                        } else {
+                            calendar
+                                .child(self.day_headers(&days, today))
+                                .children(self.all_day_row(&days, &events, send_response))
+                                .child(self.grid(&days, &events, today, now, send_response, cx))
+                        }
+                    }),
+            )
     }
 }

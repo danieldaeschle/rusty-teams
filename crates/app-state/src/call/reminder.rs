@@ -273,27 +273,37 @@ impl MeetingToasts {
     }
 }
 
+fn reminder_source_events(state: &AppState) -> Vec<CalendarEvent> {
+    let mut events = state.calendar_events.clone();
+    for event in &state.calendar_week.events {
+        if !events
+            .iter()
+            .any(|existing| existing.object_id == event.object_id)
+        {
+            events.push(event.clone());
+        }
+    }
+    events
+}
+
 impl AppState {
     pub fn tick_meeting_reminders(&mut self, show: bool, cx: &mut Context<Self>) {
         let now = Utc::now();
         self.poll_outlook_reminders(now, cx);
         let in_call = self.call.is_some();
         let show = show && !in_call && !self.mode.read_only;
-        for thread_id in self
-            .meeting_toasts
-            .live_candidates(&self.calendar_events, now)
-        {
+        let events = reminder_source_events(self);
+        for thread_id in self.meeting_toasts.live_candidates(&events, now) {
             self.fetch_live_meeting(&thread_id, cx);
         }
-        let live_threads: HashSet<String> = self
-            .calendar_events
+        let live_threads: HashSet<String> = events
             .iter()
             .filter_map(|event| event.thread_id.clone())
             .filter(|thread_id| self.running_meeting(thread_id).is_some())
             .collect();
         let update = self
             .meeting_toasts
-            .update(&self.calendar_events, &live_threads, now, show);
+            .update(&events, &live_threads, now, show);
         if (in_call && self.meeting_toasts.clear()) || update.changed {
             cx.emit(AppEvent::MeetingReminder);
             cx.notify();
@@ -322,7 +332,9 @@ impl AppState {
 
     pub fn snooze_meeting_toast(&mut self, id: u64, cx: &mut Context<Self>) {
         if let Some(toast) = self.meeting_toasts.snooze(id) {
-            self.write_outlook_reminder(toast.event_id, ReminderWrite::Snooze(toast.start));
+            if self.outlook_reminder_event(&toast.event_id) {
+                self.write_outlook_reminder(toast.event_id, ReminderWrite::Snooze(toast.start));
+            }
             cx.emit(AppEvent::MeetingReminder);
             cx.notify();
         }
@@ -330,10 +342,20 @@ impl AppState {
 
     pub fn dismiss_meeting_toast(&mut self, id: u64, cx: &mut Context<Self>) {
         if let Some(toast) = self.meeting_toasts.dismiss(id) {
-            self.write_outlook_reminder(toast.event_id, ReminderWrite::Dismiss);
+            if self.outlook_reminder_event(&toast.event_id) {
+                self.write_outlook_reminder(toast.event_id, ReminderWrite::Dismiss);
+            }
             cx.emit(AppEvent::MeetingReminder);
             cx.notify();
         }
+    }
+
+    fn outlook_reminder_event(&self, event_id: &str) -> bool {
+        self.calendar_events
+            .iter()
+            .chain(self.calendar_week.events.iter())
+            .find(|event| event.object_id == event_id)
+            .is_none_or(|event| event.source == chatsvc::CalendarSource::Outlook)
     }
 }
 
@@ -365,6 +387,7 @@ mod tests {
             show_as: Default::default(),
             dial_in: None,
             response: ResponseType::Accepted,
+            ..Default::default()
         }
     }
 

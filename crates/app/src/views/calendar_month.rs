@@ -6,7 +6,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app_state::AppState;
-use crate::call::week_grid::{WeekDay, month_shown};
+use crate::call::week_grid::{WeekDay, is_effective_all_day, month_shown};
 use crate::theme;
 
 pub const MONTH_GRID_TAG: &str = "shell/islands/calendar/month";
@@ -35,7 +35,8 @@ fn more_label(hidden: usize) -> String {
 }
 
 fn event_chip(event: &CalendarEvent, offset: FixedOffset) -> Div {
-    let time = (!event.all_day).then(|| {
+    let all_day = is_effective_all_day(event, offset);
+    let time = (!all_day).then(|| {
         event
             .start
             .with_timezone(&offset)
@@ -50,17 +51,28 @@ fn event_chip(event: &CalendarEvent, offset: FixedOffset) -> Div {
         .gap(px(6.))
         .items_center()
         .rounded(px(4.))
-        .bg(theme::accent().opacity(if event.all_day { 0.28 } else { 0.14 }))
+        .bg(theme::accent().opacity(if all_day { 0.28 } else { 0.14 }))
         .text_size(px(11.5))
         .text_color(theme::text())
         .children(time.map(|time| div().flex_none().text_color(theme::text_soft()).child(time)))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
-                .child(event.subject.clone()),
-        )
+        .child(div().flex_1().min_w_0().truncate().child({
+            let mut sources = event.sources.clone();
+            if sources.is_empty() {
+                sources.push(event.source);
+            }
+            sources.sort_by_key(|source| source.label());
+            sources.dedup();
+            if sources.len() == 1 && sources[0] == chatsvc::CalendarSource::Outlook {
+                event.subject.clone()
+            } else {
+                let names = sources
+                    .iter()
+                    .map(|source| source.label())
+                    .collect::<Vec<_>>()
+                    .join("+");
+                format!("{} · {names}", event.subject)
+            }
+        }))
 }
 
 fn day_cell(
