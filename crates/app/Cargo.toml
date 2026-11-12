@@ -48,3 +48,6 @@ webview.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 browser.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+browser.workspace = true

@@ -56,10 +56,10 @@ pub fn chrome_arguments(spec: &ArgumentSpec) -> Vec<String> {
 }
 
 pub fn user_agent(platform: Platform, major: u32) -> String {
-    let system = if platform == Platform::Linux {
-        "X11; Linux x86_64"
-    } else {
-        "Windows NT 10.0; Win64; x64"
+    let system = match platform {
+        Platform::Linux => "X11; Linux x86_64",
+        Platform::Macos => "Macintosh; Intel Mac OS X 10_15_7",
+        Platform::Windows | Platform::Wsl => "Windows NT 10.0; Win64; x64",
     };
     format!(
         "Mozilla/5.0 ({system}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
@@ -90,12 +90,12 @@ const FALLBACK_MAJOR: u32 = 150;
 
 fn chrome_major(platform: Platform, executable: &Path) -> u32 {
     let detected = match platform {
-        Platform::Linux => Command::new(executable)
+        Platform::Linux | Platform::Macos => Command::new(executable)
             .arg("--version")
             .output()
             .ok()
             .and_then(|output| major_from_version_output(&String::from_utf8_lossy(&output.stdout))),
-        _ => executable
+        Platform::Windows | Platform::Wsl => executable
             .parent()
             .and_then(|parent| std::fs::read_dir(parent).ok())
             .and_then(|entries| {
@@ -225,6 +225,9 @@ mod tests {
         assert!(user_agent(Platform::Wsl, 154).contains("Windows NT 10.0; Win64; x64"));
         assert!(user_agent(Platform::Windows, 154).contains("Chrome/154.0.0.0"));
         assert!(user_agent(Platform::Linux, 140).contains("X11; Linux x86_64"));
+        assert!(user_agent(Platform::Macos, 154).contains("Macintosh; Intel Mac OS X 10_15_7"));
+        assert!(user_agent(Platform::Macos, 154).contains("Chrome/154.0.0.0"));
+        assert!(!user_agent(Platform::Macos, 154).contains("Windows NT"));
     }
 
     #[test]
