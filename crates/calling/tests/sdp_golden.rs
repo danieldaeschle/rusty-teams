@@ -12,6 +12,7 @@ fn captured_plan() -> OfferPlan {
     OfferPlan {
         screen_share_mids: vec!["18".into()],
         gallery_mids: (10..=17).map(|mid| mid.to_string()).collect(),
+        fold_groups: Vec::new(),
     }
 }
 

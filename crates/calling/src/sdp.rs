@@ -298,11 +298,14 @@ impl LineRole {
     }
 }
 
-/// Which browser m-lines play which Teams role; `gallery_mids` are folded into one `x-multi-stream` line.
+/// Which browser m-lines play which Teams role.
+/// `gallery_mids` / `fold_groups` collapse several browser mids into one Teams `x-multi-stream` line.
 #[derive(Debug, Clone, Default)]
 pub struct OfferPlan {
     pub screen_share_mids: Vec<String>,
     pub gallery_mids: Vec<String>,
+    /// Each group is one Teams line; the last mid is the carrier written back to Teams.
+    pub fold_groups: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -344,12 +347,16 @@ pub fn to_teams_offer(
                 .map(|(_, cname)| cname.to_owned())
         })
         .unwrap_or_else(|| format!("{:08x}{:08x}", numbers.next_u32(), numbers.next_u32()));
-    let gallery_carrier = plan.gallery_mids.last().cloned();
+    let fold_groups = effective_fold_groups(plan);
     let mut lines = Vec::new();
     let mut media = Vec::new();
     for source in &browser.media {
         let mid = source.mid().unwrap_or_default().to_owned();
-        if plan.gallery_mids.contains(&mid) && Some(&mid) != gallery_carrier.as_ref() {
+        let fold_group = fold_groups
+            .iter()
+            .find(|group| group.iter().any(|entry| entry == &mid));
+        let fold_carrier = fold_group.and_then(|group| group.last());
+        if fold_group.is_some() && Some(&mid) != fold_carrier {
             continue;
         }
         let role = match source.kind.as_str() {
@@ -358,11 +365,10 @@ pub fn to_teams_offer(
             _ if plan.screen_share_mids.contains(&mid) => LineRole::ScreenShare,
             _ => LineRole::MainVideo,
         };
-        let multi_stream =
-            (Some(&mid) == gallery_carrier.as_ref()).then_some(plan.gallery_mids.len());
+        let multi_stream = fold_group.map(|group| group.len());
         let is_first = media.is_empty();
         let signaled = if source.port == "0" {
-            signal_rejected_line(source, role)
+            signal_rejected_line(source, role, multi_stream)
         } else if role == LineRole::Data {
             signal_data_line(source, numbers)
         } else {
@@ -370,8 +376,8 @@ pub fn to_teams_offer(
         };
         media.push(signaled);
         lines.push(SignaledLine {
-            browser_mids: match multi_stream {
-                Some(_) => plan.gallery_mids.clone(),
+            browser_mids: match fold_group {
+                Some(group) => group.clone(),
                 None => vec![mid],
             },
             role,
@@ -405,12 +411,14 @@ pub fn to_teams_offer(
     })
 }
 
-fn signal_rejected_line(source: &Media, role: LineRole) -> Media {
-    let attributes = vec![
-        Attribute::new("mid", source.mid().unwrap_or_default()),
-        Attribute::flag("inactive"),
-        Attribute::new("label", role.label()),
-    ];
+fn signal_rejected_line(source: &Media, role: LineRole, multi_stream: Option<usize>) -> Media {
+    let mut attributes = Vec::new();
+    if let Some(count) = multi_stream {
+        attributes.push(Attribute::new("x-multi-stream", format!("{count} 1 1 1")));
+    }
+    attributes.push(Attribute::new("mid", source.mid().unwrap_or_default()));
+    attributes.push(Attribute::flag("inactive"));
+    attributes.push(Attribute::new("label", role.label()));
     Media {
         kind: if role == LineRole::Data {
             "x-data".to_owned()
@@ -1117,13 +1125,25 @@ impl RemoteOffer {
                 LineRole::ScreenShare => plan
                     .screen_share_mids
                     .extend(line.browser_mids.iter().cloned()),
-                _ if line.browser_mids.len() > 1 => {
-                    plan.gallery_mids.extend(line.browser_mids.iter().cloned())
-                }
                 _ => {}
+            }
+            if line.browser_mids.len() > 1 {
+                plan.gallery_mids.extend(line.browser_mids.iter().cloned());
+                plan.fold_groups.push(line.browser_mids.clone());
             }
         }
         plan
+    }
+}
+
+fn effective_fold_groups(plan: &OfferPlan) -> Vec<Vec<String>> {
+    if !plan.fold_groups.is_empty() {
+        return plan.fold_groups.clone();
+    }
+    if plan.gallery_mids.len() > 1 {
+        vec![plan.gallery_mids.clone()]
+    } else {
+        Vec::new()
     }
 }
 
@@ -1658,6 +1678,89 @@ mod tests {
             folded_mids("2", 2, &taken),
             vec!["2-0".to_owned(), "2".to_owned()]
         );
+    }
+
+    /// Mid 2 is already taken, so mid 3 with x-multi-stream:2 folds to 3-0 + 3 (as in the Hyprland 1:1 call report).
+    fn folded_carrier_neighbor_taken(label: &str) -> String {
+        format!(
+            "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 1 2 5 3 4\r\nm=audio 1234 RTP/SAVP 111\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:111 opus/48000/2\r\na=mid:1\r\na=sendrecv\r\na=label:main-audio\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=fingerprint:sha-256 AA\r\na=setup:actpass\r\nm=video 1234 RTP/SAVP 102\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:102 H264/90000\r\na=mid:2\r\na=sendrecv\r\na=label:main-video\r\nm=video 1234 RTP/SAVP 102\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:102 H264/90000\r\na=mid:5\r\na=sendrecv\r\na=label:main-video\r\nm=video 1234 RTP/SAVP 102\r\nc=IN IP4 10.10.10.10\r\na=rtpmap:102 H264/90000\r\na=mid:3\r\na=sendrecv\r\na=label:{label}\r\na=x-multi-stream:2 1 1 1\r\nm=x-data 1234 RTP/SAVP 127\r\nc=IN IP4 10.10.10.10\r\na=mid:4\r\na=sendrecv\r\na=label:data\r\n"
+        )
+    }
+
+    #[test]
+    fn a_folded_answer_keeps_one_teams_line_when_carrier_neighbors_are_taken() {
+        for label in ["main-video", "applicationsharing-video"] {
+            let offer = folded_carrier_neighbor_taken(label);
+            let remote = from_teams_offer(&offer).unwrap();
+            let folded = remote
+                .lines
+                .iter()
+                .find(|line| line.browser_mids.len() > 1)
+                .expect("folded line");
+            assert_eq!(folded.browser_mids, vec!["3-0".to_owned(), "3".to_owned()]);
+            assert_eq!(
+                remote.plan().fold_groups,
+                vec![vec!["3-0".to_owned(), "3".to_owned()]]
+            );
+            let offer_lines = parse(&offer).unwrap().media.len();
+            let browser = parse(&remote.browser_sdp).unwrap();
+            assert_eq!(browser.media.len(), offer_lines + 1);
+            for port in ["0", "9"] {
+                let answer_browser = write(&SessionDescription {
+                    session: browser.session.clone(),
+                    media: browser
+                        .media
+                        .iter()
+                        .map(|line| {
+                            let mut line = line.clone();
+                            line.port = if line.kind == "audio" || line.kind == "application" {
+                                "9".to_owned()
+                            } else {
+                                port.to_owned()
+                            };
+                            line.attributes.retain(|attribute| {
+                                !matches!(
+                                    attribute.name.as_str(),
+                                    "sendrecv" | "recvonly" | "sendonly" | "inactive"
+                                )
+                            });
+                            if line.kind == "audio" || line.kind == "application" {
+                                line.attributes.push(Attribute::flag("sendrecv"));
+                            } else {
+                                line.attributes.push(Attribute::flag("inactive"));
+                            }
+                            line
+                        })
+                        .collect(),
+                });
+                let answer = to_teams_answer(&answer_browser, &remote, &mut counter()).unwrap();
+                let parsed = parse(&answer.sdp).unwrap();
+                let mids: Vec<_> = parsed.media.iter().filter_map(|line| line.mid()).collect();
+                assert_eq!(
+                    parsed.media.len(),
+                    offer_lines,
+                    "{label} port {port}: answer mids {mids:?} must match the offer line count"
+                );
+                assert!(
+                    !mids.iter().any(|mid| *mid == "3-0"),
+                    "{label} port {port}: signaled answer must not expose the internal fold mid: {mids:?}"
+                );
+                assert!(mids.iter().any(|mid| *mid == "3"), "{label} port {port}");
+                let carrier = parsed
+                    .media
+                    .iter()
+                    .find(|line| line.mid() == Some("3"))
+                    .unwrap();
+                assert_eq!(
+                    carrier
+                        .value("x-multi-stream")
+                        .and_then(|value| value.split(' ').next().map(str::to_owned)),
+                    Some("2".to_owned()),
+                    "{label} port {port}: carrier must keep x-multi-stream"
+                );
+                assert_eq!(carrier.value("label"), Some(label));
+            }
+        }
     }
 
     #[test]

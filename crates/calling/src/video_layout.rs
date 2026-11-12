@@ -12,6 +12,7 @@ use crate::error::{Error, Result};
 use crate::sdp::{LineRole, OfferPlan, StreamLine};
 use crate::send_control::capture_macroblocks;
 use crate::video_frame::VideoKey;
+use crate::video_quality::VideoQuality;
 
 pub const RECEIVE_SLOTS: usize = 9;
 pub const CAMERA_MID: &str = "1";
@@ -25,10 +26,16 @@ pub const SCREEN_STREAM: &str = "screen";
 const H264: &str = "video/h264";
 const RTX: &str = "video/rtx";
 const NO_SOURCE: i64 = -1;
-const STAGE_REQUEST: ReceiveLimits = ReceiveLimits {
+const STAGE_720_REQUEST: ReceiveLimits = ReceiveLimits {
     max_fs: 3600,
     max_fps: 3000,
     max_mbps: 108_000,
+};
+/// 1080p @ 30: max-fs 8160 macroblocks, mbps ≈ 8160 * 30.
+const STAGE_1080_REQUEST: ReceiveLimits = ReceiveLimits {
+    max_fs: 8160,
+    max_fps: 3000,
+    max_mbps: 244_800,
 };
 const SMALL_REQUEST: ReceiveLimits = ReceiveLimits {
     max_fs: 920,
@@ -55,9 +62,12 @@ pub enum TileDetail {
 }
 
 impl TileDetail {
-    fn limits(self) -> ReceiveLimits {
+    fn limits(self, quality: VideoQuality) -> ReceiveLimits {
         match self {
-            TileDetail::Stage => STAGE_REQUEST,
+            TileDetail::Stage => match quality {
+                VideoQuality::P720 => STAGE_720_REQUEST,
+                VideoQuality::Auto | VideoQuality::P1080 => STAGE_1080_REQUEST,
+            },
             TileDetail::Small => SMALL_REQUEST,
         }
     }
@@ -80,6 +90,7 @@ pub fn offer_plan() -> OfferPlan {
     OfferPlan {
         screen_share_mids: vec![SHARE_MID.to_owned()],
         gallery_mids: Vec::new(),
+        fold_groups: Vec::new(),
     }
 }
 
@@ -87,6 +98,7 @@ pub fn one_to_one_plan() -> OfferPlan {
     OfferPlan {
         screen_share_mids: vec![ONE_TO_ONE_SHARE_MID.to_owned()],
         gallery_mids: Vec::new(),
+        fold_groups: Vec::new(),
     }
 }
 
@@ -387,12 +399,14 @@ pub struct SourceRequest {
     pub source: Option<u32>,
     pub screen: bool,
     pub detail: TileDetail,
+    pub quality: VideoQuality,
 }
 
 pub fn requests_for(
     current: &[Option<Assignment>],
     next: &[Option<Assignment>],
     slots: &[ReceiveSlot],
+    quality: VideoQuality,
 ) -> Vec<SourceRequest> {
     slots
         .iter()
@@ -407,6 +421,7 @@ pub fn requests_for(
                 .as_ref()
                 .map(|assignment| assignment.detail)
                 .unwrap_or_default(),
+            quality,
         })
         .collect()
 }
@@ -417,7 +432,7 @@ impl SourceRequest {
         let limits = if self.screen {
             SCREEN_REQUEST
         } else {
-            self.detail.limits()
+            self.detail.limits(self.quality)
         };
         let control = json!({
             "controlVideoStreaming": {
@@ -445,7 +460,15 @@ impl SourceRequest {
     }
 }
 
-pub fn send_capabilities_body(width: u32, height: u32, sequence_number: u64) -> Value {
+pub fn send_capabilities_body(
+    width: u32,
+    height: u32,
+    sequence_number: u64,
+    quality: VideoQuality,
+) -> Value {
+    let ceiling = quality.capture_height().max(quality.capture_width());
+    let width = width.min(ceiling);
+    let height = height.min(ceiling);
     let largest_side = width.max(height);
     let layers = if capture_macroblocks(width, height) < THREE_LAYER_MIN_FS {
         2
@@ -476,17 +499,24 @@ pub fn send_capabilities_body(width: u32, height: u32, sequence_number: u64) -> 
 #[derive(Debug, Default)]
 pub struct SendCapabilityReporter {
     last_size: Option<(u32, u32)>,
+    last_quality: Option<VideoQuality>,
     sequence_number: u64,
 }
 
 impl SendCapabilityReporter {
-    pub fn body_for(&mut self, size: (u32, u32)) -> Option<Value> {
-        if self.last_size == Some(size) {
+    pub fn body_for(&mut self, size: (u32, u32), quality: VideoQuality) -> Option<Value> {
+        if self.last_size == Some(size) && self.last_quality == Some(quality) {
             return None;
         }
-        self.last_size = Some(size);
+        self.last_size.replace(size);
+        self.last_quality.replace(quality);
         self.sequence_number += 1;
-        Some(send_capabilities_body(size.0, size.1, self.sequence_number))
+        Some(send_capabilities_body(
+            size.0,
+            size.1,
+            self.sequence_number,
+            quality,
+        ))
     }
 }
 
@@ -610,7 +640,7 @@ mod tests {
                 stream_id: 204,
             },
         ];
-        let requests = requests_for(&held, &next, &slots);
+        let requests = requests_for(&held, &next, &slots, VideoQuality::Auto);
         assert_eq!(
             requests,
             vec![SourceRequest {
@@ -618,7 +648,8 @@ mod tests {
                 stream_id: 203,
                 source: None,
                 screen: false,
-                detail: TileDetail::Stage
+                detail: TileDetail::Stage,
+                quality: VideoQuality::Auto,
             }]
         );
     }
@@ -631,6 +662,7 @@ mod tests {
             source: Some(302),
             screen: false,
             detail: TileDetail::Stage,
+            quality: VideoQuality::Auto,
         };
         let body = request.body(7);
         let channel = &body["applyChannelParameters"]["multiChannelParameter"];
@@ -641,8 +673,9 @@ mod tests {
         assert_eq!(parameter["controlVideoStreaming"]["sequenceNumber"], 7);
         assert_eq!(info["sourceId"], 302);
         assert_eq!(info["streamMsid"], 204);
-        assert_eq!(info["fmtParams"][0]["max-fs"], 3600);
+        assert_eq!(info["fmtParams"][0]["max-fs"], 8160);
         assert_eq!(info["fmtParams"][0]["max-fps"], 3000);
+        assert_eq!(info["fmtParams"][0]["max-mbps"], 244_800);
         assert_eq!(info["fmtParams"][0]["profile-level-id"], "64001f");
         let cleared = SourceRequest {
             source: None,
@@ -744,7 +777,7 @@ mod tests {
                 stream_id: 203 + index,
             })
             .collect();
-        let requests = requests_for(&held, &next, &slots);
+        let requests = requests_for(&held, &next, &slots, VideoQuality::Auto);
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].mid, "3");
         assert_eq!(requests[0].detail, TileDetail::Stage);
@@ -759,6 +792,7 @@ mod tests {
                 source: Some(1),
                 screen: false,
                 detail,
+                quality: VideoQuality::Auto,
             };
             let body = request.body(1);
             let parameter: Value = serde_json::from_str(
@@ -769,9 +803,29 @@ mod tests {
             .unwrap();
             parameter["controlVideoStreaming"]["controlInfo"]["fmtParams"][0].clone()
         };
-        assert_eq!(fmt_for(TileDetail::Stage)["max-fs"], 3600);
+        assert_eq!(fmt_for(TileDetail::Stage)["max-fs"], 8160);
+        assert_eq!(fmt_for(TileDetail::Stage)["max-mbps"], 244_800);
         assert_eq!(fmt_for(TileDetail::Small)["max-fs"], 920);
         assert_eq!(fmt_for(TileDetail::Small)["max-mbps"], 27_600);
+        let locked = SourceRequest {
+            mid: "2".into(),
+            stream_id: 203,
+            source: Some(1),
+            screen: false,
+            detail: TileDetail::Stage,
+            quality: VideoQuality::P720,
+        }
+        .body(1);
+        let parameter: Value = serde_json::from_str(
+            locked["applyChannelParameters"]["multiChannelParameter"]["mediaParameter"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            parameter["controlVideoStreaming"]["controlInfo"]["fmtParams"][0]["max-fs"],
+            3600
+        );
     }
 
     #[test]
@@ -805,7 +859,7 @@ mod tests {
 
     #[test]
     fn send_capabilities_name_the_camera_mid_and_the_largest_side() {
-        let body = send_capabilities_body(1280, 720, 4);
+        let body = send_capabilities_body(1280, 720, 4, VideoQuality::Auto);
         let channel = &body["applyChannelParameters"]["multiChannelParameter"];
         assert_eq!(channel["mids"], json!(["1"]));
         let parameter: Value =
@@ -817,21 +871,31 @@ mod tests {
             }})
         );
         let small: Value = serde_json::from_str(
-            send_capabilities_body(480, 270, 1)["applyChannelParameters"]["multiChannelParameter"]
-                ["mediaParameter"]
+            send_capabilities_body(480, 270, 1, VideoQuality::Auto)
+                ["applyChannelParameters"]["multiChannelParameter"]["mediaParameter"]
                 .as_str()
                 .unwrap(),
         )
         .unwrap();
         assert_eq!(small["maxVideoSendCapabilities"]["max-layers"], 2);
+        let clamped: Value =
+            serde_json::from_str(
+                send_capabilities_body(3840, 2160, 1, VideoQuality::P720)["applyChannelParameters"]
+                    ["multiChannelParameter"]["mediaParameter"]
+                    .as_str()
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(clamped["maxVideoSendCapabilities"]["max-width"], 1280);
+        assert_eq!(clamped["maxVideoSendCapabilities"]["max-height"], 1280);
     }
 
     #[test]
     fn the_reporter_skips_a_repeated_size_and_counts_sequences() {
         let mut reporter = SendCapabilityReporter::default();
-        assert!(reporter.body_for((1280, 720)).is_some());
-        assert!(reporter.body_for((1280, 720)).is_none());
-        let body = reporter.body_for((640, 480)).unwrap();
+        assert!(reporter.body_for((1280, 720), VideoQuality::Auto).is_some());
+        assert!(reporter.body_for((1280, 720), VideoQuality::Auto).is_none());
+        let body = reporter.body_for((640, 480), VideoQuality::Auto).unwrap();
         let parameter: Value = serde_json::from_str(
             body["applyChannelParameters"]["multiChannelParameter"]["mediaParameter"]
                 .as_str()
@@ -839,5 +903,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(parameter["maxVideoSendCapabilities"]["sequence-number"], 2);
+        assert!(reporter.body_for((640, 480), VideoQuality::P720).is_some());
     }
 }
