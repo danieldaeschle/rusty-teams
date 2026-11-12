@@ -41,7 +41,7 @@ use crate::hold::{HoldState, INACTIVE, MediaLine, accepted_modalities, direction
 use crate::mic_processing::MicSettings;
 use crate::mute::{MuteCommand, MuteEffect};
 use crate::push::CallNotification;
-use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant, fetch_relay_grant};
+use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant};
 use crate::renegotiation::{MediaAction, MediaNegotiator, MediaPath, RejectedOffer};
 use crate::candidates::{SdpKind, is_udp_relay, negotiated_setup, with_candidates};
 use crate::outcome::{embedded_end, failed_participant_count, outcome_summary};
@@ -789,7 +789,7 @@ async fn drive(
     } else {
         None
     };
-    let grant = control.until_hangup(fetch_relay_grant(&inner.session)).await??;
+    let grant = control.until_hangup(inner.relay.grant(&inner.session)).await??;
     timeline.record("GET trap/tokens", format!("relay grant, expires in {} s", grant.expires_in_seconds));
 
     let factory = devices::shared_factory();

@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::{Duration, Instant};
 
 use libwebrtc::peer_connection_factory::IceServer;
 use serde::Deserialize;
@@ -78,9 +79,47 @@ pub async fn fetch_relay_grant(session: &Session) -> Result<RelayGrant> {
     })
 }
 
+const MAX_REFRESH_MARGIN: Duration = Duration::from_secs(3600);
+
+/// One relay grant per engine, fetched once and reused while it stays valid.
+#[derive(Default)]
+pub struct RelayCache {
+    cached: tokio::sync::Mutex<Option<(RelayGrant, Instant)>>,
+}
+
+impl RelayCache {
+    pub async fn grant(&self, session: &Session) -> Result<RelayGrant> {
+        let mut cached = self.cached.lock().await;
+        if let Some((grant, fetched)) = cached.as_ref()
+            && still_fresh(grant.expires_in_seconds, fetched.elapsed())
+        {
+            return Ok(grant.clone());
+        }
+        let grant = fetch_relay_grant(session).await?;
+        *cached = Some((grant.clone(), Instant::now()));
+        Ok(grant)
+    }
+}
+
+fn still_fresh(expires_in_seconds: u64, age: Duration) -> bool {
+    let lifetime = Duration::from_secs(expires_in_seconds);
+    age + (lifetime / 2).min(MAX_REFRESH_MARGIN) < lifetime
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_grant_is_reused_until_an_hour_before_it_expires() {
+        let week = 604_800;
+        assert!(still_fresh(week, Duration::from_secs(60)));
+        assert!(still_fresh(week, Duration::from_secs(week - 3601)));
+        assert!(!still_fresh(week, Duration::from_secs(week - 3600)));
+        assert!(still_fresh(600, Duration::from_secs(200)));
+        assert!(!still_fresh(600, Duration::from_secs(300)));
+        assert!(!still_fresh(0, Duration::ZERO));
+    }
 
     #[test]
     fn debug_never_shows_secrets() {
