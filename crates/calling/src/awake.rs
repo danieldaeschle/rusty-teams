@@ -11,15 +11,27 @@ const REASON: &str = "Teams call in progress";
 #[cfg(windows)]
 mod platform {
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::System::Power::{POWER_REQUEST_TYPE, PowerClearRequest, PowerCreateRequest, PowerRequestDisplayRequired, PowerRequestSystemRequired, PowerSetRequest};
-    use windows::Win32::System::Threading::{POWER_REQUEST_CONTEXT_SIMPLE_STRING, REASON_CONTEXT, REASON_CONTEXT_0};
+    use windows::Win32::System::Power::{
+        POWER_REQUEST_TYPE, PowerClearRequest, PowerCreateRequest, PowerRequestDisplayRequired,
+        PowerRequestSystemRequired, PowerSetRequest,
+    };
+    use windows::Win32::System::Threading::{
+        POWER_REQUEST_CONTEXT_SIMPLE_STRING, REASON_CONTEXT, REASON_CONTEXT_0,
+    };
     use windows_core::PWSTR;
 
-    pub const REQUESTS: [POWER_REQUEST_TYPE; 2] = [PowerRequestSystemRequired, PowerRequestDisplayRequired];
+    pub const REQUESTS: [POWER_REQUEST_TYPE; 2] =
+        [PowerRequestSystemRequired, PowerRequestDisplayRequired];
 
     pub fn acquire(reason: &str) -> Option<HANDLE> {
         let mut wide: Vec<u16> = reason.encode_utf16().chain(Some(0)).collect();
-        let context = REASON_CONTEXT { Version: 0, Flags: POWER_REQUEST_CONTEXT_SIMPLE_STRING, Reason: REASON_CONTEXT_0 { SimpleReasonString: PWSTR(wide.as_mut_ptr()) } };
+        let context = REASON_CONTEXT {
+            Version: 0,
+            Flags: POWER_REQUEST_CONTEXT_SIMPLE_STRING,
+            Reason: REASON_CONTEXT_0 {
+                SimpleReasonString: PWSTR(wide.as_mut_ptr()),
+            },
+        };
         let request = unsafe { PowerCreateRequest(&context) }.ok()?;
         for kind in REQUESTS {
             let _ = unsafe { PowerSetRequest(request, kind) };
@@ -38,13 +50,22 @@ mod platform {
 impl StayAwake {
     #[cfg(windows)]
     pub fn new() -> Self {
-        StayAwake { request: platform::acquire(REASON) }
+        StayAwake {
+            request: platform::acquire(REASON),
+        }
     }
 
     #[cfg(not(windows))]
     pub fn new() -> Self {
         let inhibitor = std::process::Command::new("systemd-inhibit")
-            .args(["--what=idle:sleep", "--who=Rusty Teams", &format!("--why={REASON}"), "--mode=block", "sleep", "infinity"])
+            .args([
+                "--what=idle:sleep",
+                "--who=Rusty Teams",
+                &format!("--why={REASON}"),
+                "--mode=block",
+                "sleep",
+                "infinity",
+            ])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

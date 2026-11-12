@@ -1,7 +1,7 @@
 use app_ui_kit::settings_controls::PAGE_PADDING;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
@@ -85,11 +85,15 @@ impl SettingsDialog {
         let subscriptions = [
             cx.observe(&center, |_, _, cx| cx.notify()),
             cx.observe(&app, |_, _, cx| cx.notify()),
-            cx.subscribe_in(&search, window, |this, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.follow_search(window, cx);
-                }
-            }),
+            cx.subscribe_in(
+                &search,
+                window,
+                |this, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        this.follow_search(window, cx);
+                    }
+                },
+            ),
         ];
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);

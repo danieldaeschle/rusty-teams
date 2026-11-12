@@ -1,14 +1,14 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::watch;
 use std::time::Duration;
+use tokio::sync::watch;
 
 use calling::meeting::{LiveMeeting, fetch_live_meeting};
 use calling::{
-    AcceptMode, BackgroundCache, CallControl, CallEngine, CallHandle, CallSpec, CallState, CallUpdate,
-    DefaultBackground, DeviceChoice, EndReason, EngineConfig, EngineEvent, MeetingTarget,
-    call_channel,
+    AcceptMode, BackgroundCache, CallControl, CallEngine, CallHandle, CallSpec, CallState,
+    CallUpdate, DefaultBackground, DeviceChoice, EndReason, EngineConfig, EngineEvent,
+    MeetingTarget, call_channel,
 };
 use session::{Session, SessionConfig, Transport};
 
@@ -423,24 +423,39 @@ mod tests {
     #[tokio::test]
     async fn waiting_gives_up_after_the_timeout() {
         let (_sender, receiver) = watch::channel(None::<u32>);
-        assert_eq!(wait_until_ready(receiver, Duration::from_millis(20)).await, None);
+        assert_eq!(
+            wait_until_ready(receiver, Duration::from_millis(20)).await,
+            None
+        );
     }
 
     #[tokio::test]
     async fn waiting_gives_up_when_the_launcher_is_gone() {
         let (sender, receiver) = watch::channel(None::<u32>);
         drop(sender);
-        assert_eq!(wait_until_ready(receiver, Duration::from_secs(5)).await, None);
+        assert_eq!(
+            wait_until_ready(receiver, Duration::from_secs(5)).await,
+            None
+        );
     }
 
     #[tokio::test]
     async fn queued_call_fails_with_notice_after_the_timeout() {
         let (_sender, receiver) = watch::channel(None);
         let (mut handle, control) = call_channel();
-        queue_outgoing(receiver, Duration::from_millis(20), CallSpec::Echo, OutgoingKind::Audio, control).await;
+        queue_outgoing(
+            receiver,
+            Duration::from_millis(20),
+            CallSpec::Echo,
+            OutgoingKind::Audio,
+            control,
+        )
+        .await;
         assert_eq!(
             handle.updates.recv().await,
-            Some(CallUpdate::State(CallState::Ended { reason: EndReason::Failed(NOT_READY.to_owned()) }))
+            Some(CallUpdate::State(CallState::Ended {
+                reason: EndReason::Failed(NOT_READY.to_owned())
+            }))
         );
     }
 
@@ -449,10 +464,19 @@ mod tests {
         let (_sender, receiver) = watch::channel(None);
         let (mut handle, control) = call_channel();
         handle.commands.send(CallCommand::Hangup).unwrap();
-        queue_outgoing(receiver, Duration::from_secs(30), CallSpec::Echo, OutgoingKind::Video, control).await;
+        queue_outgoing(
+            receiver,
+            Duration::from_secs(30),
+            CallSpec::Echo,
+            OutgoingKind::Video,
+            control,
+        )
+        .await;
         assert_eq!(
             handle.updates.recv().await,
-            Some(CallUpdate::State(CallState::Ended { reason: EndReason::Cancelled }))
+            Some(CallUpdate::State(CallState::Ended {
+                reason: EndReason::Cancelled
+            }))
         );
     }
 }

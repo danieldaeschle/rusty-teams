@@ -160,8 +160,14 @@ mod tests {
     #[test]
     fn the_popover_names_the_transport_and_the_media_path_without_claiming_end_to_end() {
         let mut found = health(NetworkLevel::Good, false);
-        assert_eq!(transport_text(&found), "Transport: DTLS-SRTP (AEAD_AES_128_GCM)");
-        assert_eq!(media_text(&found, "Mara").as_deref(), Some("Media: direct to Mara"));
+        assert_eq!(
+            transport_text(&found),
+            "Transport: DTLS-SRTP (AEAD_AES_128_GCM)"
+        );
+        assert_eq!(
+            media_text(&found, "Mara").as_deref(),
+            Some("Media: direct to Mara")
+        );
         found.path = MediaPath::Mixer;
         assert_eq!(
             media_text(&found, "Mara").as_deref(),

@@ -61,7 +61,11 @@ impl ParkGate {
 
 fn adjust(counts: &mut HashMap<App, usize>, app: App, up: bool) {
     let count = counts.entry(app).or_default();
-    *count = if up { *count + 1 } else { count.saturating_sub(1) };
+    *count = if up {
+        *count + 1
+    } else {
+        count.saturating_sub(1)
+    };
 }
 
 #[cfg(test)]

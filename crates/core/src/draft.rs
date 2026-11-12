@@ -674,9 +674,7 @@ impl Draft {
         let kinds: Vec<MarkKind> = self
             .marks
             .iter()
-            .filter(|mark| {
-                !matches!(mark.kind, MarkKind::Link(_)) && overlaps(&mark.range, &range)
-            })
+            .filter(|mark| !matches!(mark.kind, MarkKind::Link(_)) && overlaps(&mark.range, &range))
             .map(|mark| mark.kind.clone())
             .collect();
         for kind in kinds {
@@ -1072,8 +1070,9 @@ impl Draft {
 
     /// Decrease indent has something to lift: a list item or an indented paragraph.
     pub fn can_outdent(&self, range: Range<usize>) -> bool {
-        self.selected_lines(&range)
-            .any(|index| self.lines[index].is_list() || matches!(self.lines[index], LineKind::Indent(_)))
+        self.selected_lines(&range).any(|index| {
+            self.lines[index].is_list() || matches!(self.lines[index], LineKind::Indent(_))
+        })
     }
 
     /// Teams' paragraph style: `None` is Paragraph, otherwise Heading 1 to 3.
@@ -1435,7 +1434,9 @@ impl Draft {
                         };
                         let inline = inline_html(&line.content, &line.marks);
                         let margin = level * INDENT_PIXELS;
-                        html.push_str(&format!("<p style=\"margin-left:{margin}px;\">{inline}</p>"));
+                        html.push_str(&format!(
+                            "<p style=\"margin-left:{margin}px;\">{inline}</p>"
+                        ));
                     }
                 }
                 LineKind::Table(_) => {
@@ -1757,9 +1758,11 @@ impl Draft {
             let line = self.line_ranges()[index].clone();
             let kind = self.lines[index].clone();
             let expected = kind.object_mark();
-            let stray = self.text[line.clone()].char_indices().find(|(_, character)| {
-                [TABLE_MARK, RULE_MARK].contains(character) && Some(*character) != expected
-            });
+            let stray = self.text[line.clone()]
+                .char_indices()
+                .find(|(_, character)| {
+                    [TABLE_MARK, RULE_MARK].contains(character) && Some(*character) != expected
+                });
             if let Some((at, character)) = stray {
                 let mark = line.start + at..line.start + at + character.len_utf8();
                 self.splice(mark.clone(), "", &[]);
@@ -3209,7 +3212,10 @@ mod tests {
     fn code_lines_hold_only_their_content() {
         let mut draft = Draft::from_markdown("```\nlet a = 1;\n\u{2003}b\n```");
         assert_eq!(draft.text(), "let a = 1;\n\u{2003}b");
-        assert_eq!(draft.to_html(), "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>let a = 1;<br>\u{2003}b</code></pre>");
+        assert_eq!(
+            draft.to_html(),
+            "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>let a = 1;<br>\u{2003}b</code></pre>"
+        );
         assert_eq!(draft.backspace_at_start(draft.line_ranges()[1].start), None);
         assert_eq!(draft.backspace_at_start(0), Some(0));
         assert_eq!(draft.lines()[0], LineKind::Text);
@@ -3239,7 +3245,10 @@ mod tests {
         let mut split = Draft::from_markdown("```\n   a    b\n```");
         let after_a = "   a".len();
         split.break_line(after_a, false).unwrap();
-        assert_eq!(split.to_html(), "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>   a<br>    b</code></pre>");
+        assert_eq!(
+            split.to_html(),
+            "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>   a<br>    b</code></pre>"
+        );
     }
 
     #[test]

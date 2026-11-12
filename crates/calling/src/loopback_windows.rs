@@ -4,16 +4,21 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{CloseHandle, E_FAIL, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
-    AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-    AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS,
-    AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK, AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS,
-    ActivateAudioInterfaceAsync, IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
-    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient, PROCESS_LOOPBACK_MODE, PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
-    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
-    VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, WAVEFORMATEX,
+    AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
+    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDIOCLIENT_ACTIVATION_PARAMS,
+    AUDIOCLIENT_ACTIVATION_PARAMS_0, AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
+    AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS, ActivateAudioInterfaceAsync,
+    IActivateAudioInterfaceAsyncOperation, IActivateAudioInterfaceCompletionHandler,
+    IActivateAudioInterfaceCompletionHandler_Impl, IAudioCaptureClient, IAudioClient,
+    PROCESS_LOOPBACK_MODE, PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+    PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE, VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+    WAVEFORMATEX,
 };
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-use windows::Win32::System::Com::{BLOB, COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize, IAgileObject, IAgileObject_Impl};
+use windows::Win32::System::Com::{
+    BLOB, COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize, IAgileObject, IAgileObject_Impl,
+};
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::Win32::System::Variant::VT_BLOB;
 use windows::core::{Interface, Ref};
@@ -42,14 +47,18 @@ struct ActivationHandler {
 impl IAgileObject_Impl for ActivationHandler_Impl {}
 
 impl IActivateAudioInterfaceCompletionHandler_Impl for ActivationHandler_Impl {
-    fn ActivateCompleted(&self, operation: Ref<IActivateAudioInterfaceAsyncOperation>) -> windows::core::Result<()> {
+    fn ActivateCompleted(
+        &self,
+        operation: Ref<IActivateAudioInterfaceAsyncOperation>,
+    ) -> windows::core::Result<()> {
         let activated = (|| unsafe {
             let operation = operation.ok()?;
             let mut result = windows::core::HRESULT(0);
             let mut unknown = None;
             operation.GetActivateResult(&mut result, &mut unknown)?;
             result.ok()?;
-            let unknown: windows::core::IUnknown = unknown.ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+            let unknown: windows::core::IUnknown =
+                unknown.ok_or_else(|| windows::core::Error::from(E_FAIL))?;
             unknown.cast::<IAudioClient>().map(ActivatedClient)
         })();
         let _ = self.sender.send(activated);
@@ -83,7 +92,12 @@ fn activate(process_id: u32, mode: PROCESS_LOOPBACK_MODE) -> Result<IAudioClient
     let (sender, receiver) = mpsc::channel();
     let handler: IActivateAudioInterfaceCompletionHandler = ActivationHandler { sender }.into();
     let _operation = unsafe {
-        ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK, &IAudioClient::IID, Some(&raw const *variant), &handler)
+        ActivateAudioInterfaceAsync(
+            VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+            &IAudioClient::IID,
+            Some(&raw const *variant),
+            &handler,
+        )
     }
     .map_err(|error| audio_error("activate process loopback", error))?;
     receiver
@@ -110,12 +124,26 @@ fn initialise(client: &IAudioClient) -> Result<(IAudioCaptureClient, HANDLE)> {
         | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
     unsafe {
         client
-            .Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 0, 0, &raw const format, None)
+            .Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                flags,
+                0,
+                0,
+                &raw const format,
+                None,
+            )
             .map_err(|error| audio_error("initialize loopback", error))?;
-        let event = CreateEventW(None, false, false, None).map_err(|error| audio_error("event", error))?;
-        client.SetEventHandle(event).map_err(|error| audio_error("event handle", error))?;
-        let capture = client.GetService::<IAudioCaptureClient>().map_err(|error| audio_error("capture service", error))?;
-        client.Start().map_err(|error| audio_error("start loopback", error))?;
+        let event =
+            CreateEventW(None, false, false, None).map_err(|error| audio_error("event", error))?;
+        client
+            .SetEventHandle(event)
+            .map_err(|error| audio_error("event handle", error))?;
+        let capture = client
+            .GetService::<IAudioCaptureClient>()
+            .map_err(|error| audio_error("capture service", error))?;
+        client
+            .Start()
+            .map_err(|error| audio_error("start loopback", error))?;
         Ok((capture, event))
     }
 }
@@ -127,12 +155,19 @@ fn drain(capture: &IAudioCaptureClient, queue: &SampleQueue) -> windows::core::R
             let mut frames = 0u32;
             let mut flags = 0u32;
             capture.GetBuffer(&mut data, &mut frames, &mut flags, None, None)?;
-            let mono: Vec<i16> = if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() {
-                vec![0; frames as usize]
-            } else {
-                let pairs = std::slice::from_raw_parts(data.cast::<i16>(), frames as usize * usize::from(CHANNELS));
-                pairs.chunks_exact(usize::from(CHANNELS)).map(|pair| ((i32::from(pair[0]) + i32::from(pair[1])) / 2) as i16).collect()
-            };
+            let mono: Vec<i16> =
+                if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() {
+                    vec![0; frames as usize]
+                } else {
+                    let pairs = std::slice::from_raw_parts(
+                        data.cast::<i16>(),
+                        frames as usize * usize::from(CHANNELS),
+                    );
+                    pairs
+                        .chunks_exact(usize::from(CHANNELS))
+                        .map(|pair| ((i32::from(pair[0]) + i32::from(pair[1])) / 2) as i16)
+                        .collect()
+                };
             capture.ReleaseBuffer(frames)?;
             queue.push(&mono);
         }
@@ -141,12 +176,20 @@ fn drain(capture: &IAudioCaptureClient, queue: &SampleQueue) -> windows::core::R
 }
 
 pub fn start_process_loopback(queue: SampleQueue, own_process_id: u32) -> Result<Capture> {
-    start(queue, own_process_id, PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE)
+    start(
+        queue,
+        own_process_id,
+        PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE,
+    )
 }
 
 /// Only the audio of `process_id` and its children, for checking what an app plays out.
 pub fn start_process_capture(queue: SampleQueue, process_id: u32) -> Result<Capture> {
-    start(queue, process_id, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE)
+    start(
+        queue,
+        process_id,
+        PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE,
+    )
 }
 
 fn start(queue: SampleQueue, process_id: u32, mode: PROCESS_LOOPBACK_MODE) -> Result<Capture> {
@@ -155,7 +198,9 @@ fn start(queue: SampleQueue, process_id: u32, mode: PROCESS_LOOPBACK_MODE) -> Re
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
-        let started = activate(process_id, mode).and_then(|client| initialise(&client).map(|(capture, event)| (client, capture, event)));
+        let started = activate(process_id, mode).and_then(|client| {
+            initialise(&client).map(|(capture, event)| (client, capture, event))
+        });
         match started {
             Ok((client, capture, event)) => {
                 let _ = ready_sender.send(Ok(()));
@@ -177,6 +222,8 @@ fn start(queue: SampleQueue, process_id: u32, mode: PROCESS_LOOPBACK_MODE) -> Re
         unsafe { CoUninitialize() };
     })
     .map_err(|error| audio_error("loopback thread", error))?;
-    ready.recv().map_err(|_| Error::Audio("loopback thread ended".into()))??;
+    ready
+        .recv()
+        .map_err(|_| Error::Audio("loopback thread ended".into()))??;
     Ok(capture)
 }

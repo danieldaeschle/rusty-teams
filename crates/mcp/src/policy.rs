@@ -203,7 +203,13 @@ mod tests {
     fn default_is_closed() {
         let policy = AgentPolicy::default();
         assert_eq!(policy.port, DEFAULT_PORT);
-        assert!(!policy.enabled && !policy.write && policy.review && !policy.calendar && !policy.transcripts);
+        assert!(
+            !policy.enabled
+                && !policy.write
+                && policy.review
+                && !policy.calendar
+                && !policy.transcripts
+        );
         assert_eq!(policy.chats, Access::None);
         assert_eq!(policy.channels, Access::None);
     }

@@ -69,7 +69,10 @@ fn mark_style(kind: &MarkKind) -> HighlightStyle {
         MarkKind::Color(value) => {
             style.color = Some(readable_on(*value, theme::surface_raised()));
         }
-        MarkKind::Superscript | MarkKind::Subscript | MarkKind::Size(_) | MarkKind::Highlight(_) => {}
+        MarkKind::Superscript
+        | MarkKind::Subscript
+        | MarkKind::Size(_)
+        | MarkKind::Highlight(_) => {}
         MarkKind::Code => style.color = Some(theme::text_strong()),
         MarkKind::Link(_) => {
             style.color = Some(theme::accent_text());

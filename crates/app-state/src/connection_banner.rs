@@ -58,8 +58,13 @@ pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> Banner
         BannerKind::Connecting => text("Connecting..."),
         BannerKind::Reconnecting => text("Reconnecting..."),
         BannerKind::Offline => BannerText {
-            detail: last_sync
-                .map(|time| format!("Last synced {}", time.with_timezone(&Local).format(app_base::format::clock_format()))),
+            detail: last_sync.map(|time| {
+                format!(
+                    "Last synced {}",
+                    time.with_timezone(&Local)
+                        .format(app_base::format::clock_format())
+                )
+            }),
             ..text(OFFLINE_TEXT)
         },
         BannerKind::SignIn => text("Sign-in required. Sign in to Teams in the window that opened."),
@@ -167,7 +172,10 @@ mod tests {
 
     use chrono::Utc;
 
-    use super::{BannerKind, BannerTiming, CONNECTING_SHOW_AFTER, MIN_VISIBLE, SHOW_AFTER, banner_kind, banner_text};
+    use super::{
+        BannerKind, BannerTiming, CONNECTING_SHOW_AFTER, MIN_VISIBLE, SHOW_AFTER, banner_kind,
+        banner_text,
+    };
     use crate::backend::{ConnectionState, LiveState};
 
     #[test]
@@ -187,8 +195,15 @@ mod tests {
         let mut timing = BannerTiming::default();
         let start = Instant::now();
         timing.update(Some(BannerKind::Connecting), start);
-        assert!(timing.update(Some(BannerKind::Connecting), start + SHOW_AFTER).is_some());
-        assert_eq!(timing.update(Some(BannerKind::Connecting), start + CONNECTING_SHOW_AFTER), None);
+        assert!(
+            timing
+                .update(Some(BannerKind::Connecting), start + SHOW_AFTER)
+                .is_some()
+        );
+        assert_eq!(
+            timing.update(Some(BannerKind::Connecting), start + CONNECTING_SHOW_AFTER),
+            None
+        );
         assert_eq!(timing.visible(), Some(BannerKind::Connecting));
     }
 

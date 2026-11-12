@@ -12,7 +12,10 @@ pub struct SampleQueue {
 
 impl SampleQueue {
     pub fn push(&self, samples: &[i16]) {
-        let mut queued = self.samples.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut queued = self
+            .samples
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         queued.extend(samples.iter().copied());
         let excess = queued.len().saturating_sub(MAX_QUEUED_SAMPLES);
         queued.drain(..excess);
@@ -21,7 +24,10 @@ impl SampleQueue {
     /// Returns a full 10 ms frame when enough samples are queued. Partial frames stay queued
     /// so AEC and the encoder never see zero-padded speech.
     pub fn next_frame(&self) -> Option<Vec<i16>> {
-        let mut queued = self.samples.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut queued = self
+            .samples
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if queued.len() < FRAME_SAMPLES {
             return None;
         }
@@ -61,7 +67,10 @@ impl MonoResampler {
 }
 
 pub fn i16_to_f32(samples: &[i16]) -> Vec<f32> {
-    samples.iter().map(|&sample| f32::from(sample) / f32::from(i16::MAX)).collect()
+    samples
+        .iter()
+        .map(|&sample| f32::from(sample) / f32::from(i16::MAX))
+        .collect()
 }
 
 #[cfg(test)]
@@ -100,7 +109,11 @@ mod tests {
         let mut output = Vec::new();
         resampler.convert(&[0.5, 0.5].repeat(240), 2, &mut output);
         assert_eq!(output.len(), 480);
-        assert!(output[10..].iter().all(|&sample| (sample - (0.5 * f32::from(i16::MAX)) as i16).abs() < 2));
+        assert!(
+            output[10..]
+                .iter()
+                .all(|&sample| (sample - (0.5 * f32::from(i16::MAX)) as i16).abs() < 2)
+        );
     }
 
     #[test]

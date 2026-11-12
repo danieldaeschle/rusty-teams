@@ -5,7 +5,8 @@ use crate::models::AgentMeetingRecord;
 use crate::store::Store;
 use crate::time::{from_millis, to_millis};
 
-const MEETING_COLUMNS: &str = "id, subject, start_at, end_at, attendees, description, agent, session_id, created_at";
+const MEETING_COLUMNS: &str =
+    "id, subject, start_at, end_at, attendees, description, agent, session_id, created_at";
 
 impl Store {
     pub fn insert_agent_meeting(&self, meeting: &AgentMeetingRecord) -> Result<()> {
@@ -29,7 +30,10 @@ impl Store {
 
     pub fn delete_agent_meeting(&self, meeting_id: &str) -> Result<bool> {
         let connection = self.lock()?;
-        let removed = connection.execute("DELETE FROM agent_meeting_proposals WHERE id = ?1", [meeting_id])?;
+        let removed = connection.execute(
+            "DELETE FROM agent_meeting_proposals WHERE id = ?1",
+            [meeting_id],
+        )?;
         Ok(removed > 0)
     }
 

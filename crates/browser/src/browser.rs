@@ -83,12 +83,20 @@ pub struct Browser {
 
 pub(crate) fn start_urls_for(headless: bool) -> Vec<String> {
     let urls = APPS.iter().map(|app| app.start_url().to_owned());
-    if headless { urls.take(1).collect() } else { urls.collect() }
+    if headless {
+        urls.take(1).collect()
+    } else {
+        urls.collect()
+    }
 }
 
 pub(crate) fn jitter_between(min: Duration, max: Duration, random: u64) -> Duration {
     let span = max.saturating_sub(min).as_millis() as u64;
-    if span == 0 { min } else { min + Duration::from_millis(random % (span + 1)) }
+    if span == 0 {
+        min
+    } else {
+        min + Duration::from_millis(random % (span + 1))
+    }
 }
 
 fn random_u64() -> u64 {
@@ -106,7 +114,11 @@ impl Browser {
         Browser::with_launcher(config, launcher, Timeouts::default())
     }
 
-    pub fn with_launcher(config: Config, launcher: Arc<dyn Launcher>, timeouts: Timeouts) -> Browser {
+    pub fn with_launcher(
+        config: Config,
+        launcher: Arc<dyn Launcher>,
+        timeouts: Timeouts,
+    ) -> Browser {
         Browser {
             inner: Arc::new(Inner {
                 config,
@@ -124,10 +136,20 @@ impl Browser {
 
     pub async fn status(&self) -> Result<Status, BrowserError> {
         let Some(_) = self.version().await else {
-            return Ok(Status { running: false, mode: Mode::Visible, tabs: Vec::new(), login_state: LoginState::Unknown });
+            return Ok(Status {
+                running: false,
+                mode: Mode::Visible,
+                tabs: Vec::new(),
+                login_state: LoginState::Unknown,
+            });
         };
         let tabs = self.tabs().await?;
-        Ok(Status { running: true, mode: self.mode(), login_state: targets::login_state(&tabs), tabs })
+        Ok(Status {
+            running: true,
+            mode: self.mode(),
+            login_state: targets::login_state(&tabs),
+            tabs,
+        })
     }
 
     pub async fn is_running(&self) -> bool {
@@ -135,9 +157,16 @@ impl Browser {
     }
 
     pub async fn probe_renderer(&self) -> RendererState {
-        let Ok(tabs) = self.tabs().await else { return RendererState::NoTab };
-        let Some(tab) = targets::app_tab(&tabs, App::Teams) else { return RendererState::NoTab };
-        let url = format!("ws://127.0.0.1:{}/devtools/page/{}", self.inner.config.port, tab.id);
+        let Ok(tabs) = self.tabs().await else {
+            return RendererState::NoTab;
+        };
+        let Some(tab) = targets::app_tab(&tabs, App::Teams) else {
+            return RendererState::NoTab;
+        };
+        let url = format!(
+            "ws://127.0.0.1:{}/devtools/page/{}",
+            self.inner.config.port, tab.id
+        );
         let params = json!({ "expression": "1+1" });
         match cdp_call(&url, "Runtime.evaluate", params, self.inner.timeouts.probe).await {
             Ok(_) => RendererState::Ok,
@@ -153,7 +182,8 @@ impl Browser {
     }
 
     pub async fn tabs(&self) -> Result<Vec<Tab>, BrowserError> {
-        let response = http::request(self.inner.config.port, "GET", "/json/list", HTTP_TIMEOUT).await?;
+        let response =
+            http::request(self.inner.config.port, "GET", "/json/list", HTTP_TIMEOUT).await?;
         targets::parse_tabs(&response.body)
     }
 
@@ -176,11 +206,25 @@ impl Browser {
         let _guard = self.inner.operation.lock().await;
         let tabs = self.tabs().await?;
         let candidates = tabs.iter().filter(|tab| tab.app == Some(app));
-        let Some(tab) = candidates.clone().find(|tab| tab.parked).or_else(|| candidates.clone().next()) else {
+        let Some(tab) = candidates
+            .clone()
+            .find(|tab| tab.parked)
+            .or_else(|| candidates.clone().next())
+        else {
             return self.open_tab(app).await;
         };
-        let url = format!("ws://127.0.0.1:{}/devtools/page/{}", self.inner.config.port, tab.id);
-        cdp_call(&url, "Page.navigate", json!({ "url": app.start_url() }), CDP_TIMEOUT).await.map(|_| ())
+        let url = format!(
+            "ws://127.0.0.1:{}/devtools/page/{}",
+            self.inner.config.port, tab.id
+        );
+        cdp_call(
+            &url,
+            "Page.navigate",
+            json!({ "url": app.start_url() }),
+            CDP_TIMEOUT,
+        )
+        .await
+        .map(|_| ())
     }
 
     pub async fn ensure_tabs(&self) -> Result<(), BrowserError> {
@@ -193,12 +237,19 @@ impl Browser {
     }
 
     pub async fn teams_has_msal_cache(&self) -> bool {
-        let Ok(tabs) = self.tabs().await else { return false };
-        let Some(tab) = targets::app_tab(&tabs, App::Teams) else { return false };
+        let Ok(tabs) = self.tabs().await else {
+            return false;
+        };
+        let Some(tab) = targets::app_tab(&tabs, App::Teams) else {
+            return false;
+        };
         if tab.parked {
             return false;
         }
-        let url = format!("ws://127.0.0.1:{}/devtools/page/{}", self.inner.config.port, tab.id);
+        let url = format!(
+            "ws://127.0.0.1:{}/devtools/page/{}",
+            self.inner.config.port, tab.id
+        );
         let expression = "(() => { let access = false, refresh = false; for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i) || ''; if (key.includes('accesstoken')) access = true; if (key.includes('refreshtoken')) refresh = true; } return access && refresh; })()";
         let params = json!({ "expression": expression, "returnByValue": true });
         cdp_call(&url, "Runtime.evaluate", params, self.inner.timeouts.probe)
@@ -219,12 +270,16 @@ impl Browser {
         // CdpTransport open Outlook silently once Teams is signed in.
         self.inner.wanted.store(true, Ordering::SeqCst);
         self.stop_locked(false).await?;
-        self.launch_with_urls_locked(false, start_urls_for(true)).await
+        self.launch_with_urls_locked(false, start_urls_for(true))
+            .await
     }
 
     pub async fn headless(&self) -> Result<(), BrowserError> {
         let _guard = self.inner.operation.lock().await;
-        if self.inner.config.mode_file.exists() && self.mode() == Mode::Headless && self.is_running().await {
+        if self.inner.config.mode_file.exists()
+            && self.mode() == Mode::Headless
+            && self.is_running().await
+        {
             return Ok(());
         }
         self.relaunch_locked(true).await
@@ -255,9 +310,14 @@ impl Browser {
     }
 
     async fn version(&self) -> Option<VersionInfo> {
-        let response = http::request(self.inner.config.port, "GET", "/json/version", Duration::from_secs(2))
-            .await
-            .ok()?;
+        let response = http::request(
+            self.inner.config.port,
+            "GET",
+            "/json/version",
+            Duration::from_secs(2),
+        )
+        .await
+        .ok()?;
         targets::parse_version(&response.body).ok()
     }
 
@@ -289,8 +349,17 @@ impl Browser {
 
     async fn try_dedupe_app_tabs(&self) -> Result<(), BrowserError> {
         let tabs = self.tabs().await?;
-        let info = self.version().await.ok_or_else(|| BrowserError::NoBrowser(self.inner.config.port.to_string()))?;
-        let result = cdp_call(&info.websocket_url, "Target.getTargets", json!({}), CDP_TIMEOUT).await?;
+        let info = self
+            .version()
+            .await
+            .ok_or_else(|| BrowserError::NoBrowser(self.inner.config.port.to_string()))?;
+        let result = cdp_call(
+            &info.websocket_url,
+            "Target.getTargets",
+            json!({}),
+            CDP_TIMEOUT,
+        )
+        .await?;
         let attached = targets::attached_target_ids(&result);
         for id in targets::duplicate_app_tab_ids(&tabs, &attached) {
             let path = format!("/json/close/{id}");
@@ -301,26 +370,42 @@ impl Browser {
 
     async fn open_tab(&self, app: App) -> Result<(), BrowserError> {
         let path = format!("/json/new?{}", app.start_url());
-        let response = http::request(self.inner.config.port, "PUT", &path, OPEN_TAB_TIMEOUT).await?;
+        let response =
+            http::request(self.inner.config.port, "PUT", &path, OPEN_TAB_TIMEOUT).await?;
         if response.status != 200 {
-            return Err(BrowserError::Http(format!("PUT /json/new returned {}", response.status)));
+            return Err(BrowserError::Http(format!(
+                "PUT /json/new returned {}",
+                response.status
+            )));
         }
         Ok(())
     }
 
     async fn launch_locked(&self, headless: bool) -> Result<(), BrowserError> {
-        self.launch_with_urls_locked(headless, start_urls_for(headless)).await
+        self.launch_with_urls_locked(headless, start_urls_for(headless))
+            .await
     }
 
-    async fn launch_with_urls_locked(&self, headless: bool, start_urls: Vec<String>) -> Result<(), BrowserError> {
+    async fn launch_with_urls_locked(
+        &self,
+        headless: bool,
+        start_urls: Vec<String>,
+    ) -> Result<(), BrowserError> {
         let config = &self.inner.config;
         tokio::time::sleep(self.jitter()).await;
         if self.is_running().await {
             return Err(BrowserError::PortBusy(config.port));
         }
-        let request = LaunchRequest { headless, start_urls };
+        let request = LaunchRequest {
+            headless,
+            start_urls,
+        };
         self.inner.launcher.spawn(&request)?;
-        let mode = if headless { Mode::Headless } else { Mode::Visible };
+        let mode = if headless {
+            Mode::Headless
+        } else {
+            Mode::Visible
+        };
         if let Some(parent) = config.mode_file.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -352,11 +437,16 @@ impl Browser {
             }
             tokio::time::sleep(timeouts.poll).await;
         }
-        Err(BrowserError::StartTimeout { port: self.inner.config.port, seconds: timeouts.start.as_secs() })
+        Err(BrowserError::StartTimeout {
+            port: self.inner.config.port,
+            seconds: timeouts.start.as_secs(),
+        })
     }
 
     async fn stop_locked(&self, kill_fallback: bool) -> Result<(), BrowserError> {
-        let Some(info) = self.version().await else { return Ok(()) };
+        let Some(info) = self.version().await else {
+            return Ok(());
+        };
         close_over_cdp(&info.websocket_url).await;
         let timeouts = &self.inner.timeouts;
         if !self.wait_until_stopped().await && kill_fallback {
@@ -393,15 +483,22 @@ async fn cdp_call(
             .await
             .map_err(|error| BrowserError::Cdp(error.to_string()))?;
         while let Some(message) = socket.next().await {
-            let Message::Text(text) = message.map_err(|error| BrowserError::Cdp(error.to_string()))? else {
+            let Message::Text(text) =
+                message.map_err(|error| BrowserError::Cdp(error.to_string()))?
+            else {
                 continue;
             };
-            let Ok(reply) = serde_json::from_str::<Value>(&text) else { continue };
+            let Ok(reply) = serde_json::from_str::<Value>(&text) else {
+                continue;
+            };
             if reply["id"] != 1 {
                 continue;
             }
             if let Some(error) = reply.get("error") {
-                return Err(BrowserError::Cdp(format!("{method}: {}", error["message"].as_str().unwrap_or("error"))));
+                return Err(BrowserError::Cdp(format!(
+                    "{method}: {}",
+                    error["message"].as_str().unwrap_or("error")
+                )));
             }
             return Ok(reply["result"].clone());
         }
@@ -413,13 +510,22 @@ async fn cdp_call(
 }
 
 async fn close_over_cdp(websocket_url: &str) {
-    let Ok(Ok((mut socket, _))) =
-        tokio::time::timeout(Duration::from_secs(3), tokio_tungstenite::connect_async(websocket_url)).await
+    let Ok(Ok((mut socket, _))) = tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio_tungstenite::connect_async(websocket_url),
+    )
+    .await
     else {
         return;
     };
-    let _ = socket.send(Message::text(r#"{"id":1,"method":"Browser.close"}"#)).await;
-    let _ = tokio::time::timeout(Duration::from_secs(2), futures_util::StreamExt::next(&mut socket)).await;
+    let _ = socket
+        .send(Message::text(r#"{"id":1,"method":"Browser.close"}"#))
+        .await;
+    let _ = tokio::time::timeout(
+        Duration::from_secs(2),
+        futures_util::StreamExt::next(&mut socket),
+    )
+    .await;
 }
 
 #[cfg(test)]
@@ -433,7 +539,11 @@ mod tests {
         assert_eq!(jitter_between(min, max, 1500), max);
         assert_eq!(jitter_between(min, max, 1501), Duration::from_millis(500));
         assert_eq!(jitter_between(min, min, 99), min);
-        assert!((0..50).all(|seed| (min..=max).contains(&jitter_between(min, max, random_u64().wrapping_add(seed)))));
+        assert!((0..50).all(|seed| (min..=max).contains(&jitter_between(
+            min,
+            max,
+            random_u64().wrapping_add(seed)
+        ))));
     }
 
     #[test]
@@ -441,7 +551,10 @@ mod tests {
         assert_eq!(start_urls_for(true), ["https://teams.cloud.microsoft/"]);
         assert_eq!(
             start_urls_for(false),
-            ["https://teams.cloud.microsoft/", "https://outlook.office.com/mail/"]
+            [
+                "https://teams.cloud.microsoft/",
+                "https://outlook.office.com/mail/"
+            ]
         );
     }
 }

@@ -33,7 +33,8 @@ pub const EMOJI_FONT_FAMILY: &str = "Apple Color Emoji";
 pub const EMOJI_FONT_FAMILY: &str = "Noto Color Emoji";
 
 #[cfg(target_os = "linux")]
-const PLATFORM_FONT_FILES: [&[u8]; 1] = [include_bytes!("../../app/assets/fonts/NotoColorEmoji.ttf")];
+const PLATFORM_FONT_FILES: [&[u8]; 1] =
+    [include_bytes!("../../app/assets/fonts/NotoColorEmoji.ttf")];
 #[cfg(not(target_os = "linux"))]
 const PLATFORM_FONT_FILES: [&[u8]; 0] = [];
 

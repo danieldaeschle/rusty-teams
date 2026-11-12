@@ -314,7 +314,12 @@ impl AgentHub {
             .cloned()
     }
 
-    pub fn grant_free_writing(&self, conversation_id: &str, until: DateTime<Utc>, agent: Option<String>) {
+    pub fn grant_free_writing(
+        &self,
+        conversation_id: &str,
+        until: DateTime<Utc>,
+        agent: Option<String>,
+    ) {
         let mut state = self.lock();
         state
             .free_writing
@@ -688,10 +693,17 @@ impl AgentHub {
         Some(state.pending_meetings.remove(index))
     }
 
-    pub fn resolve_meeting(&self, proposal_id: &str, outcome: MeetingOutcome, join_url: Option<String>) {
+    pub fn resolve_meeting(
+        &self,
+        proposal_id: &str,
+        outcome: MeetingOutcome,
+        join_url: Option<String>,
+    ) {
         {
             let mut state = self.lock();
-            state.pending_meetings.retain(|proposal| proposal.id != proposal_id);
+            state
+                .pending_meetings
+                .retain(|proposal| proposal.id != proposal_id);
             let _ = self.store.delete_agent_meeting(proposal_id);
             push_event(
                 &mut state,
@@ -954,7 +966,9 @@ mod tests {
             attendees: vec!["a@example.com".to_owned()],
             description: "Agenda".to_owned(),
         };
-        let kept = hub.propose_meeting(draft.clone(), Some("claude".to_owned()), None).unwrap();
+        let kept = hub
+            .propose_meeting(draft.clone(), Some("claude".to_owned()), None)
+            .unwrap();
         let resolved = hub.propose_meeting(draft, None, None).unwrap();
         hub.resolve_meeting(&resolved.id, MeetingOutcome::Created, None);
         let (sender, _restarted_receiver) = unbounded_channel();
@@ -962,14 +976,25 @@ mod tests {
         restarted.restore_pending().unwrap();
         let restored = restarted.pending_meetings();
         assert_eq!(restored.len(), 1);
-        assert_eq!((restored[0].id.as_str(), restored[0].draft.description.as_str(), restored[0].agent.as_deref()), (kept.id.as_str(), "Agenda", Some("claude")));
+        assert_eq!(
+            (
+                restored[0].id.as_str(),
+                restored[0].draft.description.as_str(),
+                restored[0].agent.as_deref()
+            ),
+            (kept.id.as_str(), "Agenda", Some("claude"))
+        );
     }
 
     #[test]
     fn a_free_writing_window_skips_review_until_it_ends_or_stops() {
         let (hub, _receiver, _store) = hub_with(open_policy());
         assert!(hub.needs_review("c1"));
-        hub.grant_free_writing("c1", Utc::now() + chrono::Duration::minutes(15), Some("claude".to_owned()));
+        hub.grant_free_writing(
+            "c1",
+            Utc::now() + chrono::Duration::minutes(15),
+            Some("claude".to_owned()),
+        );
         assert!(!hub.needs_review("c1"));
         assert!(hub.needs_review("c2"));
         hub.stop_free_writing("c1");

@@ -135,7 +135,11 @@ mod tests {
     #[test]
     fn ice_server_lists_udp_tcp_and_tls() {
         let grant = RelayGrant {
-            credentials: RelayCredentials { realm: String::new(), username: "u".into(), password: "p".into() },
+            credentials: RelayCredentials {
+                realm: String::new(),
+                username: "u".into(),
+                password: "p".into(),
+            },
             expires_in_seconds: 604800,
         };
         let server = grant.ice_server(DEFAULT_RELAY_HOST);

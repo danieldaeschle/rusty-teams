@@ -69,24 +69,28 @@ pub fn duration_label(minutes: u32) -> String {
 fn free_writing_row(entry: &ProposalEntry, allow: AllowAction) -> Option<Div> {
     let ask = entry.proposal.free_writing_ask.as_ref()?;
     let agent = agent_label(entry.proposal.agent.as_deref());
-    let chips = free_writing_choices(ask.minutes).into_iter().map(|minutes| {
-        let allow = allow.clone();
-        div()
-            .id(ElementId::Name(format!("proposal-allow-{minutes}").into()))
-            .h(px(BUTTON_HEIGHT))
-            .px(px(10.))
-            .flex()
-            .items_center()
-            .rounded(px(BUTTON_RADIUS))
-            .cursor_pointer()
-            .text_size(px(12.))
-            .bg(theme::surface_raised())
-            .text_color(theme::text())
-            .hover(|chip| chip.opacity(0.85))
-            .child(duration_label(minutes))
-            .on_click(move |_, window, cx| allow(minutes, window, cx))
-    });
-    let reason = (!ask.reason.is_empty()).then(|| format!(": {}", ask.reason)).unwrap_or_default();
+    let chips = free_writing_choices(ask.minutes)
+        .into_iter()
+        .map(|minutes| {
+            let allow = allow.clone();
+            div()
+                .id(ElementId::Name(format!("proposal-allow-{minutes}").into()))
+                .h(px(BUTTON_HEIGHT))
+                .px(px(10.))
+                .flex()
+                .items_center()
+                .rounded(px(BUTTON_RADIUS))
+                .cursor_pointer()
+                .text_size(px(12.))
+                .bg(theme::surface_raised())
+                .text_color(theme::text())
+                .hover(|chip| chip.opacity(0.85))
+                .child(duration_label(minutes))
+                .on_click(move |_, window, cx| allow(minutes, window, cx))
+        });
+    let reason = (!ask.reason.is_empty())
+        .then(|| format!(": {}", ask.reason))
+        .unwrap_or_default();
     Some(
         v_flex()
             .w_full()
@@ -105,14 +109,21 @@ fn free_writing_row(entry: &ProposalEntry, allow: AllowAction) -> Option<Div> {
                     .flex_wrap()
                     .items_center()
                     .gap(px(6.))
-                    .child(div().text_size(px(12.)).text_color(theme::text_soft()).child("Send and allow for"))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme::text_soft())
+                            .child("Send and allow for"),
+                    )
                     .children(chips),
             ),
     )
 }
 
 pub fn free_writing_bar(agent: &str, until: DateTime<Utc>, stop: CardAction) -> Div {
-    let until = until.with_timezone(&chrono::Local).format(crate::format::clock_format());
+    let until = until
+        .with_timezone(&chrono::Local)
+        .format(crate::format::clock_format());
     h_flex()
         .flex_none()
         .mx(px(CARD_MARGIN_X))
@@ -133,7 +144,13 @@ pub fn free_writing_bar(agent: &str, until: DateTime<Utc>, stop: CardAction) -> 
                 .text_color(theme::text_muted())
                 .child(format!("{agent} writes here without review until {until}")),
         )
-        .child(card_button("free-writing-stop", "Stop", theme::surface_raised(), theme::text(), stop))
+        .child(card_button(
+            "free-writing-stop",
+            "Stop",
+            theme::surface_raised(),
+            theme::text(),
+            stop,
+        ))
 }
 
 fn open_session_available(session_id: &str, cx: &App) -> bool {
@@ -499,8 +516,8 @@ mod tests {
     use teams_core::MentionInput;
 
     use super::{
-        age_label, duration_label, free_writing_choices, needs_upload, outgoing_for, picture_files, sample_entry,
-        sample_png, thumbnail_size,
+        age_label, duration_label, free_writing_choices, needs_upload, outgoing_for, picture_files,
+        sample_entry, sample_png, thumbnail_size,
     };
     use crate::views::attachment_tray::{AttachmentTray, INLINE_IMAGE_MAX_BYTES, OutgoingImage};
 

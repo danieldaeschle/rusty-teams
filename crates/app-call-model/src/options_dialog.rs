@@ -10,7 +10,12 @@ pub struct OptionsDialog {
 
 impl OptionsDialog {
     pub fn loading() -> Self {
-        OptionsDialog { original: None, draft: None, saving: false, error: None }
+        OptionsDialog {
+            original: None,
+            draft: None,
+            saving: false,
+            error: None,
+        }
     }
 
     pub fn loaded(&mut self, result: Result<MeetingOptions, String>) {
@@ -67,7 +72,8 @@ mod tests {
     use super::*;
 
     fn options() -> MeetingOptions {
-        let option = |name: &str, value: serde_json::Value| json!({"name": name, "currentValue": value});
+        let option =
+            |name: &str, value: serde_json::Value| json!({"name": name, "currentValue": value});
         MeetingOptions::from_response(&json!({"options": [
             option("AutoAdmittedUsers", json!("EveryoneInCompany")),
             option("PresenterOption", json!("Everyone")),
@@ -100,14 +106,20 @@ mod tests {
         let mut dialog = OptionsDialog::loading();
         dialog.loaded(Err("The options could not be read".into()));
         assert!(!dialog.is_loading());
-        assert_eq!(dialog.error.as_deref(), Some("The options could not be read"));
+        assert_eq!(
+            dialog.error.as_deref(),
+            Some("The options could not be read")
+        );
         dialog.loaded(Ok(options()));
         assert_eq!(dialog.error, None);
         dialog.draft.as_mut().unwrap().meeting_chat = "Disabled".into();
         dialog.begin_save();
         assert!(!dialog.saved(Err("the service refused AllowMeetingChat".into())));
         assert!(!dialog.saving);
-        assert_eq!(dialog.error.as_deref(), Some("the service refused AllowMeetingChat"));
+        assert_eq!(
+            dialog.error.as_deref(),
+            Some("the service refused AllowMeetingChat")
+        );
         assert!(dialog.can_save());
         dialog.begin_save();
         assert!(dialog.saved(Ok(options())));

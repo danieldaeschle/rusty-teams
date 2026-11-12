@@ -72,7 +72,9 @@ impl CalendarSpan {
     pub fn shifted(self, start: NaiveDate, steps: i32) -> NaiveDate {
         match self {
             CalendarSpan::Day => start + Duration::days(i64::from(steps)),
-            CalendarSpan::WorkWeek | CalendarSpan::Week => start + Duration::weeks(i64::from(steps)),
+            CalendarSpan::WorkWeek | CalendarSpan::Week => {
+                start + Duration::weeks(i64::from(steps))
+            }
             CalendarSpan::Month => {
                 let month = month_shown(start);
                 let moved = if steps >= 0 {
@@ -285,7 +287,10 @@ mod tests {
         assert_eq!(CalendarSpan::Month.title(next), "December 2026");
         let back = CalendarSpan::Month.shifted(start, -11);
         assert_eq!(CalendarSpan::Month.title(back), "December 2025");
-        assert_eq!(CalendarSpan::Week.shifted(date(2), -1), date(2) - Duration::weeks(1));
+        assert_eq!(
+            CalendarSpan::Week.shifted(date(2), -1),
+            date(2) - Duration::weeks(1)
+        );
     }
 
     #[test]
@@ -355,7 +360,10 @@ mod tests {
         assert_eq!(CalendarSpan::Week.start_for(wednesday), monday);
         let sunday = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
         assert_eq!(CalendarSpan::Week.start_for(sunday), monday);
-        assert_eq!(CalendarSpan::Day.shifted(wednesday, 1), wednesday + Duration::days(1));
+        assert_eq!(
+            CalendarSpan::Day.shifted(wednesday, 1),
+            wednesday + Duration::days(1)
+        );
         assert_eq!(CalendarSpan::Week.days(), 7);
     }
 

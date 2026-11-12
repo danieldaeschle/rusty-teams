@@ -1,5 +1,6 @@
 use mcp::{
-    FileInfo, ForwardedInfo, ImageInfo, ImageKind, LinkInfo, MentionInfo, MessageExtras, QuoteInfo, ReactionInfo,
+    FileInfo, ForwardedInfo, ImageInfo, ImageKind, LinkInfo, MentionInfo, MessageExtras, QuoteInfo,
+    ReactionInfo,
 };
 use store::MessageRecord;
 use teams_core::MentionTarget;

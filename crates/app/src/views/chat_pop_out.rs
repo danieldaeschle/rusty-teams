@@ -39,8 +39,7 @@ impl ChatPopOutView {
             true
         });
         let selection = Selection::Chat(chat_id);
-        let conversation =
-            cx.new(|cx| ConversationView::popped_out(app, selection, window, cx));
+        let conversation = cx.new(|cx| ConversationView::popped_out(app, selection, window, cx));
         ChatPopOutView { conversation }
     }
 }
@@ -86,10 +85,7 @@ pub fn pop_out_chat(app: &Entity<AppState>, chat_id: &str, cx: &mut App) {
             size(px(CHAT_WINDOW_SIZE.0), px(CHAT_WINDOW_SIZE.1)),
             cx,
         ))),
-        window_min_size: Some(size(
-            px(CHAT_WINDOW_MIN_SIZE.0),
-            px(CHAT_WINDOW_MIN_SIZE.1),
-        )),
+        window_min_size: Some(size(px(CHAT_WINDOW_MIN_SIZE.0), px(CHAT_WINDOW_MIN_SIZE.1))),
         titlebar: Some(TitlebarOptions {
             title: Some(title.into()),
             ..Default::default()

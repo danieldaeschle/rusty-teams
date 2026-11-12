@@ -12,7 +12,12 @@ pub struct Series {
 
 impl Series {
     fn new(value: f64) -> Self {
-        Series { min: value, max: value, last: value, samples: 1 }
+        Series {
+            min: value,
+            max: value,
+            last: value,
+            samples: 1,
+        }
     }
 
     fn observe(&mut self, value: f64) {
@@ -65,7 +70,12 @@ impl StatsSeries {
         }
     }
 
-    pub fn observe_sample(&mut self, sample: &StatsSample, others_unmuted: bool, own_unmuted: bool) {
+    pub fn observe_sample(
+        &mut self,
+        sample: &StatsSample,
+        others_unmuted: bool,
+        own_unmuted: bool,
+    ) {
         let video = &sample.video;
         if let Some(before) = self.values.get("audio_in_packets")
             && others_unmuted
@@ -85,11 +95,17 @@ impl StatsSeries {
             ("audio_in_level", sample.audio_in_level),
             ("audio_out_level", sample.audio_out_level),
             ("video_in_packets", video.inbound_packets as f64),
-            ("video_in_frames_decoded", video.inbound_frames_decoded as f64),
+            (
+                "video_in_frames_decoded",
+                video.inbound_frames_decoded as f64,
+            ),
             ("video_in_width", f64::from(video.inbound_width)),
             ("video_in_height", f64::from(video.inbound_height)),
             ("video_out_packets", video.outbound_packets as f64),
-            ("video_out_frames_encoded", video.outbound_frames_encoded as f64),
+            (
+                "video_out_frames_encoded",
+                video.outbound_frames_encoded as f64,
+            ),
             ("video_out_width", f64::from(video.outbound_width)),
             ("video_out_height", f64::from(video.outbound_height)),
             ("video_remote_round_trip_ms", video.remote_round_trip_ms),
@@ -135,7 +151,11 @@ mod tests {
         StatsSample {
             audio_in_packets: audio_in,
             audio_out_packets: audio_in * 2,
-            video: VideoReport { inbound_width: 1280, inbound_height: 720, ..VideoReport::default() },
+            video: VideoReport {
+                inbound_width: 1280,
+                inbound_height: 720,
+                ..VideoReport::default()
+            },
             ..StatsSample::default()
         }
     }
@@ -144,7 +164,10 @@ mod tests {
         CallHealth {
             level,
             cpu_limited: false,
-            sample: HealthSample { loss_percent, ..HealthSample::default() },
+            sample: HealthSample {
+                loss_percent,
+                ..HealthSample::default()
+            },
             transport: TransportDetails::default(),
             path: MediaPath::Direct,
         }
@@ -157,7 +180,10 @@ mod tests {
             series.observe_sample(&sample(packets), true, true);
         }
         let audio_in = series.values()["audio_in_packets"];
-        assert_eq!((audio_in.min, audio_in.max, audio_in.last, audio_in.samples), (10., 35., 35., 4));
+        assert_eq!(
+            (audio_in.min, audio_in.max, audio_in.last, audio_in.samples),
+            (10., 35., 35., 4)
+        );
         assert_eq!(series.stalled_audio_in, 1);
         assert_eq!(series.values()["video_in_width"].last, 1280.);
     }

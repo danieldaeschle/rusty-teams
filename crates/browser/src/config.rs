@@ -8,8 +8,13 @@ pub const PROFILE_NAME: &str = "rusty-teams-chrome";
 pub const DEFAULT_PORT: u16 = 9222;
 const CHROME_RELATIVE: &str = r"Google\Chrome\Application\chrome.exe";
 const WINDOWS_VARIABLES: [&str; 4] = ["LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "TEMP"];
-const LINUX_CHROME_NAMES: [&str; 5] =
-    ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"];
+const LINUX_CHROME_NAMES: [&str; 5] = [
+    "google-chrome",
+    "google-chrome-stable",
+    "chromium",
+    "chromium-browser",
+    "chrome",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
@@ -65,23 +70,37 @@ impl Config {
             Platform::Linux => HashMap::new(),
             Platform::Windows => WINDOWS_VARIABLES
                 .iter()
-                .filter_map(|name| std::env::var(name).ok().map(|value| ((*name).to_owned(), value)))
+                .filter_map(|name| {
+                    std::env::var(name)
+                        .ok()
+                        .map(|value| ((*name).to_owned(), value))
+                })
                 .collect(),
             Platform::Wsl => wsl_windows_variables()?,
         };
         let linux_data_dir = directories::BaseDirs::new().map(|dirs| dirs.data_dir().to_path_buf());
         let to_local = |windows_path: &str| match platform {
-            Platform::Wsl => wslpath(windows_path).unwrap_or_else(|| windows_path_to_wsl(windows_path)),
+            Platform::Wsl => {
+                wslpath(windows_path).unwrap_or_else(|| windows_path_to_wsl(windows_path))
+            }
             _ => windows_path.to_owned(),
         };
         Config::resolve(
             platform,
             DEFAULT_PORT,
-            &ConfigInputs { windows_variables, linux_data_dir, to_local: &to_local },
+            &ConfigInputs {
+                windows_variables,
+                linux_data_dir,
+                to_local: &to_local,
+            },
         )
     }
 
-    pub fn resolve(platform: Platform, port: u16, inputs: &ConfigInputs) -> Result<Config, BrowserError> {
+    pub fn resolve(
+        platform: Platform,
+        port: u16,
+        inputs: &ConfigInputs,
+    ) -> Result<Config, BrowserError> {
         let to_local = inputs.to_local;
         let missing = |name: &str| BrowserError::Environment(format!("%{name}% is not set"));
         let config = match platform {
@@ -100,12 +119,18 @@ impl Config {
                     profile_parent: path_text(&data_dir),
                     mode_parent: data_dir,
                     chrome_search: ChromeSearch::Named(
-                        LINUX_CHROME_NAMES.iter().map(|name| (*name).to_owned()).collect(),
+                        LINUX_CHROME_NAMES
+                            .iter()
+                            .map(|name| (*name).to_owned())
+                            .collect(),
                     ),
                 }
             }
             Platform::Windows | Platform::Wsl => {
-                let local = inputs.windows_variables.get("LOCALAPPDATA").ok_or_else(|| missing("LOCALAPPDATA"))?;
+                let local = inputs
+                    .windows_variables
+                    .get("LOCALAPPDATA")
+                    .ok_or_else(|| missing("LOCALAPPDATA"))?;
                 let candidates = ["PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"]
                     .iter()
                     .filter_map(|name| inputs.windows_variables.get(*name))
@@ -131,7 +156,11 @@ impl Config {
     }
 
     pub fn with_profile_name(mut self, name: &str) -> Config {
-        let separator = if self.platform == Platform::Linux { "/" } else { "\\" };
+        let separator = if self.platform == Platform::Linux {
+            "/"
+        } else {
+            "\\"
+        };
         self.profile = format!("{}{separator}{name}", self.profile_parent);
         self.mode_file = self.mode_parent.join(format!("{name}.mode"));
         self
@@ -157,25 +186,37 @@ pub(crate) fn find_chrome(
             .iter()
             .find(|candidate| exists(candidate))
             .cloned()
-            .ok_or_else(|| BrowserError::ChromeNotFound("not under Program Files or LocalAppData".into())),
+            .ok_or_else(|| {
+                BrowserError::ChromeNotFound("not under Program Files or LocalAppData".into())
+            }),
         ChromeSearch::Named(names) => std::env::split_paths(path_variable)
             .flat_map(|directory| names.iter().map(move |name| directory.join(name)))
             .find(|candidate| exists(candidate))
-            .ok_or_else(|| BrowserError::ChromeNotFound(format!("none of {} on PATH", names.join(", ")))),
+            .ok_or_else(|| {
+                BrowserError::ChromeNotFound(format!("none of {} on PATH", names.join(", ")))
+            }),
     }
 }
 
 pub fn windows_path_to_wsl(windows_path: &str) -> String {
     match windows_path.split_once(':') {
         Some((drive, rest)) if drive.len() == 1 => {
-            format!("/mnt/{}{}", drive.to_ascii_lowercase(), rest.replace('\\', "/"))
+            format!(
+                "/mnt/{}{}",
+                drive.to_ascii_lowercase(),
+                rest.replace('\\', "/")
+            )
         }
         _ => windows_path.replace('\\', "/"),
     }
 }
 
 fn wslpath(windows_path: &str) -> Option<String> {
-    let output = Command::new("wslpath").arg("-u").arg(windows_path).output().ok()?;
+    let output = Command::new("wslpath")
+        .arg("-u")
+        .arg(windows_path)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -185,7 +226,10 @@ fn wslpath(windows_path: &str) -> Option<String> {
 }
 
 pub(crate) fn parse_windows_variables(output: &str) -> Option<HashMap<String, String>> {
-    let line = output.lines().map(str::trim).rfind(|line| !line.is_empty())?;
+    let line = output
+        .lines()
+        .map(str::trim)
+        .rfind(|line| !line.is_empty())?;
     let values: Vec<&str> = line.split(';').collect();
     if values.len() != WINDOWS_VARIABLES.len() {
         return None;
@@ -200,7 +244,11 @@ pub(crate) fn parse_windows_variables(output: &str) -> Option<HashMap<String, St
 }
 
 fn wsl_windows_variables() -> Result<HashMap<String, String>, BrowserError> {
-    let echo = WINDOWS_VARIABLES.iter().map(|name| format!("%{name}%")).collect::<Vec<_>>().join(";");
+    let echo = WINDOWS_VARIABLES
+        .iter()
+        .map(|name| format!("%{name}%"))
+        .collect::<Vec<_>>()
+        .join(";");
     let output = Command::new("/mnt/c/Windows/System32/cmd.exe")
         .args(["/c", &format!("echo {echo}")])
         .current_dir("/mnt/c")
@@ -222,7 +270,10 @@ mod tests {
             ("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
         ];
         ConfigInputs {
-            windows_variables: variables.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect(),
+            windows_variables: variables
+                .iter()
+                .map(|(k, v)| ((*k).into(), (*v).into()))
+                .collect(),
             linux_data_dir: None,
             to_local,
         }
@@ -232,13 +283,19 @@ mod tests {
     fn detects_platform_from_proc_version() {
         let wsl = "Linux version 6.18.33.2-microsoft-standard-WSL2 (root@x)";
         assert_eq!(Platform::from_proc_version(Some(wsl)), Platform::Wsl);
-        assert_eq!(Platform::from_proc_version(Some("Linux version 6.8.0-generic")), Platform::Linux);
+        assert_eq!(
+            Platform::from_proc_version(Some("Linux version 6.8.0-generic")),
+            Platform::Linux
+        );
         assert_eq!(Platform::from_proc_version(None), Platform::Linux);
     }
 
     #[test]
     fn converts_windows_paths() {
-        assert_eq!(windows_path_to_wsl(r"C:\Users\me\x.mode"), "/mnt/c/Users/me/x.mode");
+        assert_eq!(
+            windows_path_to_wsl(r"C:\Users\me\x.mode"),
+            "/mnt/c/Users/me/x.mode"
+        );
         assert_eq!(windows_path_to_wsl(r"D:\a"), "/mnt/d/a");
     }
 
@@ -246,13 +303,21 @@ mod tests {
     fn resolves_wsl_config() {
         let to_local = |path: &str| windows_path_to_wsl(path);
         let config = Config::resolve(Platform::Wsl, 9222, &windows_inputs(&to_local)).unwrap();
-        assert_eq!(config.profile, r"C:\Users\me\AppData\Local\rusty-teams-chrome");
+        assert_eq!(
+            config.profile,
+            r"C:\Users\me\AppData\Local\rusty-teams-chrome"
+        );
         assert_eq!(
             config.mode_file,
             PathBuf::from("/mnt/c/Users/me/AppData/Local/rusty-teams-chrome.mode")
         );
-        let ChromeSearch::Files(files) = &config.chrome_search else { panic!("expected files") };
-        assert_eq!(files[0], PathBuf::from("/mnt/c/Program Files/Google/Chrome/Application/chrome.exe"));
+        let ChromeSearch::Files(files) = &config.chrome_search else {
+            panic!("expected files")
+        };
+        assert_eq!(
+            files[0],
+            PathBuf::from("/mnt/c/Program Files/Google/Chrome/Application/chrome.exe")
+        );
         assert_eq!(files.len(), 3);
     }
 
@@ -260,21 +325,35 @@ mod tests {
     fn resolves_windows_config_without_conversion() {
         let to_local = |path: &str| path.to_owned();
         let config = Config::resolve(Platform::Windows, 9222, &windows_inputs(&to_local)).unwrap();
-        assert_eq!(config.mode_file, PathBuf::from(r"C:\Users\me\AppData\Local\rusty-teams-chrome.mode"));
+        assert_eq!(
+            config.mode_file,
+            PathBuf::from(r"C:\Users\me\AppData\Local\rusty-teams-chrome.mode")
+        );
     }
 
     #[test]
     fn native_windows_uses_the_app_profile_and_chrome_install_dirs() {
         let to_local = |path: &str| path.to_owned();
         let config = Config::resolve(Platform::Windows, 9222, &windows_inputs(&to_local)).unwrap();
-        assert_eq!(config.profile, r"C:\Users\me\AppData\Local\rusty-teams-chrome");
-        let ChromeSearch::Files(files) = &config.chrome_search else { panic!("expected files") };
+        assert_eq!(
+            config.profile,
+            r"C:\Users\me\AppData\Local\rusty-teams-chrome"
+        );
+        let ChromeSearch::Files(files) = &config.chrome_search else {
+            panic!("expected files")
+        };
         let expected = [
             r"C:\Program Files\Google\Chrome\Application\chrome.exe",
             r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
             r"C:\Users\me\AppData\Local\Google\Chrome\Application\chrome.exe",
         ];
-        assert_eq!(files.iter().map(|file| file.to_string_lossy().into_owned()).collect::<Vec<_>>(), expected);
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            expected
+        );
     }
 
     #[test]
@@ -286,8 +365,13 @@ mod tests {
             to_local: &to_local,
         };
         let config = Config::resolve(Platform::Windows, 9222, &inputs).unwrap();
-        let ChromeSearch::Files(files) = &config.chrome_search else { panic!("expected files") };
-        assert_eq!(files, &[PathBuf::from(r"D:\L\Google\Chrome\Application\chrome.exe")]);
+        let ChromeSearch::Files(files) = &config.chrome_search else {
+            panic!("expected files")
+        };
+        assert_eq!(
+            files,
+            &[PathBuf::from(r"D:\L\Google\Chrome\Application\chrome.exe")]
+        );
         assert_eq!(config.with_profile_name("x").profile, r"D:\L\x");
     }
 
@@ -309,13 +393,20 @@ mod tests {
         };
         let config = Config::resolve(Platform::Linux, 9222, &inputs).unwrap();
         assert_eq!(config.profile, "/home/u/.local/share/rusty-teams-chrome");
-        assert_eq!(config.mode_file, PathBuf::from("/home/u/.local/share/rusty-teams-chrome.mode"));
+        assert_eq!(
+            config.mode_file,
+            PathBuf::from("/home/u/.local/share/rusty-teams-chrome.mode")
+        );
     }
 
     #[test]
     fn missing_localappdata_is_an_error() {
         let to_local = |path: &str| path.to_owned();
-        let inputs = ConfigInputs { windows_variables: HashMap::new(), linux_data_dir: None, to_local: &to_local };
+        let inputs = ConfigInputs {
+            windows_variables: HashMap::new(),
+            linux_data_dir: None,
+            to_local: &to_local,
+        };
         assert!(Config::resolve(Platform::Windows, 9222, &inputs).is_err());
     }
 
@@ -327,7 +418,10 @@ mod tests {
             .with_port(9333)
             .with_profile_name("rusty-teams-chrome-test");
         assert_eq!(config.port, 9333);
-        assert_eq!(config.profile, r"C:\Users\me\AppData\Local\rusty-teams-chrome-test");
+        assert_eq!(
+            config.profile,
+            r"C:\Users\me\AppData\Local\rusty-teams-chrome-test"
+        );
         assert!(config.mode_file.ends_with("rusty-teams-chrome-test.mode"));
     }
 
@@ -356,7 +450,8 @@ mod tests {
         // join_paths picks the host's PATH separator so split_paths splits it here too.
         let path = std::env::join_paths(["/usr/local/bin", "/usr/bin"]).unwrap();
         let found = find_chrome(&search, &path, &|candidate| {
-            candidate == Path::new("/usr/bin/chromium") || candidate == Path::new("/usr/bin/google-chrome")
+            candidate == Path::new("/usr/bin/chromium")
+                || candidate == Path::new("/usr/bin/google-chrome")
         })
         .unwrap();
         assert_eq!(found, PathBuf::from("/usr/bin/google-chrome"));

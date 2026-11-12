@@ -177,7 +177,10 @@ impl RosterEvent {
             }
             RosterChange::Invited => format!("{targets} were invited to the meeting."),
             RosterChange::MeetingNamed => {
-                format!("{initiator} named the meeting {}.", self.topic.as_deref().unwrap_or_default())
+                format!(
+                    "{initiator} named the meeting {}.",
+                    self.topic.as_deref().unwrap_or_default()
+                )
             }
             RosterChange::AppAdded => {
                 let app = self.app_name.as_deref().unwrap_or(UNNAMED_APP);
@@ -307,15 +310,28 @@ mod tests {
             .text(plain_names)
         };
         assert_eq!(invited(&["ann"]), "ann was invited to the meeting.");
-        assert_eq!(invited(&["ann", "bob"]), "ann and bob were invited to the meeting.");
-        assert_eq!(invited(&["ann", "bob", "cy"]), "ann and 2 others were invited to the meeting.");
-        let named = RosterEvent::from_thread_activity(&activity(ThreadActivityKind::TopicUpdated {
-            topic: "Tree service".into(),
-        }));
-        assert_eq!(named.text(plain_names), "boss named the meeting Tree service.");
-        let record = thread_activity_record("19:meeting_x@thread.v2", &activity(ThreadActivityKind::TopicUpdated {
-            topic: "Tree service".into(),
-        }));
+        assert_eq!(
+            invited(&["ann", "bob"]),
+            "ann and bob were invited to the meeting."
+        );
+        assert_eq!(
+            invited(&["ann", "bob", "cy"]),
+            "ann and 2 others were invited to the meeting."
+        );
+        let named =
+            RosterEvent::from_thread_activity(&activity(ThreadActivityKind::TopicUpdated {
+                topic: "Tree service".into(),
+            }));
+        assert_eq!(
+            named.text(plain_names),
+            "boss named the meeting Tree service."
+        );
+        let record = thread_activity_record(
+            "19:meeting_x@thread.v2",
+            &activity(ThreadActivityKind::TopicUpdated {
+                topic: "Tree service".into(),
+            }),
+        );
         assert_eq!(roster_event(&record), Some(named));
     }
 
@@ -462,6 +478,9 @@ mod tests {
         let event = RosterEvent::from_graph(&detail, created()).unwrap();
         assert_eq!(event.change, RosterChange::AppAdded);
         assert!(event.member_ids.is_empty());
-        assert_eq!(event.text(plain_names), "Ann Example added Jira to the chat.");
+        assert_eq!(
+            event.text(plain_names),
+            "Ann Example added Jira to the chat."
+        );
     }
 }

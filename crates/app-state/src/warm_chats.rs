@@ -71,14 +71,20 @@ mod tests {
     fn chat(id: &str, hour: Option<u32>) -> ChatRecord {
         ChatRecord {
             id: id.to_owned(),
-            last_message_at: hour.map(|hour| Utc.with_ymd_and_hms(2026, 11, 11, hour, 0, 0).unwrap()),
+            last_message_at: hour
+                .map(|hour| Utc.with_ymd_and_hms(2026, 11, 11, hour, 0, 0).unwrap()),
             ..Default::default()
         }
     }
 
     #[test]
     fn the_newest_chats_are_warmed_first() {
-        let chats = [chat("old", Some(8)), chat("never", None), chat("new", Some(12)), chat("mid", Some(10))];
+        let chats = [
+            chat("old", Some(8)),
+            chat("never", None),
+            chat("new", Some(12)),
+            chat("mid", Some(10)),
+        ];
         assert_eq!(recent_chat_ids(&chats, 2), ["new", "mid"]);
     }
 

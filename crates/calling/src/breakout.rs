@@ -25,7 +25,10 @@ fn percent_decoded(text: &str) -> String {
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
-        let hex = bytes.get(index + 1..index + 3).and_then(|pair| std::str::from_utf8(pair).ok()).and_then(|pair| u8::from_str_radix(pair, 16).ok());
+        let hex = bytes
+            .get(index + 1..index + 3)
+            .and_then(|pair| std::str::from_utf8(pair).ok())
+            .and_then(|pair| u8::from_str_radix(pair, 16).ok());
         match (bytes[index], hex) {
             (b'%', Some(byte)) => {
                 decoded.push(byte);
@@ -62,7 +65,11 @@ fn context_of(decoded_url: &str) -> Option<Value> {
 pub fn target_from_join_url(url: &str) -> Option<MeetingTarget> {
     let decoded = percent_decoded(url);
     let after = &decoded[decoded.find(MEETUP_PATH)? + MEETUP_PATH.len()..];
-    let thread_id = after.split(['/', '?']).next().filter(|thread| thread.starts_with("19:"))?.to_owned();
+    let thread_id = after
+        .split(['/', '?'])
+        .next()
+        .filter(|thread| thread.starts_with("19:"))?
+        .to_owned();
     let context = context_of(after)?;
     Some(MeetingTarget {
         thread_id,
@@ -92,10 +99,15 @@ pub fn room_assignment(body: &Value) -> Option<RoomAssignment> {
     let properties = find_key(body, "mainMeetingProperties")?;
     let room = properties["assignedBreakoutRooms"].as_array()?.first()?;
     Some(RoomAssignment {
-        name: room["name"].as_str().unwrap_or("a breakout room").to_owned(),
+        name: room["name"]
+            .as_str()
+            .unwrap_or("a breakout room")
+            .to_owned(),
         open: room["isOpen"].as_bool().unwrap_or(false),
         join_url: room["meetingJoinUrl"].as_str()?.to_owned(),
-        version: properties["breakoutRoomVersion"].as_u64().unwrap_or_default(),
+        version: properties["breakoutRoomVersion"]
+            .as_u64()
+            .unwrap_or_default(),
     })
 }
 
@@ -112,11 +124,24 @@ pub fn invite_move(body: &Value) -> Option<BreakoutMove> {
         return None;
     }
     let target = target_from_coordinates(data["relatedMeetingCoords"].as_str()?)?;
-    let room_name = data["meetingName"].as_str().filter(|name| !name.is_empty()).map_or_else(
-        || if returning { "the main meeting".to_owned() } else { "a breakout room".to_owned() },
-        str::to_owned,
-    );
-    Some(BreakoutMove { room_name, target, returning })
+    let room_name = data["meetingName"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .map_or_else(
+            || {
+                if returning {
+                    "the main meeting".to_owned()
+                } else {
+                    "a breakout room".to_owned()
+                }
+            },
+            str::to_owned,
+        );
+    Some(BreakoutMove {
+        room_name,
+        target,
+        returning,
+    })
 }
 
 /// Mode 2: no invite, the room simply opens; moves once per room opening.
@@ -142,7 +167,11 @@ impl RoomWatcher {
         }
         let target = target_from_join_url(&assignment.join_url)?;
         self.joined = Some(assignment.join_url);
-        Some(BreakoutMove { room_name: assignment.name, target, returning: false })
+        Some(BreakoutMove {
+            room_name: assignment.name,
+            target,
+            returning: false,
+        })
     }
 
     pub fn entered(&mut self, join_url: &str) {
@@ -176,14 +205,21 @@ mod tests {
         let plain = "https://teams.cloud.microsoft/l/meetup-join/19:meeting_x@thread.v2/0?context={\"Tid\":\"t\",\"Oid\":\"o\"}";
         assert_eq!(target_from_join_url(plain).unwrap().organizer_id, "o");
         assert!(target_from_join_url("https://example.com/other").is_none());
-        assert!(target_from_join_url("https://teams.microsoft.com/l/meetup-join/19:x@thread.v2/0").is_none());
+        assert!(
+            target_from_join_url("https://teams.microsoft.com/l/meetup-join/19:x@thread.v2/0")
+                .is_none()
+        );
     }
 
     #[test]
     fn coordinates_name_the_meeting_with_the_first_colon_replaced() {
-        let target = target_from_coordinates("tenant-1/org-1/19_meeting_Room1abc@thread.v2/0").unwrap();
+        let target =
+            target_from_coordinates("tenant-1/org-1/19_meeting_Room1abc@thread.v2/0").unwrap();
         assert_eq!(target.thread_id, "19:meeting_Room1abc@thread.v2");
-        assert_eq!((target.tenant_id.as_str(), target.organizer_id.as_str()), ("tenant-1", "org-1"));
+        assert_eq!(
+            (target.tenant_id.as_str(), target.organizer_id.as_str()),
+            ("tenant-1", "org-1")
+        );
         assert!(target_from_coordinates("tenant-1/org-1").is_none());
         assert!(target_from_coordinates("t/o/nonsense/0").is_none());
     }
@@ -191,7 +227,15 @@ mod tests {
     #[test]
     fn the_assigned_room_is_read_from_the_participant_update() {
         let assignment = room_assignment(&room_update(true, 5)).unwrap();
-        assert_eq!(assignment, RoomAssignment { name: "Room 1".into(), open: true, join_url: ROOM_URL.into(), version: 5 });
+        assert_eq!(
+            assignment,
+            RoomAssignment {
+                name: "Room 1".into(),
+                open: true,
+                join_url: ROOM_URL.into(),
+                version: 5
+            }
+        );
         assert!(room_assignment(&json!({"breakoutDetails": {"mainMeetingProperties": {"assignedBreakoutRooms": []}}})).is_none());
         assert!(room_assignment(&json!({"other": 1})).is_none());
     }
@@ -199,24 +243,54 @@ mod tests {
     #[test]
     fn an_opening_room_moves_you_once() {
         let mut watcher = RoomWatcher::default();
-        assert!(watcher.apply(room_assignment(&room_update(false, 1))).is_none());
-        let moved = watcher.apply(room_assignment(&room_update(true, 2))).unwrap();
+        assert!(
+            watcher
+                .apply(room_assignment(&room_update(false, 1)))
+                .is_none()
+        );
+        let moved = watcher
+            .apply(room_assignment(&room_update(true, 2)))
+            .unwrap();
         assert_eq!(moved.room_name, "Room 1");
         assert_eq!(moved.target.thread_id, "19:meeting_Room1abc@thread.v2");
         assert!(!moved.returning);
-        assert!(watcher.apply(room_assignment(&room_update(true, 3))).is_none());
-        assert!(watcher.apply(room_assignment(&room_update(false, 4))).is_none());
-        assert!(watcher.apply(room_assignment(&room_update(true, 5))).is_some());
+        assert!(
+            watcher
+                .apply(room_assignment(&room_update(true, 3)))
+                .is_none()
+        );
+        assert!(
+            watcher
+                .apply(room_assignment(&room_update(false, 4)))
+                .is_none()
+        );
+        assert!(
+            watcher
+                .apply(room_assignment(&room_update(true, 5)))
+                .is_some()
+        );
     }
 
     #[test]
     fn old_versions_and_the_room_you_are_already_in_do_not_move_you() {
         let mut watcher = RoomWatcher::default();
-        assert!(watcher.apply(room_assignment(&room_update(true, 9))).is_some());
-        assert!(watcher.apply(room_assignment(&room_update(false, 4))).is_none());
+        assert!(
+            watcher
+                .apply(room_assignment(&room_update(true, 9)))
+                .is_some()
+        );
+        assert!(
+            watcher
+                .apply(room_assignment(&room_update(false, 4)))
+                .is_none()
+        );
         let mut inside = RoomWatcher::default();
         inside.entered(ROOM_URL);
-        assert!(inside.apply(room_assignment(&room_update(true, 1))).is_none());
+        assert!(
+            inside
+                .apply(room_assignment(&room_update(true, 1)))
+                .is_none()
+        );
     }
 
     fn invite(room: bool, main: bool) -> Value {

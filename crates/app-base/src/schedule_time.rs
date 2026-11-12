@@ -186,7 +186,11 @@ pub fn describe(at: DateTime<Local>, now: DateTime<Local>) -> String {
 }
 
 fn weekday_clock(at: DateTime<Local>) -> String {
-    format!("{} {}", at.format("%a"), at.format(crate::format::clock_format()))
+    format!(
+        "{} {}",
+        at.format("%a"),
+        at.format(crate::format::clock_format())
+    )
 }
 
 #[cfg(test)]

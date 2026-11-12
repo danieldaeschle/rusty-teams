@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 use session::{App, Scope, Session};
 
 use crate::error::{Error, Result};
-use crate::pins::transport::{CSA_RESOURCE, CSA_SCOPE, skype_fetch_answer};
 use crate::messages::ensure_success;
+use crate::pins::transport::{CSA_RESOURCE, CSA_SCOPE, skype_fetch_answer};
 
 const AMS_BASE: &str = "https://de-prod.asyncgw.teams.microsoft.com/";
 const UPLOAD_BODY: &str = concat!(
@@ -28,7 +28,12 @@ fn uploaded_image(body: &Value) -> Result<AmsImage> {
     let object_id = body
         .get("id")
         .and_then(Value::as_str)
-        .filter(|id| !id.is_empty() && id.chars().all(|character| character.is_ascii_alphanumeric() || character == '-'))
+        .filter(|id| {
+            !id.is_empty()
+                && id
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '-')
+        })
         .ok_or_else(|| Error::UnexpectedAnswer("ams upload has no object id".into()))?;
     Ok(AmsImage {
         object_id: object_id.to_owned(),
@@ -48,7 +53,12 @@ impl Ams {
     }
 
     /// The image is readable by members of `conversation_id` only.
-    pub async fn upload_image(&self, conversation_id: &str, bytes: &[u8], filename: &str) -> Result<AmsImage> {
+    pub async fn upload_image(
+        &self,
+        conversation_id: &str,
+        bytes: &[u8],
+        filename: &str,
+    ) -> Result<AmsImage> {
         let arguments = json!({
             "base": AMS_BASE,
             "conversationId": conversation_id,

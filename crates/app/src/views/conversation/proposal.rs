@@ -50,7 +50,11 @@ impl ConversationView {
         Some(proposal_card::render(&entry, quote, actions, Utc::now(), cx).into_any_element())
     }
 
-    fn render_free_writing_bar(&self, conversation_id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_free_writing_bar(
+        &self,
+        conversation_id: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let grant = agent_api::free_writing(conversation_id, cx)?;
         let agent = agent_api::agent_label(grant.agent.as_deref());
         let conversation_id = conversation_id.to_owned();

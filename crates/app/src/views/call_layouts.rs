@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -18,9 +18,9 @@ use super::call_view::{own_tile, person_tile};
 use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::{
-    ActiveCall, CallLayout, CallModel, GRID_PADDING, STRIP_GAP, SpeakerSplit,
-    StripSplit, TILE_GAP, Tile, TileSize, focus_stage_size, gallery_grid, gallery_page,
-    measured_stage, shown_bubbles, speaker_split, strip_split,
+    ActiveCall, CallLayout, CallModel, GRID_PADDING, STRIP_GAP, SpeakerSplit, StripSplit, TILE_GAP,
+    Tile, TileSize, focus_stage_size, gallery_grid, gallery_page, measured_stage, shown_bubbles,
+    speaker_split, strip_split,
 };
 use crate::theme;
 
@@ -361,7 +361,11 @@ fn pager_button(
     enabled: bool,
 ) -> AnyElement {
     let app = app.clone();
-    let color = if enabled { theme::text() } else { theme::text_faint() };
+    let color = if enabled {
+        theme::text()
+    } else {
+        theme::text_faint()
+    };
     div()
         .id(id)
         .size(px(PAGER_BUTTON))
@@ -391,7 +395,14 @@ fn gallery_pager(app: &Entity<AppState>, page: usize, pages: usize) -> AnyElemen
         .items_center()
         .rounded_full()
         .bg(theme::row_hover())
-        .child(pager_button(app, "call-gallery-previous", IconName::ChevronLeft, "Previous page", false, page > 0))
+        .child(pager_button(
+            app,
+            "call-gallery-previous",
+            IconName::ChevronLeft,
+            "Previous page",
+            false,
+            page > 0,
+        ))
         .child(
             div()
                 .min_w(px(40.))
@@ -400,7 +411,14 @@ fn gallery_pager(app: &Entity<AppState>, page: usize, pages: usize) -> AnyElemen
                 .text_color(theme::text_soft())
                 .child(format!("{} / {}", page + 1, pages)),
         )
-        .child(pager_button(app, "call-gallery-next", IconName::ChevronRight, "Next page", true, page + 1 < pages))
+        .child(pager_button(
+            app,
+            "call-gallery-next",
+            IconName::ChevronRight,
+            "Next page",
+            true,
+            page + 1 < pages,
+        ))
         .into_any_element()
 }
 
@@ -440,7 +458,9 @@ fn gallery_body(
         .justify_center()
         .gap(px(TILE_GAP))
         .children(rows_of(tiles, grid.columns))
-        .when(paged, |body| body.child(gallery_pager(app, page.page, page.pages)))
+        .when(paged, |body| {
+            body.child(gallery_pager(app, page.page, page.pages))
+        })
         .into_any_element()
 }
 
@@ -451,10 +471,20 @@ fn speaker_body(
     now: Instant,
     stage: (f32, f32),
 ) -> AnyElement {
-    let SpeakerSplit { focus, others, own_cells, plan } = speaker_split(model, stage);
+    let SpeakerSplit {
+        focus,
+        others,
+        own_cells,
+        plan,
+    } = speaker_split(model, stage);
     let size = TileSize::sixteen_by_nine(plan.tile_width.floor());
     let has_filmstrip = plan.overflow.shown + own_cells + usize::from(plan.overflow.hidden > 0) > 0;
-    let focus_size = focus_stage_size(stage, GRID_PADDING, TILE_GAP, has_filmstrip.then_some(size.height));
+    let focus_size = focus_stage_size(
+        stage,
+        GRID_PADDING,
+        TILE_GAP,
+        has_filmstrip.then_some(size.height),
+    );
     let main = focus
         .as_ref()
         .and_then(|focus| render_focus_stage(app, state, focus, focus_size, now));
@@ -524,7 +554,12 @@ fn people_strip(
         cells.insert(own_index, own_tile(app, state, model, size, now));
     }
     if plan.overflow.hidden > 0 {
-        cells.push(overflow_tile(app, state, size, &others[plan.overflow.shown..]));
+        cells.push(overflow_tile(
+            app,
+            state,
+            size,
+            &others[plan.overflow.shown..],
+        ));
     }
     h_flex()
         .id("call-strip")

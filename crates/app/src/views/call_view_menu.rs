@@ -141,8 +141,8 @@ pub(super) fn view_button(
         "call-view",
         tool_face("call-view-face", IconName::LayoutGrid, "View", false),
     )
-        .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
-            view_items(popup, &app, &model, fullscreen)
-        })
-        .into_any_element()
+    .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
+        view_items(popup, &app, &model, fullscreen)
+    })
+    .into_any_element()
 }

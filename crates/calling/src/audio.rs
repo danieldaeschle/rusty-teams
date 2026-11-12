@@ -46,7 +46,8 @@ impl ClipGenerator {
         }
         while offset + 8 <= bytes.len() {
             let chunk_id = &bytes[offset..offset + 4];
-            let chunk_size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().ok()?) as usize;
+            let chunk_size =
+                u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().ok()?) as usize;
             let body = bytes.get(offset + 8..(offset + 8 + chunk_size).min(bytes.len()))?;
             match chunk_id {
                 b"fmt " => format = Some(body.get(0..16)?.to_vec()),
@@ -55,11 +56,23 @@ impl ClipGenerator {
                     let channels = u16::from_le_bytes([format[2], format[3]]);
                     let rate = u32::from_le_bytes(format[4..8].try_into().ok()?);
                     let bits = u16::from_le_bytes([format[14], format[15]]);
-                    if u16::from_le_bytes([format[0], format[1]]) != 1 || channels != 1 || rate != SAMPLE_RATE || bits != 16 {
+                    if u16::from_le_bytes([format[0], format[1]]) != 1
+                        || channels != 1
+                        || rate != SAMPLE_RATE
+                        || bits != 16
+                    {
                         return None;
                     }
-                    let samples: Vec<i16> = body.as_chunks::<2>().0.iter().map(|pair| i16::from_le_bytes(*pair)).collect();
-                    return (!samples.is_empty()).then_some(ClipGenerator { samples, position: 0 });
+                    let samples: Vec<i16> = body
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|pair| i16::from_le_bytes(*pair))
+                        .collect();
+                    return (!samples.is_empty()).then_some(ClipGenerator {
+                        samples,
+                        position: 0,
+                    });
                 }
                 _ => {}
             }
@@ -105,7 +118,8 @@ pub fn tone_ratio(samples: &[i16], frequency: f32) -> f32 {
     if energy == 0.0 {
         return 0.0;
     }
-    let power = previous * previous + before_previous * before_previous - coefficient * previous * before_previous;
+    let power = previous * previous + before_previous * before_previous
+        - coefficient * previous * before_previous;
     (2.0 * power / (samples.len() as f64 * energy)) as f32
 }
 

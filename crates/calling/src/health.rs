@@ -128,7 +128,11 @@ fn run_since(since: &mut Option<Instant>, holds: bool, now: Instant) -> bool {
 impl QualityTracker {
     pub fn observe(&mut self, now: Instant, sample: &HealthSample) -> Quality {
         self.limits.push_back((now, sample.limitation));
-        while self.limits.front().is_some_and(|(at, _)| now.duration_since(*at) > LIMIT_WINDOW) {
+        while self
+            .limits
+            .front()
+            .is_some_and(|(at, _)| now.duration_since(*at) > LIMIT_WINDOW)
+        {
             self.limits.pop_front();
         }
         let bad = run_since(&mut self.bad_since, sample.is_bad(), now);
@@ -152,15 +156,25 @@ impl QualityTracker {
         } else {
             self.recovering_since = None;
         }
-        Quality { level: self.level, cpu_limited: self.share_of(Limitation::Cpu, now) > LIMIT_SHARE }
+        Quality {
+            level: self.level,
+            cpu_limited: self.share_of(Limitation::Cpu, now) > LIMIT_SHARE,
+        }
     }
 
     fn share_of(&self, limitation: Limitation, now: Instant) -> f32 {
-        let spans_window = self.limits.front().is_some_and(|(at, _)| now.duration_since(*at) >= SUSTAIN);
+        let spans_window = self
+            .limits
+            .front()
+            .is_some_and(|(at, _)| now.duration_since(*at) >= SUSTAIN);
         if !spans_window {
             return 0.;
         }
-        let matching = self.limits.iter().filter(|(_, found)| *found == limitation).count();
+        let matching = self
+            .limits
+            .iter()
+            .filter(|(_, found)| *found == limitation)
+            .count();
         matching as f32 / self.limits.len() as f32
     }
 }
@@ -189,10 +203,17 @@ impl HealthSampler {
         if seconds <= 0. {
             return None;
         }
-        let received = counters.packets_received.saturating_sub(before.packets_received);
+        let received = counters
+            .packets_received
+            .saturating_sub(before.packets_received);
         let lost = counters.packets_lost.saturating_sub(before.packets_lost);
-        let inbound_loss_percent = if received + lost == 0 { 0. } else { lost as f64 * 100. / (received + lost) as f64 };
-        let kbps = |after: u64, before: u64| after.saturating_sub(before) as f64 * 8. / seconds / 1000.;
+        let inbound_loss_percent = if received + lost == 0 {
+            0.
+        } else {
+            lost as f64 * 100. / (received + lost) as f64
+        };
+        let kbps =
+            |after: u64, before: u64| after.saturating_sub(before) as f64 * 8. / seconds / 1000.;
         Some(HealthSample {
             loss_percent: inbound_loss_percent.max(counters.outbound_loss_percent),
             round_trip_ms: counters.round_trip_ms,
@@ -236,15 +257,25 @@ pub fn health_from_stats(stats: &[RtcStats]) -> (HealthCounters, TransportDetail
                 }
             }
             RtcStats::RemoteInboundRtp(remote) => {
-                counters.outbound_loss_percent = counters.outbound_loss_percent.max(remote.remote_inbound.fraction_lost * 100.);
-                remote_round_trip_ms = remote_round_trip_ms.max(remote.remote_inbound.round_trip_time * 1000.);
+                counters.outbound_loss_percent = counters
+                    .outbound_loss_percent
+                    .max(remote.remote_inbound.fraction_lost * 100.);
+                remote_round_trip_ms =
+                    remote_round_trip_ms.max(remote.remote_inbound.round_trip_time * 1000.);
             }
             RtcStats::Transport(found) => {
-                transport.dtls_state = found.transport.dtls_state.map(|state| format!("{state:?}")).unwrap_or_default();
+                transport.dtls_state = found
+                    .transport
+                    .dtls_state
+                    .map(|state| format!("{state:?}"))
+                    .unwrap_or_default();
                 transport.tls_version = found.transport.tls_version.clone();
                 transport.dtls_cipher = found.transport.dtls_cipher.clone();
                 transport.srtp_cipher = found.transport.srtp_cipher.clone();
-                certificate_ids = (found.transport.local_certificate_id.clone(), found.transport.remote_certificate_id.clone());
+                certificate_ids = (
+                    found.transport.local_certificate_id.clone(),
+                    found.transport.remote_certificate_id.clone(),
+                );
                 selected_pair_id = found.transport.selected_candidate_pair_id.clone();
             }
             _ => {}
@@ -255,7 +286,11 @@ pub fn health_from_stats(stats: &[RtcStats]) -> (HealthCounters, TransportDetail
             .iter()
             .find_map(|entry| match entry {
                 RtcStats::Certificate(certificate) if certificate.rtc.id == certificate_id => {
-                    Some(format!("{} {}", certificate.certificate.fingerprint_algorithm, certificate.certificate.fingerprint))
+                    Some(format!(
+                        "{} {}",
+                        certificate.certificate.fingerprint_algorithm,
+                        certificate.certificate.fingerprint
+                    ))
                 }
                 _ => None,
             })
@@ -264,10 +299,14 @@ pub fn health_from_stats(stats: &[RtcStats]) -> (HealthCounters, TransportDetail
     transport.local_fingerprint = fingerprint(&certificate_ids.0);
     transport.remote_fingerprint = fingerprint(&certificate_ids.1);
     let pair_round_trip_ms = stats.iter().find_map(|entry| match entry {
-        RtcStats::CandidatePair(pair) if pair.rtc.id == selected_pair_id => Some(pair.candidate_pair.current_round_trip_time * 1000.),
+        RtcStats::CandidatePair(pair) if pair.rtc.id == selected_pair_id => {
+            Some(pair.candidate_pair.current_round_trip_time * 1000.)
+        }
         _ => None,
     });
-    counters.round_trip_ms = pair_round_trip_ms.filter(|milliseconds| *milliseconds > 0.).unwrap_or(remote_round_trip_ms);
+    counters.round_trip_ms = pair_round_trip_ms
+        .filter(|milliseconds| *milliseconds > 0.)
+        .unwrap_or(remote_round_trip_ms);
     (counters, transport)
 }
 
@@ -283,8 +322,15 @@ impl Limitation {
 
 #[cfg(test)]
 mod tests {
-    use libwebrtc::stats::dictionaries::{CandidatePairStats, CertificateStats, InboundRtpStreamStats, OutboundRtpStreamStats, ReceivedRtpStreamStats, RtcStats as RtcStatsBase, RtpStreamStats, SentRtpStreamStats, TransportStats as TransportDictionary};
-    use libwebrtc::stats::{CandidatePairStats as PairEntry, CertificateStats as CertificateEntry, InboundRtpStats, OutboundRtpStats, TransportStats};
+    use libwebrtc::stats::dictionaries::{
+        CandidatePairStats, CertificateStats, InboundRtpStreamStats, OutboundRtpStreamStats,
+        ReceivedRtpStreamStats, RtcStats as RtcStatsBase, RtpStreamStats, SentRtpStreamStats,
+        TransportStats as TransportDictionary,
+    };
+    use libwebrtc::stats::{
+        CandidatePairStats as PairEntry, CertificateStats as CertificateEntry, InboundRtpStats,
+        OutboundRtpStats, TransportStats,
+    };
 
     use super::*;
 
@@ -293,11 +339,23 @@ mod tests {
     }
 
     fn lossy(loss_percent: f64) -> HealthSample {
-        HealthSample { loss_percent, ..HealthSample::default() }
+        HealthSample {
+            loss_percent,
+            ..HealthSample::default()
+        }
     }
 
-    fn feed(tracker: &mut QualityTracker, start: Instant, from: u64, to: u64, sample: &HealthSample) -> Quality {
-        let mut quality = Quality { level: NetworkLevel::Good, cpu_limited: false };
+    fn feed(
+        tracker: &mut QualityTracker,
+        start: Instant,
+        from: u64,
+        to: u64,
+        sample: &HealthSample,
+    ) -> Quality {
+        let mut quality = Quality {
+            level: NetworkLevel::Good,
+            cpu_limited: false,
+        };
         for seconds in (from..=to).step_by(2) {
             quality = tracker.observe(at(start, seconds), sample);
         }
@@ -307,42 +365,90 @@ mod tests {
     #[test]
     fn a_brief_spike_does_not_degrade_the_level() {
         let (mut tracker, start) = (QualityTracker::default(), Instant::now());
-        assert_eq!(feed(&mut tracker, start, 0, 2, &lossy(8.)).level, NetworkLevel::Good);
-        assert_eq!(feed(&mut tracker, start, 4, 20, &lossy(0.)).level, NetworkLevel::Good);
+        assert_eq!(
+            feed(&mut tracker, start, 0, 2, &lossy(8.)).level,
+            NetworkLevel::Good
+        );
+        assert_eq!(
+            feed(&mut tracker, start, 4, 20, &lossy(0.)).level,
+            NetworkLevel::Good
+        );
     }
 
     #[test]
     fn poor_needs_five_seconds_of_loss_over_five_percent() {
         let (mut tracker, start) = (QualityTracker::default(), Instant::now());
-        assert_eq!(feed(&mut tracker, start, 0, 4, &lossy(6.)).level, NetworkLevel::Good);
-        assert_eq!(feed(&mut tracker, start, 6, 6, &lossy(6.)).level, NetworkLevel::Poor);
+        assert_eq!(
+            feed(&mut tracker, start, 0, 4, &lossy(6.)).level,
+            NetworkLevel::Good
+        );
+        assert_eq!(
+            feed(&mut tracker, start, 6, 6, &lossy(6.)).level,
+            NetworkLevel::Poor
+        );
     }
 
     #[test]
     fn round_trip_and_jitter_also_make_it_poor() {
-        for sample in [HealthSample { round_trip_ms: 450., ..Default::default() }, HealthSample { jitter_ms: 35., ..Default::default() }] {
+        for sample in [
+            HealthSample {
+                round_trip_ms: 450.,
+                ..Default::default()
+            },
+            HealthSample {
+                jitter_ms: 35.,
+                ..Default::default()
+            },
+        ] {
             let (mut tracker, start) = (QualityTracker::default(), Instant::now());
-            assert_eq!(feed(&mut tracker, start, 0, 6, &sample).level, NetworkLevel::Poor);
+            assert_eq!(
+                feed(&mut tracker, start, 0, 6, &sample).level,
+                NetworkLevel::Poor
+            );
         }
     }
 
     #[test]
     fn bad_needs_five_seconds_over_ten_percent_loss_or_500_ms() {
         let (mut tracker, start) = (QualityTracker::default(), Instant::now());
-        assert_eq!(feed(&mut tracker, start, 0, 6, &lossy(12.)).level, NetworkLevel::Bad);
+        assert_eq!(
+            feed(&mut tracker, start, 0, 6, &lossy(12.)).level,
+            NetworkLevel::Bad
+        );
         let (mut tracker, start) = (QualityTracker::default(), Instant::now());
-        let slow = HealthSample { round_trip_ms: 600., ..Default::default() };
-        assert_eq!(feed(&mut tracker, start, 0, 6, &slow).level, NetworkLevel::Bad);
+        let slow = HealthSample {
+            round_trip_ms: 600.,
+            ..Default::default()
+        };
+        assert_eq!(
+            feed(&mut tracker, start, 0, 6, &slow).level,
+            NetworkLevel::Bad
+        );
     }
 
     #[test]
     fn the_level_drops_fast_and_recovers_one_step_per_ten_seconds() {
         let (mut tracker, start) = (QualityTracker::default(), Instant::now());
-        assert_eq!(feed(&mut tracker, start, 0, 6, &lossy(12.)).level, NetworkLevel::Bad);
-        assert_eq!(feed(&mut tracker, start, 8, 16, &lossy(0.)).level, NetworkLevel::Bad);
-        assert_eq!(feed(&mut tracker, start, 18, 18, &lossy(0.)).level, NetworkLevel::Poor);
-        assert_eq!(feed(&mut tracker, start, 20, 28, &lossy(0.)).level, NetworkLevel::Poor);
-        assert_eq!(feed(&mut tracker, start, 30, 30, &lossy(0.)).level, NetworkLevel::Good);
+        assert_eq!(
+            feed(&mut tracker, start, 0, 6, &lossy(12.)).level,
+            NetworkLevel::Bad
+        );
+        assert_eq!(
+            feed(&mut tracker, start, 8, 16, &lossy(0.)).level,
+            NetworkLevel::Bad
+        );
+        assert_eq!(
+            feed(&mut tracker, start, 18, 18, &lossy(0.)).level,
+            NetworkLevel::Poor
+        );
+        assert_eq!(
+            feed(&mut tracker, start, 20, 28, &lossy(0.)).level,
+            NetworkLevel::Poor
+        );
+        assert_eq!(
+            feed(&mut tracker, start, 30, 30, &lossy(0.)).level,
+            NetworkLevel::Good
+        );
     }
 
     #[test]
@@ -351,21 +457,36 @@ mod tests {
         feed(&mut tracker, start, 0, 6, &lossy(7.));
         feed(&mut tracker, start, 8, 16, &lossy(0.));
         feed(&mut tracker, start, 18, 18, &lossy(7.));
-        assert_eq!(feed(&mut tracker, start, 20, 28, &lossy(0.)).level, NetworkLevel::Poor);
-        assert_eq!(feed(&mut tracker, start, 30, 30, &lossy(0.)).level, NetworkLevel::Good);
+        assert_eq!(
+            feed(&mut tracker, start, 20, 28, &lossy(0.)).level,
+            NetworkLevel::Poor
+        );
+        assert_eq!(
+            feed(&mut tracker, start, 30, 30, &lossy(0.)).level,
+            NetworkLevel::Good
+        );
     }
 
     #[test]
     fn bandwidth_limits_alone_keep_it_good() {
         let (mut tracker, start) = (QualityTracker::default(), Instant::now());
-        let limited = HealthSample { limitation: Limitation::Bandwidth, ..Default::default() };
-        assert_eq!(feed(&mut tracker, start, 0, 30, &limited).level, NetworkLevel::Good);
+        let limited = HealthSample {
+            limitation: Limitation::Bandwidth,
+            ..Default::default()
+        };
+        assert_eq!(
+            feed(&mut tracker, start, 0, 30, &limited).level,
+            NetworkLevel::Good
+        );
     }
 
     #[test]
     fn cpu_limits_raise_their_own_flag_without_touching_the_level() {
         let (mut tracker, start) = (QualityTracker::default(), Instant::now());
-        let limited = HealthSample { limitation: Limitation::Cpu, ..Default::default() };
+        let limited = HealthSample {
+            limitation: Limitation::Cpu,
+            ..Default::default()
+        };
         let quality = feed(&mut tracker, start, 0, 6, &limited);
         assert!(quality.cpu_limited);
         assert_eq!(quality.level, NetworkLevel::Good);
@@ -375,9 +496,23 @@ mod tests {
     #[test]
     fn the_sampler_turns_counter_deltas_into_loss_and_bitrate() {
         let (mut sampler, start) = (HealthSampler::default(), Instant::now());
-        let first = HealthCounters { packets_received: 100, packets_lost: 0, bytes_sent: 1000, bytes_received: 2000, ..Default::default() };
+        let first = HealthCounters {
+            packets_received: 100,
+            packets_lost: 0,
+            bytes_sent: 1000,
+            bytes_received: 2000,
+            ..Default::default()
+        };
         assert_eq!(sampler.sample(start, first), None);
-        let second = HealthCounters { packets_received: 190, packets_lost: 10, bytes_sent: 51_000, bytes_received: 27_000, round_trip_ms: 80., jitter_ms: 4., ..first };
+        let second = HealthCounters {
+            packets_received: 190,
+            packets_lost: 10,
+            bytes_sent: 51_000,
+            bytes_received: 27_000,
+            round_trip_ms: 80.,
+            jitter_ms: 4.,
+            ..first
+        };
         let sample = sampler.sample(at(start, 2), second).unwrap();
         assert_eq!(sample.loss_percent, 10.);
         assert_eq!(sample.sent_kbps, 200.);
@@ -389,23 +524,49 @@ mod tests {
     fn the_sampler_reports_outbound_loss_from_the_remote_report() {
         let (mut sampler, start) = (HealthSampler::default(), Instant::now());
         sampler.sample(start, HealthCounters::default());
-        let counters = HealthCounters { outbound_loss_percent: 7., ..Default::default() };
-        assert_eq!(sampler.sample(at(start, 2), counters).unwrap().loss_percent, 7.);
+        let counters = HealthCounters {
+            outbound_loss_percent: 7.,
+            ..Default::default()
+        };
+        assert_eq!(
+            sampler.sample(at(start, 2), counters).unwrap().loss_percent,
+            7.
+        );
     }
 
     #[test]
     fn stats_parse_into_counters_and_transport_details() {
         let stats = vec![
             RtcStats::InboundRtp(InboundRtpStats {
-                stream: RtpStreamStats { kind: "audio".into(), ..Default::default() },
-                received: ReceivedRtpStreamStats { packets_received: 50, packets_lost: 5, jitter: 0.012 },
-                inbound: InboundRtpStreamStats { bytes_received: 4000, ..Default::default() },
+                stream: RtpStreamStats {
+                    kind: "audio".into(),
+                    ..Default::default()
+                },
+                received: ReceivedRtpStreamStats {
+                    packets_received: 50,
+                    packets_lost: 5,
+                    jitter: 0.012,
+                },
+                inbound: InboundRtpStreamStats {
+                    bytes_received: 4000,
+                    ..Default::default()
+                },
                 ..Default::default()
             }),
             RtcStats::OutboundRtp(OutboundRtpStats {
-                stream: RtpStreamStats { kind: "video".into(), ..Default::default() },
-                sent: SentRtpStreamStats { bytes_sent: 9000, ..Default::default() },
-                outbound: OutboundRtpStreamStats { active: true, quality_limitation_reason: QualityLimitationReason::Cpu, ..Default::default() },
+                stream: RtpStreamStats {
+                    kind: "video".into(),
+                    ..Default::default()
+                },
+                sent: SentRtpStreamStats {
+                    bytes_sent: 9000,
+                    ..Default::default()
+                },
+                outbound: OutboundRtpStreamStats {
+                    active: true,
+                    quality_limitation_reason: QualityLimitationReason::Cpu,
+                    ..Default::default()
+                },
                 ..Default::default()
             }),
             RtcStats::Transport(TransportStats {
@@ -421,12 +582,25 @@ mod tests {
                 ..Default::default()
             }),
             RtcStats::CandidatePair(PairEntry {
-                rtc: RtcStatsBase { id: "CP1".into(), ..Default::default() },
-                candidate_pair: CandidatePairStats { current_round_trip_time: 0.045, ..Default::default() },
+                rtc: RtcStatsBase {
+                    id: "CP1".into(),
+                    ..Default::default()
+                },
+                candidate_pair: CandidatePairStats {
+                    current_round_trip_time: 0.045,
+                    ..Default::default()
+                },
             }),
             RtcStats::Certificate(CertificateEntry {
-                rtc: RtcStatsBase { id: "CF1".into(), ..Default::default() },
-                certificate: CertificateStats { fingerprint: "AA:BB".into(), fingerprint_algorithm: "sha-256".into(), ..Default::default() },
+                rtc: RtcStatsBase {
+                    id: "CF1".into(),
+                    ..Default::default()
+                },
+                certificate: CertificateStats {
+                    fingerprint: "AA:BB".into(),
+                    fingerprint_algorithm: "sha-256".into(),
+                    ..Default::default()
+                },
             }),
         ];
         let (counters, transport) = health_from_stats(&stats);
@@ -443,8 +617,15 @@ mod tests {
     #[test]
     fn inactive_video_streams_do_not_count_as_limited() {
         let stats = vec![RtcStats::OutboundRtp(OutboundRtpStats {
-            stream: RtpStreamStats { kind: "video".into(), ..Default::default() },
-            outbound: OutboundRtpStreamStats { active: false, quality_limitation_reason: QualityLimitationReason::Bandwidth, ..Default::default() },
+            stream: RtpStreamStats {
+                kind: "video".into(),
+                ..Default::default()
+            },
+            outbound: OutboundRtpStreamStats {
+                active: false,
+                quality_limitation_reason: QualityLimitationReason::Bandwidth,
+                ..Default::default()
+            },
             ..Default::default()
         })];
         assert_eq!(health_from_stats(&stats).0.limitation, Limitation::None);

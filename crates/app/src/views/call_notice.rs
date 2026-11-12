@@ -158,11 +158,7 @@ fn transcript_chip(index: usize, transcript: RowAction) -> Stateful<Div> {
         .text_size(px(TEXT_SIZE))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text())
-        .child(symbol(
-            "description",
-            ICON_SIZE,
-            theme::accent_text(),
-        ))
+        .child(symbol("description", ICON_SIZE, theme::accent_text()))
         .child("Transcript")
 }
 

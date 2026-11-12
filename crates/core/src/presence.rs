@@ -245,7 +245,10 @@ mod tests {
 
     #[test]
     fn idle_available_shows_as_away_like_teams() {
-        assert_eq!(Availability::from_service("AvailableIdle"), Availability::Away);
+        assert_eq!(
+            Availability::from_service("AvailableIdle"),
+            Availability::Away
+        );
         assert_eq!(Availability::from_service("BusyIdle"), Availability::Busy);
     }
 

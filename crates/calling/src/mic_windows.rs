@@ -5,14 +5,17 @@ use std::sync::mpsc;
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
-    AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDCLNT_STREAMOPTIONS_NONE, AudioCategory_Communications, AudioClientProperties,
-    AUDIO_EFFECT, AUDIO_EFFECT_STATE_OFF, AUDIO_EFFECT_STATE_ON, DEVICE_STATE_ACTIVE, IAudioCaptureClient, IAudioClient, IAudioClient2,
-    IAudioEffectsManager, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX, eCapture, eCommunications,
+    AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
+    AUDCLNT_STREAMOPTIONS_NONE, AUDIO_EFFECT, AUDIO_EFFECT_STATE_OFF, AUDIO_EFFECT_STATE_ON,
+    AudioCategory_Communications, AudioClientProperties, DEVICE_STATE_ACTIVE, IAudioCaptureClient,
+    IAudioClient, IAudioClient2, IAudioEffectsManager, IMMDevice, IMMDeviceEnumerator,
+    MMDeviceEnumerator, WAVEFORMATEX, eCapture, eCommunications,
 };
 use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PropVariantClear};
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, STGM_READ,
+    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+    CoUninitialize, STGM_READ,
 };
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::core::{BOOL, GUID, HSTRING, Interface};
@@ -35,13 +38,18 @@ fn audio_error(what: &str, error: impl std::fmt::Display) -> Error {
 fn open_device(choice: &DeviceChoice) -> Result<IMMDevice> {
     unsafe {
         let enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|error| audio_error("device enumerator", error))?;
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|error| audio_error("device enumerator", error))?;
         let chosen = match choice {
             DeviceChoice::SystemDefault => None,
             DeviceChoice::Device(key) => enumerator
                 .GetDevice(&HSTRING::from(key.as_str()))
                 .ok()
-                .filter(|device| device.GetState().is_ok_and(|state| state == DEVICE_STATE_ACTIVE)),
+                .filter(|device| {
+                    device
+                        .GetState()
+                        .is_ok_and(|state| state == DEVICE_STATE_ACTIVE)
+                }),
         };
         match chosen {
             Some(device) => Ok(device),
@@ -54,15 +62,27 @@ fn open_device(choice: &DeviceChoice) -> Result<IMMDevice> {
 
 fn friendly_name(device: &IMMDevice) -> String {
     unsafe {
-        let Ok(store) = device.OpenPropertyStore(STGM_READ) else { return String::new() };
-        let Ok(mut value) = store.GetValue(&PKEY_Device_FriendlyName) else { return String::new() };
-        let name = value.Anonymous.Anonymous.Anonymous.pwszVal.to_string().unwrap_or_default();
+        let Ok(store) = device.OpenPropertyStore(STGM_READ) else {
+            return String::new();
+        };
+        let Ok(mut value) = store.GetValue(&PKEY_Device_FriendlyName) else {
+            return String::new();
+        };
+        let name = value
+            .Anonymous
+            .Anonymous
+            .Anonymous
+            .pwszVal
+            .to_string()
+            .unwrap_or_default();
         let _ = PropVariantClear(&mut value as *mut PROPVARIANT);
         name
     }
 }
 
-fn initialise(device: &IMMDevice) -> Result<(IAudioClient, IAudioCaptureClient, HANDLE, Vec<MicEffect>)> {
+fn initialise(
+    device: &IMMDevice,
+) -> Result<(IAudioClient, IAudioCaptureClient, HANDLE, Vec<MicEffect>)> {
     let block_align = BITS / 8;
     let format = WAVEFORMATEX {
         wFormatTag: PCM_TAG,
@@ -73,9 +93,13 @@ fn initialise(device: &IMMDevice) -> Result<(IAudioClient, IAudioCaptureClient, 
         wBitsPerSample: BITS,
         cbSize: 0,
     };
-    let flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+    let flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK
+        | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
+        | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
     unsafe {
-        let client: IAudioClient = device.Activate(CLSCTX_ALL, None).map_err(|error| audio_error("activate microphone", error))?;
+        let client: IAudioClient = device
+            .Activate(CLSCTX_ALL, None)
+            .map_err(|error| audio_error("activate microphone", error))?;
         let properties = AudioClientProperties {
             cbSize: size_of::<AudioClientProperties>() as u32,
             bIsOffload: BOOL(0),
@@ -87,13 +111,27 @@ fn initialise(device: &IMMDevice) -> Result<(IAudioClient, IAudioCaptureClient, 
             .and_then(|extended| extended.SetClientProperties(&raw const properties))
             .map_err(|error| audio_error("communications category", error))?;
         client
-            .Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 0, 0, &raw const format, None)
+            .Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                flags,
+                0,
+                0,
+                &raw const format,
+                None,
+            )
             .map_err(|error| audio_error("initialize microphone", error))?;
         let effects = apply_effect_policy(&client);
-        let event = CreateEventW(None, false, false, None).map_err(|error| audio_error("event", error))?;
-        client.SetEventHandle(event).map_err(|error| audio_error("event handle", error))?;
-        let capture = client.GetService::<IAudioCaptureClient>().map_err(|error| audio_error("capture service", error))?;
-        client.Start().map_err(|error| audio_error("start microphone", error))?;
+        let event =
+            CreateEventW(None, false, false, None).map_err(|error| audio_error("event", error))?;
+        client
+            .SetEventHandle(event)
+            .map_err(|error| audio_error("event handle", error))?;
+        let capture = client
+            .GetService::<IAudioCaptureClient>()
+            .map_err(|error| audio_error("capture service", error))?;
+        client
+            .Start()
+            .map_err(|error| audio_error("start microphone", error))?;
         Ok((client, capture, event, effects))
     }
 }
@@ -105,11 +143,12 @@ fn drain(capture: &IAudioCaptureClient, queue: &SampleQueue) -> windows::core::R
             let mut frames = 0u32;
             let mut flags = 0u32;
             capture.GetBuffer(&mut data, &mut frames, &mut flags, None, None)?;
-            let samples: Vec<i16> = if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() {
-                vec![0; frames as usize]
-            } else {
-                std::slice::from_raw_parts(data.cast::<i16>(), frames as usize).to_vec()
-            };
+            let samples: Vec<i16> =
+                if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || data.is_null() {
+                    vec![0; frames as usize]
+                } else {
+                    std::slice::from_raw_parts(data.cast::<i16>(), frames as usize).to_vec()
+                };
             capture.ReleaseBuffer(frames)?;
             queue.push(&samples);
         }
@@ -117,7 +156,10 @@ fn drain(capture: &IAudioCaptureClient, queue: &SampleQueue) -> windows::core::R
     Ok(())
 }
 
-pub fn start_communications_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<(Capture, String, Vec<MicEffect>)> {
+pub fn start_communications_microphone(
+    choice: &DeviceChoice,
+    queue: SampleQueue,
+) -> Result<(Capture, String, Vec<MicEffect>)> {
     let (ready_sender, ready) = mpsc::channel::<Result<(String, Vec<MicEffect>)>>();
     let choice = choice.clone();
     let capture = Capture::spawn_thread("mic-communications", move |stop| {
@@ -126,7 +168,8 @@ pub fn start_communications_microphone(choice: &DeviceChoice, queue: SampleQueue
         }
         let started = open_device(&choice).and_then(|device| {
             let name = friendly_name(&device);
-            initialise(&device).map(|(client, capture, event, effects)| (name, effects, client, capture, event))
+            initialise(&device)
+                .map(|(client, capture, event, effects)| (name, effects, client, capture, event))
         });
         match started {
             Ok((name, effects, client, capture, event)) => {
@@ -149,17 +192,25 @@ pub fn start_communications_microphone(choice: &DeviceChoice, queue: SampleQueue
         unsafe { CoUninitialize() };
     })
     .map_err(|error| audio_error("microphone thread", error))?;
-    let (name, effects) = ready.recv().map_err(|_| Error::Audio("microphone thread ended".into()))??;
+    let (name, effects) = ready
+        .recv()
+        .map_err(|_| Error::Audio("microphone thread ended".into()))??;
     Ok((capture, name, effects))
 }
 
 /// Switches the Windows effects on this stream to what our chain expects and returns the resulting effect list.
 fn apply_effect_policy(client: &IAudioClient) -> Vec<MicEffect> {
     unsafe {
-        let Ok(manager) = client.GetService::<IAudioEffectsManager>() else { return Vec::new() };
+        let Ok(manager) = client.GetService::<IAudioEffectsManager>() else {
+            return Vec::new();
+        };
         for effect in list_effects(&manager).unwrap_or_default() {
             if let Some(enabled) = effect.change() {
-                let state = if enabled { AUDIO_EFFECT_STATE_ON } else { AUDIO_EFFECT_STATE_OFF };
+                let state = if enabled {
+                    AUDIO_EFFECT_STATE_ON
+                } else {
+                    AUDIO_EFFECT_STATE_OFF
+                };
                 let _ = manager.SetAudioEffectState(GUID::from_u128(effect.id), state);
             }
         }
@@ -171,13 +222,19 @@ fn list_effects(manager: &IAudioEffectsManager) -> Result<Vec<MicEffect>> {
     unsafe {
         let mut effects: *mut AUDIO_EFFECT = std::ptr::null_mut();
         let mut count = 0u32;
-        manager.GetAudioEffects(&mut effects, &mut count).map_err(|error| audio_error("audio effects", error))?;
+        manager
+            .GetAudioEffects(&mut effects, &mut count)
+            .map_err(|error| audio_error("audio effects", error))?;
         if effects.is_null() {
             return Ok(Vec::new());
         }
         let listed = std::slice::from_raw_parts(effects, count as usize)
             .iter()
-            .map(|effect| MicEffect { id: effect.id.to_u128(), enabled: effect.state.0 != 0, can_set: effect.canSetState.as_bool() })
+            .map(|effect| MicEffect {
+                id: effect.id.to_u128(),
+                enabled: effect.state.0 != 0,
+                can_set: effect.canSetState.as_bool(),
+            })
             .collect();
         CoTaskMemFree(Some(effects.cast_const().cast()));
         Ok(listed)

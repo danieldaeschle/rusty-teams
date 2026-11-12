@@ -12,15 +12,28 @@ fn main() {
         eprintln!("usage: mic_chain_wav <input.wav> <output-dir> [auto|low|off]");
         std::process::exit(2);
     };
-    let level = arguments.next().and_then(|key| NoiseSuppression::from_key(&key)).unwrap_or_default();
+    let level = arguments
+        .next()
+        .and_then(|key| NoiseSuppression::from_key(&key))
+        .unwrap_or_default();
     let bytes = std::fs::read(&input).expect("read input");
     let mut clip = ClipGenerator::from_wav(&bytes).expect("48 kHz mono 16-bit WAV");
     let frames = bytes.len().saturating_sub(44) / 2 / FRAME_SAMPLES;
-    let settings = MicSettings { noise_suppression: level, music_mode: false };
+    let settings = MicSettings {
+        noise_suppression: level,
+        music_mode: false,
+    };
     let dumps = StageDumps::create(std::path::Path::new(&output)).expect("create output dir");
-    let mut chain = MicChain::new(settings.apm_config(), settings.ml_noise_suppression(), Some(dumps));
+    let mut chain = MicChain::new(
+        settings.apm_config(),
+        settings.ml_noise_suppression(),
+        Some(dumps),
+    );
     let waiting = std::time::Instant::now();
-    while settings.ml_noise_suppression() && !calling::noise_stage::is_ready() && waiting.elapsed().as_secs() < 30 {
+    while settings.ml_noise_suppression()
+        && !calling::noise_stage::is_ready()
+        && waiting.elapsed().as_secs() < 30
+    {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     let started = std::time::Instant::now();

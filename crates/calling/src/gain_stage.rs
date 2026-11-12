@@ -16,7 +16,11 @@ const MIN_SPEECH_FRAMES: u32 = 100;
 static LEARNED_LIFT_GAIN_DB: AtomicU32 = AtomicU32::new(LIFT_DEFAULT_GAIN_DB.to_bits());
 
 fn frame_dbfs(frame: &[i16]) -> f32 {
-    let mean_square = frame.iter().map(|sample| f32::from(*sample).powi(2)).sum::<f32>() / frame.len().max(1) as f32;
+    let mean_square = frame
+        .iter()
+        .map(|sample| f32::from(*sample).powi(2))
+        .sum::<f32>()
+        / frame.len().max(1) as f32;
     10.0 * (mean_square / 32768.0_f32.powi(2) + 1e-12).log10()
 }
 
@@ -32,7 +36,13 @@ impl GainStage {
     /// Before DeepFilterNet: brings a quiet laptop mic up; starts at the gain the last call settled on, so the first words already have the right level.
     pub fn lift() -> GainStage {
         let initial_gain_db = f32::from_bits(LEARNED_LIFT_GAIN_DB.load(Ordering::Relaxed));
-        GainStage::new(true, initial_gain_db, 0.0, LIFT_GAIN_CHANGE_DB_PER_SECOND, true)
+        GainStage::new(
+            true,
+            initial_gain_db,
+            0.0,
+            LIFT_GAIN_CHANGE_DB_PER_SECOND,
+            true,
+        )
     }
 
     /// Last stage, fixed: makes up the level DeepFilterNet takes off and limits peaks; a second adaptive stage pumps against the first.
@@ -40,9 +50,20 @@ impl GainStage {
         GainStage::new(false, 0.0, OUTPUT_FIXED_GAIN_DB, 1.0, false)
     }
 
-    fn new(adaptive: bool, initial_gain_db: f32, fixed_gain_db: f32, max_gain_change_db_per_second: f32, learns: bool) -> GainStage {
+    fn new(
+        adaptive: bool,
+        initial_gain_db: f32,
+        fixed_gain_db: f32,
+        max_gain_change_db_per_second: f32,
+        learns: bool,
+    ) -> GainStage {
         GainStage {
-            module: GainProcessor::new(adaptive, initial_gain_db, fixed_gain_db, max_gain_change_db_per_second),
+            module: GainProcessor::new(
+                adaptive,
+                initial_gain_db,
+                fixed_gain_db,
+                max_gain_change_db_per_second,
+            ),
             measured_gain_db_sum: 0.0,
             measured_frames: 0,
             learns,
@@ -65,7 +86,8 @@ impl GainStage {
     }
 
     fn learned_gain_db(&self) -> Option<f32> {
-        (self.measured_frames >= MIN_SPEECH_FRAMES).then(|| self.measured_gain_db_sum / self.measured_frames as f32)
+        (self.measured_frames >= MIN_SPEECH_FRAMES)
+            .then(|| self.measured_gain_db_sum / self.measured_frames as f32)
     }
 }
 
@@ -97,7 +119,10 @@ mod tests {
             .collect();
         let before = frame_dbfs(&quiet);
         stage.process(&mut quiet);
-        assert!(frame_dbfs(&quiet) - before > 6.0, "quiet speech should be lifted");
+        assert!(
+            frame_dbfs(&quiet) - before > 6.0,
+            "quiet speech should be lifted"
+        );
 
         let mut loud: Vec<i16> = (0..FRAME_SAMPLES)
             .map(|sample| ((sample as f32 * 0.04).sin() * 8000.0) as i16)

@@ -43,7 +43,8 @@ impl RenderOnce for JumboEmoticon {
             Some(Err(_)) => return glyph(&self.emoji),
             None => return div().size(px(EMOTICON_SIZE)).into_any_element(),
         };
-        let playback = window.use_keyed_state(self.id.clone(), cx, |_, _| Playback { started: None });
+        let playback =
+            window.use_keyed_state(self.id.clone(), cx, |_, _| Playback { started: None });
         let now = Instant::now();
         let active = window.is_window_active();
         let started = playback.update(cx, |playback, _| {
@@ -52,7 +53,8 @@ impl RenderOnce for JumboEmoticon {
             }
             playback.started
         });
-        let playing = started.is_some_and(|started| now.duration_since(started) < resolved.loop_duration());
+        let playing =
+            started.is_some_and(|started| now.duration_since(started) < resolved.loop_duration());
         let image = if playing {
             images.animated.clone()
         } else {

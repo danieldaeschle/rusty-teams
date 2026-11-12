@@ -197,13 +197,18 @@ mod tests {
         assert_eq!(body["target"], "chat");
         assert_eq!(message["text"], "Summarize this chat");
         assert_eq!(message["messageAnnotations"][0]["id"], "19:chat@thread.v2");
-        assert_eq!(message["messageAnnotations"][0]["messageAnnotationType"], "Chat");
+        assert_eq!(
+            message["messageAnnotations"][0]["messageAnnotationType"],
+            "Chat"
+        );
     }
 
     #[test]
     fn the_url_routes_to_the_user_in_the_tenant() {
         let url = chathub_url(&ask(), "session-1", "request-1");
-        assert!(url.starts_with("https://substrate.office.com/m365Copilot/Chathub/user-1@tenant-1?"));
+        assert!(
+            url.starts_with("https://substrate.office.com/m365Copilot/Chathub/user-1@tenant-1?")
+        );
         assert!(url.contains("X-SessionId=session-1"));
     }
 
@@ -217,7 +222,10 @@ mod tests {
                 {"text": "### Chat summary\n\n- <Person>Ada</Person> shipped it. \u{e200}cite\u{e202}turn1search1\u{e201}", "author": "bot"}
             ], "result": {"value": "Success"}}}
         ]);
-        assert_eq!(answer_of(&received).unwrap(), "### Chat summary\n\n- Ada shipped it.");
+        assert_eq!(
+            answer_of(&received).unwrap(),
+            "### Chat summary\n\n- Ada shipped it."
+        );
     }
 
     #[test]

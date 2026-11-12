@@ -37,11 +37,14 @@ mod probe {
     use calling::wav_dump::WavDump;
     use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
     use windows::Win32::Media::Audio::{
-        AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-        DEVICE_STATE_ACTIVE, IAudioClient, IAudioRenderClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX,
+        AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+        AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, DEVICE_STATE_ACTIVE, IAudioClient,
+        IAudioRenderClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX,
         eRender,
     };
-    use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, STGM_READ};
+    use windows::Win32::System::Com::{
+        CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, STGM_READ,
+    };
 
     const CHANNELS: u16 = 2;
     const BITS: u16 = 16;
@@ -59,22 +62,35 @@ mod probe {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             let enumerator: IMMDeviceEnumerator =
-                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|error| failed("enumerator", error))?;
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                    .map_err(|error| failed("enumerator", error))?;
             let devices = enumerator
                 .EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
                 .map_err(|error| failed("endpoints", error))?;
             let mut names = Vec::new();
             for index in 0..devices.GetCount().map_err(|error| failed("count", error))? {
                 let device = devices.Item(index).map_err(|error| failed("item", error))?;
-                let store = device.OpenPropertyStore(STGM_READ).map_err(|error| failed("properties", error))?;
-                let value = store.GetValue(&PKEY_Device_FriendlyName).map_err(|error| failed("name", error))?;
-                let name = value.Anonymous.Anonymous.Anonymous.pwszVal.to_string().unwrap_or_default();
+                let store = device
+                    .OpenPropertyStore(STGM_READ)
+                    .map_err(|error| failed("properties", error))?;
+                let value = store
+                    .GetValue(&PKEY_Device_FriendlyName)
+                    .map_err(|error| failed("name", error))?;
+                let name = value
+                    .Anonymous
+                    .Anonymous
+                    .Anonymous
+                    .pwszVal
+                    .to_string()
+                    .unwrap_or_default();
                 if name.contains(name_part) {
                     return Ok(device);
                 }
                 names.push(name);
             }
-            Err(format!("no render device with \"{name_part}\" in {names:?}"))
+            Err(format!(
+                "no render device with \"{name_part}\" in {names:?}"
+            ))
         }
     }
 
@@ -85,10 +101,19 @@ mod probe {
         let rate = u32::from_le_bytes([header[24], header[25], header[26], header[27]]);
         let bits = u16::from_le_bytes([header[34], header[35]]);
         if channels != 1 || rate != SAMPLE_RATE || bits != BITS {
-            return Err(format!("need mono 16-bit {SAMPLE_RATE} Hz, got {channels} ch {bits} bit {rate} Hz"));
+            return Err(format!(
+                "need mono 16-bit {SAMPLE_RATE} Hz, got {channels} ch {bits} bit {rate} Hz"
+            ));
         }
-        let data = bytes.windows(4).position(|tag| tag == b"data").ok_or("wav without data chunk")? + 8;
-        Ok(bytes[data..].chunks_exact(2).map(|pair| i16::from_le_bytes([pair[0], pair[1]])).collect())
+        let data = bytes
+            .windows(4)
+            .position(|tag| tag == b"data")
+            .ok_or("wav without data chunk")?
+            + 8;
+        Ok(bytes[data..]
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .collect())
     }
 
     pub fn play(name_part: &str, wav: &str, seconds: u64) -> Result<(), String> {
@@ -108,7 +133,9 @@ mod probe {
             cbSize: 0,
         };
         unsafe {
-            let client: IAudioClient = device.Activate(CLSCTX_ALL, None).map_err(|error| failed("activate", error))?;
+            let client: IAudioClient = device
+                .Activate(CLSCTX_ALL, None)
+                .map_err(|error| failed("activate", error))?;
             client
                 .Initialize(
                     AUDCLNT_SHAREMODE_SHARED,
@@ -119,24 +146,37 @@ mod probe {
                     None,
                 )
                 .map_err(|error| failed("initialize", error))?;
-            let buffer_frames = client.GetBufferSize().map_err(|error| failed("buffer size", error))?;
-            let render: IAudioRenderClient = client.GetService().map_err(|error| failed("render service", error))?;
+            let buffer_frames = client
+                .GetBufferSize()
+                .map_err(|error| failed("buffer size", error))?;
+            let render: IAudioRenderClient = client
+                .GetService()
+                .map_err(|error| failed("render service", error))?;
             client.Start().map_err(|error| failed("start", error))?;
             let started = Instant::now();
             let mut position = 0usize;
             println!("{{\"playing\":true}}");
             while started.elapsed() < Duration::from_secs(seconds) {
-                let padding = client.GetCurrentPadding().map_err(|error| failed("padding", error))?;
+                let padding = client
+                    .GetCurrentPadding()
+                    .map_err(|error| failed("padding", error))?;
                 let frames = buffer_frames - padding;
                 if frames > 0 {
-                    let data = render.GetBuffer(frames).map_err(|error| failed("buffer", error))?;
-                    let output = std::slice::from_raw_parts_mut(data.cast::<i16>(), frames as usize * usize::from(CHANNELS));
+                    let data = render
+                        .GetBuffer(frames)
+                        .map_err(|error| failed("buffer", error))?;
+                    let output = std::slice::from_raw_parts_mut(
+                        data.cast::<i16>(),
+                        frames as usize * usize::from(CHANNELS),
+                    );
                     for pair in output.chunks_exact_mut(usize::from(CHANNELS)) {
                         let sample = samples[position % samples.len()];
                         pair.fill(sample);
                         position += 1;
                     }
-                    render.ReleaseBuffer(frames, 0).map_err(|error| failed("release", error))?;
+                    render
+                        .ReleaseBuffer(frames, 0)
+                        .map_err(|error| failed("release", error))?;
                 }
                 std::thread::sleep(TICK);
             }
@@ -146,26 +186,34 @@ mod probe {
     }
 
     fn rms(samples: &[i16]) -> f64 {
-        let sum: f64 = samples.iter().map(|sample| f64::from(*sample).powi(2)).sum();
+        let sum: f64 = samples
+            .iter()
+            .map(|sample| f64::from(*sample).powi(2))
+            .sum();
         (sum / samples.len().max(1) as f64).sqrt()
     }
 
     pub fn record_process(process_id: u32, seconds: u64, out: &str) -> Result<(), String> {
         let queue = SampleQueue::default();
-        let _capture = calling::start_process_capture(queue.clone(), process_id).map_err(|error| failed("capture", error))?;
+        let _capture = calling::start_process_capture(queue.clone(), process_id)
+            .map_err(|error| failed("capture", error))?;
         record(&queue, seconds, out)
     }
 
     pub fn record_mic(seconds: u64, out: &str) -> Result<(), String> {
         let queue = SampleQueue::default();
-        let started = calling::sound_capture::start_microphone(&calling::DeviceChoice::SystemDefault, queue.clone())
-            .map_err(|error| failed("microphone", error))?;
+        let started = calling::sound_capture::start_microphone(
+            &calling::DeviceChoice::SystemDefault,
+            queue.clone(),
+        )
+        .map_err(|error| failed("microphone", error))?;
         eprintln!("{}", started.source);
         record(&queue, seconds, out)
     }
 
     fn record(queue: &SampleQueue, seconds: u64, out: &str) -> Result<(), String> {
-        let mut dump = WavDump::create(std::path::Path::new(out)).map_err(|error| failed("wav", error))?;
+        let mut dump =
+            WavDump::create(std::path::Path::new(out)).map_err(|error| failed("wav", error))?;
         let frames_per_window = WINDOW_MS * SAMPLE_RATE as usize / 1000 / FRAME_SAMPLES;
         let mut window = Vec::new();
         let mut loudness = Vec::new();

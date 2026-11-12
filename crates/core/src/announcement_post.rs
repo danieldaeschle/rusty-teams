@@ -46,7 +46,9 @@ impl<R: Remote> SyncEngine<R> {
             return Err(Error::Unsupported("an announcement in a chat"));
         };
         let image = match &banner.background {
-            BannerBackground::LocalImage(path) => Some(self.upload_banner_image(channel_id, path).await?),
+            BannerBackground::LocalImage(path) => {
+                Some(self.upload_banner_image(channel_id, path).await?)
+            }
             _ => None,
         };
         let (html, mentions) = outgoing(&conversation, html, mentions)?;
@@ -67,8 +69,10 @@ impl<R: Remote> SyncEngine<R> {
                 },
                 None => banner.clone(),
             };
-            sent.attachments
-                .insert(0, shown.attachment(format!("announcement-card-{}", sent.id)));
+            sent.attachments.insert(
+                0,
+                shown.attachment(format!("announcement-card-{}", sent.id)),
+            );
         }
         let record = self.cache_sent(channel_id, &sent, &html, extras)?;
         if attached {
@@ -78,7 +82,12 @@ impl<R: Remote> SyncEngine<R> {
         }
     }
 
-    async fn set_cards_with_retry(&self, target: &ConversationRef, message_id: &str, cards: &str) -> bool {
+    async fn set_cards_with_retry(
+        &self,
+        target: &ConversationRef,
+        message_id: &str,
+        cards: &str,
+    ) -> bool {
         for delay in CARD_RETRY_DELAYS {
             tokio::time::sleep(delay).await;
             if self
@@ -94,10 +103,9 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     async fn upload_banner_image(&self, channel_id: &str, path: &str) -> Result<TeamsBannerImage> {
-        let bytes = std::fs::read(path)
-            .map_err(|_| Error::BannerImage("the picked file is gone"))?;
-        let (width, height) =
-            png_size(&bytes).ok_or(Error::BannerImage("not a PNG"))?;
+        let bytes =
+            std::fs::read(path).map_err(|_| Error::BannerImage("the picked file is gone"))?;
+        let (width, height) = png_size(&bytes).ok_or(Error::BannerImage("not a PNG"))?;
         let uploaded = self
             .remote
             .upload_ams_image(channel_id, &bytes, BANNER_FILE_NAME)

@@ -106,7 +106,11 @@ pub fn people_sections(model: &CallModel) -> PeopleSections {
     });
     let mut rows: Vec<(MeetingRole, PersonRow)> = Vec::new();
     let mut lobby = Vec::new();
-    for tile in model.tiles.iter().filter(|tile| !tile.mri.starts_with(BOT_PREFIX)) {
+    for tile in model
+        .tiles
+        .iter()
+        .filter(|tile| !tile.mri.starts_with(BOT_PREFIX))
+    {
         match tile.state {
             TileState::InLobby => lobby.push(LobbyRow {
                 mri: tile.mri.clone(),
@@ -115,7 +119,10 @@ pub fn people_sections(model: &CallModel) -> PeopleSections {
             }),
             TileState::Present | TileState::Invited => {
                 let role = in_meeting.then(|| tile.role.unwrap_or(MeetingRole::Attendee));
-                rows.push((role.unwrap_or(MeetingRole::Attendee), tile_row(model, tile, role)));
+                rows.push((
+                    role.unwrap_or(MeetingRole::Attendee),
+                    tile_row(model, tile, role),
+                ));
             }
             TileState::Left => {}
         }
@@ -131,47 +138,77 @@ pub fn people_sections(model: &CallModel) -> PeopleSections {
         .collect();
     hands.sort_by_key(|row| row.hand);
     let groups = if in_meeting {
-        [MeetingRole::Organizer, MeetingRole::Presenter, MeetingRole::Attendee]
-            .into_iter()
-            .filter_map(|role| {
-                let mut group: Vec<PersonRow> = rows
-                    .iter()
-                    .filter(|(row_role, _)| *row_role == role)
-                    .map(|(_, row)| row.clone())
-                    .collect();
-                by_name(&mut group);
-                (!group.is_empty()).then_some(PeopleGroup { title: group_title(role), rows: group })
+        [
+            MeetingRole::Organizer,
+            MeetingRole::Presenter,
+            MeetingRole::Attendee,
+        ]
+        .into_iter()
+        .filter_map(|role| {
+            let mut group: Vec<PersonRow> = rows
+                .iter()
+                .filter(|(row_role, _)| *row_role == role)
+                .map(|(_, row)| row.clone())
+                .collect();
+            by_name(&mut group);
+            (!group.is_empty()).then_some(PeopleGroup {
+                title: group_title(role),
+                rows: group,
             })
-            .collect()
+        })
+        .collect()
     } else {
         let mut flat: Vec<PersonRow> = rows.into_iter().map(|(_, row)| row).collect();
         by_name(&mut flat);
-        vec![PeopleGroup { title: FLAT_TITLE, rows: flat }]
+        vec![PeopleGroup {
+            title: FLAT_TITLE,
+            rows: flat,
+        }]
     };
-    PeopleSections { count, lobby, hands, groups }
+    PeopleSections {
+        count,
+        lobby,
+        hands,
+        groups,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
 
-    use calling::{AttendeeLimits, CallState, CallUpdate, MeetingCapability, PublishedState, RaisedHand, RosterEntry};
+    use calling::{
+        AttendeeLimits, CallState, CallUpdate, MeetingCapability, PublishedState, RaisedHand,
+        RosterEntry,
+    };
 
     use super::*;
 
     fn entry(mri: &str, name: &str, role: Option<MeetingRole>) -> RosterEntry {
-        RosterEntry { mri: mri.into(), display_name: name.into(), role, ..RosterEntry::default() }
+        RosterEntry {
+            mri: mri.into(),
+            display_name: name.into(),
+            role,
+            ..RosterEntry::default()
+        }
     }
 
     fn raised(mut entry: RosterEntry, rank: u64) -> RosterEntry {
-        entry.hand = Some(RaisedHand { state_id: format!("s-{rank}"), rank });
+        entry.hand = Some(RaisedHand {
+            state_id: format!("s-{rank}"),
+            rank,
+        });
         entry
     }
 
     fn meeting(entries: Vec<RosterEntry>) -> CallModel {
         let mut model = CallModel::meeting("Standup", true);
-        model.apply(CallUpdate::OwnIdentity { mri: "8:orgid:me".into() });
-        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        model.apply(CallUpdate::OwnIdentity {
+            mri: "8:orgid:me".into(),
+        });
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
         model.apply(CallUpdate::Roster(entries));
         model
     }
@@ -197,19 +234,41 @@ mod tests {
         assert_eq!(names(&sections.groups[0]), vec!["You"]);
         assert_eq!(names(&sections.groups[1]), vec!["Ana", "bo", "Cy"]);
         assert_eq!(sections.count, 4);
-        let presenter = meeting(vec![entry("8:orgid:p", "Pia", Some(MeetingRole::Presenter))]);
-        assert_eq!(titles(&people_sections(&presenter)), vec!["Organizers", "Presenters"]);
+        let presenter = meeting(vec![entry(
+            "8:orgid:p",
+            "Pia",
+            Some(MeetingRole::Presenter),
+        )]);
+        assert_eq!(
+            titles(&people_sections(&presenter)),
+            vec!["Organizers", "Presenters"]
+        );
     }
 
     #[test]
     fn direct_and_group_calls_show_one_flat_list_without_role_labels() {
-        let mut model = CallModel::people("Team", &[("8:orgid:a".into(), "Ana".into()), ("8:orgid:b".into(), "Bo".into())]);
-        model.apply(CallUpdate::OwnIdentity { mri: "8:orgid:me".into() });
-        model.apply(CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        let mut model = CallModel::people(
+            "Team",
+            &[
+                ("8:orgid:a".into(), "Ana".into()),
+                ("8:orgid:b".into(), "Bo".into()),
+            ],
+        );
+        model.apply(CallUpdate::OwnIdentity {
+            mri: "8:orgid:me".into(),
+        });
+        model.apply(CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
         let sections = people_sections(&model);
         assert_eq!(titles(&sections), vec!["In this call"]);
         assert_eq!(names(&sections.groups[0]), vec!["You", "Ana", "Bo"]);
-        assert!(sections.groups[0].rows.iter().all(|row| row.label.is_none()));
+        assert!(
+            sections.groups[0]
+                .rows
+                .iter()
+                .all(|row| row.label.is_none())
+        );
         assert!(sections.groups[0].rows[1].ringing);
     }
 
@@ -224,7 +283,11 @@ mod tests {
             waiting,
         ]);
         let sections = people_sections(&model);
-        let queue: Vec<(&str, Option<usize>)> = sections.hands.iter().map(|row| (row.name.as_str(), row.hand)).collect();
+        let queue: Vec<(&str, Option<usize>)> = sections
+            .hands
+            .iter()
+            .map(|row| (row.name.as_str(), row.hand))
+            .collect();
         assert_eq!(queue, vec![("Bo", Some(1)), ("Ana", Some(2))]);
         assert_eq!(sections.lobby.len(), 1);
         assert_eq!(sections.lobby[0].name, "Wen");
@@ -233,7 +296,11 @@ mod tests {
 
     #[test]
     fn bots_stay_out_and_the_own_role_falls_back_to_the_organizer_flag() {
-        let model = meeting(vec![entry("28:recorder", "Recorder", Some(MeetingRole::Presenter))]);
+        let model = meeting(vec![entry(
+            "28:recorder",
+            "Recorder",
+            Some(MeetingRole::Presenter),
+        )]);
         let sections = people_sections(&model);
         assert_eq!(sections.count, 1);
         assert_eq!(sections.groups[0].title, "Organizers");
@@ -243,20 +310,38 @@ mod tests {
     #[test]
     fn only_attendees_show_blocked_microphones() {
         let blocked = AttendeeLimits {
-            mic_blocked: Some(PublishedState { state_id: "x".into(), rank: 1 }),
+            mic_blocked: Some(PublishedState {
+                state_id: "x".into(),
+                rank: 1,
+            }),
             ..AttendeeLimits::default()
         };
         let mut limited = entry("8:orgid:a", "Ana", Some(MeetingRole::Attendee));
         limited.limits = blocked.clone();
         let mut presenter = entry("8:orgid:p", "Pia", Some(MeetingRole::Presenter));
         presenter.limits = blocked;
-        let mut model = meeting(vec![limited, presenter, entry("8:orgid:b", "Bo", Some(MeetingRole::Attendee))]);
-        model.apply(CallUpdate::Capability(MeetingCapability { attendee_camera_off: true, ..MeetingCapability::default() }));
+        let mut model = meeting(vec![
+            limited,
+            presenter,
+            entry("8:orgid:b", "Bo", Some(MeetingRole::Attendee)),
+        ]);
+        model.apply(CallUpdate::Capability(MeetingCapability {
+            attendee_camera_off: true,
+            ..MeetingCapability::default()
+        }));
         let sections = people_sections(&model);
-        let attendees = sections.groups.iter().find(|group| group.title == "Attendees").unwrap();
+        let attendees = sections
+            .groups
+            .iter()
+            .find(|group| group.title == "Attendees")
+            .unwrap();
         assert!(attendees.rows[0].mic_blocked && !attendees.rows[1].mic_blocked);
         assert!(attendees.rows.iter().all(|row| row.camera_blocked));
-        let presenters = sections.groups.iter().find(|group| group.title == "Presenters").unwrap();
+        let presenters = sections
+            .groups
+            .iter()
+            .find(|group| group.title == "Presenters")
+            .unwrap();
         assert!(!presenters.rows[0].mic_blocked && !presenters.rows[0].camera_blocked);
     }
 
@@ -265,7 +350,10 @@ mod tests {
         let mut model = CallModel::people("Ana", &[("8:orgid:a".into(), "Ana".into())]);
         model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", None)]));
         assert_eq!(model.kind, CallKind::Direct);
-        model.apply(CallUpdate::Roster(vec![entry("8:orgid:a", "Ana", None), entry("8:orgid:b", "Bo", None)]));
+        model.apply(CallUpdate::Roster(vec![
+            entry("8:orgid:a", "Ana", None),
+            entry("8:orgid:b", "Bo", None),
+        ]));
         assert_eq!(model.kind, CallKind::Group);
     }
 }

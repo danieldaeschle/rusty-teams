@@ -46,7 +46,10 @@ fn unescape(text: &str) -> String {
 
 fn parse_activity(message: &Value) -> Option<ThreadActivity> {
     let message_id = crate::json_id::id_text(message.get("id")?)?;
-    let content = message.get("content").and_then(Value::as_str).unwrap_or_default();
+    let content = message
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let (initiator, kind) = match message.get("messagetype").and_then(Value::as_str)? {
         MEMBER_JOINED => {
             let detail: Value = serde_json::from_str(content).ok()?;
@@ -122,11 +125,21 @@ mod tests {
         assert_eq!(activities.len(), 2);
         assert_eq!(activities[0].message_id, "2");
         assert_eq!(activities[0].initiator_id.as_deref(), Some("boss"));
-        assert_eq!(activities[0].kind, ThreadActivityKind::TopicUpdated { topic: "Tree & service".into() });
+        assert_eq!(
+            activities[0].kind,
+            ThreadActivityKind::TopicUpdated {
+                topic: "Tree & service".into()
+            }
+        );
         assert_eq!(
             activities[1].kind,
-            ThreadActivityKind::MembersJoined { member_ids: vec!["ann".into(), "bob".into()] }
+            ThreadActivityKind::MembersJoined {
+                member_ids: vec!["ann".into(), "bob".into()]
+            }
         );
-        assert_eq!(activities[1].created_at.timestamp_millis(), 1_793_352_408_138);
+        assert_eq!(
+            activities[1].created_at.timestamp_millis(),
+            1_793_352_408_138
+        );
     }
 }

@@ -18,7 +18,9 @@ pub(crate) async fn request(
 ) -> Result<Response, BrowserError> {
     tokio::time::timeout(timeout, exchange(port, method, path))
         .await
-        .map_err(|_| BrowserError::Http(format!("{method} timed out after {}s", timeout.as_secs())))?
+        .map_err(|_| {
+            BrowserError::Http(format!("{method} timed out after {}s", timeout.as_secs()))
+        })?
 }
 
 async fn exchange(port: u16, method: &str, path: &str) -> Result<Response, BrowserError> {
@@ -48,7 +50,9 @@ async fn exchange(port: u16, method: &str, path: &str) -> Result<Response, Brows
 }
 
 fn is_complete(raw: &[u8]) -> bool {
-    let Some(split) = find(raw, b"\r\n\r\n") else { return false };
+    let Some(split) = find(raw, b"\r\n\r\n") else {
+        return false;
+    };
     let head = String::from_utf8_lossy(&raw[..split]).to_ascii_lowercase();
     let body = &raw[split + 4..];
     if head.contains("transfer-encoding: chunked") {
@@ -76,12 +80,18 @@ pub(crate) fn parse_response(raw: &[u8]) -> Result<Response, BrowserError> {
         let lower = line.to_ascii_lowercase();
         lower.starts_with("transfer-encoding:") && lower.contains("chunked")
     });
-    let body = if chunked { dechunk(body)? } else { body.to_vec() };
+    let body = if chunked {
+        dechunk(body)?
+    } else {
+        body.to_vec()
+    };
     Ok(Response { status, body })
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 fn dechunk(mut data: &[u8]) -> Result<Vec<u8>, BrowserError> {

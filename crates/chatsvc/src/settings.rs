@@ -482,7 +482,8 @@ mod tests {
                 engage_community_ms: 0,
             }
         );
-        let object = parse_app_consumption_horizon(&json!({"appConsumptionHorizon": {"channel": 5}}));
+        let object =
+            parse_app_consumption_horizon(&json!({"appConsumptionHorizon": {"channel": 5}}));
         assert_eq!(object.channel_ms, 5);
         for broken in [
             json!({}),

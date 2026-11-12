@@ -13,14 +13,24 @@ async fn get(endpoint: &str, path: &str) -> std::result::Result<Vec<u8>, String>
     exchange(endpoint, "GET", path).await
 }
 
-async fn exchange(endpoint: &str, method: &str, path: &str) -> std::result::Result<Vec<u8>, String> {
+async fn exchange(
+    endpoint: &str,
+    method: &str,
+    path: &str,
+) -> std::result::Result<Vec<u8>, String> {
     let parsed = Url::parse(endpoint).map_err(|error| error.to_string())?;
     let host = parsed.host_str().ok_or("endpoint has no host")?;
     let port = parsed.port_or_known_default().unwrap_or(80);
     let exchange = async {
-        let mut stream = TcpStream::connect((host, port)).await.map_err(|error| error.to_string())?;
-        let request = format!("{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
-        stream.write_all(request.as_bytes()).await.map_err(|error| error.to_string())?;
+        let mut stream = TcpStream::connect((host, port))
+            .await
+            .map_err(|error| error.to_string())?;
+        let request =
+            format!("{method} {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
+        stream
+            .write_all(request.as_bytes())
+            .await
+            .map_err(|error| error.to_string())?;
         read_response(&mut stream).await
     };
     tokio::time::timeout(HTTP_TIMEOUT, exchange)
@@ -38,7 +48,10 @@ async fn read_response(stream: &mut TcpStream) -> std::result::Result<Vec<u8>, S
         {
             return split_response(&response[..complete]);
         }
-        let count = stream.read(&mut chunk).await.map_err(|error| error.to_string())?;
+        let count = stream
+            .read(&mut chunk)
+            .await
+            .map_err(|error| error.to_string())?;
         if count == 0 {
             return split_response(&response);
         }
@@ -53,7 +66,9 @@ fn complete_length(response: &[u8]) -> std::result::Result<Option<usize>, String
     let head = String::from_utf8_lossy(&response[..separator]);
     let length = head.lines().find_map(|line| {
         let (name, value) = line.split_once(':')?;
-        name.trim().eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().ok())?
+        name.trim()
+            .eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse::<usize>().ok())?
     });
     Ok(length.map(|length| separator + 4 + length))
 }
@@ -85,7 +100,10 @@ pub async fn new_tab(endpoint: &str, url: &str) -> Result<()> {
     exchange(endpoint, "PUT", &format!("/json/new?{url}"))
         .await
         .map(drop)
-        .map_err(|reason| Error::NoBrowser { endpoint: endpoint.to_owned(), reason })
+        .map_err(|reason| Error::NoBrowser {
+            endpoint: endpoint.to_owned(),
+            reason,
+        })
 }
 
 #[cfg(test)]

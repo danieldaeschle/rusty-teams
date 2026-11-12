@@ -19,7 +19,10 @@ async fn main() {
             for tab in status.tabs {
                 let app = tab.app.map_or("-", |app| app.name());
                 let parked = if tab.parked { " (parked)" } else { "" };
-                println!("  tab {app}: {}{parked}", tab.host.as_deref().unwrap_or("(no host)"));
+                println!(
+                    "  tab {app}: {}{parked}",
+                    tab.host.as_deref().unwrap_or("(no host)")
+                );
             }
         }
         Err(error) => {

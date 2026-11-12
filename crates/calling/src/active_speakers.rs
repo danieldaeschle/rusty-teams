@@ -41,8 +41,18 @@ pub fn speaking_sources(sources: &[RtpSource]) -> Vec<u32> {
 mod tests {
     use super::*;
 
-    fn source(source_id: u32, contributing: bool, audio_level: Option<u8>, timestamp_ms: i64) -> RtpSource {
-        RtpSource { source_id, contributing, audio_level, timestamp_ms }
+    fn source(
+        source_id: u32,
+        contributing: bool,
+        audio_level: Option<u8>,
+        timestamp_ms: i64,
+    ) -> RtpSource {
+        RtpSource {
+            source_id,
+            contributing,
+            audio_level,
+            timestamp_ms,
+        }
     }
 
     #[test]
@@ -58,13 +68,19 @@ mod tests {
 
     #[test]
     fn a_quiet_contributor_is_not_speaking() {
-        let sources = [source(900, false, Some(30), 10_000), source(8, true, Some(100), 10_000)];
+        let sources = [
+            source(900, false, Some(30), 10_000),
+            source(8, true, Some(100), 10_000),
+        ];
         assert!(speaking_sources(&sources).is_empty());
     }
 
     #[test]
     fn a_direct_call_uses_the_peer_level() {
-        assert_eq!(speaking_sources(&[source(42, false, Some(35), 5_000)]), vec![42]);
+        assert_eq!(
+            speaking_sources(&[source(42, false, Some(35), 5_000)]),
+            vec![42]
+        );
         assert!(speaking_sources(&[source(42, false, Some(127), 5_000)]).is_empty());
         assert!(speaking_sources(&[source(42, false, None, 5_000)]).is_empty());
         assert!(speaking_sources(&[]).is_empty());

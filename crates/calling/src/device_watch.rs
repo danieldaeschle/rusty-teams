@@ -41,11 +41,14 @@ pub fn watch() -> (DeviceWatcher, UnboundedReceiver<()>) {
 #[cfg(windows)]
 mod platform {
     use tokio::sync::mpsc::UnboundedSender;
-    use windows::Win32::Media::Audio::{
-        DEVICE_STATE, EDataFlow, ERole, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator, eCommunications,
-    };
     use windows::Win32::Foundation::PROPERTYKEY;
-    use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize};
+    use windows::Win32::Media::Audio::{
+        DEVICE_STATE, EDataFlow, ERole, IMMDeviceEnumerator, IMMNotificationClient,
+        IMMNotificationClient_Impl, MMDeviceEnumerator, eCommunications,
+    };
+    use windows::Win32::System::Com::{
+        CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+    };
     use windows::core::PCWSTR;
     use windows_core::implement;
 
@@ -57,7 +60,11 @@ mod platform {
     }
 
     impl IMMNotificationClient_Impl for Client_Impl {
-        fn OnDeviceStateChanged(&self, _device_id: &PCWSTR, _state: DEVICE_STATE) -> windows::core::Result<()> {
+        fn OnDeviceStateChanged(
+            &self,
+            _device_id: &PCWSTR,
+            _state: DEVICE_STATE,
+        ) -> windows::core::Result<()> {
             let _ = self.sender.send(());
             Ok(())
         }
@@ -72,14 +79,23 @@ mod platform {
             Ok(())
         }
 
-        fn OnDefaultDeviceChanged(&self, _flow: EDataFlow, role: ERole, _device_id: &PCWSTR) -> windows::core::Result<()> {
+        fn OnDefaultDeviceChanged(
+            &self,
+            _flow: EDataFlow,
+            role: ERole,
+            _device_id: &PCWSTR,
+        ) -> windows::core::Result<()> {
             if role == eCommunications {
                 let _ = self.sender.send(());
             }
             Ok(())
         }
 
-        fn OnPropertyValueChanged(&self, _device_id: &PCWSTR, _key: &PROPERTYKEY) -> windows::core::Result<()> {
+        fn OnPropertyValueChanged(
+            &self,
+            _device_id: &PCWSTR,
+            _key: &PROPERTYKEY,
+        ) -> windows::core::Result<()> {
             Ok(())
         }
     }
@@ -88,9 +104,14 @@ mod platform {
         let (stop, stopped) = std::sync::mpsc::channel::<()>();
         std::thread::spawn(move || unsafe {
             let initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
-            if let Ok(enumerator) = CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+            if let Ok(enumerator) =
+                CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
+            {
                 let client: IMMNotificationClient = Client { sender }.into();
-                if enumerator.RegisterEndpointNotificationCallback(&client).is_ok() {
+                if enumerator
+                    .RegisterEndpointNotificationCallback(&client)
+                    .is_ok()
+                {
                     let _ = stopped.recv();
                     let _ = enumerator.UnregisterEndpointNotificationCallback(&client);
                 }

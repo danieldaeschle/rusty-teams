@@ -55,7 +55,10 @@ pub struct EchoWatch {
 
 impl EchoWatch {
     pub fn bot_left<'a>(&mut self, participant_mris: impl IntoIterator<Item = &'a str>) -> bool {
-        if participant_mris.into_iter().any(|mri| mri == crate::signaling::ECHO_BOT_MRI) {
+        if participant_mris
+            .into_iter()
+            .any(|mri| mri == crate::signaling::ECHO_BOT_MRI)
+        {
             self.seen = true;
             return false;
         }

@@ -95,7 +95,10 @@ impl AppState {
                     }
                 }
                 _ => {
-                    state.post_follows.requested.remove(&post_key(&channel, &root));
+                    state
+                        .post_follows
+                        .requested
+                        .remove(&post_key(&channel, &root));
                 }
             })
             .ok();
@@ -130,7 +133,8 @@ impl AppState {
         self.run_channel_action(
             follow_failure(followed),
             async move {
-                let annotation_failure = engine.set_post_followed(&channel, &root, followed).await?;
+                let annotation_failure =
+                    engine.set_post_followed(&channel, &root, followed).await?;
                 if let Some(error) = annotation_failure {
                     log::warn!("post follow annotation not written: {error}");
                 }
@@ -157,7 +161,10 @@ mod tests {
 
     #[test]
     fn explicit_state_wins_over_participation() {
-        assert!(!post_followed(Some(PostFollowState::ExplicitUnfollow), true));
+        assert!(!post_followed(
+            Some(PostFollowState::ExplicitUnfollow),
+            true
+        ));
         assert!(post_followed(Some(PostFollowState::ExplicitFollow), false));
         assert!(post_followed(Some(PostFollowState::ImplicitFollow), false));
         assert!(post_followed(None, true));

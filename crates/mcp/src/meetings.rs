@@ -1,6 +1,6 @@
 use chrono::{DateTime, Duration, Utc};
-use serde::Deserialize;
 use rmcp::schemars;
+use serde::Deserialize;
 
 use crate::source::MeetingDraft;
 
@@ -50,7 +50,9 @@ fn valid_email(address: &str) -> bool {
         && domain.contains('.')
         && !domain.starts_with('.')
         && !domain.ends_with('.')
-        && !address.chars().any(|character| character.is_whitespace() || character == ',')
+        && !address
+            .chars()
+            .any(|character| character.is_whitespace() || character == ',')
 }
 
 fn clean_emails(addresses: &[String], limit: usize) -> Result<Vec<String>, String> {
@@ -80,32 +82,43 @@ pub fn availability_request(
         return Err("end must be after start".to_owned());
     }
     if params.end - params.start > Duration::days(MAX_AVAILABILITY_DAYS) {
-        return Err(format!("the window may span at most {MAX_AVAILABILITY_DAYS} days"));
+        return Err(format!(
+            "the window may span at most {MAX_AVAILABILITY_DAYS} days"
+        ));
     }
     let emails = clean_emails(&params.attendees, MAX_AVAILABILITY_PEOPLE)?;
     Ok((emails, params.start, params.end))
 }
 
-pub fn meeting_draft(params: &CreateMeetingParams, now: DateTime<Utc>) -> Result<MeetingDraft, String> {
+pub fn meeting_draft(
+    params: &CreateMeetingParams,
+    now: DateTime<Utc>,
+) -> Result<MeetingDraft, String> {
     let subject = params.subject.trim();
     if subject.is_empty() {
         return Err("subject is empty".to_owned());
     }
     if subject.chars().count() > MAX_SUBJECT_CHARACTERS {
-        return Err(format!("subject is longer than {MAX_SUBJECT_CHARACTERS} characters"));
+        return Err(format!(
+            "subject is longer than {MAX_SUBJECT_CHARACTERS} characters"
+        ));
     }
     if params.end <= params.start {
         return Err("end must be after start".to_owned());
     }
     if params.end - params.start > Duration::hours(MAX_MEETING_HOURS) {
-        return Err(format!("a meeting may last at most {MAX_MEETING_HOURS} hours"));
+        return Err(format!(
+            "a meeting may last at most {MAX_MEETING_HOURS} hours"
+        ));
     }
     if params.start < now - Duration::minutes(PAST_TOLERANCE_MINUTES) {
         return Err("start lies in the past".to_owned());
     }
     let description = params.description.clone().unwrap_or_default();
     if description.chars().count() > MAX_DESCRIPTION_CHARACTERS {
-        return Err(format!("description is longer than {MAX_DESCRIPTION_CHARACTERS} characters"));
+        return Err(format!(
+            "description is longer than {MAX_DESCRIPTION_CHARACTERS} characters"
+        ));
     }
     Ok(MeetingDraft {
         subject: subject.to_owned(),
@@ -123,12 +136,16 @@ mod tests {
     use super::{CreateMeetingParams, FindAvailabilityParams, availability_request, meeting_draft};
 
     fn params(start_hours: i64, length_hours: i64, attendees: &[&str]) -> CreateMeetingParams {
-        let start = Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap() + Duration::hours(start_hours);
+        let start =
+            Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap() + Duration::hours(start_hours);
         CreateMeetingParams {
             subject: " Release review ".to_owned(),
             start,
             end: start + Duration::hours(length_hours),
-            attendees: attendees.iter().map(|address| (*address).to_owned()).collect(),
+            attendees: attendees
+                .iter()
+                .map(|address| (*address).to_owned())
+                .collect(),
             description: Some("Agenda".to_owned()),
             session_id: None,
             agent: None,
@@ -138,7 +155,15 @@ mod tests {
     #[test]
     fn a_meeting_draft_is_trimmed_and_deduplicated() {
         let now = Utc.with_ymd_and_hms(2026, 11, 12, 9, 0, 0).unwrap();
-        let draft = meeting_draft(&params(0, 1, &["Mara@Example.com", "mara@example.com", "jonas@example.com"]), now).unwrap();
+        let draft = meeting_draft(
+            &params(
+                0,
+                1,
+                &["Mara@Example.com", "mara@example.com", "jonas@example.com"],
+            ),
+            now,
+        )
+        .unwrap();
         assert_eq!(draft.subject, "Release review");
         assert_eq!(draft.attendees, ["mara@example.com", "jonas@example.com"]);
     }

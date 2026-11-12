@@ -27,7 +27,13 @@ async fn start_browser(tab_url: &'static str, outcomes: Vec<Value>) -> (String, 
     (format!("http://127.0.0.1:{port}"), calls)
 }
 
-async fn serve(mut stream: TcpStream, port: u16, tab_url: &'static str, script: Script, calls: Calls) {
+async fn serve(
+    mut stream: TcpStream,
+    port: u16,
+    tab_url: &'static str,
+    script: Script,
+    calls: Calls,
+) {
     let mut peek = [0u8; 16];
     let count = stream.peek(&mut peek).await.unwrap();
     if !peek[..count].starts_with(b"GET /json") {
@@ -35,15 +41,24 @@ async fn serve(mut stream: TcpStream, port: u16, tab_url: &'static str, script: 
         while let Some(Ok(Message::Text(text))) = websocket.next().await {
             let call: Value = serde_json::from_str(text.as_str()).unwrap();
             let method = call["method"].as_str().unwrap().to_owned();
-            calls.lock().unwrap().push((method.clone(), call["params"].clone()));
+            calls
+                .lock()
+                .unwrap()
+                .push((method.clone(), call["params"].clone()));
             let result = if method == "Runtime.evaluate" {
-                let outcome = script.lock().unwrap().pop_front().expect("script exhausted");
+                let outcome = script
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .expect("script exhausted");
                 json!({"result": {"type": "object", "value": outcome}})
             } else {
                 json!({})
             };
             websocket
-                .send(Message::text(json!({"id": call["id"], "result": result}).to_string()))
+                .send(Message::text(
+                    json!({"id": call["id"], "result": result}).to_string(),
+                ))
                 .await
                 .unwrap();
         }
@@ -53,7 +68,10 @@ async fn serve(mut stream: TcpStream, port: u16, tab_url: &'static str, script: 
     let _ = stream.read(&mut discard).await.unwrap();
     let targets = json!([{"type": "page", "url": tab_url, "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/page/0")}]);
     let body = targets.to_string();
-    let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
     stream.write_all(response.as_bytes()).await.unwrap();
 }
 
@@ -69,9 +87,16 @@ async fn navigations(tab_url: &'static str) -> Vec<(String, Value)> {
     let missing = json!({"noToken": true, "refreshError": "invalid_grant"});
     let ok = json!({"results": [{"status": 200, "body": {"ok": true}}]});
     let (endpoint, calls) = start_browser(tab_url, vec![missing, ok]).await;
-    let session = Session::connect_with(&endpoint, fast_config()).await.unwrap();
+    let session = Session::connect_with(&endpoint, fast_config())
+        .await
+        .unwrap();
     session
-        .request(Method::Get, "https://graph.microsoft.com/v1.0/me", &Scope::graph("User.Read"), None)
+        .request(
+            Method::Get,
+            "https://graph.microsoft.com/v1.0/me",
+            &Scope::graph("User.Read"),
+            None,
+        )
         .await
         .unwrap();
     let recorded = calls.lock().unwrap().clone();

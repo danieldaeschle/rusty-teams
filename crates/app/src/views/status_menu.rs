@@ -13,8 +13,8 @@ use teams_core::{ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKin
 use super::avatar::{person_avatar, status_glyph, with_presence, with_presence_badge};
 use super::widgets::{menu_icon, symbol};
 use crate::app_state::AppState;
-use crate::notify::pause;
 use crate::data::{Person, PresenceKind};
+use crate::notify::pause;
 use crate::own_status::{
     STATUS_CHOICES, STATUS_DURATIONS, StateSummary, StatusDuration, choice_label, duration_target,
     presence_kind_for, state_summary, work_location_label,
@@ -234,10 +234,12 @@ fn pause_item(
         let menu = STATUS_DURATIONS.iter().fold(menu, |menu, duration| {
             let app = app.clone();
             let duration = *duration;
-            menu.item(PopupMenuItem::new(duration.label()).on_click(move |_, _, cx| {
-                let until = duration.expires_at(Local::now());
-                app.update(cx, |state, cx| state.pause_notifications(until, cx));
-            }))
+            menu.item(
+                PopupMenuItem::new(duration.label()).on_click(move |_, _, cx| {
+                    let until = duration.expires_at(Local::now());
+                    app.update(cx, |state, cx| state.pause_notifications(until, cx));
+                }),
+            )
         });
         if !paused {
             return menu;

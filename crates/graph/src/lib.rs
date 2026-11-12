@@ -14,8 +14,8 @@ mod target;
 mod urls;
 mod writes;
 
-pub use cloud_files::{CloudFile, QuickSite};
 pub use client::{BATCH_SIZE, CHAT_PAGE_SIZE, Graph, MESSAGE_PAGE_SIZE};
+pub use cloud_files::{CloudFile, QuickSite};
 pub use error::{Error, Result};
 pub use files::{
     DOWNLOAD_CHUNK_BYTES, DriveFolder, SharedFile, UPLOAD_CHUNK_BYTES, UploadDestination,
@@ -24,8 +24,8 @@ pub use files::{
 };
 pub use library::DriveEntry;
 pub use models::{
-    Attachment, Body, Channel, Chat, ChatViewpoint, Identity, Member, Mention, Message, OnlineMeetingInfo, Photo,
-    Presence, Reaction, Sender, Tag, Team, UNKNOWN_USER_NAME, User,
+    Attachment, Body, Channel, Chat, ChatViewpoint, Identity, Member, Mention, Message,
+    OnlineMeetingInfo, Photo, Presence, Reaction, Sender, Tag, Team, UNKNOWN_USER_NAME, User,
 };
 pub use outgoing::{
     FileReference, HostedImage, KeptAttachment, MentionTarget, MessageExtras, OutgoingMention,

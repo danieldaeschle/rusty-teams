@@ -51,7 +51,11 @@ fn scene(tick: usize) -> Vec<u8> {
 }
 
 fn person_mask() -> Mask {
-    Mask::from_fn(256, 144, |x, y| if person_at(x, y).is_some() { 1. } else { 0. })
+    Mask::from_fn(
+        256,
+        144,
+        |x, y| if person_at(x, y).is_some() { 1. } else { 0. },
+    )
 }
 
 /// A drawn head-and-shoulders scene; the mask comes from the drawing, not from the model.

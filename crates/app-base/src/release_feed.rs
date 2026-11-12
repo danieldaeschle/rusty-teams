@@ -13,7 +13,8 @@ use crate::updater::UpdatePaths;
 
 pub const FIRST_CHECK_DELAY: Duration = Duration::from_secs(60);
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
-const RELEASES_URL: &str = "https://api.github.com/repos/danieldaeschle/rusty-teams/releases?per_page=10";
+const RELEASES_URL: &str =
+    "https://api.github.com/repos/danieldaeschle/rusty-teams/releases?per_page=10";
 const WINDOWS_ASSET_SUFFIX: &str = "-windows-amd64.exe";
 const PARTIAL_SUFFIX: &str = ".partial";
 const SHA256_PREFIX: &str = "sha256:";

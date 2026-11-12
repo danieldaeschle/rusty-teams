@@ -43,11 +43,16 @@ impl SidebarView {
         cx.notify();
     }
 
-    fn channel_filter_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<InputState> {
+    fn channel_filter_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<InputState> {
         if let Some(input) = &self.channel_filter_input {
             return input.clone();
         }
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder(CHANNEL_FILTER_PLACEHOLDER));
+        let input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(CHANNEL_FILTER_PLACEHOLDER));
         let subscription = cx.subscribe_in(&input, window, |this, input, event, _, cx| {
             if matches!(event, InputEvent::Change) {
                 this.channel_filter.text = input.read(cx).value().to_string();
@@ -61,7 +66,11 @@ impl SidebarView {
 
     pub(super) fn channel_filter_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let open = self.channel_filter_open;
-        let label = if open { CLOSE_FILTER_TEXT } else { SHOW_FILTER_TEXT };
+        let label = if open {
+            CLOSE_FILTER_TEXT
+        } else {
+            SHOW_FILTER_TEXT
+        };
         div()
             .id("channel-filter-toggle")
             .size(px(NEW_CHAT_BUTTON_SIZE))
@@ -77,7 +86,11 @@ impl SidebarView {
             .child(icon(
                 IconName::Search,
                 16.,
-                if open { theme::accent_text() } else { theme::text_soft() },
+                if open {
+                    theme::accent_text()
+                } else {
+                    theme::text_soft()
+                },
             ))
             .on_click(cx.listener(|this, _, window, cx| this.toggle_channel_filter(window, cx)))
     }
@@ -92,7 +105,12 @@ impl SidebarView {
                 .sidebar
                 .teams
                 .iter()
-                .find(|entry| entry.channels.iter().any(|channel| &channel.id == channel_id))
+                .find(|entry| {
+                    entry
+                        .channels
+                        .iter()
+                        .any(|channel| &channel.id == channel_id)
+                })
                 .filter(|entry| entry.rights.add_channel && !app.mode.read_only)
                 .map(|entry| entry.team.id.clone()),
             _ => None,
@@ -154,7 +172,9 @@ impl SidebarView {
                         .rounded_full()
                         .text_size(px(12.))
                         .cursor_pointer()
-                        .when(selected, |chip| chip.bg(theme::accent()).text_color(theme::on_accent()))
+                        .when(selected, |chip| {
+                            chip.bg(theme::accent()).text_color(theme::on_accent())
+                        })
                         .when(!selected, |chip| {
                             chip.bg(theme::surface_raised())
                                 .text_color(theme::text_soft())

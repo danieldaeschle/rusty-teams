@@ -5,46 +5,44 @@ use std::sync::Arc;
 use gpui_kit::component::{elevation, h_flex, v_flex};
 use gpui_kit::*;
 
-use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::actions::{NewChat, OpenSwitcher, ReplyToHovered, ToggleCallMute};
+use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
 use super::calendar_view::CalendarView;
+use super::call_pop_out::zoom_listener;
+use super::calls_page::CallsPage;
+use super::chat_pop_out;
+use super::connection_banner::render_connection_banner;
 use super::conversation::ConversationView;
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
 use super::image_viewer::{ImageViewer, ImageViewerEvent};
+use super::manage_team_page::ManageTeamPage;
+use super::notice_toast::NoticeToasts;
 use super::profile_card::{ProfileCard, ProfileCardEvent};
-use gpui_kit::prelude::FluentBuilder as _;
-use super::rail::RailView;
-use crate::chat_filter::ChatFilterPill;
-use super::calls_page::CallsPage;
 use super::quick_view_pane::{QuickViewEvent, QuickViewPane};
+use super::rail::RailView;
 use super::shortcuts::{
-    ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats,
-    FilterNonMeetingChats, FilterUnreadChats, FindInChat, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest, NextConversation, OpenActivity,
-    OpenAgents, OpenCallsTab, OpenSettings, OpenChannelsTab, OpenChatFilter, OpenChatsTab, PopOutSelectedChat, OpenLobbyList, OpenSaved, OpenCalendar, PreviousConversation, PushToTalk,
-    Scope, ShowShortcuts, StartAudioCall, StartVideoCall, ToggleCallCamera,
-    ToggleCallHand, ToggleCallShare, ZoomIn, ZoomOut, ZoomReset, ZoomShareIn, ZoomShareOut,
-    ZoomShareReset,
+    ClearChatFilters, DeclineCall, FilterMeetingChats, FilterMutedChats, FilterNonMeetingChats,
+    FilterUnreadChats, FindInChat, HangUpCall, JoinMeetingFromToast, JumpToLastReadOrNewest,
+    NextConversation, OpenActivity, OpenAgents, OpenCalendar, OpenCallsTab, OpenChannelsTab,
+    OpenChatFilter, OpenChatsTab, OpenLobbyList, OpenSaved, OpenSettings, PopOutSelectedChat,
+    PreviousConversation, PushToTalk, Scope, ShowShortcuts, StartAudioCall, StartVideoCall,
+    ToggleCallCamera, ToggleCallHand, ToggleCallShare, ZoomIn, ZoomOut, ZoomReset, ZoomShareIn,
+    ZoomShareOut, ZoomShareReset,
 };
-use super::window_zoom::{WindowZoom, change_zoom};
-use super::call_pop_out::zoom_listener;
-use super::chat_pop_out;
 use super::shortcuts_dialog::{ShortcutsDialog, ShortcutsDialogEvent};
 use super::sidebar::{SidebarEvent, SidebarTab, SidebarView};
-use app_ui_kit::render::hooks::RenderHooks;
-use app_ui_kit::layout::{ISLAND_GAP, SIDEBAR_WIDTH};
-use super::connection_banner::render_connection_banner;
-use super::manage_team_page::ManageTeamPage;
 use super::splash::{self, Phase, Splash, StartupFacts};
-use super::notice_toast::NoticeToasts;
 use super::status_menu::{own_status_button, settings_more_button};
 use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent};
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
 use super::title_bar::{mode_label, render_title_bar, update_button};
+use super::window_zoom::{WindowZoom, change_zoom};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRunsEvent, StartDialog, StartDialogEvent, StartRequest};
 use crate::app_state::{AppEvent, AppState, QuickView, Selection, selection_for};
 use crate::call::{CallMedia, CallWindows, ZoomStep};
+use crate::chat_filter::ChatFilterPill;
 use crate::notice::NoticeAction;
 use crate::notify::NotificationCenter;
 use crate::settings::{SettingsDialog, SettingsDialogEvent};
@@ -53,6 +51,9 @@ use crate::sidebar_model::Step;
 use crate::theme;
 use crate::updater::{self, IdleInputs, UpdateStatus};
 use crate::user_activity::{self, UserInput};
+use app_ui_kit::layout::{ISLAND_GAP, SIDEBAR_WIDTH};
+use app_ui_kit::render::hooks::RenderHooks;
+use gpui_kit::prelude::FluentBuilder as _;
 
 pub fn bind_keys(cx: &mut App) {
     super::composer::bind_keys(cx);
@@ -99,7 +100,10 @@ pub fn install_globals(state: &Entity<AppState>, user_input: Arc<UserInput>, cx:
 fn open_link(url: &str, cx: &mut App) {
     if let Some(handle) = cx.try_global::<crate::app_state::AppHandle>() {
         let text = opening_link_text(url);
-        handle.0.clone().update(cx, |state, cx| state.raise_notice(text, None, cx));
+        handle
+            .0
+            .clone()
+            .update(cx, |state, cx| state.raise_notice(text, None, cx));
     }
     cx.open_url(url);
 }
@@ -284,7 +288,11 @@ impl AppShell {
                 } = event;
                 this.state
                     .update(cx, |state, cx| state.close_quick_view(cx));
-                this.open_message(conversation_id, message_id.as_deref().unwrap_or_default(), cx);
+                this.open_message(
+                    conversation_id,
+                    message_id.as_deref().unwrap_or_default(),
+                    cx,
+                );
             }),
         ];
         let agent_subscription = crate::agents::runs_handle(cx).map(|runs| {
@@ -302,9 +310,12 @@ impl AppShell {
                 },
             )
         });
-        let sidebar = cx.new(|cx| SidebarView::new(state.clone(), activity_panel, agents_panel, cx));
-        let sidebar_subscription = cx.subscribe_in(&sidebar, window, |this, _, event: &SidebarEvent, window, cx| {
-            match event {
+        let sidebar =
+            cx.new(|cx| SidebarView::new(state.clone(), activity_panel, agents_panel, cx));
+        let sidebar_subscription = cx.subscribe_in(
+            &sidebar,
+            window,
+            |this, _, event: &SidebarEvent, window, cx| match event {
                 SidebarEvent::RestoreFocus => this.restore_focus(window, cx),
                 SidebarEvent::TabChanged => {
                     if this.sidebar.read(cx).tab() == SidebarTab::Calendar {
@@ -312,11 +323,11 @@ impl AppShell {
                     }
                     cx.notify();
                 }
-                SidebarEvent::NewChannelPost => this
-                    .conversation
-                    .update(cx, |conversation, cx| conversation.start_channel_post(window, cx)),
-            }
-        });
+                SidebarEvent::NewChannelPost => this.conversation.update(cx, |conversation, cx| {
+                    conversation.start_channel_post(window, cx)
+                }),
+            },
+        );
         let calendar = cx.new(|cx| CalendarView::new(state.clone(), cx));
         let rail = cx.new(|cx| RailView::new(state.clone(), activity.clone(), sidebar.clone(), cx));
         let conversation = cx.new(|cx| ConversationView::new(state.clone(), window, cx));
@@ -911,22 +922,19 @@ impl AppShell {
             .when(show_sidebar, |islands| islands.gap(px(ISLAND_GAP)))
             .pr(px(ISLAND_GAP))
             .pb(px(ISLAND_GAP))
-            .child(
-                h_flex()
-                    .h_full()
-                    .flex_none()
-                    .child(self.rail.clone())
-                    .when(show_sidebar, |group| {
-                        group.child(
-                            self.sidebar.clone().cached(
-                                StyleRefinement::default()
-                                    .w(px(SIDEBAR_WIDTH))
-                                    .h_full()
-                                    .flex_none(),
-                            ),
-                        )
-                    }),
-            )
+            .child(h_flex().h_full().flex_none().child(self.rail.clone()).when(
+                show_sidebar,
+                |group| {
+                    group.child(
+                        self.sidebar.clone().cached(
+                            StyleRefinement::default()
+                                .w(px(SIDEBAR_WIDTH))
+                                .h_full()
+                                .flex_none(),
+                        ),
+                    )
+                },
+            ))
             .child(match () {
                 _ if calls_open => self
                     .calls_page
@@ -1000,7 +1008,8 @@ impl Render for AppShell {
             UpdateStatus::Failed(message) => Some(message.clone()),
             _ => None,
         };
-        self.toasts.update_failed(update_failure.as_deref(), window, cx);
+        self.toasts
+            .update_failed(update_failure.as_deref(), window, cx);
         let calendar_tab = self.sidebar.read(cx).tab() == SidebarTab::Calendar;
         let chats_tab = self.sidebar.read(cx).tab() == SidebarTab::Chats;
         let calls_tab = self.sidebar.read(cx).tab() == SidebarTab::Calls;
@@ -1011,14 +1020,17 @@ impl Render for AppShell {
         let manage_team_open = !calendar_tab && !calls_tab && state.manage_team.is_some();
         let calls_open = calls_tab;
         let show_sidebar = !calendar_open && !calls_open;
-        let banner = state.connection_banner_text().filter(|_| !self.splash.is_up()).map(|banner| {
-            render_connection_banner(
-                banner,
-                cx.listener(|this, _, _, cx| {
-                    this.state.update(cx, |state, _| state.retry_live())
-                }),
-            )
-        });
+        let banner = state
+            .connection_banner_text()
+            .filter(|_| !self.splash.is_up())
+            .map(|banner| {
+                render_connection_banner(
+                    banner,
+                    cx.listener(|this, _, _, cx| {
+                        this.state.update(cx, |state, _| state.retry_live())
+                    }),
+                )
+            });
         let title_bar = render_title_bar(
             crate::active_appearance::current(cx).app_icon,
             mode_label(state.mode),
@@ -1079,8 +1091,9 @@ impl Render for AppShell {
             }))
             .on_action(cx.listener(|this, _: &OpenSaved, window, cx| {
                 this.close_image_viewer(window, cx);
-                this.sidebar
-                    .update(cx, |sidebar, cx| sidebar.open_quick_view(QuickView::Saved, cx));
+                this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.open_quick_view(QuickView::Saved, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &OpenCalendar, window, cx| {
                 this.close_image_viewer(window, cx);
@@ -1116,20 +1129,24 @@ impl Render for AppShell {
                     .update(cx, |sidebar, cx| sidebar.toggle_filter_box(window, cx));
             }))
             .on_action(cx.listener(|this, _: &FilterUnreadChats, _, cx| {
-                this.sidebar
-                    .update(cx, |sidebar, cx| sidebar.toggle_pill(ChatFilterPill::Unread, cx));
+                this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.toggle_pill(ChatFilterPill::Unread, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &FilterNonMeetingChats, _, cx| {
-                this.sidebar
-                    .update(cx, |sidebar, cx| sidebar.toggle_pill(ChatFilterPill::Chats, cx));
+                this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.toggle_pill(ChatFilterPill::Chats, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &FilterMeetingChats, _, cx| {
-                this.sidebar
-                    .update(cx, |sidebar, cx| sidebar.toggle_pill(ChatFilterPill::Meetings, cx));
+                this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.toggle_pill(ChatFilterPill::Meetings, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &FilterMutedChats, _, cx| {
-                this.sidebar
-                    .update(cx, |sidebar, cx| sidebar.toggle_pill(ChatFilterPill::Muted, cx));
+                this.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.toggle_pill(ChatFilterPill::Muted, cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &ClearChatFilters, window, cx| {
                 this.sidebar
@@ -1189,19 +1206,31 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &StartVideoCall, _, cx| {
                 this.start_call_in_open_chat(true, cx);
             }))
-            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| change_zoom(&this.state, WindowZoom::In, cx)))
-            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| change_zoom(&this.state, WindowZoom::Out, cx)))
-            .on_action(cx.listener(|this, _: &ZoomReset, _, cx| change_zoom(&this.state, WindowZoom::Reset, cx)))
+            .on_action(
+                cx.listener(|this, _: &ZoomIn, _, cx| change_zoom(&this.state, WindowZoom::In, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &ZoomOut, _, cx| {
+                    change_zoom(&this.state, WindowZoom::Out, cx)
+                }),
+            )
+            .on_action(cx.listener(|this, _: &ZoomReset, _, cx| {
+                change_zoom(&this.state, WindowZoom::Reset, cx)
+            }))
             .on_action(zoom_listener::<ZoomShareIn>(&self.state, ZoomStep::In))
             .on_action(zoom_listener::<ZoomShareOut>(&self.state, ZoomStep::Out))
-            .on_action(zoom_listener::<ZoomShareReset>(&self.state, ZoomStep::Reset))
+            .on_action(zoom_listener::<ZoomShareReset>(
+                &self.state,
+                ZoomStep::Reset,
+            ))
             .on_action(cx.listener(|this, _: &JumpToLastReadOrNewest, _, cx| {
                 if this.image_viewer.is_some() {
                     cx.propagate();
                     return;
                 }
-                this.conversation
-                    .update(cx, |conversation, cx| conversation.jump_to_last_read_or_newest(cx));
+                this.conversation.update(cx, |conversation, cx| {
+                    conversation.jump_to_last_read_or_newest(cx)
+                });
             }))
             .on_action(cx.listener(|this, _: &ReplyToHovered, window, cx| {
                 this.close_image_viewer(window, cx);
@@ -1223,7 +1252,17 @@ impl Render for AppShell {
                     .size_full()
                     .child(title_bar)
                     .children(banner)
-                    .child(rising_in(self.islands(show_sidebar, calendar_open, quick_view_open, calls_open, manage_team_open), &self.splash, cx)),
+                    .child(rising_in(
+                        self.islands(
+                            show_sidebar,
+                            calendar_open,
+                            quick_view_open,
+                            calls_open,
+                            manage_team_open,
+                        ),
+                        &self.splash,
+                        cx,
+                    )),
             )
             .children(splash)
             .children(self.image_viewer.clone())
@@ -1245,9 +1284,15 @@ fn rising_in(islands: Div, splash: &Splash, cx: &App) -> AnyElement {
     }
     islands
         .relative()
-        .with_animation("startup-content-rise", Animation::new(splash::CONTENT_RISE).with_easing(ease_out_quint()), |islands, delta| {
-            islands.top(px(splash::CONTENT_RISE_OFFSET * (1. - delta))).opacity(delta)
-        })
+        .with_animation(
+            "startup-content-rise",
+            Animation::new(splash::CONTENT_RISE).with_easing(ease_out_quint()),
+            |islands, delta| {
+                islands
+                    .top(px(splash::CONTENT_RISE_OFFSET * (1. - delta)))
+                    .opacity(delta)
+            },
+        )
         .into_any_element()
 }
 
@@ -1257,9 +1302,11 @@ mod opening_link_tests {
 
     #[test]
     fn the_notice_names_the_host() {
-        assert_eq!(opening_link_text("https://example.com/a?b#c"), "Opening example.com...");
+        assert_eq!(
+            opening_link_text("https://example.com/a?b#c"),
+            "Opening example.com..."
+        );
         assert_eq!(opening_link_text("mailto:"), "Opening mailto:...");
         assert_eq!(opening_link_text(""), "Opening link...");
     }
 }
-

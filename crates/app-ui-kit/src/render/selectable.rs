@@ -132,7 +132,14 @@ fn paint_inline_images(
         let center_x = line.left + (line.right - line.left) / 2.;
         let origin = point(center_x - side / 2., line.top + (line_height - side) / 2.);
         let image_bounds = Bounds::new(origin, size(side, side));
-        let _ = window.paint_image(image_bounds, image_bounds, Corners::default(), image, 0, false);
+        let _ = window.paint_image(
+            image_bounds,
+            image_bounds,
+            Corners::default(),
+            image,
+            0,
+            false,
+        );
     }
 }
 
@@ -382,9 +389,11 @@ impl Element for SelectableRichText {
         };
         window.set_cursor_style(cursor, hitbox);
         if !self.links.is_empty() {
-            let (hover_layout, hover_links, hover_hitbox) = (layout.clone(), self.links.clone(), hitbox.clone());
+            let (hover_layout, hover_links, hover_hitbox) =
+                (layout.clone(), self.links.clone(), hitbox.clone());
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
-                let over_link = hover_hitbox.is_hovered(window) && link_at(&hover_layout, &hover_links, event.position).is_some();
+                let over_link = hover_hitbox.is_hovered(window)
+                    && link_at(&hover_layout, &hover_links, event.position).is_some();
                 if phase.bubble() && over_link != hovered_link {
                     window.refresh();
                 }

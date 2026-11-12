@@ -24,7 +24,9 @@ pub fn icon(name: IconName, size: f32, color: Hsla) -> Icon {
 }
 
 pub fn filled_icon(name: IconName, size: f32, color: Hsla) -> Icon {
-    let path = name.path().replacen("icons/", app_base::assets::FILLED_PREFIX, 1);
+    let path = name
+        .path()
+        .replacen("icons/", app_base::assets::FILLED_PREFIX, 1);
     Icon::empty().path(path).size(px(size)).text_color(color)
 }
 

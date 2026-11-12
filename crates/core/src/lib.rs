@@ -1,11 +1,10 @@
 mod actions;
-mod announcement;
-mod announcement_post;
 mod activity_sync;
 mod adaptive_card;
+mod announcement;
+mod announcement_post;
 mod avatars;
 mod bot_partners;
-mod copilot;
 mod call_event;
 mod card_actions;
 mod card_chart;
@@ -17,10 +16,11 @@ mod card_widgets;
 mod card_width;
 mod channel_mentions;
 mod channel_sync;
-mod chat_settings_sync;
 mod channel_visibility;
 mod chat_paging;
+mod chat_settings_sync;
 mod cloud_files;
+mod copilot;
 mod default_reactions;
 mod download;
 mod draft;
@@ -60,13 +60,13 @@ mod remote;
 pub mod roster_event;
 mod scheduled;
 mod search;
-mod team_admin;
 mod server_search;
 mod sidebar_sync;
 mod skin_tone;
 mod spans;
 mod stored;
 mod table;
+mod team_admin;
 mod teams_quote;
 mod time_zone;
 mod translate_sync;
@@ -75,17 +75,16 @@ mod youtube;
 
 pub use actions::OpenedPost;
 pub use activity_sync::stored_activity_feed;
-pub use announcement::{
-    ANNOUNCEMENT_APP_ID, ANNOUNCEMENT_BANNER_TYPE, AnnouncementBanner, BannerBackground,
-    TeamsBannerImage, teams_theme,
-};
-pub use chatsvc::{ActivityHorizons, ActivityItem, ActivitySnapshot};
 pub use adaptive_card::{
     ActionSplit, AdaptiveCard, CARD_THEME, CardAction, CardActionIcon, CardActionKind, CardColumn,
     CardElement, CardFact, CardIcon, CardImage, CardItem, CardMedia, CardRefresh, CardSpacing,
     CardText, ColumnWidth, ContainerStyle, ExecuteAction, ExecuteTrigger, IconSize, ImageSize,
     InvokePayload, SubmitAction, TextColor, TextSize, ToggleTarget, VerticalAlignment,
     card_content_text, split_overflow, task_value,
+};
+pub use announcement::{
+    ANNOUNCEMENT_APP_ID, ANNOUNCEMENT_BANNER_TYPE, AnnouncementBanner, BannerBackground,
+    TeamsBannerImage, teams_theme,
 };
 pub use avatars::{Avatar, team_avatar_key};
 pub use call_event::{
@@ -113,21 +112,22 @@ pub use card_widgets::{
     LabelPosition, RingSize,
 };
 pub use card_width::{TargetWidth, WidthClass};
-pub use chatsvc::substrate_search;
-pub use chatsvc::compose_copilot::{Adjustment as ComposeAdjustment, ComposeAction};
-pub use chatsvc::{
-    CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind,
-    ForwardResult, Gif, PinnedMessage, PostFollowState, PresenceStatus, SavedMessage, ScheduledDraft, StatusNote,
-    WindowDirection, WorkLocation, WorkLocationKind, WorkLocationSource,
-};
 pub use chat_settings_sync::{store_chat_settings, stored_chat_settings};
+pub use chatsvc::compose_copilot::{Adjustment as ComposeAdjustment, ComposeAction};
+pub use chatsvc::substrate_search;
 pub use chatsvc::{
     ActivityAlert, ChatAccountSettings, ChatNotificationMode, ChatSettingChange,
     ChatSettingsDocument, DesktopNotifications, EnterKeyBehavior, MeetingChatNotifications,
     MessageDensity, NotificationAccountSettings, NotificationPreset, UpArrowBehavior,
 };
+pub use chatsvc::{ActivityHorizons, ActivityItem, ActivitySnapshot};
+pub use chatsvc::{
+    CallDirection, CallLogEntry, CallOutcome, ChatApp, ForcedAvailability, ForcedKind,
+    ForwardResult, Gif, PinnedMessage, PostFollowState, PresenceStatus, SavedMessage,
+    ScheduledDraft, StatusNote, WindowDirection, WorkLocation, WorkLocationKind,
+    WorkLocationSource,
+};
 pub use chatsvc::{ChannelPrivacy, ChatSection, ChatSectionSettings, RecordingPolicy};
-pub use team_admin::{MAX_CHANNEL_DESCRIPTION_LENGTH, MAX_CHANNEL_NAME_LENGTH};
 pub use chatsvc::{
     Language, LanguageSettings, MessageLanguage, Translation, TranslationBehavior,
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
@@ -140,8 +140,8 @@ pub use default_reactions::{
 pub use download::LibraryFile;
 pub use draft::{
     Draft, DraftLine, Edit, FormatState, INDENT_PIXELS, LineKind, MAX_DEPTH, MAX_INDENT, Mark,
-    MarkKind, OBJECT_MARK, RULE_MARK,
-    SizeStep, TypingStyle, changed_span, has_markdown, link_url, map_offset, reverse_edits,
+    MarkKind, OBJECT_MARK, RULE_MARK, SizeStep, TypingStyle, changed_span, has_markdown, link_url,
+    map_offset, reverse_edits,
 };
 pub use emoticon_tags::{EmoticonTag, emoticon_tags};
 pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
@@ -157,13 +157,12 @@ pub use forwarded::{
     ForwardInfo, ForwardState, forwarded_texts, forwards, is_forwarded,
 };
 pub use graph::{
-    CloudFile, DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget, QuickSite,
-    MessageExtras, SharedFile, UploadedFile,
+    CloudFile, DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,
+    MessageExtras, QuickSite, SharedFile, UploadedFile,
 };
 pub use images::StoredImage;
 pub use jumbo::{JumboEmoji, MAX_JUMBO_EMOJI, jumbo_emoji};
 pub use links::{LinkPreview, first_public_link, is_public_link, link_preview, public_links};
-pub use youtube::fallback_poster_url;
 pub use mapping::{chat_record, message_record};
 pub use markdown::{card_markdown_to_html, escape_html, markdown_to_html, plain_text_to_html};
 pub use meeting_join::{
@@ -191,12 +190,14 @@ pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX,
     QuoteInfo, ReactionInfo, ReactionSummary, adaptive_cards, attachments, can_delete, can_edit,
     card_texts, copy_text, files, images, linked_message_spans, linked_message_spans_with,
-    mentions, mentions_whole_chat, message_quote, message_spans, quote_html, quotes, reaction_summaries, reactions,
-    readable_text, translated_spans, user_mention_inputs,
+    mentions, mentions_whole_chat, message_quote, message_spans, quote_html, quotes,
+    reaction_summaries, reactions, readable_text, translated_spans, user_mention_inputs,
 };
 pub use table::{Cell, PICKER_COLUMNS, PICKER_ROWS, TABLE_MARK, Table, TableEdit};
+pub use team_admin::{MAX_CHANNEL_DESCRIPTION_LENGTH, MAX_CHANNEL_NAME_LENGTH};
 pub use time_zone::local_time;
 pub use translation::{
     FALLBACK_TARGET, LanguageStamp, confident_language, default_target, language_name, min_chars,
     offered_language,
 };
+pub use youtube::fallback_poster_url;

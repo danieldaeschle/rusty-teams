@@ -42,7 +42,11 @@ pub fn save_report(directory: &Path, document: &Document) -> io::Result<SavedRep
 }
 
 fn free_stem(directory: &Path, stem: &str) -> String {
-    let taken = |candidate: &str| directory.join(format!("{candidate}.{JSON_EXTENSION}")).exists();
+    let taken = |candidate: &str| {
+        directory
+            .join(format!("{candidate}.{JSON_EXTENSION}"))
+            .exists()
+    };
     if !taken(stem) {
         return stem.to_owned();
     }
@@ -59,8 +63,14 @@ fn prune(directory: &Path, keep: usize) {
     let mut stems: Vec<String> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == JSON_EXTENSION))
-        .filter_map(|path| path.file_stem().map(|stem| stem.to_string_lossy().into_owned()))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == JSON_EXTENSION)
+        })
+        .filter_map(|path| {
+            path.file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+        })
         .collect();
     stems.sort();
     let surplus = stems.len().saturating_sub(keep);
@@ -76,17 +86,27 @@ mod tests {
     use super::*;
 
     fn document(stem: &str) -> Document {
-        Document { stem: stem.to_owned(), json: "{}".to_owned(), markdown: "# x".to_owned() }
+        Document {
+            stem: stem.to_owned(),
+            json: "{}".to_owned(),
+            markdown: "# x".to_owned(),
+        }
     }
 
     #[test]
     fn the_newest_thirty_reports_are_kept_with_both_files() {
         let directory = tempfile::tempdir().unwrap();
         for index in 0..33 {
-            save_report(directory.path(), &document(&format!("20260101T0000{index:02}Z-1to1"))).unwrap();
+            save_report(
+                directory.path(),
+                &document(&format!("20260101T0000{index:02}Z-1to1")),
+            )
+            .unwrap();
         }
-        let mut names: Vec<String> =
-            fs::read_dir(directory.path()).unwrap().map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let mut names: Vec<String> = fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
         names.sort();
         assert_eq!(names.len(), 60);
         assert_eq!(names[0], "20260101T000003Z-1to1.json");
@@ -99,6 +119,11 @@ mod tests {
         let first = save_report(directory.path(), &document("20260101T000000Z-echo")).unwrap();
         let second = save_report(directory.path(), &document("20260101T000000Z-echo")).unwrap();
         assert_ne!(first.json, second.json);
-        assert!(second.json.to_string_lossy().ends_with("20260101T000000Z-echo-2.json"));
+        assert!(
+            second
+                .json
+                .to_string_lossy()
+                .ends_with("20260101T000000Z-echo-2.json")
+        );
     }
 }

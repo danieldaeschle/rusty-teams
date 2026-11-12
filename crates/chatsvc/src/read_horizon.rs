@@ -47,7 +47,11 @@ impl ReadHorizon {
     pub fn is_unread_after(&self, my_user_id: &str, app_horizon_ms: i64) -> bool {
         let app_horizon_set = app_horizon_ms > 0;
         let bookmark_cleared = app_horizon_set && app_horizon_ms >= self.bookmark_timestamp_ms;
-        let bookmark_ms = if bookmark_cleared { 0 } else { self.bookmark_ms };
+        let bookmark_ms = if bookmark_cleared {
+            0
+        } else {
+            self.bookmark_ms
+        };
         if bookmark_ms != 0 && self.bookmark_message_set {
             return true;
         }
@@ -77,7 +81,11 @@ pub fn read_up_to(last_message_at: DateTime<Utc>, now: DateTime<Utc>) -> String 
 }
 
 /// Teams' unread bookmark on a message: one millisecond before its arrival, now, its id.
-pub fn bookmark_at(message_arrived_at: DateTime<Utc>, message_id: &str, now: DateTime<Utc>) -> String {
+pub fn bookmark_at(
+    message_arrived_at: DateTime<Utc>,
+    message_id: &str,
+    now: DateTime<Utc>,
+) -> String {
     format!(
         "{};{};{message_id}",
         message_arrived_at.timestamp_millis() - 1,
@@ -268,6 +276,10 @@ mod tests {
         assert!(unread(&marked));
         let cleared = cleared_bookmark(now);
         assert_eq!(cleared, "0;1792190000000;0");
-        assert!(!unread(&conversation(Some("1792182658901;1;0"), Some(&cleared), last)));
+        assert!(!unread(&conversation(
+            Some("1792182658901;1;0"),
+            Some(&cleared),
+            last
+        )));
     }
 }

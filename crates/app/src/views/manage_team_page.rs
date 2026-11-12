@@ -58,7 +58,13 @@ impl ManageTeamPage {
         }
     }
 
-    fn header(&self, team_id: &str, team_name: &str, directory: &Directory, cx: &Context<Self>) -> Div {
+    fn header(
+        &self,
+        team_id: &str,
+        team_name: &str,
+        directory: &Directory,
+        cx: &Context<Self>,
+    ) -> Div {
         let photo = directory.avatar(&team_avatar_key(team_id));
         h_flex()
             .h(px(HEADER_HEIGHT))
@@ -81,7 +87,13 @@ impl ManageTeamPage {
                         this.app.update(cx, |state, cx| state.close_manage_team(cx));
                     })),
             )
-            .child(team_avatar(photo, team_name, team_id, TEAM_AVATAR_SIZE, TEAM_AVATAR_RADIUS))
+            .child(team_avatar(
+                photo,
+                team_name,
+                team_id,
+                TEAM_AVATAR_SIZE,
+                TEAM_AVATAR_RADIUS,
+            ))
             .child(
                 div()
                     .min_w_0()
@@ -121,7 +133,9 @@ impl ManageTeamPage {
                     .child("Open in browser")
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.app.update(cx, |state, cx| {
-                            if let Some(team_id) = state.manage_team.as_ref().map(|open| open.team_id.clone()) {
+                            if let Some(team_id) =
+                                state.manage_team.as_ref().map(|open| open.team_id.clone())
+                            {
                                 state.manage_team_in_browser(&team_id, cx);
                             }
                         });
@@ -140,7 +154,12 @@ impl ManageTeamPage {
             .rounded(px(6.))
             .bg(theme::popup())
             .child(icon(IconName::Search, 14., theme::text_muted()))
-            .child(div().flex_1().min_w_0().child(Input::new(&self.search).appearance(false).bordered(false)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(Input::new(&self.search).appearance(false).bordered(false)),
+            )
     }
 
     fn section(
@@ -162,7 +181,15 @@ impl ManageTeamPage {
             .text_size(px(14.))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text())
-            .child(icon(if open { IconName::ChevronDown } else { IconName::ChevronRight }, 14., theme::text_muted()))
+            .child(icon(
+                if open {
+                    IconName::ChevronDown
+                } else {
+                    IconName::ChevronRight
+                },
+                14.,
+                theme::text_muted(),
+            ))
             .child(format!("{title} ({})", members.len()))
             .on_click(cx.listener(move |this, _, _, cx| {
                 if id == "manage-team-owners" {
@@ -172,12 +199,9 @@ impl ManageTeamPage {
                 }
                 cx.notify();
             }));
-        v_flex()
-            .w_full()
-            .child(toggle)
-            .when(open, |section| {
-                section.children(members.iter().map(|member| member_row(member, directory)))
-            })
+        v_flex().w_full().child(toggle).when(open, |section| {
+            section.children(members.iter().map(|member| member_row(member, directory)))
+        })
     }
 }
 
@@ -195,15 +219,30 @@ fn member_row(member: &TeamMember, directory: &Directory) -> Div {
             div()
                 .flex_none()
                 .size(px(MEMBER_AVATAR_SIZE))
-                .child(person_avatar(directory, member.user_id.as_deref(), &member.name, MEMBER_AVATAR_SIZE)),
+                .child(person_avatar(
+                    directory,
+                    member.user_id.as_deref(),
+                    &member.name,
+                    MEMBER_AVATAR_SIZE,
+                )),
         )
         .child(
             v_flex()
                 .flex_1()
                 .min_w_0()
-                .child(div().truncate().text_size(px(14.)).text_color(theme::text()).child(member.name.clone()))
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(px(14.))
+                        .text_color(theme::text())
+                        .child(member.name.clone()),
+                )
                 .children(member.email.clone().map(|email| {
-                    div().truncate().text_size(px(12.)).text_color(theme::text_muted()).child(email)
+                    div()
+                        .truncate()
+                        .text_size(px(12.))
+                        .text_color(theme::text_muted())
+                        .child(email)
                 })),
         )
         .child(
@@ -235,18 +274,36 @@ impl Render for ManageTeamPage {
         };
         let directory = &state.directory;
         let body: Vec<AnyElement> = match &manage_team.members {
-            MembersLoad::Loading => vec![notice("Loading members...".to_owned()).into_any_element()],
+            MembersLoad::Loading => {
+                vec![notice("Loading members...".to_owned()).into_any_element()]
+            }
             MembersLoad::Failed(message) => vec![notice(message.clone()).into_any_element()],
             MembersLoad::Loaded(members) => {
                 let groups = member_groups(members, &query);
                 if groups.owners.is_empty() && groups.others.is_empty() {
-                    vec![notice(format!("No members match \"{}\"", query.trim())).into_any_element()]
+                    vec![
+                        notice(format!("No members match \"{}\"", query.trim())).into_any_element(),
+                    ]
                 } else {
                     vec![
-                        self.section("manage-team-owners", "Owners", &groups.owners, self.owners_open, directory, cx)
-                            .into_any_element(),
-                        self.section("manage-team-others", "Members and guests", &groups.others, self.others_open, directory, cx)
-                            .into_any_element(),
+                        self.section(
+                            "manage-team-owners",
+                            "Owners",
+                            &groups.owners,
+                            self.owners_open,
+                            directory,
+                            cx,
+                        )
+                        .into_any_element(),
+                        self.section(
+                            "manage-team-others",
+                            "Members and guests",
+                            &groups.others,
+                            self.others_open,
+                            directory,
+                            cx,
+                        )
+                        .into_any_element(),
                     ]
                 }
             }
@@ -276,7 +333,13 @@ impl Render for ManageTeamPage {
                             .w_full()
                             .max_w(px(LIST_MAX_WIDTH))
                             .gap(px(12.))
-                            .child(h_flex().w_full().px(px(8.)).justify_end().child(self.search_box()))
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .px(px(8.))
+                                    .justify_end()
+                                    .child(self.search_box()),
+                            )
                             .children(body),
                     ),
                 &self.scroll,

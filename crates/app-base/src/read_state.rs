@@ -55,7 +55,10 @@ mod tests {
 
     #[test]
     fn jump_goes_to_last_read_from_the_newest_and_to_the_newest_from_anywhere_else() {
-        assert_eq!(jump_target(Some(4), 10, false), Some(JumpTarget::LastRead(4)));
+        assert_eq!(
+            jump_target(Some(4), 10, false),
+            Some(JumpTarget::LastRead(4))
+        );
         assert_eq!(jump_target(Some(4), 2, true), Some(JumpTarget::Newest));
         assert_eq!(jump_target(Some(4), 3, true), Some(JumpTarget::Newest));
         assert_eq!(jump_target(None, 3, true), Some(JumpTarget::Newest));
@@ -133,10 +136,26 @@ mod tests {
     fn only_messages_missed_before_the_fetch_count_as_new() {
         let at = |seconds| DateTime::<Utc>::from_timestamp(seconds, 0).unwrap();
         let (newest_cached, fetch_started_at) = (at(100), at(200));
-        assert!(!missed_before_fetch(at(100), newest_cached, fetch_started_at));
-        assert!(missed_before_fetch(at(150), newest_cached, fetch_started_at));
-        assert!(missed_before_fetch(at(200), newest_cached, fetch_started_at));
-        assert!(!missed_before_fetch(at(201), newest_cached, fetch_started_at));
+        assert!(!missed_before_fetch(
+            at(100),
+            newest_cached,
+            fetch_started_at
+        ));
+        assert!(missed_before_fetch(
+            at(150),
+            newest_cached,
+            fetch_started_at
+        ));
+        assert!(missed_before_fetch(
+            at(200),
+            newest_cached,
+            fetch_started_at
+        ));
+        assert!(!missed_before_fetch(
+            at(201),
+            newest_cached,
+            fetch_started_at
+        ));
     }
 
     #[test]

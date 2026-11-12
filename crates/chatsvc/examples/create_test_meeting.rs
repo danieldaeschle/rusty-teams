@@ -7,7 +7,10 @@ const SUBJECT: &str = "Native client test";
 async fn main() {
     let endpoint = std::env::var("CDP_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned());
     let session = Session::connect(&endpoint).await.expect("browser");
-    match chatsvc::Calendar::new(&session).create_meet_now(SUBJECT).await {
+    match chatsvc::Calendar::new(&session)
+        .create_meet_now(SUBJECT)
+        .await
+    {
         Ok(link) => println!("{link}"),
         Err(error) => {
             eprintln!("{error}");

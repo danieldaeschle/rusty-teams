@@ -4,9 +4,8 @@ use chrono::{DateTime, Utc};
 use gpui_kit::Image;
 use serde::{Deserialize, Serialize};
 use teams_core::{
-    AnnouncementBanner,
-    Draft, FileKind, FileReference, HostedImage, LinkPreview, MentionInput, MessageExtras,
-    OBJECT_MARK, UploadedFile,
+    AnnouncementBanner, Draft, FileKind, FileReference, HostedImage, LinkPreview, MentionInput,
+    MessageExtras, OBJECT_MARK, UploadedFile,
 };
 
 use store::MessageImportance;

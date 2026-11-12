@@ -40,7 +40,10 @@ pub fn member_groups<'a>(members: &'a [TeamMember], query: &str) -> MemberGroups
         .filter(|member| {
             query.is_empty()
                 || member.name.to_lowercase().contains(&query)
-                || member.email.as_deref().is_some_and(|email| email.to_lowercase().contains(&query))
+                || member
+                    .email
+                    .as_deref()
+                    .is_some_and(|email| email.to_lowercase().contains(&query))
         })
         .collect();
     matching.sort_by(|left, right| compare_names(&left.name, &right.name));
@@ -49,7 +52,9 @@ pub fn member_groups<'a>(members: &'a [TeamMember], query: &str) -> MemberGroups
 }
 
 fn compare_names(left: &str, right: &str) -> Ordering {
-    left.to_lowercase().cmp(&right.to_lowercase()).then_with(|| left.cmp(right))
+    left.to_lowercase()
+        .cmp(&right.to_lowercase())
+        .then_with(|| left.cmp(right))
 }
 
 fn team_member(member: graph::Member) -> TeamMember {
@@ -97,20 +102,34 @@ impl AppState {
                 Ok(Err(error)) => Err(error.to_string()),
                 Err(error) => Err(error.to_string()),
             };
-            this.update(cx, |state, cx| state.finish_member_load(&team_id, result, cx))
-                .ok();
+            this.update(cx, |state, cx| {
+                state.finish_member_load(&team_id, result, cx)
+            })
+            .ok();
         })
         .detach();
     }
 
-    fn finish_member_load(&mut self, team_id: &str, result: Result<Vec<TeamMember>, String>, cx: &mut Context<Self>) {
-        let Some(manage_team) = self.manage_team.as_mut().filter(|open| open.team_id == team_id) else {
+    fn finish_member_load(
+        &mut self,
+        team_id: &str,
+        result: Result<Vec<TeamMember>, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(manage_team) = self
+            .manage_team
+            .as_mut()
+            .filter(|open| open.team_id == team_id)
+        else {
             return;
         };
         let mut user_ids = Vec::new();
         manage_team.members = match result {
             Ok(members) => {
-                user_ids = members.iter().filter_map(|member| member.user_id.clone()).collect();
+                user_ids = members
+                    .iter()
+                    .filter_map(|member| member.user_id.clone())
+                    .collect();
                 MembersLoad::Loaded(members)
             }
             Err(error) => {
@@ -152,7 +171,12 @@ mod tests {
             member("Bert", None, true),
         ];
         let groups = member_groups(&members, "");
-        let names = |group: &[&TeamMember]| group.iter().map(|member| member.name.clone()).collect::<Vec<_>>();
+        let names = |group: &[&TeamMember]| {
+            group
+                .iter()
+                .map(|member| member.name.clone())
+                .collect::<Vec<_>>()
+        };
         assert_eq!(names(&groups.owners), ["Bert", "Mara"]);
         assert_eq!(names(&groups.others), ["Anna", "tobias"]);
     }

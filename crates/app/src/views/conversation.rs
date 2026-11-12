@@ -93,8 +93,8 @@ use crate::people::{local_names, resolve_names};
 use crate::reaction_model::UNKNOWN_REACTOR;
 use crate::read_state::{ReadTrigger, missed_before_fetch, plan_read};
 use crate::rows::{
-    Delivery, LocalImage, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo, api_reaction,
-    apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
+    Delivery, LocalImage, MessageRow, PendingReactions, Receipt, Row, RowContext, StartInfo,
+    api_reaction, apply_pending_reactions, assign_series, changed_indices, diff_keys, flat_rows,
     forward_sender_ids, has_own_reaction, message_draft, message_text, own_reaction_glyph,
     place_local_rows, placeholder_rows, reaction_glyph, reply_excerpt, set_own_reaction,
     thread_list_rows, thread_rows,
@@ -662,8 +662,15 @@ impl ConversationView {
 
     #[cfg_attr(not(windows), allow(dead_code))]
     pub fn opening_title(&self) -> Option<String> {
-        let loading = self.rows.borrow().iter().any(|row| matches!(row, Row::Skeleton(_)));
-        self.current.as_ref().filter(|_| loading).map(|current| current.title.clone())
+        let loading = self
+            .rows
+            .borrow()
+            .iter()
+            .any(|row| matches!(row, Row::Skeleton(_)));
+        self.current
+            .as_ref()
+            .filter(|_| loading)
+            .map(|current| current.title.clone())
     }
 
     pub fn send_in_flight(&self) -> bool {
@@ -1042,9 +1049,8 @@ impl ConversationView {
             self.hovered_message = None;
             self.sync_generation += 1;
             self.draft.update(cx, |draft, cx| draft.reset(window, cx));
-            self.composer.update(cx, |composer, cx| {
-                composer.set_conversation("", window, cx)
-            });
+            self.composer
+                .update(cx, |composer, cx| composer.set_conversation("", window, cx));
             self.on_draft_changed(window, cx);
             self.rebuild(true, cx);
         }
@@ -1288,11 +1294,7 @@ impl ConversationView {
             if refresh_replies {
                 self.refresh_thread(row_key.clone(), cx);
             }
-            let shown_alone = self
-                .rows
-                .borrow()
-                .iter()
-                .any(|row| row.key() == message_id);
+            let shown_alone = self.rows.borrow().iter().any(|row| row.key() == message_id);
             if shown_alone {
                 self.reveal_row(message_id.to_owned(), message_id.to_owned(), cx);
                 return;
@@ -1314,7 +1316,8 @@ impl ConversationView {
         }
         self.fetched_jump = Some(message_id.to_owned());
         let conversation_id = current.selection.conversation_id().to_owned();
-        let (task_conversation_id, task_message_id) = (conversation_id.clone(), message_id.to_owned());
+        let (task_conversation_id, task_message_id) =
+            (conversation_id.clone(), message_id.to_owned());
         let receiver = runtime::spawn(async move {
             engine
                 .open_post(&task_conversation_id, &task_message_id)
@@ -1358,9 +1361,10 @@ impl ConversationView {
         if self.conversation_id().as_deref() != Some(conversation_id) {
             return;
         }
-        let still_waiting = self.current.as_ref().is_some_and(|current| {
-            current.mode == ViewMode::Thread(message_id.to_owned())
-        });
+        let still_waiting = self
+            .current
+            .as_ref()
+            .is_some_and(|current| current.mode == ViewMode::Thread(message_id.to_owned()));
         match result {
             Ok(Ok(Some(post))) if still_waiting => {
                 self.jump_to_post(conversation_id, message_id, !post.replies_loaded, cx)
@@ -1646,11 +1650,9 @@ impl ConversationView {
         let app = self.app.read(cx);
         let (user_id, member_name, notes) = match &current.selection {
             Selection::Chat(chat_id)
-                if app
-                    .sidebar
-                    .chats
-                    .iter()
-                    .any(|chat| &chat.id == chat_id && chat.kind.eq_ignore_ascii_case("meeting")) =>
+                if app.sidebar.chats.iter().any(|chat| {
+                    &chat.id == chat_id && chat.kind.eq_ignore_ascii_case("meeting")
+                }) =>
             {
                 return None;
             }
@@ -1790,8 +1792,8 @@ impl ConversationView {
             current.loaded_count = records.len();
         }
         let has_older = sync_has_more && !current.older_blocked && can_load_older;
-        let placeholders = records.is_empty()
-            && (loading_post || current.sync.messages && thread_root.is_none());
+        let placeholders =
+            records.is_empty() && (loading_post || current.sync.messages && thread_root.is_none());
         let in_feed = current.mode == ViewMode::ThreadList;
         let appear_scope = format!("{conversation_id}/{:?}", current.mode);
         let appear_live = !placeholders && !in_feed && window.is_none() && !current.sync.messages;
@@ -1851,7 +1853,11 @@ impl ConversationView {
             {
                 message.receipt = receipts.get(&message.key).copied().unwrap_or_default();
                 message.receipt_label = receipt_labels.get(&message.key).cloned();
-                if let Some((_, previews)) = self.sent_previews.iter().find(|(key, _)| key == &message.key) {
+                if let Some((_, previews)) = self
+                    .sent_previews
+                    .iter()
+                    .find(|(key, _)| key == &message.key)
+                {
                     message.sent_previews = previews.clone();
                 }
             }
@@ -2201,7 +2207,11 @@ impl ConversationView {
         for receipt in receipts.values_mut() {
             *receipt = shown_receipt(&settings, *receipt);
         }
-        labels.retain(|key, _| receipts.get(key).is_some_and(|receipt| *receipt != Receipt::Hidden));
+        labels.retain(|key, _| {
+            receipts
+                .get(key)
+                .is_some_and(|receipt| *receipt != Receipt::Hidden)
+        });
         (receipts, labels)
     }
 
@@ -2227,7 +2237,11 @@ impl ConversationView {
             let labels = receipts
                 .iter()
                 .map(|(key, receipt)| {
-                    let label = if *receipt == Receipt::Read { "Seen" } else { "Sent" };
+                    let label = if *receipt == Receipt::Read {
+                        "Seen"
+                    } else {
+                        "Sent"
+                    };
                     (key.clone(), label.to_owned())
                 })
                 .collect();
@@ -2405,7 +2419,10 @@ impl ConversationView {
         current.loading_older = false;
         match result {
             Ok(Ok(records)) if !records.is_empty() => {
-                app_base::diagnostics::record(&format!("chat: older page, {} messages", records.len()));
+                app_base::diagnostics::record(&format!(
+                    "chat: older page, {} messages",
+                    records.len()
+                ));
                 current.loaded_limit = current.loaded_count + records.len();
                 self.older_anchor = self
                     .rows
@@ -2419,7 +2436,10 @@ impl ConversationView {
                 current.older_blocked = true;
             }
             Ok(Err(error)) => {
-                app_base::diagnostics::record(&format!("chat: older page failed: {}", short_error(&error)));
+                app_base::diagnostics::record(&format!(
+                    "chat: older page failed: {}",
+                    short_error(&error)
+                ));
                 current.older_blocked = true;
                 self.notice = Some(format!(
                     "Could not load older messages: {}",
@@ -2876,7 +2896,10 @@ impl ConversationView {
         }
         if hovered
             && matches!(slot, HoverSlot::Row)
-            && self.toolbar_hovered.as_deref().is_some_and(|toolbar| toolbar != key)
+            && self
+                .toolbar_hovered
+                .as_deref()
+                .is_some_and(|toolbar| toolbar != key)
         {
             self.toolbar_hovered = None;
         }
@@ -3540,7 +3563,10 @@ impl ConversationView {
         if matches!(result, Ok(Ok(Delivered::WithoutBanner))) {
             self.notice = Some(POSTED_WITHOUT_BANNER.to_owned());
         }
-        if let Ok(Ok(Delivered::Complete { message_id: Some(message_id) })) = &result {
+        if let Ok(Ok(Delivered::Complete {
+            message_id: Some(message_id),
+        })) = &result
+        {
             self.keep_sent_previews(key, message_id);
         }
         let failure = match result {
@@ -3575,7 +3601,8 @@ impl ConversationView {
         if row.local_images.is_empty() {
             return;
         }
-        self.sent_previews.push_back((message_id.to_owned(), row.local_images.clone()));
+        self.sent_previews
+            .push_back((message_id.to_owned(), row.local_images.clone()));
         if self.sent_previews.len() > SENT_PREVIEWS_KEPT {
             self.sent_previews.pop_front();
         }
@@ -3813,7 +3840,12 @@ impl ConversationView {
                                     .any(|member| member.user_id.as_deref() == Some(&me.user_id))
                             })
                         {
-                            rename = Some(group_name_button(&self.app, &self.group_name, chat_id, &chat.title));
+                            rename = Some(group_name_button(
+                                &self.app,
+                                &self.group_name,
+                                chat_id,
+                                &chat.title,
+                            ));
                         }
                         if chat.title.trim().is_empty() {
                             names_title = Some(chat_header_actions::group_title(directory, &faces));
@@ -3845,9 +3877,12 @@ impl ConversationView {
                         .avatar(&teams_core::team_avatar_key(&entry.team.id))
                 });
                 lead = Some(team_avatar(photo, name, key, 36., 9.));
-                if let Some(channel) = team
-                    .and_then(|entry| entry.channels.iter().find(|channel| &channel.id == channel_id))
-                {
+                if let Some(channel) = team.and_then(|entry| {
+                    entry
+                        .channels
+                        .iter()
+                        .find(|channel| &channel.id == channel_id)
+                }) {
                     header_title = channel.name.clone();
                 }
             }
@@ -3900,7 +3935,12 @@ impl ConversationView {
         } else if loading_window {
             subline = "Loading message ...".to_owned();
         } else if sync.shown_at.is_some() {
-            subline = if sync.slow { "Taking longer than usual ..." } else { "Loading messages ..." }.to_owned();
+            subline = if sync.slow {
+                "Taking longer than usual ..."
+            } else {
+                "Loading messages ..."
+            }
+            .to_owned();
         }
         let inline_tabs = tabs.map(|tabs| h_flex().h_full().flex_1().child(tabs));
         let overflow = self.header_overflows();
@@ -3961,7 +4001,9 @@ impl ConversationView {
                     .children(self.chat_find_button(cx))
             })
             .children(self.channel_find_button(cx))
-            .when(!overflow, |header| header.children(self.channel_details_button(cx)))
+            .when(!overflow, |header| {
+                header.children(self.channel_details_button(cx))
+            })
             .children(self.channel_more_button(cx))
             .children(self.chat_more_button(overflow, cx))
             .children(self.pop_in_button(current))
@@ -4301,63 +4343,69 @@ impl Render for ConversationView {
                     })
                     .children(pin_banner.map(|banner| pin_banner_overlay(runway(banner, comfy)))),
             )
-            .children(self.render_draft_error(cx).map(|error| runway(error, comfy)))
+            .children(
+                self.render_draft_error(cx)
+                    .map(|error| runway(error, comfy)),
+            )
             .when(
                 !in_feed && !recap_active && !self.shared_active(),
                 |column| match &forward_selection {
                     Some(snapshot) => {
                         column.child(runway(self.render_forward_footer(snapshot, cx), comfy))
                     }
-                    None => column.child(runway(
-                        v_flex()
-                            .w_full()
-                            .children(self.render_absence_notice(cx))
-                            .children(self.render_proposal_card(cx).map(|card| {
-                                div().w_full().pb(px(COMPOSER_TOP_GAP)).child(card)
-                            }))
-                            .child(self.composer.clone()),
-                        comfy,
-                    )),
+                    None => {
+                        column.child(runway(
+                            v_flex()
+                                .w_full()
+                                .children(self.render_absence_notice(cx))
+                                .children(self.render_proposal_card(cx).map(|card| {
+                                    div().w_full().pb(px(COMPOSER_TOP_GAP)).child(card)
+                                }))
+                                .child(self.composer.clone()),
+                            comfy,
+                        ))
+                    }
                 },
             )
             .child(self.render_drop_overlay(cx));
-        let root = root.child(
-            h_flex()
-                .relative()
-                .flex_1()
-                .min_h_0()
-                .w_full()
-                .items_stretch()
-                .child(content)
-                .children(channel_details)
-                .children(find_panel.map(|panel| {
-                    div()
-                        .h_full()
-                        .w(px(FIND_PANEL_WIDTH))
-                        .min_w_0()
-                        .flex_shrink(1.)
-                        .when(find_overlays, |slot| {
-                            slot.absolute().top_0().right_0().bottom_0().max_w_full()
-                        })
-                        .child(panel)
-                })),
-        )
-        .capture_action(cx.listener(|this, _: &Escape, _, cx| {
-            if this.reaction_details.is_some() {
-                this.close_reaction_details(cx);
-                cx.stop_propagation();
-            }
-        }))
-        .on_action(cx.listener(|this, _: &Escape, window, cx| {
-            if this.draft_active {
-                if this.draft.read(cx).has_focus(window, cx) {
-                    this.draft.update(cx, |draft, cx| draft.escape(cx));
+        let root = root
+            .child(
+                h_flex()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .items_stretch()
+                    .child(content)
+                    .children(channel_details)
+                    .children(find_panel.map(|panel| {
+                        div()
+                            .h_full()
+                            .w(px(FIND_PANEL_WIDTH))
+                            .min_w_0()
+                            .flex_shrink(1.)
+                            .when(find_overlays, |slot| {
+                                slot.absolute().top_0().right_0().bottom_0().max_w_full()
+                            })
+                            .child(panel)
+                    })),
+            )
+            .capture_action(cx.listener(|this, _: &Escape, _, cx| {
+                if this.reaction_details.is_some() {
+                    this.close_reaction_details(cx);
+                    cx.stop_propagation();
                 }
-            } else if this.cancel_forward_selection(cx) {
-            } else if !this.on_escape(window, cx) {
-                cx.propagate();
-            }
-        }));
+            }))
+            .on_action(cx.listener(|this, _: &Escape, window, cx| {
+                if this.draft_active {
+                    if this.draft.read(cx).has_focus(window, cx) {
+                        this.draft.update(cx, |draft, cx| draft.escape(cx));
+                    }
+                } else if this.cancel_forward_selection(cx) {
+                } else if !this.on_escape(window, cx) {
+                    cx.propagate();
+                }
+            }));
         let root = root.child(crate::inline_video::sentinel());
         match copilot_island {
             Some(island) => h_flex()
@@ -4377,9 +4425,8 @@ fn typing_bottom_offset(timeline: Option<Bounds<Pixels>>, last_row: Option<Bound
     let (Some(timeline), Some(last_row)) = (timeline, last_row) else {
         return TYPING_BOTTOM_GAP;
     };
-    let under_last_row = f32::from(timeline.bottom() - last_row.bottom())
-        - TYPING_TOP_GAP
-        - TYPING_BUBBLE_HEIGHT;
+    let under_last_row =
+        f32::from(timeline.bottom() - last_row.bottom()) - TYPING_TOP_GAP - TYPING_BUBBLE_HEIGHT;
     under_last_row.max(TYPING_BOTTOM_GAP)
 }
 
@@ -4617,9 +4664,20 @@ mod tests {
     fn the_typing_bubble_follows_the_last_row_and_sticks_above_the_composer() {
         use gpui_kit::{Bounds, point, px, size};
         let timeline = Bounds::new(point(px(0.), px(100.)), size(px(800.), px(600.)));
-        let row_ending_at = |bottom: f32| Some(Bounds::new(point(px(0.), px(bottom - 50.)), size(px(800.), px(50.))));
-        assert_eq!(typing_bottom_offset(Some(timeline), row_ending_at(400.)), 256.);
-        assert_eq!(typing_bottom_offset(Some(timeline), row_ending_at(900.)), 8.);
+        let row_ending_at = |bottom: f32| {
+            Some(Bounds::new(
+                point(px(0.), px(bottom - 50.)),
+                size(px(800.), px(50.)),
+            ))
+        };
+        assert_eq!(
+            typing_bottom_offset(Some(timeline), row_ending_at(400.)),
+            256.
+        );
+        assert_eq!(
+            typing_bottom_offset(Some(timeline), row_ending_at(900.)),
+            8.
+        );
         assert_eq!(typing_bottom_offset(Some(timeline), None), 8.);
     }
 }

@@ -74,19 +74,37 @@ mod tests {
 
     #[test]
     fn chat_scopes_prefer_outlook() {
-        assert_eq!(Scope::graph("Chat.Read").tab_order(), [App::Outlook, App::Teams]);
-        assert_eq!(Scope::graph("Chat.ReadWrite").tab_order(), [App::Outlook, App::Teams]);
+        assert_eq!(
+            Scope::graph("Chat.Read").tab_order(),
+            [App::Outlook, App::Teams]
+        );
+        assert_eq!(
+            Scope::graph("Chat.ReadWrite").tab_order(),
+            [App::Outlook, App::Teams]
+        );
     }
 
     #[test]
     fn other_scopes_prefer_teams() {
-        assert_eq!(Scope::graph("ChannelMessage.Read.All").tab_order(), [App::Teams, App::Outlook]);
-        assert_eq!(Scope::new(IC3, "Teams.AccessAsUser.All").tab_order(), [App::Teams, App::Outlook]);
-        assert_eq!(Scope::new(PRESENCE, "Chat.Read").tab_order(), [App::Teams, App::Outlook]);
+        assert_eq!(
+            Scope::graph("ChannelMessage.Read.All").tab_order(),
+            [App::Teams, App::Outlook]
+        );
+        assert_eq!(
+            Scope::new(IC3, "Teams.AccessAsUser.All").tab_order(),
+            [App::Teams, App::Outlook]
+        );
+        assert_eq!(
+            Scope::new(PRESENCE, "Chat.Read").tab_order(),
+            [App::Teams, App::Outlook]
+        );
     }
 
     #[test]
     fn displays_resource_and_name() {
-        assert_eq!(Scope::graph("Chat.Read").to_string(), "https://graph.microsoft.com/Chat.Read");
+        assert_eq!(
+            Scope::graph("Chat.Read").to_string(),
+            "https://graph.microsoft.com/Chat.Read"
+        );
     }
 }

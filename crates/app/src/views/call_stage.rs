@@ -228,11 +228,15 @@ pub fn render_stage(
                 cx.stop_propagation();
             })
             .on_mouse_down(MouseButton::Left, move |event, _, cx| {
-                down_app.update(cx, |state, cx| state.begin_share_pan(position(event.position), cx));
+                down_app.update(cx, |state, cx| {
+                    state.begin_share_pan(position(event.position), cx)
+                });
             })
             .on_mouse_move(move |event, _, cx| {
                 if event.pressed_button == Some(MouseButton::Left) {
-                    move_app.update(cx, |state, cx| state.pan_share_to(position(event.position), cx));
+                    move_app.update(cx, |state, cx| {
+                        state.pan_share_to(position(event.position), cx)
+                    });
                 }
             })
             .on_mouse_up(MouseButton::Left, move |_, _, cx| {

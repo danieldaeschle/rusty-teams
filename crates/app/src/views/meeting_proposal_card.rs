@@ -24,7 +24,11 @@ pub fn when_label(start: DateTime<Utc>, end: DateTime<Utc>) -> String {
     } else {
         format!("{} {}", end.format("%a %-d %b,"), end.format(clock))
     };
-    format!("{} {} - {end_text}", start.format("%a %-d %b,"), start.format(clock))
+    format!(
+        "{} {} - {end_text}",
+        start.format("%a %-d %b,"),
+        start.format(clock)
+    )
 }
 
 fn description_excerpt(description: &str) -> Option<String> {
@@ -62,7 +66,10 @@ fn card(proposal: &MeetingProposal, now: DateTime<Utc>) -> Div {
             div()
                 .text_size(px(12.))
                 .text_color(theme::accent_text())
-                .child(format!("{agent} proposes a meeting - {}", age_label(proposal.created_at, now))),
+                .child(format!(
+                    "{agent} proposes a meeting - {}",
+                    age_label(proposal.created_at, now)
+                )),
         )
         .child(
             div()
@@ -92,8 +99,20 @@ fn card(proposal: &MeetingProposal, now: DateTime<Utc>) -> Div {
             h_flex()
                 .pt(px(2.))
                 .gap(px(8.))
-                .child(card_button("meeting-proposal-create", "Create", theme::accent(), theme::on_accent(), create))
-                .child(card_button("meeting-proposal-discard", "Discard", theme::surface_raised(), theme::text(), discard)),
+                .child(card_button(
+                    "meeting-proposal-create",
+                    "Create",
+                    theme::accent(),
+                    theme::on_accent(),
+                    create,
+                ))
+                .child(card_button(
+                    "meeting-proposal-discard",
+                    "Discard",
+                    theme::surface_raised(),
+                    theme::text(),
+                    discard,
+                )),
         )
 }
 
@@ -101,7 +120,11 @@ pub fn meeting_proposal_cards(cx: &App) -> Vec<AnyElement> {
     let now = Utc::now();
     meetings::pending_meetings(cx)
         .iter()
-        .map(|proposal| card(proposal, now).id(SharedString::from(proposal.id.clone())).into_any_element())
+        .map(|proposal| {
+            card(proposal, now)
+                .id(SharedString::from(proposal.id.clone()))
+                .into_any_element()
+        })
         .collect()
 }
 
@@ -112,6 +135,9 @@ mod tests {
     #[test]
     fn long_descriptions_show_three_lines() {
         assert_eq!(description_excerpt("  \n"), None);
-        assert_eq!(description_excerpt("a\n\nb\nc\nd").as_deref(), Some("a\nb\nc ..."));
+        assert_eq!(
+            description_excerpt("a\n\nb\nc\nd").as_deref(),
+            Some("a\nb\nc ...")
+        );
     }
 }

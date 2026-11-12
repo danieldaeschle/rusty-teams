@@ -32,12 +32,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateIconIndirect, DestroyIcon, FLASHW_STOP, FLASHW_TIMERNOFG, FLASHW_TRAY, FLASHWINFO,
     FlashWindowEx, GW_HWNDPREV, GWL_EXSTYLE, GWL_STYLE, GetWindow, GetWindowLongPtrW,
     GetWindowRect, HICON, HWND_NOTOPMOST, HWND_TOPMOST, ICON_BIG, ICON_SMALL, ICONINFO, IsIconic,
-    IsWindowVisible, LWA_ALPHA, SM_CXSMICON, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE, SW_SHOW,
-    SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-    SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW, SetForegroundWindow,
-    SetLayeredWindowAttributes, SetWindowDisplayAffinity, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, SystemParametersInfoW, WDA_EXCLUDEFROMCAPTURE, WM_SETICON, WS_CAPTION,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_THICKFRAME,
+    IsWindowVisible, LWA_ALPHA, SM_CXSMICON, SPI_GETCLIENTAREAANIMATION, SW_HIDE, SW_RESTORE,
+    SW_SHOW, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
+    SWP_NOSIZE, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SendMessageW,
+    SetForegroundWindow, SetLayeredWindowAttributes, SetWindowDisplayAffinity, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, SystemParametersInfoW, WDA_EXCLUDEFROMCAPTURE, WM_SETICON,
+    WS_CAPTION, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+    WS_THICKFRAME,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -571,7 +572,9 @@ pub fn set_window_icon(window: &Window, png: &[u8]) {
 static SOUND_OUTPUT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 pub fn set_sound_output(device_key: Option<String>) {
-    *SOUND_OUTPUT.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = device_key;
+    *SOUND_OUTPUT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = device_key;
 }
 
 fn open_sound_sink() -> Option<rodio::MixerDeviceSink> {

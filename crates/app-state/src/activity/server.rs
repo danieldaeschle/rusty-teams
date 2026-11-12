@@ -10,7 +10,10 @@ const APP_TEMPLATES: [(&str, &str); 4] = [
     ("recapIsReady", "Meeting recap is ready"),
     ("recapIsReadyForFollowedMeetings", "Meeting recap is ready"),
     ("recapIsReadyV2", "Recap ready: {subject}"),
-    ("recapIsReadyForFollowedMeetingsV2", "Recap ready: {subject}"),
+    (
+        "recapIsReadyForFollowedMeetingsV2",
+        "Recap ready: {subject}",
+    ),
 ];
 
 pub fn feed_of(snapshot: &ActivitySnapshot, seen_locally_ms: i64) -> Feed {
@@ -63,7 +66,10 @@ fn entry_of(item: &ActivityItem) -> Entry {
         updated_at: DateTime::from_timestamp_millis(item.timestamp_ms).unwrap_or_else(Utc::now),
         read: false,
         counts_for_bell: false,
-        source_label: item.source_app_name.clone().or_else(|| item.thread_topic.clone()),
+        source_label: item
+            .source_app_name
+            .clone()
+            .or_else(|| item.thread_topic.clone()),
         link: item.tap_url.clone(),
         reply_id: channel_reply(item, kind),
         title: app_title(item),
@@ -97,12 +103,19 @@ fn app_title(item: &ActivityItem) -> Option<String> {
 
 pub fn kind_of(item: &ActivityItem) -> Kind {
     match item.activity_type.as_str() {
-        "mention" | "mentionInChat" | "mentionInCommunity" | "mentionInSubCommunity"
+        "mention"
+        | "mentionInChat"
+        | "mentionInCommunity"
+        | "mentionInSubCommunity"
         | "communityMention" => Kind::Mention,
         "reply" | "replyToReply" | "replyInChat" | "communityReply" | "communityReplyToReply" => {
             Kind::Reply
         }
-        "reaction" | "reactionInChat" | "like" | "likeInChat" | "reactionInCommunity"
+        "reaction"
+        | "reactionInChat"
+        | "like"
+        | "likeInChat"
+        | "reactionInCommunity"
         | "reactionInSubCommunity" => Kind::Reaction,
         "call" if item.activity_subtype == "missedCall" => Kind::MissedCall,
         "call" | "voicemail" | "callOrMeetup" => Kind::Call,
@@ -144,7 +157,13 @@ fn preview_of(item: &ActivityItem) -> String {
         "forwardedMessage" => "Forwarded message",
         "isMeeting" => "Teams Meeting",
         "replyWithQuote" if item.preview.is_empty() => "Replied with quote",
-        _ => return item.preview.split_whitespace().collect::<Vec<_>>().join(" "),
+        _ => {
+            return item
+                .preview
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+        }
     };
     fixed.to_owned()
 }
@@ -178,8 +197,14 @@ mod tests {
 
     #[test]
     fn a_preview_with_line_breaks_becomes_one_line() {
-        let multiline = ActivityItem { preview: "Menu 09.11.-13.11. -\nPlease order\r\n until 9:30".into(), ..item("mention", "person") };
-        assert_eq!(preview_of(&multiline), "Menu 09.11.-13.11. - Please order until 9:30");
+        let multiline = ActivityItem {
+            preview: "Menu 09.11.-13.11. -\nPlease order\r\n until 9:30".into(),
+            ..item("mention", "person")
+        };
+        assert_eq!(
+            preview_of(&multiline),
+            "Menu 09.11.-13.11. - Please order until 9:30"
+        );
     }
 
     #[test]
@@ -191,7 +216,10 @@ mod tests {
         recap.event_start_ms = Some(1793865600000);
         recap.event_end_ms = Some(1793869200000);
         let entry = entry_of(&recap);
-        assert_eq!(entry.title.as_deref(), Some("Recap ready: Following: Sprint {Demo}"));
+        assert_eq!(
+            entry.title.as_deref(),
+            Some("Recap ready: Following: Sprint {Demo}")
+        );
         let (start, end) = entry.event_range.unwrap();
         assert_eq!((end - start).num_minutes(), 60);
         assert_eq!(entry_of(&item("msGraph", "recapIsReadyV2")).title, None);
@@ -213,7 +241,11 @@ mod tests {
             ("unknownType", "", Kind::Other),
         ];
         for (activity_type, subtype, kind) in cases {
-            assert_eq!(kind_of(&item(activity_type, subtype)), kind, "{activity_type}");
+            assert_eq!(
+                kind_of(&item(activity_type, subtype)),
+                kind,
+                "{activity_type}"
+            );
         }
     }
 
@@ -242,7 +274,10 @@ mod tests {
         });
         assert_eq!(recap.conversation_id, "19:meeting_Zm9v@thread.v2");
         assert_eq!(recap.message_id, "");
-        assert_eq!(recap.link.as_deref(), Some("https://teams.microsoft.com/l/entity/x"));
+        assert_eq!(
+            recap.link.as_deref(),
+            Some("https://teams.microsoft.com/l/entity/x")
+        );
     }
 
     #[test]
@@ -305,7 +340,11 @@ mod tests {
             .collect();
         assert_eq!(
             read,
-            [("old", true, false), ("new", false, true), ("flagged", true, false)]
+            [
+                ("old", true, false),
+                ("new", false, true),
+                ("flagged", true, false)
+            ]
         );
         assert_eq!(feed_of(&snapshot, 300).bell_count(), 0);
     }

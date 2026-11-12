@@ -5,7 +5,13 @@ use chrono::{Duration, Utc};
 use serde_json::Value;
 use session::{DEFAULT_ENDPOINT, Session};
 
-const DIAL_IN_HINTS: [&str; 5] = ["tel:", "Conference ID", "Konferenz-ID", "tollNumber", "dialin"];
+const DIAL_IN_HINTS: [&str; 5] = [
+    "tel:",
+    "Conference ID",
+    "Konferenz-ID",
+    "tollNumber",
+    "dialin",
+];
 
 fn key_paths(value: &Value, prefix: &str, paths: &mut BTreeSet<String>) {
     match value {
@@ -61,7 +67,18 @@ async fn main() {
         .iter()
         .find_map(|event| event.get("onlineMeetingTollNumber").and_then(Value::as_str))
         .filter(|value| !value.is_empty())
-        .map(|value| value.chars().map(|character| if character.is_ascii_digit() { '9' } else { character }).collect::<String>());
+        .map(|value| {
+            value
+                .chars()
+                .map(|character| {
+                    if character.is_ascii_digit() {
+                        '9'
+                    } else {
+                        character
+                    }
+                })
+                .collect::<String>()
+        });
     println!("# toll number shape: {shape:?}");
     let online = events.iter().find(|event| {
         event.get("isOnlineMeeting").and_then(Value::as_bool) == Some(true)

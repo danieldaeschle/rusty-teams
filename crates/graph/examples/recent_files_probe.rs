@@ -8,11 +8,20 @@ async fn main() {
     let files = graph.recent_files(40).await.expect("recent files");
     println!("recent {}", files.len());
     for file in files.iter().take(12) {
-        println!("  {} opened {:?} ids {}", file.name, file.last_opened, file.item_id.is_some());
+        println!(
+            "  {} opened {:?} ids {}",
+            file.name,
+            file.last_opened,
+            file.item_id.is_some()
+        );
     }
     if let Some(first) = files.first() {
         match graph.cloud_file_reference(first).await {
-            Ok(uploaded) => println!("reference ok: {} etag {}", uploaded.name, uploaded.reference().is_some()),
+            Ok(uploaded) => println!(
+                "reference ok: {} etag {}",
+                uploaded.name,
+                uploaded.reference().is_some()
+            ),
             Err(error) => println!("reference error: {error}"),
         }
     }

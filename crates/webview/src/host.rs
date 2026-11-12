@@ -139,7 +139,14 @@ fn run(
     });
     SHARED.with(|slot| *slot.borrow_mut() = Some(shared.clone()));
     load(&shared);
-    unsafe { SetTimer(Some(shared.windows[&App::Teams]), SLEEP_TIMER, SLEEP_CHECK_MS, None) };
+    unsafe {
+        SetTimer(
+            Some(shared.windows[&App::Teams]),
+            SLEEP_TIMER,
+            SLEEP_CHECK_MS,
+            None,
+        )
+    };
     let mut message = MSG::default();
     while unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool() {
         unsafe {
@@ -195,7 +202,10 @@ fn load(shared: &Rc<Shared>) {
     }
 }
 
-fn create_views(shared: &Rc<Shared>, first_url: impl Fn(App) -> &'static str) -> std::result::Result<(), String> {
+fn create_views(
+    shared: &Rc<Shared>,
+    first_url: impl Fn(App) -> &'static str,
+) -> std::result::Result<(), String> {
     let environment = create_environment(&shared.config.user_data_folder)?;
     *shared.environment.borrow_mut() = Some(environment.clone());
     for app in App::ALL {
@@ -488,7 +498,10 @@ fn drain(shared: &Rc<Shared>) {
 
 fn call(shared: &Rc<Shared>, app: App, command: TabCommand) {
     shared.sleep.borrow_mut().touch(Instant::now());
-    shared.calls.borrow_mut().note(format!("{app} {}", call_label(&command.method, &command.params)));
+    shared.calls.borrow_mut().note(format!(
+        "{app} {}",
+        call_label(&command.method, &command.params)
+    ));
     wake_views(shared, None);
     let Some(command) = shared.sleep.borrow_mut().admit(app, command) else {
         return;
@@ -527,13 +540,25 @@ fn call(shared: &Rc<Shared>, app: App, command: TabCommand) {
         unsafe { webview.CallDevToolsProtocolMethod(&method, &parameters, &handler) }
         && let Some(command) = pending.borrow_mut().take()
     {
-        let reason = describe_failure(app, &command.method, parameters_bytes, &error.to_string(), "");
+        let reason = describe_failure(
+            app,
+            &command.method,
+            parameters_bytes,
+            &error.to_string(),
+            "",
+        );
         shared.park_gate.borrow_mut().command_finished(app);
         command.respond(Err(Error::Cdp(reason)));
     }
 }
 
-fn describe_failure(app: App, method: &str, parameters_bytes: usize, hresult: &str, json: &str) -> String {
+fn describe_failure(
+    app: App,
+    method: &str,
+    parameters_bytes: usize,
+    hresult: &str,
+    json: &str,
+) -> String {
     let (tab, in_flight) = match shared() {
         Some(shared) => (
             tab_state(app, &current_url(&shared, app)),
@@ -622,13 +647,23 @@ fn restart(shared: &Rc<Shared>) {
 
 /// Both apps parked and unused for a while: the web views close so the browser processes exit.
 fn maybe_sleep(shared: &Rc<Shared>) {
-    let urls: Vec<String> = App::ALL.iter().map(|&app| current_url(shared, app)).collect();
+    let urls: Vec<String> = App::ALL
+        .iter()
+        .map(|&app| current_url(shared, app))
+        .collect();
     let activity = Activity {
         restarting: shared.restarting.get(),
-        all_parked: App::ALL.iter().zip(&urls).all(|(app, url)| app.is_park_url(url)),
+        all_parked: App::ALL
+            .iter()
+            .zip(&urls)
+            .all(|(app, url)| app.is_park_url(url)),
         login_pending: urls.iter().any(|url| is_login_url(url)),
-        held: App::ALL.iter().any(|&app| shared.park_gate.borrow().held(app)),
-        in_flight: App::ALL.iter().any(|&app| shared.park_gate.borrow().in_flight(app) > 0),
+        held: App::ALL
+            .iter()
+            .any(|&app| shared.park_gate.borrow().held(app)),
+        in_flight: App::ALL
+            .iter()
+            .any(|&app| shared.park_gate.borrow().in_flight(app) > 0),
         dialogs_open: !shared.dialogs.borrow().is_empty(),
         subscribed: shared.subscribers.borrow_mut().has_live(),
     };
@@ -637,7 +672,9 @@ fn maybe_sleep(shared: &Rc<Shared>) {
         shared.busy_checks.set(checks % BUSY_REPORT_EVERY);
         if checks == BUSY_REPORT_EVERY && !shared.sleep.borrow().asleep() {
             let summary = shared.calls.borrow_mut().summary();
-            (shared.config.log)(&format!("webview: busy, calls in the last {BUSY_REPORT_EVERY} min: {summary}"));
+            (shared.config.log)(&format!(
+                "webview: busy, calls in the last {BUSY_REPORT_EVERY} min: {summary}"
+            ));
         }
         return;
     }
@@ -653,7 +690,12 @@ fn maybe_sleep(shared: &Rc<Shared>) {
     }
     shared.sleep.borrow_mut().fall_asleep();
     (shared.config.log)("webview: asleep");
-    let views: Vec<View> = shared.views.borrow_mut().drain().map(|(_, view)| view).collect();
+    let views: Vec<View> = shared
+        .views
+        .borrow_mut()
+        .drain()
+        .map(|(_, view)| view)
+        .collect();
     for view in views {
         unsafe {
             let _ = view.controller.Close();
@@ -671,7 +713,13 @@ fn wake_views(shared: &Rc<Shared>, full: Option<App>) {
         Some(app) => format!("webview: awake, {app} reloads"),
         None => "webview: awake".to_owned(),
     });
-    let outcome = create_views(shared, |app| if Some(app) == full { app.start_url() } else { app.park_url() });
+    let outcome = create_views(shared, |app| {
+        if Some(app) == full {
+            app.start_url()
+        } else {
+            app.park_url()
+        }
+    });
     if let Err(reason) = outcome {
         let stranded = shared.sleep.borrow_mut().reset();
         for command in stranded {

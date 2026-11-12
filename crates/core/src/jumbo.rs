@@ -191,7 +191,10 @@ mod tests {
     fn repeated_skin_tones_from_graph_are_dropped() {
         assert_eq!(without_repeated_skin_tone("👍🏼🏼"), "👍🏼");
         assert_eq!(without_repeated_skin_tone("🤷🏽\u{200d}♂️🏽"), "🤷🏽\u{200d}♂️");
-        assert_eq!(without_repeated_skin_tone("🧑🏻\u{200d}🤝\u{200d}🧑🏿"), "🧑🏻\u{200d}🤝\u{200d}🧑🏿");
+        assert_eq!(
+            without_repeated_skin_tone("🧑🏻\u{200d}🤝\u{200d}🧑🏿"),
+            "🧑🏻\u{200d}🤝\u{200d}🧑🏿"
+        );
         assert_eq!(
             jumbo_emoji(r#"<emoji id="yes" alt="👍🏼🏼"></emoji>"#),
             Some(vec![emoticon("yes", "👍🏼")])

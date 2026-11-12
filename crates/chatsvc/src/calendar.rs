@@ -291,7 +291,10 @@ mod tests {
             join_info_text("https://teams.microsoft.com/l/meetup-join/x", Some(&parsed)),
             "Microsoft Teams meeting\nJoin: https://teams.microsoft.com/l/meetup-join/x\n\nDial in by phone\n+49 30 123456,,987654321#\nPhone conference ID: 987654321#"
         );
-        assert_eq!(dial_in(&serde_json::json!({"onlineMeetingTollNumber": ""})), None);
+        assert_eq!(
+            dial_in(&serde_json::json!({"onlineMeetingTollNumber": ""})),
+            None
+        );
         assert_eq!(
             join_info_text("https://x", None),
             "Microsoft Teams meeting\nJoin: https://x"
@@ -415,7 +418,12 @@ mod tests {
             .collect();
         assert_eq!(
             statuses,
-            [ShowAs::Free, ShowAs::Tentative, ShowAs::OutOfOffice, ShowAs::Busy]
+            [
+                ShowAs::Free,
+                ShowAs::Tentative,
+                ShowAs::OutOfOffice,
+                ShowAs::Busy
+            ]
         );
     }
 

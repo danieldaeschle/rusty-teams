@@ -208,8 +208,13 @@ impl CallRecorder {
     pub fn document(&self) -> Document {
         let report = self.report();
         Document {
-            stem: format!("{}-{}", self.started_at.format(FILE_STAMP), kind_slug(self.kind)),
-            json: serde_json::to_string_pretty(&report).unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}")),
+            stem: format!(
+                "{}-{}",
+                self.started_at.format(FILE_STAMP),
+                kind_slug(self.kind)
+            ),
+            json: serde_json::to_string_pretty(&report)
+                .unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}")),
             markdown: markdown::render(&report),
         }
     }
@@ -239,13 +244,30 @@ impl CallRecorder {
         let notices = self
             .notices
             .iter()
-            .map(|(at_ms, text)| NoticeInfo { at_ms: *at_ms, text: scrubber.scrub(text) })
+            .map(|(at_ms, text)| NoticeInfo {
+                at_ms: *at_ms,
+                text: scrubber.scrub(text),
+            })
             .collect();
         let total_ms = self.ended.as_ref().map(|(at_ms, _)| *at_ms);
-        let end_reason = self.ended.as_ref().map_or_else(|| "still running when saved".to_owned(), |(_, reason)| scrubber.scrub(&end_text(reason)));
-        let escalations = timeline.iter().filter(|entry| entry.label == ESCALATION_LABEL && entry.detail.contains("new offer sent")).count();
-        let escalation_failures = timeline.iter().filter(|entry| entry.label == "escalation failed").count();
-        let path = self.paths.last().map_or("unknown", |(_, path)| path_name(*path));
+        let end_reason = self.ended.as_ref().map_or_else(
+            || "still running when saved".to_owned(),
+            |(_, reason)| scrubber.scrub(&end_text(reason)),
+        );
+        let escalations = timeline
+            .iter()
+            .filter(|entry| {
+                entry.label == ESCALATION_LABEL && entry.detail.contains("new offer sent")
+            })
+            .count();
+        let escalation_failures = timeline
+            .iter()
+            .filter(|entry| entry.label == "escalation failed")
+            .count();
+        let path = self
+            .paths
+            .last()
+            .map_or("unknown", |(_, path)| path_name(*path));
         let stats = self.stats_info();
         let sdp = diagnostics
             .sdp
@@ -279,21 +301,38 @@ impl CallRecorder {
             },
             call: CallInfo {
                 kind: kind_label(self.kind),
-                direction: if self.incoming { "incoming" } else { "outgoing" },
+                direction: if self.incoming {
+                    "incoming"
+                } else {
+                    "outgoing"
+                },
                 started_utc: self.started_at.format(READABLE_STAMP).to_string(),
                 connect_ms: self.connected_ms,
                 total_ms,
-                connected_ms: self.connected_ms.zip(total_ms).map(|(connected, total)| total.saturating_sub(connected)),
+                connected_ms: self
+                    .connected_ms
+                    .zip(total_ms)
+                    .map(|(connected, total)| total.saturating_sub(connected)),
                 end_reason,
                 engine_ice_connected_ms: diagnostics.ice_connected_ms,
                 engine_peer_connected_ms: diagnostics.peer_connected_ms,
             },
             media: MediaInfo {
                 path,
-                path_changes: self.paths.iter().map(|(at_ms, path)| PathChange { at_ms: *at_ms, path: path_name(*path) }).collect(),
+                path_changes: self
+                    .paths
+                    .iter()
+                    .map(|(at_ms, path)| PathChange {
+                        at_ms: *at_ms,
+                        path: path_name(*path),
+                    })
+                    .collect(),
                 escalations,
                 escalation_failures,
-                selected_pair: diagnostics.selected_pair.as_deref().map(|pair| scrubber.scrub(pair)),
+                selected_pair: diagnostics
+                    .selected_pair
+                    .as_deref()
+                    .map(|pair| scrubber.scrub(pair)),
                 tls_version: diagnostics.tls_version.clone(),
                 dtls_cipher: diagnostics.dtls_cipher.clone(),
                 srtp_cipher: diagnostics.srtp_cipher.clone(),
@@ -307,11 +346,21 @@ impl CallRecorder {
             stats,
             features,
             notices,
-            states: self.states.iter().map(|(at_ms, state)| StateInfo { at_ms: *at_ms, state: state.clone() }).collect(),
+            states: self
+                .states
+                .iter()
+                .map(|(at_ms, state)| StateInfo {
+                    at_ms: *at_ms,
+                    state: state.clone(),
+                })
+                .collect(),
             sdp,
             timeline,
         };
-        let abnormal = matches!(self.ended, Some((_, EndReason::Failed(_) | EndReason::Dropped)));
+        let abnormal = matches!(
+            self.ended,
+            Some((_, EndReason::Failed(_) | EndReason::Dropped))
+        );
         report.problems = problems(&report, abnormal);
         report
     }
@@ -321,27 +370,66 @@ impl CallRecorder {
         let metrics: BTreeMap<&'static str, Range> = series
             .values()
             .iter()
-            .map(|(name, value)| (*name, Range { min: value.min, max: value.max, last: value.last }))
+            .map(|(name, value)| {
+                (
+                    *name,
+                    Range {
+                        min: value.min,
+                        max: value.max,
+                        last: value.last,
+                    },
+                )
+            })
             .collect();
-        let samples = series.values().get("audio_in_packets").map_or(0, |value| value.samples);
-        let health_names = [calling::NetworkLevel::Good, calling::NetworkLevel::Poor, calling::NetworkLevel::Bad];
-        let limitation_names = [calling::Limitation::None, calling::Limitation::Cpu, calling::Limitation::Bandwidth];
+        let samples = series
+            .values()
+            .get("audio_in_packets")
+            .map_or(0, |value| value.samples);
+        let health_names = [
+            calling::NetworkLevel::Good,
+            calling::NetworkLevel::Poor,
+            calling::NetworkLevel::Bad,
+        ];
+        let limitation_names = [
+            calling::Limitation::None,
+            calling::Limitation::Cpu,
+            calling::Limitation::Bandwidth,
+        ];
         StatsInfo {
             samples,
             metrics,
             audio_in_stalled_samples: series.stalled_audio_in,
             audio_out_stalled_samples: series.stalled_audio_out,
-            health_samples: health_names.iter().map(|level| (level_name(*level), series.level_samples[*level as usize])).collect(),
-            health_level_changes: series.level_changes.iter().map(|(at_ms, level)| PathChange { at_ms: *at_ms, path: level }).collect(),
+            health_samples: health_names
+                .iter()
+                .map(|level| (level_name(*level), series.level_samples[*level as usize]))
+                .collect(),
+            health_level_changes: series
+                .level_changes
+                .iter()
+                .map(|(at_ms, level)| PathChange {
+                    at_ms: *at_ms,
+                    path: level,
+                })
+                .collect(),
             quality_limitation_samples: limitation_names
                 .iter()
-                .map(|limitation| (limitation_name(*limitation), series.limitation_samples[*limitation as usize]))
+                .map(|limitation| {
+                    (
+                        limitation_name(*limitation),
+                        series.limitation_samples[*limitation as usize],
+                    )
+                })
                 .collect(),
             cpu_limited_samples: series.cpu_limited_samples,
         }
     }
 
-    fn feature_infos(&self, scrubber: &mut Scrubber, timeline: &[calling::timeline::TimelineEntry]) -> Vec<FeatureInfo> {
+    fn feature_infos(
+        &self,
+        scrubber: &mut Scrubber,
+        timeline: &[calling::timeline::TimelineEntry],
+    ) -> Vec<FeatureInfo> {
         let mut records: Vec<FeatureRecord> = self.features.clone();
         for entry in timeline {
             if entry.label == TRANSFER_LABEL
@@ -349,7 +437,10 @@ impl CallRecorder {
             {
                 record.outcome = Outcome::Confirmed(entry.elapsed_ms);
             }
-            let Some((_, feature)) = FEATURE_FAILURE_LABELS.iter().find(|(label, _)| entry.label == *label) else {
+            let Some((_, feature)) = FEATURE_FAILURE_LABELS
+                .iter()
+                .find(|(label, _)| entry.label == *label)
+            else {
                 continue;
             };
             if let Some(record) = oldest_pending(&mut records, feature) {
@@ -377,8 +468,13 @@ impl CallRecorder {
     }
 }
 
-fn oldest_pending<'a>(records: &'a mut [FeatureRecord], feature: &str) -> Option<&'a mut FeatureRecord> {
-    records.iter_mut().find(|record| record.feature == feature && record.outcome == Outcome::Requested)
+fn oldest_pending<'a>(
+    records: &'a mut [FeatureRecord],
+    feature: &str,
+) -> Option<&'a mut FeatureRecord> {
+    records
+        .iter_mut()
+        .find(|record| record.feature == feature && record.outcome == Outcome::Requested)
 }
 
 fn placeholders(scrubber: &mut Scrubber, people: &[(String, String)]) -> Vec<String> {
@@ -401,33 +497,73 @@ fn problems(report: &Report, abnormal_end: bool) -> Vec<String> {
     }
     let metrics = &report.stats.metrics;
     let samples = report.stats.samples;
-    if samples > 0 && metrics.get("audio_in_packets").is_some_and(|range| range.max == 0.) {
+    if samples > 0
+        && metrics
+            .get("audio_in_packets")
+            .is_some_and(|range| range.max == 0.)
+    {
         found.push("No inbound audio packets arrived.".to_owned());
     }
-    if samples > 0 && metrics.get("audio_out_packets").is_some_and(|range| range.max == 0.) {
+    if samples > 0
+        && metrics
+            .get("audio_out_packets")
+            .is_some_and(|range| range.max == 0.)
+    {
         found.push("No outbound audio packets were sent.".to_owned());
     }
     if samples >= MIN_SAMPLES_FOR_STALLS && report.stats.audio_in_stalled_samples > 0 {
-        found.push(format!("Inbound audio stalled in {} of {samples} samples.", report.stats.audio_in_stalled_samples));
+        found.push(format!(
+            "Inbound audio stalled in {} of {samples} samples.",
+            report.stats.audio_in_stalled_samples
+        ));
     }
     if samples >= MIN_SAMPLES_FOR_STALLS && report.stats.audio_out_stalled_samples > 0 {
-        found.push(format!("Outbound audio stalled in {} of {samples} samples.", report.stats.audio_out_stalled_samples));
+        found.push(format!(
+            "Outbound audio stalled in {} of {samples} samples.",
+            report.stats.audio_out_stalled_samples
+        ));
     }
-    let degraded: u32 = ["poor", "bad"].iter().filter_map(|name| report.stats.health_samples.get(*name)).sum();
+    let degraded: u32 = ["poor", "bad"]
+        .iter()
+        .filter_map(|name| report.stats.health_samples.get(*name))
+        .sum();
     if degraded > 0 {
-        found.push(format!("Network health was poor or bad in {degraded} samples."));
+        found.push(format!(
+            "Network health was poor or bad in {degraded} samples."
+        ));
     }
     if report.media.escalation_failures > 0 {
-        found.push(format!("{} escalation(s) failed.", report.media.escalation_failures));
+        found.push(format!(
+            "{} escalation(s) failed.",
+            report.media.escalation_failures
+        ));
     }
-    let failures: Vec<&TimelineInfo> =
-        report.timeline.iter().filter(|entry| FAILURE_WORDS.iter().any(|word| entry.label.contains(word))).collect();
+    let failures: Vec<&TimelineInfo> = report
+        .timeline
+        .iter()
+        .filter(|entry| FAILURE_WORDS.iter().any(|word| entry.label.contains(word)))
+        .collect();
     if !failures.is_empty() {
-        let labels: Vec<&str> = failures.iter().take(5).map(|entry| entry.label.as_str()).collect();
-        found.push(format!("{} failure entries in the timeline: {}.", failures.len(), labels.join(", ")));
+        let labels: Vec<&str> = failures
+            .iter()
+            .take(5)
+            .map(|entry| entry.label.as_str())
+            .collect();
+        found.push(format!(
+            "{} failure entries in the timeline: {}.",
+            failures.len(),
+            labels.join(", ")
+        ));
     }
-    for feature in report.features.iter().filter(|feature| feature.result == "failed") {
-        found.push(format!("Feature {} ({}) failed at {} ms.", feature.feature, feature.detail, feature.at_ms));
+    for feature in report
+        .features
+        .iter()
+        .filter(|feature| feature.result == "failed")
+    {
+        found.push(format!(
+            "Feature {} ({}) failed at {} ms.",
+            feature.feature, feature.detail, feature.at_ms
+        ));
     }
     found
 }

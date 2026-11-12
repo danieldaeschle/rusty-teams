@@ -73,7 +73,10 @@ pub struct ReminderUpdate {
 }
 
 pub fn subtitle(toast: &MeetingToast, now: DateTime<Utc>, offset: FixedOffset) -> String {
-    let clock = toast.start.with_timezone(&offset).format(app_base::format::clock_format());
+    let clock = toast
+        .start
+        .with_timezone(&offset)
+        .format(app_base::format::clock_format());
     match toast.phase {
         ReminderPhase::Started => format!("{clock} - started"),
         ReminderPhase::Live => format!("{clock} - live now"),
@@ -132,14 +135,15 @@ impl MeetingToasts {
 
     pub fn dismiss_for_good(&mut self, id: u64) -> Option<MeetingToast> {
         let toast = self.dismiss(id)?;
-        self.dismissed.insert(toast.event_key.clone(), ReminderPhase::Live);
+        self.dismissed
+            .insert(toast.event_key.clone(), ReminderPhase::Live);
         Some(toast)
     }
 
     fn blocked(&self, key: &str, phase: ReminderPhase) -> bool {
-        self.dismissed
-            .get(key)
-            .is_some_and(|dismissed_at| *dismissed_at == ReminderPhase::Live || phase != ReminderPhase::Live)
+        self.dismissed.get(key).is_some_and(|dismissed_at| {
+            *dismissed_at == ReminderPhase::Live || phase != ReminderPhase::Live
+        })
     }
 
     pub fn snooze(&mut self, id: u64) -> Option<MeetingToast> {
@@ -170,7 +174,8 @@ impl MeetingToasts {
         let candidates: Vec<String> = events
             .iter()
             .filter(|event| {
-                phase_at(event, now, false).is_some() && !self.blocked(&event_key(event), ReminderPhase::Live)
+                phase_at(event, now, false).is_some()
+                    && !self.blocked(&event_key(event), ReminderPhase::Live)
             })
             .filter_map(|event| event.thread_id.clone())
             .collect();

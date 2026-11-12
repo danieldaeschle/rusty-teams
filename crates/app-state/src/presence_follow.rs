@@ -118,7 +118,12 @@ impl AppState {
         }
     }
 
-    pub(crate) fn note_followed_change(&mut self, user_id: &str, previous: Presence, next: PresenceKind) {
+    pub(crate) fn note_followed_change(
+        &mut self,
+        user_id: &str,
+        previous: Presence,
+        next: PresenceKind,
+    ) {
         if !self.is_presence_followed(user_id) {
             return;
         }
@@ -142,8 +147,14 @@ mod tests {
     #[test]
     fn only_a_change_to_available_or_offline_is_announced() {
         let busy = Presence::Live(PresenceKind::Busy);
-        assert_eq!(status_change_text(busy, PresenceKind::Available), Some(NOW_AVAILABLE));
-        assert_eq!(status_change_text(busy, PresenceKind::Offline), Some(NOW_OFFLINE));
+        assert_eq!(
+            status_change_text(busy, PresenceKind::Available),
+            Some(NOW_AVAILABLE)
+        );
+        assert_eq!(
+            status_change_text(busy, PresenceKind::Offline),
+            Some(NOW_OFFLINE)
+        );
         assert_eq!(status_change_text(busy, PresenceKind::Away), None);
         assert_eq!(status_change_text(busy, PresenceKind::OutOfOffice), None);
         let available = Presence::Live(PresenceKind::Available);
@@ -152,13 +163,22 @@ mod tests {
 
     #[test]
     fn the_first_known_status_is_not_announced() {
-        assert_eq!(status_change_text(Presence::Loading, PresenceKind::Available), None);
         assert_eq!(
-            status_change_text(Presence::Cached(PresenceKind::Busy), PresenceKind::Available),
+            status_change_text(Presence::Loading, PresenceKind::Available),
             None
         );
         assert_eq!(
-            status_change_text(Presence::Live(PresenceKind::Unknown), PresenceKind::Available),
+            status_change_text(
+                Presence::Cached(PresenceKind::Busy),
+                PresenceKind::Available
+            ),
+            None
+        );
+        assert_eq!(
+            status_change_text(
+                Presence::Live(PresenceKind::Unknown),
+                PresenceKind::Available
+            ),
             None
         );
     }

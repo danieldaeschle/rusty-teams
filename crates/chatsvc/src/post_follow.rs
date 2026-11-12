@@ -277,7 +277,13 @@ mod tests {
     #[tokio::test]
     async fn no_numeric_roots_sends_nothing() {
         let messages = canned(200, json!({}));
-        assert!(messages.post_follow_states("19:c", &[]).await.unwrap().is_empty());
+        assert!(
+            messages
+                .post_follow_states("19:c", &[])
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert!(messages.transport.requests.lock().unwrap().is_empty());
     }
 }

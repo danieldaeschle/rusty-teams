@@ -299,7 +299,12 @@ impl ConversationView {
         }
     }
 
-    pub(super) fn run_shared(&mut self, command: SharedCommand, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn run_shared(
+        &mut self,
+        command: SharedCommand,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let conversation_id = self.conversation_id().unwrap_or_default();
         match command {
             SharedCommand::Scope(scope) => {

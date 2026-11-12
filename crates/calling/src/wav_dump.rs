@@ -17,7 +17,10 @@ impl WavDump {
     pub fn create(path: &Path) -> std::io::Result<WavDump> {
         let mut writer = BufWriter::new(File::create(path)?);
         writer.write_all(&header(0))?;
-        Ok(WavDump { writer, data_bytes: 0 })
+        Ok(WavDump {
+            writer,
+            data_bytes: 0,
+        })
     }
 
     pub fn write(&mut self, samples: &[i16]) {
@@ -66,7 +69,13 @@ pub struct StageDumps {
 }
 
 impl StageDumps {
-    pub const STAGES: [&str; 5] = ["0-far-end", "1-raw", "2-echo-highpass", "3-gain", "4-noise-gain"];
+    pub const STAGES: [&str; 5] = [
+        "0-far-end",
+        "1-raw",
+        "2-echo-highpass",
+        "3-gain",
+        "4-noise-gain",
+    ];
 
     pub fn from_env() -> Option<StageDumps> {
         let directory = PathBuf::from(std::env::var_os(AUDIO_DUMP_ENV)?);
@@ -104,7 +113,10 @@ mod tests {
         }
         let bytes = std::fs::read(&path).unwrap();
         assert_eq!(&bytes[0..4], b"RIFF");
-        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), SAMPLE_RATE);
+        assert_eq!(
+            u32::from_le_bytes(bytes[24..28].try_into().unwrap()),
+            SAMPLE_RATE
+        );
         assert_eq!(u32::from_le_bytes(bytes[40..44].try_into().unwrap()), 6);
         assert_eq!(&bytes[44..], &[1, 0, 254, 255, 3, 0]);
     }
@@ -115,8 +127,10 @@ mod tests {
         let mut dumps = StageDumps::create(directory.path()).unwrap();
         dumps.write(4, &[5]);
         drop(dumps);
-        let names: Vec<String> =
-            std::fs::read_dir(directory.path()).unwrap().map(|entry| entry.unwrap().file_name().into_string().unwrap()).collect();
+        let names: Vec<String> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
         assert_eq!(names.len(), StageDumps::STAGES.len());
         assert!(names.iter().any(|name| name.ends_with("4-noise-gain.wav")));
     }

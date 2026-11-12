@@ -13,8 +13,19 @@ async fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let endpoint = std::env::var("CDP_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned());
     let session = Session::connect(&endpoint).await.expect("browser");
-    if let ["lib-create", team_thread_id, group_id, name, privacy, object_id, tenant_id] =
-        arguments.iter().map(String::as_str).collect::<Vec<_>>().as_slice()
+    if let [
+        "lib-create",
+        team_thread_id,
+        group_id,
+        name,
+        privacy,
+        object_id,
+        tenant_id,
+    ] = arguments
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
     {
         let channel = chatsvc::NewChannel {
             team_thread_id,
@@ -27,7 +38,10 @@ async fn main() {
                 chatsvc::ChannelPrivacy::Standard
             },
         };
-        let mailbox = chatsvc::Mailbox { object_id, tenant_id };
+        let mailbox = chatsvc::Mailbox {
+            object_id,
+            tenant_id,
+        };
         let outcome = chatsvc::TeamAdmin::new(&session)
             .create_channel(&channel, mailbox)
             .await;
@@ -35,8 +49,16 @@ async fn main() {
         return;
     }
     let channel_arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
-    if let [action @ ("lib-edit" | "lib-delete"), team_thread_id, group_id, channel_id, substrate, name, object_id, tenant_id] =
-        channel_arguments.as_slice()
+    if let [
+        action @ ("lib-edit" | "lib-delete"),
+        team_thread_id,
+        group_id,
+        channel_id,
+        substrate,
+        name,
+        object_id,
+        tenant_id,
+    ] = channel_arguments.as_slice()
     {
         let channel = chatsvc::ExistingChannel {
             team_thread_id,
@@ -44,10 +66,16 @@ async fn main() {
             channel_id,
             substrate_group_id: (*substrate != "-").then_some(*substrate),
         };
-        let mailbox = chatsvc::Mailbox { object_id, tenant_id };
+        let mailbox = chatsvc::Mailbox {
+            object_id,
+            tenant_id,
+        };
         let admin = chatsvc::TeamAdmin::new(&session);
         let outcome = if *action == "lib-edit" {
-            let edit = chatsvc::ChannelEdit { name, description: None };
+            let edit = chatsvc::ChannelEdit {
+                name,
+                description: None,
+            };
             admin.update_channel(channel, edit, mailbox).await
         } else {
             admin.delete_channel(channel, mailbox).await
@@ -55,16 +83,29 @@ async fn main() {
         println!("{outcome:?}");
         return;
     }
-    let (method, path, body) = match arguments.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+    let (method, path, body) = match arguments
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
         ["create-team", name] => (
             Method::Post,
             "teams/create".to_owned(),
             Some(json!({"displayName": name, "description": "", "accessType": "Private"})),
         ),
-        ["create-channel", team_thread_id, group_id, name, channel_type] => (
+        [
+            "create-channel",
+            team_thread_id,
+            group_id,
+            name,
+            channel_type,
+        ] => (
             Method::Post,
             format!("teams/{team_thread_id}/channels"),
-            Some(json!({"displayName": name, "description": "", "groupId": group_id, "channelType": channel_type})),
+            Some(
+                json!({"displayName": name, "description": "", "groupId": group_id, "channelType": channel_type}),
+            ),
         ),
         ["delete-channel", team_thread_id, channel_id] => (
             Method::Delete,
@@ -78,7 +119,9 @@ async fn main() {
         ["create-private", group_id, team_thread_id, name] => (
             Method::Post,
             format!("provisioning:teams/{group_id}/channels?forceSync=false"),
-            Some(json!({"spaceThreadId": team_thread_id, "displayName": name, "description": "", "channelType": "Private", "sharedWithParentTeam": false})),
+            Some(
+                json!({"spaceThreadId": team_thread_id, "displayName": name, "description": "", "channelType": "Private", "sharedWithParentTeam": false}),
+            ),
         ),
         ["send", method, path, body] => (
             match *method {
@@ -91,20 +134,37 @@ async fn main() {
             Some(serde_json::from_str(body).expect("json body")),
         ),
         ["provisioning-get", path] => (Method::Get, format!("provisioning:{path}"), None),
-        _ => panic!("usage: create-team NAME | create-channel TEAM_THREAD GROUP NAME | delete-channel TEAM_THREAD CHANNEL | delete-team GROUP | get PATH"),
+        _ => panic!(
+            "usage: create-team NAME | create-channel TEAM_THREAD GROUP NAME | delete-channel TEAM_THREAD CHANNEL | delete-team GROUP | get PATH"
+        ),
     };
     let (url, scope) = if let Some(path) = path.strip_prefix("csa:") {
-        (format!("{CSA}/{path}"), Scope::new(CSA_RESOURCE, "user_impersonation"))
+        (
+            format!("{CSA}/{path}"),
+            Scope::new(CSA_RESOURCE, "user_impersonation"),
+        )
     } else if let Some(path) = path.strip_prefix("graph:") {
-        (format!("{GRAPH}/v1.0/{path}"), Scope::new(GRAPH, ".default"))
+        (
+            format!("{GRAPH}/v1.0/{path}"),
+            Scope::new(GRAPH, ".default"),
+        )
     } else if let Some(path) = path.strip_prefix("provisioning:") {
-        (format!("{PROVISIONING}/{path}"), Scope::new(PROVISIONING_RESOURCE, ".default"))
+        (
+            format!("{PROVISIONING}/{path}"),
+            Scope::new(PROVISIONING_RESOURCE, ".default"),
+        )
     } else {
-        (format!("{MIDDLE_TIER}/{path}"), Scope::new(SPACES, "user_impersonation"))
+        (
+            format!("{MIDDLE_TIER}/{path}"),
+            Scope::new(SPACES, "user_impersonation"),
+        )
     };
     let mut request = match body {
         Some(body) => Request::with_body(method, url, body),
-        None => Request { method, ..Request::get(url) },
+        None => Request {
+            method,
+            ..Request::get(url)
+        },
     };
     request.headers = vec![
         ("x-ms-client-type".to_owned(), "TeamsV2Web".to_owned()),
@@ -113,10 +173,7 @@ async fn main() {
     if let Ok(anchor) = std::env::var("ANCHOR_MAILBOX") {
         request.headers.push(("X-AnchorMailbox".to_owned(), anchor));
     }
-    let answers = session
-        .batch(&[request], &scope)
-        .await
-        .expect("request");
+    let answers = session.batch(&[request], &scope).await.expect("request");
     let answer = &answers[0];
     println!("HTTP {}", answer.status);
     let body: &Value = &answer.body;

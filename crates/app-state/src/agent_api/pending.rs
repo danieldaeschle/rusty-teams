@@ -95,18 +95,21 @@ pub fn collect(
             created_at: entry.proposal.created_at,
             seen: seen.contains(&entry.proposal.id),
         });
-    let reacts = reactions.values().filter(|reaction| !reaction.direct).map(|reaction| PendingProposal {
-        id: reaction.id.clone(),
-        conversation_id: reaction.conversation_id.clone(),
-        agent: agent_label(reaction.agent.as_deref()),
-        kind: PendingKind::Reaction {
-            glyph: reaction_glyph(&reaction.emoji),
-            message_id: reaction.message_id.clone(),
-            excerpt: excerpts.get(&reaction.id).cloned(),
-        },
-        created_at: reaction.created_at,
-        seen: seen.contains(&reaction.id),
-    });
+    let reacts = reactions
+        .values()
+        .filter(|reaction| !reaction.direct)
+        .map(|reaction| PendingProposal {
+            id: reaction.id.clone(),
+            conversation_id: reaction.conversation_id.clone(),
+            agent: agent_label(reaction.agent.as_deref()),
+            kind: PendingKind::Reaction {
+                glyph: reaction_glyph(&reaction.emoji),
+                message_id: reaction.message_id.clone(),
+                excerpt: excerpts.get(&reaction.id).cloned(),
+            },
+            created_at: reaction.created_at,
+            seen: seen.contains(&reaction.id),
+        });
     let mut pending: Vec<PendingProposal> = replies.chain(reacts).collect();
     pending.sort_by(|left, right| {
         right

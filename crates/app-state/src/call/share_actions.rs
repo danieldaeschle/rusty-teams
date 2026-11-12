@@ -16,8 +16,16 @@ fn flag_text(on: bool) -> &'static str {
 }
 
 impl AppState {
-    fn change_share_stage(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut super::share_view::ShareStage)) {
-        let Some(call) = self.call.as_mut().filter(|call| call.model.screen_sharer.is_some()) else {
+    fn change_share_stage(
+        &mut self,
+        cx: &mut Context<Self>,
+        change: impl FnOnce(&mut super::share_view::ShareStage),
+    ) {
+        let Some(call) = self
+            .call
+            .as_mut()
+            .filter(|call| call.model.screen_sharer.is_some())
+        else {
             return;
         };
         change(&mut call.share_stage);
@@ -25,7 +33,12 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn zoom_share_wheel(&mut self, scroll_pixels: f32, position: (f32, f32), cx: &mut Context<Self>) {
+    pub fn zoom_share_wheel(
+        &mut self,
+        scroll_pixels: f32,
+        position: (f32, f32),
+        cx: &mut Context<Self>,
+    ) {
         self.change_share_stage(cx, |stage| {
             let (pointer, size) = (stage.pointer(position), stage.size());
             stage.view.zoom_wheel(scroll_pixels, pointer, size);
@@ -53,7 +66,9 @@ impl AppState {
                 return;
             };
             let size = stage.size();
-            stage.view.pan_by((position.0 - from.0, position.1 - from.1), size);
+            stage
+                .view
+                .pan_by((position.0 - from.0, position.1 - from.1), size);
         });
     }
 

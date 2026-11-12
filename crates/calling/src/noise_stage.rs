@@ -17,7 +17,9 @@ static PROTOTYPE: Mutex<Option<DfTract>> = Mutex::new(None);
 static PREPARE: Once = Once::new();
 
 fn load_model() -> Option<DfTract> {
-    let mut model = DfTract::new(DfParams::default(), &runtime_params(ATTENUATION_LIMIT_DB)).ok().filter(|model| model.hop_size == FRAME_SAMPLES)?;
+    let mut model = DfTract::new(DfParams::default(), &runtime_params(ATTENUATION_LIMIT_DB))
+        .ok()
+        .filter(|model| model.hop_size == FRAME_SAMPLES)?;
     warm_up(&mut model);
     Some(model)
 }
@@ -27,9 +29,10 @@ fn warm_up(model: &mut DfTract) {
     let mut enhanced = vec![0.0; FRAME_SAMPLES];
     for frame_index in 0..WARM_UP_FRAMES {
         let noisy = vowel_frame(frame_index);
-        let (Ok(noisy), Ok(enhanced)) =
-            (ArrayView2::from_shape((1, FRAME_SAMPLES), &noisy), ArrayViewMut2::from_shape((1, FRAME_SAMPLES), &mut enhanced))
-        else {
+        let (Ok(noisy), Ok(enhanced)) = (
+            ArrayView2::from_shape((1, FRAME_SAMPLES), &noisy),
+            ArrayViewMut2::from_shape((1, FRAME_SAMPLES), &mut enhanced),
+        ) else {
             return;
         };
         let _ = model.process(noisy, enhanced);
@@ -68,19 +71,30 @@ fn runtime_params(attenuation_limit_db: f32) -> RuntimeParams {
 /// Builds the DeepFilterNet3 model off the audio thread; frames pass through unchanged until it is ready.
 pub fn prepare() {
     PREPARE.call_once(|| {
-        let _ = std::thread::Builder::new().name("deep-filter-load".into()).spawn(|| {
-            let model = load_model();
-            *PROTOTYPE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = model;
-        });
+        let _ = std::thread::Builder::new()
+            .name("deep-filter-load".into())
+            .spawn(|| {
+                let model = load_model();
+                *PROTOTYPE
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = model;
+            });
     });
 }
 
 pub fn is_ready() -> bool {
-    PROTOTYPE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_some()
+    PROTOTYPE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .is_some()
 }
 
 fn ready_model() -> Option<DfTract> {
-    PROTOTYPE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().map(DfTract::fork)
+    PROTOTYPE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+        .map(DfTract::fork)
 }
 
 pub struct NoiseStage {
@@ -92,7 +106,12 @@ pub struct NoiseStage {
 
 impl NoiseStage {
     pub const fn new() -> Self {
-        NoiseStage { channels: Vec::new(), input: Vec::new(), output: Vec::new(), pcm: Vec::new() }
+        NoiseStage {
+            channels: Vec::new(),
+            input: Vec::new(),
+            output: Vec::new(),
+            pcm: Vec::new(),
+        }
     }
 
     pub fn process(&mut self, channel_index: usize, samples: &mut [f32]) {
@@ -110,7 +129,8 @@ impl NoiseStage {
             return;
         };
         self.input.clear();
-        self.input.extend(samples.iter().map(|sample| sample / PCM_SCALE));
+        self.input
+            .extend(samples.iter().map(|sample| sample / PCM_SCALE));
         self.output.resize(FRAME_SAMPLES, 0.0);
         let (Ok(noisy), Ok(enhanced)) = (
             ArrayView2::from_shape((1, FRAME_SAMPLES), &self.input),
@@ -172,7 +192,10 @@ mod tests {
 
     fn stage_with_model() -> NoiseStage {
         let model = load_model().expect("DeepFilterNet3 loads with a 10 ms hop at 48 kHz");
-        NoiseStage { channels: vec![Some(model)], ..NoiseStage::new() }
+        NoiseStage {
+            channels: vec![Some(model)],
+            ..NoiseStage::new()
+        }
     }
 
     #[test]
@@ -195,7 +218,10 @@ mod tests {
     #[test]
     fn the_attenuation_limit_caps_what_the_model_removes() {
         let model = DfTract::new(DfParams::default(), &runtime_params(6.0)).unwrap();
-        let mut stage = NoiseStage { channels: vec![Some(model)], ..NoiseStage::new() };
+        let mut stage = NoiseStage {
+            channels: vec![Some(model)],
+            ..NoiseStage::new()
+        };
         let mut state = 0x1234_5678_u32;
         let (mut before, mut after) = (0.0, 0.0);
         for frame_index in 0..200 {
@@ -208,7 +234,10 @@ mod tests {
             }
         }
         let ratio_db = 10.0 * (after / before).log10();
-        assert!((-7.5..=-4.5).contains(&ratio_db), "noise reduced by {ratio_db:.1} dB");
+        assert!(
+            (-7.5..=-4.5).contains(&ratio_db),
+            "noise reduced by {ratio_db:.1} dB"
+        );
     }
 
     #[test]

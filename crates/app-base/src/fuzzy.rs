@@ -49,7 +49,11 @@ fn score_plain(query: &[char], candidate: &[char], prefer_word_starts: bool) -> 
 /// Without a query the items keep their order, so callers decide what comes first.
 pub fn rank<T: Clone>(query: &str, items: &[(String, T)], limit: usize) -> Vec<T> {
     if query.trim().is_empty() {
-        return items.iter().take(limit).map(|(_, item)| item.clone()).collect();
+        return items
+            .iter()
+            .take(limit)
+            .map(|(_, item)| item.clone())
+            .collect();
     }
     let mut scored: Vec<(i64, usize, usize)> = items
         .iter()

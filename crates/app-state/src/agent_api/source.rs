@@ -4,8 +4,8 @@ use std::time::Duration;
 use chatsvc::{Attendee, Calendar, NewEvent, Repeat, Transcripts};
 use chrono::{DateTime, Utc};
 use mcp::{
-    BusySlot, CreatedMeeting, EncodedImage, Meeting, MeetingDraft, PersonAvailability, MessageExtras, SourceError, SourceFuture, TeamsSource, Transcript,
-    TranscriptTurn,
+    BusySlot, CreatedMeeting, EncodedImage, Meeting, MeetingDraft, MessageExtras,
+    PersonAvailability, SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
 use store::{MessageRecord, Store};
 use teams_core::CoreEvent;
@@ -192,7 +192,11 @@ impl TeamsSource for AppSource {
                     busy: schedule
                         .busy
                         .into_iter()
-                        .map(|slot| BusySlot { start: slot.start, end: slot.end, status: slot.status })
+                        .map(|slot| BusySlot {
+                            start: slot.start,
+                            end: slot.end,
+                            status: slot.status,
+                        })
                         .collect(),
                     error: schedule.error,
                 })
@@ -212,7 +216,9 @@ impl TeamsSource for AppSource {
                 .create_event(&new_event(draft, names))
                 .await
                 .map_err(|error| SourceError::Failed(error.to_string()))?;
-            Ok(CreatedMeeting { join_url: created.join_url })
+            Ok(CreatedMeeting {
+                join_url: created.join_url,
+            })
         })
     }
 
@@ -276,7 +282,11 @@ mod tests {
             description: String::new(),
         };
         let event = new_event(draft, vec![Some("Anna Berg".to_owned()), None]);
-        let names: Vec<_> = event.attendees.iter().map(|attendee| attendee.name.as_str()).collect();
+        let names: Vec<_> = event
+            .attendees
+            .iter()
+            .map(|attendee| attendee.name.as_str())
+            .collect();
         assert_eq!(names, ["Anna Berg", "ext@example.org"]);
     }
 
@@ -334,7 +344,10 @@ fn new_event(draft: MeetingDraft, names: Vec<Option<String>>) -> NewEvent {
             .attendees
             .into_iter()
             .zip(names.into_iter().chain(std::iter::repeat(None)))
-            .map(|(address, name)| Attendee { name: name.unwrap_or_else(|| address.clone()), address })
+            .map(|(address, name)| Attendee {
+                name: name.unwrap_or_else(|| address.clone()),
+                address,
+            })
             .collect(),
         repeat: Repeat::Never,
         details: draft.description,

@@ -48,13 +48,18 @@ pub enum PushEvent {
 
 /// `body` is the raw Trouter request body: `{evt, gp}` or `{evt, cp}`.
 pub fn decode_push(body: &str) -> Result<PushEvent> {
-    let push: Value = serde_json::from_str(body).map_err(|error| Error::Callback(format!("push is not JSON: {error}")))?;
-    let evt = push["evt"].as_i64().ok_or_else(|| Error::Callback("push without evt".into()))?;
+    let push: Value = serde_json::from_str(body)
+        .map_err(|error| Error::Callback(format!("push is not JSON: {error}")))?;
+    let evt = push["evt"]
+        .as_i64()
+        .ok_or_else(|| Error::Callback("push without evt".into()))?;
     if evt != EVT_TEAMS_CALL && evt != EVT_GROUP_VIDEO_CALL {
         return Ok(PushEvent::Other(evt));
     }
     let payload = payload_of(&push)?;
-    Ok(PushEvent::IncomingCall(Box::new(notification_from(&payload, evt)?)))
+    Ok(PushEvent::IncomingCall(Box::new(notification_from(
+        &payload, evt,
+    )?)))
 }
 
 fn payload_of(push: &Value) -> Result<Value> {
@@ -64,7 +69,8 @@ fn payload_of(push: &Value) -> Result<Value> {
     }
     if let Some(compressed) = push["cp"].as_str() {
         let bytes = base64_bytes(compressed)?;
-        return inflated_json(&bytes).ok_or_else(|| Error::Callback("cp is not deflated JSON".into()));
+        return inflated_json(&bytes)
+            .ok_or_else(|| Error::Callback("cp is not deflated JSON".into()));
     }
     Err(Error::Callback("push has neither gp nor cp".into()))
 }
@@ -87,12 +93,18 @@ fn json_from(reader: impl Read) -> Option<Value> {
 
 fn read_all(reader: impl Read) -> Option<String> {
     let mut text = String::new();
-    reader.take(MAX_INFLATED_BYTES).read_to_string(&mut text).ok()?;
+    reader
+        .take(MAX_INFLATED_BYTES)
+        .read_to_string(&mut text)
+        .ok()?;
     Some(text)
 }
 
 fn text_of(value: &Value) -> Option<String> {
-    value.as_str().filter(|text| !text.is_empty()).map(str::to_owned)
+    value
+        .as_str()
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
 }
 
 fn notification_from(payload: &Value, evt: i64) -> Result<CallNotification> {
@@ -117,7 +129,11 @@ fn notification_from(payload: &Value, evt: i64) -> Result<CallNotification> {
     let call_id = text_of(&payload["debugContent"]["callId"]).unwrap_or_else(|| attach.clone());
     let modalities_have_video = notification["callModalities"]
         .as_array()
-        .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(VIDEO_MODALITY)));
+        .is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.as_str() == Some(VIDEO_MODALITY))
+        });
     let invitation = &payload["conversationInvitation"];
     let offer_sdp = text_of(&notification["mediaContent"]["blob"]);
     let offer_has_video = offer_sdp.as_deref().is_some_and(offer_sends_video);
@@ -126,7 +142,10 @@ fn notification_from(payload: &Value, evt: i64) -> Result<CallNotification> {
         participant_id,
         caller: Caller {
             mri: caller_mri,
-            display_name: notification["from"]["displayName"].as_str().unwrap_or_default().to_owned(),
+            display_name: notification["from"]["displayName"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
         },
         links,
         offer_sdp,
@@ -181,15 +200,30 @@ mod tests {
     #[test]
     fn a_plain_push_decodes_to_the_notification() {
         let notification = incoming(&gp_body(&payload()));
-        assert_eq!(notification.caller, Caller { mri: "8:orgid:caller".into(), display_name: "Cara".into() });
+        assert_eq!(
+            notification.caller,
+            Caller {
+                mri: "8:orgid:caller".into(),
+                display_name: "Cara".into()
+            }
+        );
         assert_eq!(notification.call_id, "call-1");
         assert_eq!(notification.participant_id, "participant-1");
         assert_eq!(notification.links["attach"], "https://cc.skype.com/attach");
-        assert_eq!(notification.thread_id.as_deref(), Some("19:a_b@unq.gbl.spaces"));
-        assert_eq!(notification.conversation_controller.as_deref(), Some("https://conv.skype.com/c"));
+        assert_eq!(
+            notification.thread_id.as_deref(),
+            Some("19:a_b@unq.gbl.spaces")
+        );
+        assert_eq!(
+            notification.conversation_controller.as_deref(),
+            Some("https://conv.skype.com/c")
+        );
         assert!(!notification.video && !notification.is_multi_party);
         assert!(notification.offer_sdp.is_none());
-        assert_eq!(notification.dedupe_key(), ("call-1".to_owned(), "participant-1".to_owned()));
+        assert_eq!(
+            notification.dedupe_key(),
+            ("call-1".to_owned(), "participant-1".to_owned())
+        );
     }
 
     #[test]
@@ -207,7 +241,8 @@ mod tests {
 
     #[test]
     fn group_video_pushes_and_video_modalities_are_video_calls() {
-        let body = json!({"evt": 109, "gp": base64_of(payload().to_string().as_bytes())}).to_string();
+        let body =
+            json!({"evt": 109, "gp": base64_of(payload().to_string().as_bytes())}).to_string();
         assert!(incoming(&body).video);
         let mut with_video = payload();
         with_video["callNotification"]["callModalities"] = json!(["Audio", "Video"]);
@@ -228,13 +263,22 @@ mod tests {
     fn an_offer_in_the_push_is_kept() {
         let mut with_offer = payload();
         with_offer["callNotification"]["mediaContent"] = json!({"blob": "v=0\r\n"});
-        assert_eq!(incoming(&gp_body(&with_offer)).offer_sdp.as_deref(), Some("v=0\r\n"));
+        assert_eq!(
+            incoming(&gp_body(&with_offer)).offer_sdp.as_deref(),
+            Some("v=0\r\n")
+        );
     }
 
     #[test]
     fn other_events_are_passed_on_without_decoding() {
-        assert_eq!(decode_push(r#"{"evt":115,"cp":"x"}"#).unwrap(), PushEvent::Other(115));
-        assert_eq!(decode_push(r#"{"evt":116}"#).unwrap(), PushEvent::Other(116));
+        assert_eq!(
+            decode_push(r#"{"evt":115,"cp":"x"}"#).unwrap(),
+            PushEvent::Other(115)
+        );
+        assert_eq!(
+            decode_push(r#"{"evt":116}"#).unwrap(),
+            PushEvent::Other(116)
+        );
     }
 
     #[test]

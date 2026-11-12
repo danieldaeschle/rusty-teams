@@ -5,13 +5,15 @@ use std::time::{Duration, Instant};
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
 use crate::blur::{BlurSettings, BlurStage, MaskSource};
-use crate::standout::Cutout;
 use crate::framing::{CropPlanner, Subject, crop_and_scale, find_subject, is_full_frame};
 use crate::latest::Latest;
+use crate::luma_effects::{
+    apply_table, gamma_table, mean_luma, smooth_gamma, soften_luma, target_gamma,
+};
 use crate::mask::Mask;
 use crate::matte::{Planes, refine};
 use crate::motion::{LumaGrid, propagate_for_display};
-use crate::luma_effects::{apply_table, gamma_table, mean_luma, smooth_gamma, soften_luma, target_gamma};
+use crate::standout::Cutout;
 
 pub const SOFT_FOCUS_DEFAULT: u8 = 50;
 const AVERAGE_WEIGHT: f64 = 0.1;
@@ -30,7 +32,13 @@ pub struct CameraEffects {
 
 impl Default for CameraEffects {
     fn default() -> Self {
-        CameraEffects { mirror: true, auto_framing: false, adjust_brightness: false, soft_focus: false, soft_focus_strength: SOFT_FOCUS_DEFAULT }
+        CameraEffects {
+            mirror: true,
+            auto_framing: false,
+            adjust_brightness: false,
+            soft_focus: false,
+            soft_focus_strength: SOFT_FOCUS_DEFAULT,
+        }
     }
 }
 
@@ -44,7 +52,14 @@ impl CameraEffects {
     }
 
     pub fn to_meta(&self) -> String {
-        format!("mirror={},framing={},brightness={},soft_focus={},strength={}", u8::from(self.mirror), u8::from(self.auto_framing), u8::from(self.adjust_brightness), u8::from(self.soft_focus), self.soft_focus_strength)
+        format!(
+            "mirror={},framing={},brightness={},soft_focus={},strength={}",
+            u8::from(self.mirror),
+            u8::from(self.auto_framing),
+            u8::from(self.adjust_brightness),
+            u8::from(self.soft_focus),
+            self.soft_focus_strength
+        )
     }
 
     pub fn from_meta(value: &str) -> Self {
@@ -55,7 +70,11 @@ impl CameraEffects {
                 "framing" => effects.auto_framing = setting == "1",
                 "brightness" => effects.adjust_brightness = setting == "1",
                 "soft_focus" => effects.soft_focus = setting == "1",
-                "strength" => effects.soft_focus_strength = setting.parse().map_or(SOFT_FOCUS_DEFAULT, |strength: u8| strength.min(100)),
+                "strength" => {
+                    effects.soft_focus_strength = setting
+                        .parse()
+                        .map_or(SOFT_FOCUS_DEFAULT, |strength: u8| strength.min(100))
+                }
                 _ => {}
             }
         }
@@ -104,7 +123,10 @@ impl EffectsStage {
             return buffer;
         }
         let started = Instant::now();
-        let elapsed = self.previous_frame.replace(started).map_or(FIRST_FRAME_GAP, |previous| started.duration_since(previous));
+        let elapsed = self
+            .previous_frame
+            .replace(started)
+            .map_or(FIRST_FRAME_GAP, |previous| started.duration_since(previous));
         let (width, height) = (buffer.width() as usize, buffer.height() as usize);
         if effects.adjust_brightness {
             self.adjust_brightness(&mut buffer, width, height, elapsed);
@@ -126,7 +148,13 @@ impl EffectsStage {
         buffer
     }
 
-    fn adjust_brightness(&mut self, buffer: &mut I420Buffer, width: usize, height: usize, elapsed: Duration) {
+    fn adjust_brightness(
+        &mut self,
+        buffer: &mut I420Buffer,
+        width: usize,
+        height: usize,
+        elapsed: Duration,
+    ) {
         let stride = buffer.strides().0 as usize;
         let plane = buffer.data_mut().0;
         let target = target_gamma(mean_luma(plane, stride, width, height));
@@ -147,10 +175,16 @@ impl EffectsStage {
     }
 
     fn refresh_mask(&mut self, buffer: &I420Buffer, track_subject: bool) -> bool {
-        let Some(masks) = self.masks.as_mut() else { return false };
+        let Some(masks) = self.masks.as_mut() else {
+            return false;
+        };
         let fresh = masks.refresh(|| copy_frame(buffer));
-        let (shown, moved) = propagate_for_display(masks.mask(), masks.reference(), &LumaGrid::of(buffer));
-        self.shown = Mask { matte: shown.matte && !moved, ..shown };
+        let (shown, moved) =
+            propagate_for_display(masks.mask(), masks.reference(), &LumaGrid::of(buffer));
+        self.shown = Mask {
+            matte: shown.matte && !moved,
+            ..shown
+        };
         if track_subject && fresh {
             self.subject = find_subject(&self.shown.values, self.shown.width, self.shown.height);
         }
@@ -158,7 +192,8 @@ impl EffectsStage {
     }
 
     fn publish_cutout(&self, buffer: &mut I420Buffer) {
-        self.settings.set_cutout(Cutout::from_camera(buffer, &self.shown).map(Arc::new));
+        self.settings
+            .set_cutout(Cutout::from_camera(buffer, &self.shown).map(Arc::new));
     }
 
     fn soften(&self, buffer: &mut I420Buffer, width: usize, height: usize, strength: u8) {
@@ -166,7 +201,14 @@ impl EffectsStage {
             return;
         }
         let stride = buffer.strides().0 as usize;
-        soften_luma(buffer.data_mut().0, stride, width, height, &self.shown, strength);
+        soften_luma(
+            buffer.data_mut().0,
+            stride,
+            width,
+            height,
+            &self.shown,
+            strength,
+        );
     }
 
     fn compose_background(&mut self, mut buffer: I420Buffer) -> I420Buffer {
@@ -185,12 +227,20 @@ impl EffectsStage {
             return buffer;
         }
         let crop = self.planner.advance(self.subject.as_ref(), elapsed);
-        if is_full_frame(&crop) { buffer } else { crop_and_scale(&buffer, &crop) }
+        if is_full_frame(&crop) {
+            buffer
+        } else {
+            crop_and_scale(&buffer, &crop)
+        }
     }
 
     fn record(&mut self, started: Instant) {
         let elapsed = started.elapsed().as_secs_f64() * 1000.;
-        self.average_ms = if self.processed == 0 { elapsed } else { self.average_ms * (1. - AVERAGE_WEIGHT) + elapsed * AVERAGE_WEIGHT };
+        self.average_ms = if self.processed == 0 {
+            elapsed
+        } else {
+            self.average_ms * (1. - AVERAGE_WEIGHT) + elapsed * AVERAGE_WEIGHT
+        };
         self.processed += 1;
         self.settings.set_average_ms(self.average_ms);
         if let Some(masks) = &self.masks {
@@ -206,16 +256,24 @@ pub struct EffectsThread {
 }
 
 impl EffectsThread {
-    pub fn spawn(settings: Arc<BlurSettings>, mut deliver: impl FnMut(I420Buffer) + Send + 'static) -> std::io::Result<Self> {
+    pub fn spawn(
+        settings: Arc<BlurSettings>,
+        mut deliver: impl FnMut(I420Buffer) + Send + 'static,
+    ) -> std::io::Result<Self> {
         let frames = Arc::new(Latest::default());
         let worker_frames = frames.clone();
-        let worker = std::thread::Builder::new().name("camera effects".to_owned()).spawn(move || {
-            let mut stage = EffectsStage::new(settings);
-            while let Some(frame) = worker_frames.take() {
-                deliver(stage.apply_i420(frame));
-            }
-        })?;
-        Ok(EffectsThread { frames, worker: Some(worker) })
+        let worker = std::thread::Builder::new()
+            .name("camera effects".to_owned())
+            .spawn(move || {
+                let mut stage = EffectsStage::new(settings);
+                while let Some(frame) = worker_frames.take() {
+                    deliver(stage.apply_i420(frame));
+                }
+            })?;
+        Ok(EffectsThread {
+            frames,
+            worker: Some(worker),
+        })
     }
 
     pub fn submit(&self, frame: I420Buffer) {
@@ -259,16 +317,31 @@ mod tests {
 
     #[test]
     fn the_effects_survive_a_round_trip_through_the_meta_text() {
-        let effects = CameraEffects { mirror: false, auto_framing: true, adjust_brightness: true, soft_focus: true, soft_focus_strength: 80 };
+        let effects = CameraEffects {
+            mirror: false,
+            auto_framing: true,
+            adjust_brightness: true,
+            soft_focus: true,
+            soft_focus_strength: 80,
+        };
         assert_eq!(CameraEffects::from_meta(&effects.to_meta()), effects);
         assert_eq!(CameraEffects::from_meta(""), CameraEffects::default());
-        assert_eq!(CameraEffects::from_meta("strength=900,junk").soft_focus_strength, SOFT_FOCUS_DEFAULT);
+        assert_eq!(
+            CameraEffects::from_meta("strength=900,junk").soft_focus_strength,
+            SOFT_FOCUS_DEFAULT
+        );
     }
 
     #[test]
     fn only_framing_and_soft_focus_need_the_segmenter() {
-        let framing = CameraEffects { auto_framing: true, ..CameraEffects::default() };
-        let brightness = CameraEffects { adjust_brightness: true, ..CameraEffects::default() };
+        let framing = CameraEffects {
+            auto_framing: true,
+            ..CameraEffects::default()
+        };
+        let brightness = CameraEffects {
+            adjust_brightness: true,
+            ..CameraEffects::default()
+        };
         assert!(framing.needs_mask() && framing.alters_frame());
         assert!(!brightness.needs_mask() && brightness.alters_frame());
     }
@@ -281,7 +354,10 @@ mod tests {
         buffer.data_mut().0.fill(77);
         let out = stage.apply_i420(buffer);
         assert!(out.data().0.iter().all(|&value| value == 77));
-        settings.set_effects(CameraEffects { adjust_brightness: true, ..CameraEffects::default() });
+        settings.set_effects(CameraEffects {
+            adjust_brightness: true,
+            ..CameraEffects::default()
+        });
         let mut dark = I420Buffer::new(64, 36);
         dark.data_mut().0.fill(30);
         let mut brightened = stage.apply_i420(dark);
@@ -297,10 +373,13 @@ mod tests {
     fn the_effects_thread_never_holds_capture_back_and_delivers_the_newest_frame() {
         let delivered = Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = delivered.clone();
-        let effects = EffectsThread::spawn(Arc::new(BlurSettings::default()), move |frame: I420Buffer| {
-            std::thread::sleep(Duration::from_millis(40));
-            sink.lock().unwrap().push(frame.data().0[0]);
-        })
+        let effects = EffectsThread::spawn(
+            Arc::new(BlurSettings::default()),
+            move |frame: I420Buffer| {
+                std::thread::sleep(Duration::from_millis(40));
+                sink.lock().unwrap().push(frame.data().0[0]);
+            },
+        )
         .expect("thread starts");
         let started = Instant::now();
         for marker in 1..=30u8 {
@@ -333,9 +412,24 @@ mod tests {
     #[ignore = "timing, run with --release --ignored --nocapture"]
     fn every_effect_stays_inside_the_frame_budget_at_720p() {
         let mut buffer = I420Buffer::new(1280, 720);
-        buffer.data_mut().0.iter_mut().enumerate().for_each(|(index, value)| *value = (index % 200) as u8 + 20);
-        let mask = crate::mask::Mask::from_fn(256, 144, |x, y| if ((x - 0.5) * (x - 0.5)) / 0.04 + ((y - 0.5) * (y - 0.5)) / 0.09 <= 1. { 1. } else { 0. });
-        let crop = crate::framing::Crop { center_x: 0.5, center_y: 0.5, zoom: 1.6 };
+        buffer
+            .data_mut()
+            .0
+            .iter_mut()
+            .enumerate()
+            .for_each(|(index, value)| *value = (index % 200) as u8 + 20);
+        let mask = crate::mask::Mask::from_fn(256, 144, |x, y| {
+            if ((x - 0.5) * (x - 0.5)) / 0.04 + ((y - 0.5) * (y - 0.5)) / 0.09 <= 1. {
+                1.
+            } else {
+                0.
+            }
+        });
+        let crop = crate::framing::Crop {
+            center_x: 0.5,
+            center_y: 0.5,
+            zoom: 1.6,
+        };
         let total = [
             timed("brightness", || {
                 let mut copy = I420Buffer::new(1280, 720);
@@ -346,7 +440,9 @@ mod tests {
                 soften_luma(copy.data_mut().0, 1280, 1280, 720, &mask, 100);
             }),
             timed("frame copy", || copy_frame(&buffer)),
-            timed("subject", || find_subject(&mask.values, mask.width, mask.height)),
+            timed("subject", || {
+                find_subject(&mask.values, mask.width, mask.height)
+            }),
             timed("crop and scale", || crop_and_scale(&buffer, &crop)),
         ]
         .iter()

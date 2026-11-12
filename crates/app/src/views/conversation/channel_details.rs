@@ -1,7 +1,7 @@
 use chrono::{Local, Offset, Utc};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -10,8 +10,8 @@ use teams_core::FileKind;
 
 use super::{ChannelPane, ConversationView};
 use crate::app_state::Selection;
-use crate::find_in_chat::FIND_IN_CHANNEL;
 use crate::channel_files::{SharedContent, SharedItem};
+use crate::find_in_chat::FIND_IN_CHANNEL;
 use crate::format;
 use crate::rows::reply_excerpt;
 use crate::theme;
@@ -135,9 +135,7 @@ impl ConversationView {
     fn details_conversation_id(&self) -> Option<String> {
         match &self.current.as_ref()?.selection {
             Selection::Channel(channel_id) => Some(channel_id.clone()),
-            Selection::Chat(chat_id) if !self.draft_active && !self.pinned => {
-                Some(chat_id.clone())
-            }
+            Selection::Chat(chat_id) if !self.draft_active && !self.pinned => Some(chat_id.clone()),
             Selection::Chat(_) => None,
         }
     }

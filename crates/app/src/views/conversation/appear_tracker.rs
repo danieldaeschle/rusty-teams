@@ -69,7 +69,9 @@ impl AppearTracker {
     pub(super) fn entering(&self, now: Instant) -> HashMap<String, AppearKind> {
         self.entering
             .iter()
-            .filter(|(_, (kind, since))| now.duration_since(*since) < kind.duration() + SETTLE_MARGIN)
+            .filter(|(_, (kind, since))| {
+                now.duration_since(*since) < kind.duration() + SETTLE_MARGIN
+            })
             .map(|(key, (kind, _))| (key.clone(), *kind))
             .collect()
     }
@@ -174,10 +176,25 @@ mod tests {
     fn a_live_message_from_others_slides_in_once() {
         let now = Instant::now();
         let mut tracker = opened(&[server("a", false)], now);
-        tracker.apply("chat", true, false, &[server("a", false), server("b", false)], now);
-        assert_eq!(keys(&tracker, now), vec![("b".to_owned(), AppearKind::Incoming)]);
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), server("b", false)],
+            now,
+        );
+        assert_eq!(
+            keys(&tracker, now),
+            vec![("b".to_owned(), AppearKind::Incoming)]
+        );
         let later = now + Duration::from_secs(1);
-        tracker.apply("chat", true, false, &[server("a", false), server("b", false)], later);
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), server("b", false)],
+            later,
+        );
         assert!(keys(&tracker, later).is_empty());
     }
 
@@ -186,8 +203,20 @@ mod tests {
         let now = Instant::now();
         let mut tracker = AppearTracker::default();
         tracker.apply("chat", true, false, &[server("a", false)], now);
-        tracker.apply("chat", false, false, &[server("a", false), server("b", false)], now);
-        tracker.apply("chat", true, false, &[server("a", false), server("b", false), server("c", false)], now);
+        tracker.apply(
+            "chat",
+            false,
+            false,
+            &[server("a", false), server("b", false)],
+            now,
+        );
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), server("b", false), server("c", false)],
+            now,
+        );
         assert!(keys(&tracker, now).is_empty());
     }
 
@@ -199,7 +228,12 @@ mod tests {
             "chat",
             true,
             false,
-            &[server("a", false), server("b", false), server("c", false), server("d", false)],
+            &[
+                server("a", false),
+                server("b", false),
+                server("c", false),
+                server("d", false),
+            ],
             now,
         );
         assert!(keys(&tracker, now).is_empty());
@@ -209,7 +243,13 @@ mod tests {
     fn switching_chats_drops_the_baseline() {
         let now = Instant::now();
         let mut tracker = opened(&[server("a", false)], now);
-        tracker.apply("other", true, false, &[server("x", false), server("y", false)], now);
+        tracker.apply(
+            "other",
+            true,
+            false,
+            &[server("x", false), server("y", false)],
+            now,
+        );
         assert!(keys(&tracker, now).is_empty());
     }
 
@@ -217,10 +257,25 @@ mod tests {
     fn a_sent_message_animates_as_pending_and_not_again_as_server_copy() {
         let now = Instant::now();
         let mut tracker = opened(&[server("a", false)], now);
-        tracker.apply("chat", true, false, &[server("a", false), sending("local-1")], now);
-        assert_eq!(keys(&tracker, now), vec![("local-1".to_owned(), AppearKind::Own)]);
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), sending("local-1")],
+            now,
+        );
+        assert_eq!(
+            keys(&tracker, now),
+            vec![("local-1".to_owned(), AppearKind::Own)]
+        );
         let later = now + Duration::from_secs(1);
-        tracker.apply("chat", true, false, &[server("a", false), server("m1", true)], later);
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), server("m1", true)],
+            later,
+        );
         assert!(keys(&tracker, later).is_empty());
     }
 
@@ -228,30 +283,81 @@ mod tests {
     fn a_server_copy_arriving_before_the_pending_row_leaves_does_not_animate() {
         let now = Instant::now();
         let mut tracker = opened(&[server("a", false)], now);
-        tracker.apply("chat", true, false, &[server("a", false), sending("local-1")], now);
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), sending("local-1")],
+            now,
+        );
         let later = now + Duration::from_secs(1);
-        tracker.apply("chat", true, false, &[server("a", false), server("m1", true), sending("local-1")], later);
-        tracker.apply("chat", true, false, &[server("a", false), server("m1", true)], later);
-        tracker.apply("chat", true, false, &[server("a", false), server("m1", true), server("m2", true)], later);
-        assert_eq!(keys(&tracker, later), vec![("m2".to_owned(), AppearKind::Own)]);
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), server("m1", true), sending("local-1")],
+            later,
+        );
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), server("m1", true)],
+            later,
+        );
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), server("m1", true), server("m2", true)],
+            later,
+        );
+        assert_eq!(
+            keys(&tracker, later),
+            vec![("m2".to_owned(), AppearKind::Own)]
+        );
     }
 
     #[test]
     fn an_incoming_message_below_a_pending_row_still_animates() {
         let now = Instant::now();
         let mut tracker = opened(&[server("a", false), sending("local-1")], now);
-        tracker.apply("chat", true, false, &[server("a", false), server("b", false), sending("local-1")], now);
-        assert_eq!(keys(&tracker, now), vec![("b".to_owned(), AppearKind::Incoming)]);
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), server("b", false), sending("local-1")],
+            now,
+        );
+        assert_eq!(
+            keys(&tracker, now),
+            vec![("b".to_owned(), AppearKind::Incoming)]
+        );
     }
 
     #[test]
     fn a_reset_rebuild_never_animates() {
         let now = Instant::now();
         let mut tracker = opened(&[server("a", false)], now);
-        tracker.apply("chat", true, true, &[server("a", false), server("b", false)], now);
+        tracker.apply(
+            "chat",
+            true,
+            true,
+            &[server("a", false), server("b", false)],
+            now,
+        );
         assert!(keys(&tracker, now).is_empty());
-        tracker.apply("chat", true, false, &[server("a", false), server("b", false), server("c", false)], now);
-        assert_eq!(keys(&tracker, now), vec![("c".to_owned(), AppearKind::Incoming)]);
+        tracker.apply(
+            "chat",
+            true,
+            false,
+            &[server("a", false), server("b", false), server("c", false)],
+            now,
+        );
+        assert_eq!(
+            keys(&tracker, now),
+            vec![("c".to_owned(), AppearKind::Incoming)]
+        );
     }
 
     #[test]

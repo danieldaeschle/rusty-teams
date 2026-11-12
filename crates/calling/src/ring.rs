@@ -40,7 +40,9 @@ impl RingState {
         match signal {
             RingSignal::Accept => RingState::Accepted,
             RingSignal::Decline => RingState::Declined,
-            RingSignal::Remote(EndKind::AnsweredElsewhere) => RingState::Ended(RingEnd::AnsweredElsewhere),
+            RingSignal::Remote(EndKind::AnsweredElsewhere) => {
+                RingState::Ended(RingEnd::AnsweredElsewhere)
+            }
             RingSignal::Remote(EndKind::Cancelled) => RingState::Ended(RingEnd::CallerCancelled),
             RingSignal::Remote(_) => RingState::Ended(RingEnd::Other),
             RingSignal::Tick if now.saturating_duration_since(since) >= RING_TIMEOUT => {
@@ -55,7 +57,10 @@ impl RingState {
     }
 
     pub fn is_missed(&self) -> bool {
-        matches!(self, RingState::Ended(RingEnd::CallerCancelled | RingEnd::TimedOut | RingEnd::Other))
+        matches!(
+            self,
+            RingState::Ended(RingEnd::CallerCancelled | RingEnd::TimedOut | RingEnd::Other)
+        )
     }
 }
 
@@ -103,7 +108,8 @@ mod tests {
     #[test]
     fn answering_elsewhere_stops_the_ring_without_a_missed_call() {
         let start = Instant::now();
-        let state = RingState::start(start).next(RingSignal::Remote(EndKind::AnsweredElsewhere), start);
+        let state =
+            RingState::start(start).next(RingSignal::Remote(EndKind::AnsweredElsewhere), start);
         assert_eq!(state, RingState::Ended(RingEnd::AnsweredElsewhere));
         assert!(!state.is_missed());
     }
@@ -120,10 +126,19 @@ mod tests {
     fn a_settled_ring_ignores_later_signals() {
         let start = Instant::now();
         let accepted = RingState::start(start).next(RingSignal::Accept, start);
-        assert_eq!(accepted.next(RingSignal::Remote(EndKind::Cancelled), start), RingState::Accepted);
-        assert_eq!(accepted.next(RingSignal::Tick, after(start, 60)), RingState::Accepted);
+        assert_eq!(
+            accepted.next(RingSignal::Remote(EndKind::Cancelled), start),
+            RingState::Accepted
+        );
+        assert_eq!(
+            accepted.next(RingSignal::Tick, after(start, 60)),
+            RingState::Accepted
+        );
         let declined = RingState::start(start).next(RingSignal::Decline, start);
-        assert_eq!(declined.next(RingSignal::Accept, start), RingState::Declined);
+        assert_eq!(
+            declined.next(RingSignal::Accept, start),
+            RingState::Declined
+        );
         assert!(!declined.is_missed());
     }
 }

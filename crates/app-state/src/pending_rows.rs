@@ -1,9 +1,9 @@
 use chrono::{DateTime, Local, Utc};
 use teams_core::{FileCard, QuoteInfo};
 
+use crate::outgoing::{Outgoing, OutgoingImage};
 use crate::render::{Block, layout_blocks};
 use crate::rows::{Delivery, LocalImage, MessageRow, Receipt, Series};
-use crate::outgoing::{Outgoing, OutgoingImage};
 
 fn pending_blocks(outgoing: &Outgoing) -> Vec<Block> {
     let quote = outgoing.reply.as_ref().map(|reply| {
@@ -42,9 +42,11 @@ pub fn pending_row(
             .to_string(),
         day_header: None,
         blocks: pending_blocks(outgoing),
-        jumbo: (outgoing.reply.is_none() && outgoing.images.is_empty() && outgoing.files.is_empty())
-            .then(|| teams_core::jumbo_emoji(&outgoing.html()))
-            .flatten(),
+        jumbo: (outgoing.reply.is_none()
+            && outgoing.images.is_empty()
+            && outgoing.files.is_empty())
+        .then(|| teams_core::jumbo_emoji(&outgoing.html()))
+        .flatten(),
         edited: false,
         deleted: false,
         reactions: Vec::new(),

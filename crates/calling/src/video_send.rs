@@ -4,10 +4,10 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use libwebrtc::media_stream_track::MediaStreamTrack;
 use libwebrtc::peer_connection_factory::PeerConnectionFactory;
+use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use libwebrtc::rtp_parameters::DegradationPreference;
 use libwebrtc::rtp_sender::RtpSender;
 use libwebrtc::rtp_transceiver::{RtpTransceiver, RtpTransceiverDirection};
-use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _, VideoFrame, VideoRotation};
 use libwebrtc::video_source::VideoResolution;
 use libwebrtc::video_source::native::NativeVideoSource;
@@ -16,16 +16,20 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::background::BackgroundPicture;
 use crate::blur::BlurSettings;
-use crate::effects::CameraEffects;
 use crate::camera::start_camera;
 use crate::capture::Capture;
 use crate::control::CallUpdate;
 use crate::devices::DeviceChoice;
+use crate::effects::CameraEffects;
 use crate::error::{Error, Result};
 use crate::screen::{ShareSource, start_screen_capture};
-use crate::send_control::{EncoderLimits, KEYFRAME_NUDGE, LayerPlan, SendLimit, encoder_limits, plan_layers};
+use crate::send_control::{
+    EncoderLimits, KEYFRAME_NUDGE, LayerPlan, SendLimit, encoder_limits, plan_layers,
+};
 use crate::standout::StandoutOverlay;
-use crate::video_frame::{FrameGate, PERSON_FPS, SCREEN_FPS, VideoHub, VideoKey, picture_from_i420};
+use crate::video_frame::{
+    FrameGate, PERSON_FPS, SCREEN_FPS, VideoHub, VideoKey, picture_from_i420,
+};
 use crate::video_layout::VideoLines;
 use crate::video_pattern::{PatternKind, spawn_pattern};
 
@@ -69,10 +73,20 @@ pub struct LocalSink {
 impl LocalSink {
     pub fn new(source: NativeVideoSource, hub: Option<(Arc<VideoHub>, VideoKey)>) -> Self {
         let self_view = hub.map(|(hub, key)| {
-            let fps = if matches!(key, VideoKey::LocalScreen) { SCREEN_FPS } else { PERSON_FPS };
+            let fps = if matches!(key, VideoKey::LocalScreen) {
+                SCREEN_FPS
+            } else {
+                PERSON_FPS
+            };
             (hub, key, FrameGate::new(fps))
         });
-        LocalSink { source, self_view, mirror: None, standout: None, frame_size: None }
+        LocalSink {
+            source,
+            self_view,
+            mirror: None,
+            standout: None,
+            frame_size: None,
+        }
     }
 
     pub fn reporting_size(mut self, frame_size: Arc<AtomicU64>) -> Self {
@@ -96,16 +110,27 @@ impl LocalSink {
             None => buffer,
         };
         if let Some(frame_size) = &self.frame_size {
-            frame_size.store(pack_size(buffer.width(), buffer.height()), Ordering::Relaxed);
+            frame_size.store(
+                pack_size(buffer.width(), buffer.height()),
+                Ordering::Relaxed,
+            );
         }
         let mut frame = VideoFrame::new(VideoRotation::VideoRotation0, buffer);
-        frame.timestamp_us = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_micros() as i64);
+        frame.timestamp_us = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_micros() as i64);
         self.source.capture_frame(&frame);
-        let Some((hub, key, gate)) = &mut self.self_view else { return };
+        let Some((hub, key, gate)) = &mut self.self_view else {
+            return;
+        };
         if gate.admit(Instant::now())
             && let Some(mut picture) = picture_from_i420(frame.buffer, key.max_width())
         {
-            if self.mirror.as_ref().is_some_and(|settings| settings.effects().mirror) {
+            if self
+                .mirror
+                .as_ref()
+                .is_some_and(|settings| settings.effects().mirror)
+            {
                 picture.flip_horizontally();
             }
             hub.publish(key.clone(), picture);
@@ -142,11 +167,22 @@ struct RequestedLimits {
 }
 
 impl Outgoing {
-    fn new(factory: &PeerConnectionFactory, label: &str, kind: PatternKind, screencast: bool) -> Self {
+    fn new(
+        factory: &PeerConnectionFactory,
+        label: &str,
+        kind: PatternKind,
+        screencast: bool,
+    ) -> Self {
         let (width, height) = kind.size();
         let source = NativeVideoSource::new(VideoResolution { width, height }, screencast);
         let track = factory.create_video_track(label, source.clone());
-        Outgoing { source, track, capture: None, frame_size: Arc::new(AtomicU64::new(0)), requested: None }
+        Outgoing {
+            source,
+            track,
+            capture: None,
+            frame_size: Arc::new(AtomicU64::new(0)),
+            requested: None,
+        }
     }
 }
 
@@ -165,7 +201,12 @@ pub struct LocalVideo {
 }
 
 impl LocalVideo {
-    pub fn new(factory: &PeerConnectionFactory, mode: VideoMode, hub: Arc<VideoHub>, updates: UnboundedSender<CallUpdate>) -> Self {
+    pub fn new(
+        factory: &PeerConnectionFactory,
+        mode: VideoMode,
+        hub: Arc<VideoHub>,
+        updates: UnboundedSender<CallUpdate>,
+    ) -> Self {
         LocalVideo {
             mode,
             hub,
@@ -182,8 +223,20 @@ impl LocalVideo {
 
     pub fn set_motion(&mut self, motion: bool) {
         self.motion = motion;
-        self.share_fps.store(if motion { MOTION_SHARE_FPS } else { SCREEN_SHARE_FPS }, Ordering::Relaxed);
-        if let Some(share) = self.lines.as_ref().and_then(|lines| lines.share.as_ref()).filter(|_| self.sharing()) {
+        self.share_fps.store(
+            if motion {
+                MOTION_SHARE_FPS
+            } else {
+                SCREEN_SHARE_FPS
+            },
+            Ordering::Relaxed,
+        );
+        if let Some(share) = self
+            .lines
+            .as_ref()
+            .and_then(|lines| lines.share.as_ref())
+            .filter(|_| self.sharing())
+        {
             let _ = self.tune_share(&share.sender());
         }
     }
@@ -203,7 +256,9 @@ impl LocalVideo {
         for encoding in &mut parameters.encodings {
             encoding.max_framerate = Some(fps);
         }
-        sender.set_parameters(parameters).map_err(|error| Error::Webrtc(error.to_string()))
+        sender
+            .set_parameters(parameters)
+            .map_err(|error| Error::Webrtc(error.to_string()))
     }
 
     fn sender_of(&self, source: SendSource) -> Option<RtpSender> {
@@ -214,19 +269,33 @@ impl LocalVideo {
         }
     }
 
-    pub fn apply_send_limit(&mut self, source: SendSource, limits: &[SendLimit]) -> Result<Option<Vec<LayerPlan>>> {
+    pub fn apply_send_limit(
+        &mut self,
+        source: SendSource,
+        limits: &[SendLimit],
+    ) -> Result<Option<Vec<LayerPlan>>> {
         let sending = match source {
             SendSource::Camera => self.camera_on(),
             SendSource::Screen => self.sharing(),
         };
-        let Some(sender) = self.sender_of(source).filter(|_| sending) else { return Ok(None) };
+        let Some(sender) = self.sender_of(source).filter(|_| sending) else {
+            return Ok(None);
+        };
         let outgoing = match source {
             SendSource::Camera => &mut self.camera,
             SendSource::Screen => &mut self.screen,
         };
         let frame = unpack_size(outgoing.frame_size.load(Ordering::Relaxed));
-        outgoing.requested = Some(RequestedLimits { limits: limits.to_vec(), applied_for: frame });
-        let rids: Vec<String> = sender.parameters().encodings.into_iter().map(|encoding| encoding.rid).collect();
+        outgoing.requested = Some(RequestedLimits {
+            limits: limits.to_vec(),
+            applied_for: frame,
+        });
+        let rids: Vec<String> = sender
+            .parameters()
+            .encodings
+            .into_iter()
+            .map(|encoding| encoding.rid)
+            .collect();
         if rids.len() > 1 {
             let plans = plan_layers(limits, frame, &rids);
             if plans.iter().any(|plan| plan.keyframe) {
@@ -235,13 +304,20 @@ impl LocalVideo {
             Self::set_layers(&sender, &plans, 1.0)?;
             return Ok(Some(plans));
         }
-        let Some(limit) = limits.first() else { return Ok(None) };
+        let Some(limit) = limits.first() else {
+            return Ok(None);
+        };
         let encoder = encoder_limits(limit, frame);
         if limit.keyframe {
             Self::set_limits(&sender, &encoder, KEYFRAME_NUDGE)?;
         }
         Self::set_limits(&sender, &encoder, 1.0)?;
-        Ok(Some(vec![LayerPlan { rid: rids.into_iter().next().unwrap_or_default(), active: true, limits: Some(encoder), keyframe: limit.keyframe }]))
+        Ok(Some(vec![LayerPlan {
+            rid: rids.into_iter().next().unwrap_or_default(),
+            active: true,
+            limits: Some(encoder),
+            keyframe: limit.keyframe,
+        }]))
     }
 
     /// The mixer sends its limits once, often before the first frame tells the size to scale from.
@@ -253,7 +329,11 @@ impl LocalVideo {
                 SendSource::Screen => &self.screen,
             };
             let frame = unpack_size(outgoing.frame_size.load(Ordering::Relaxed));
-            let Some(requested) = outgoing.requested.as_ref().filter(|requested| frame.is_some() && requested.applied_for != frame) else {
+            let Some(requested) = outgoing
+                .requested
+                .as_ref()
+                .filter(|requested| frame.is_some() && requested.applied_for != frame)
+            else {
                 continue;
             };
             let limits = requested.limits.clone();
@@ -265,17 +345,22 @@ impl LocalVideo {
     fn set_layers(sender: &RtpSender, plans: &[LayerPlan], nudge: f64) -> Result<()> {
         let mut parameters = sender.parameters();
         for encoding in &mut parameters.encodings {
-            let Some(plan) = plans.iter().find(|plan| plan.rid == encoding.rid) else { continue };
+            let Some(plan) = plans.iter().find(|plan| plan.rid == encoding.rid) else {
+                continue;
+            };
             let nudged = nudge != 1.0 && plan.keyframe;
             encoding.active = plan.active;
             let Some(limits) = &plan.limits else { continue };
-            encoding.scale_resolution_down_by = Some(limits.scale_down_by * if nudged { nudge } else { 1.0 });
+            encoding.scale_resolution_down_by =
+                Some(limits.scale_down_by * if nudged { nudge } else { 1.0 });
             if let Some(framerate) = limits.max_framerate {
                 encoding.max_framerate = Some(framerate);
             }
             encoding.max_bitrate = limits.max_bitrate;
         }
-        sender.set_parameters(parameters).map_err(|error| Error::Webrtc(error.to_string()))
+        sender
+            .set_parameters(parameters)
+            .map_err(|error| Error::Webrtc(error.to_string()))
     }
 
     fn set_limits(sender: &RtpSender, limits: &EncoderLimits, nudge: f64) -> Result<()> {
@@ -287,7 +372,9 @@ impl LocalVideo {
             }
             encoding.max_bitrate = limits.max_bitrate;
         }
-        sender.set_parameters(parameters).map_err(|error| Error::Webrtc(error.to_string()))
+        sender
+            .set_parameters(parameters)
+            .map_err(|error| Error::Webrtc(error.to_string()))
     }
 
     pub fn camera_size(&self) -> Option<(u32, u32)> {
@@ -312,7 +399,9 @@ impl LocalVideo {
     }
 
     pub fn blur_model(&self) -> Option<&'static str> {
-        (self.camera_on() && self.blur.active()).then(|| self.blur.model()).filter(|model| !model.is_empty())
+        (self.camera_on() && self.blur.active())
+            .then(|| self.blur.model())
+            .filter(|model| !model.is_empty())
     }
 
     pub fn has_lines(&self) -> bool {
@@ -320,17 +409,31 @@ impl LocalVideo {
     }
 
     pub fn share_mid(&self) -> Option<String> {
-        self.lines.as_ref().and_then(|lines| lines.share.as_ref()).and_then(|share| share.mid())
+        self.lines
+            .as_ref()
+            .and_then(|lines| lines.share.as_ref())
+            .and_then(|share| share.mid())
     }
 
     pub fn has_share_line(&self) -> bool {
-        self.lines.as_ref().is_some_and(|lines| lines.share.is_some())
+        self.lines
+            .as_ref()
+            .is_some_and(|lines| lines.share.is_some())
     }
 
-    pub fn add_share_line(&mut self, share: RtpTransceiver, camera: Option<RtpTransceiver>) -> Result<()> {
+    pub fn add_share_line(
+        &mut self,
+        share: RtpTransceiver,
+        camera: Option<RtpTransceiver>,
+    ) -> Result<()> {
         match (self.lines.as_mut(), camera) {
             (Some(lines), _) => lines.share = Some(share),
-            (None, Some(camera)) => self.lines = Some(VideoLines { camera, share: Some(share) }),
+            (None, Some(camera)) => {
+                self.lines = Some(VideoLines {
+                    camera,
+                    share: Some(share),
+                })
+            }
             (None, None) => return Err(Error::Webrtc("no video line negotiated".into())),
         }
         Ok(())
@@ -341,7 +444,12 @@ impl LocalVideo {
             .as_ref()
             .and_then(|lines| lines.share.as_ref())
             .and_then(|share| share.current_direction())
-            .is_some_and(|direction| matches!(direction, RtpTransceiverDirection::SendOnly | RtpTransceiverDirection::SendRecv))
+            .is_some_and(|direction| {
+                matches!(
+                    direction,
+                    RtpTransceiverDirection::SendOnly | RtpTransceiverDirection::SendRecv
+                )
+            })
     }
 
     pub fn is_available(&self) -> bool {
@@ -385,13 +493,18 @@ impl LocalVideo {
         for encoding in &mut parameters.encodings {
             encoding.active = active;
         }
-        sender.set_parameters(parameters).map_err(|error| Error::Webrtc(error.to_string()))
+        sender
+            .set_parameters(parameters)
+            .map_err(|error| Error::Webrtc(error.to_string()))
     }
 
     fn camera_sink(&self) -> LocalSink {
-        LocalSink::new(self.camera.source.clone(), Some((self.hub.clone(), VideoKey::LocalCamera)))
-            .mirrored_by(self.blur.clone())
-            .reporting_size(self.camera.frame_size.clone())
+        LocalSink::new(
+            self.camera.source.clone(),
+            Some((self.hub.clone(), VideoKey::LocalCamera)),
+        )
+        .mirrored_by(self.blur.clone())
+        .reporting_size(self.camera.frame_size.clone())
     }
 
     fn report_failure(&self, what: &'static str) -> impl FnOnce(String) + Send + 'static {
@@ -412,7 +525,10 @@ impl LocalVideo {
     }
 
     pub fn start_camera(&mut self, choice: &DeviceChoice) -> Result<()> {
-        let lines = self.lines.as_ref().ok_or_else(|| Error::Webrtc("no video line negotiated".into()))?;
+        let lines = self
+            .lines
+            .as_ref()
+            .ok_or_else(|| Error::Webrtc("no video line negotiated".into()))?;
         if !self.is_available() {
             return Err(Error::Webrtc("video is switched off".into()));
         }
@@ -429,8 +545,17 @@ impl LocalVideo {
     fn capture_camera(&self, choice: &DeviceChoice) -> Result<Capture> {
         let mut sink = self.camera_sink();
         Ok(match self.mode {
-            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Camera, Some(self.blur.clone()))),
-            _ => start_camera(choice, self.blur.clone(), move |buffer| sink.push(buffer), self.report_failure("Camera"))?,
+            VideoMode::Pattern => Capture::Task(spawn_pattern(
+                sink,
+                PatternKind::Camera,
+                Some(self.blur.clone()),
+            )),
+            _ => start_camera(
+                choice,
+                self.blur.clone(),
+                move |buffer| sink.push(buffer),
+                self.report_failure("Camera"),
+            )?,
         })
     }
 
@@ -445,8 +570,14 @@ impl LocalVideo {
     }
 
     pub fn start_share(&mut self, source: &ShareSource) -> Result<()> {
-        let lines = self.lines.as_ref().ok_or_else(|| Error::Webrtc("no video line negotiated".into()))?;
-        let share = lines.share.as_ref().ok_or_else(|| Error::Webrtc("sharing needs a meeting".into()))?;
+        let lines = self
+            .lines
+            .as_ref()
+            .ok_or_else(|| Error::Webrtc("no video line negotiated".into()))?;
+        let share = lines
+            .share
+            .as_ref()
+            .ok_or_else(|| Error::Webrtc("sharing needs a meeting".into()))?;
         if !self.is_available() {
             return Err(Error::Webrtc("video is switched off".into()));
         }
@@ -456,7 +587,12 @@ impl LocalVideo {
             .reporting_size(self.screen.frame_size.clone());
         let capture = match self.mode {
             VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Screen, None)),
-            _ => start_screen_capture(source.clone(), self.share_fps.clone(), move |buffer| sink.push(buffer), self.report_failure("Screen share"))?,
+            _ => start_screen_capture(
+                source.clone(),
+                self.share_fps.clone(),
+                move |buffer| sink.push(buffer),
+                self.report_failure("Screen share"),
+            )?,
         };
         Self::begin_sending(&share.sender(), &self.screen.track)?;
         let _ = self.tune_share(&share.sender());
@@ -485,10 +621,18 @@ mod tests {
     async fn a_camera_preview_runs_without_a_line_and_stops_cleanly() {
         let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
         let factory = crate::devices::shared_factory();
-        let mut video = LocalVideo::new(&factory, VideoMode::Pattern, VideoHub::new(sender.clone()), sender);
+        let mut video = LocalVideo::new(
+            &factory,
+            VideoMode::Pattern,
+            VideoHub::new(sender.clone()),
+            sender,
+        );
         video.preview_camera(&DeviceChoice::SystemDefault).unwrap();
         assert!(video.camera_previewing() && !video.camera_on());
-        assert!(video.start_camera(&DeviceChoice::SystemDefault).is_err(), "sending needs a negotiated line");
+        assert!(
+            video.start_camera(&DeviceChoice::SystemDefault).is_err(),
+            "sending needs a negotiated line"
+        );
         assert!(video.camera_previewing());
         video.stop_camera();
         assert!(!video.camera_previewing() && !video.camera_on());

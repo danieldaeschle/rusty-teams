@@ -16,7 +16,10 @@ pub struct ShareView {
 
 impl Default for ShareView {
     fn default() -> Self {
-        ShareView { zoom: ZOOM_MIN, offset: (0., 0.) }
+        ShareView {
+            zoom: ZOOM_MIN,
+            offset: (0., 0.),
+        }
     }
 }
 
@@ -38,7 +41,10 @@ impl ShareView {
     }
 
     pub fn offset(&self, stage: (f32, f32)) -> (f32, f32) {
-        (clamp_axis(self.offset.0, stage.0, self.zoom), clamp_axis(self.offset.1, stage.1, self.zoom))
+        (
+            clamp_axis(self.offset.0, stage.0, self.zoom),
+            clamp_axis(self.offset.1, stage.1, self.zoom),
+        )
     }
 
     pub fn reset(&mut self) {
@@ -54,7 +60,10 @@ impl ShareView {
         let (offset_x, offset_y) = self.offset(stage);
         let ratio = target / self.zoom;
         self.zoom = target;
-        self.offset = (pointer.0 - (pointer.0 - offset_x) * ratio, pointer.1 - (pointer.1 - offset_y) * ratio);
+        self.offset = (
+            pointer.0 - (pointer.0 - offset_x) * ratio,
+            pointer.1 - (pointer.1 - offset_y) * ratio,
+        );
         self.offset = self.offset(stage);
     }
 
@@ -122,7 +131,10 @@ mod tests {
         let pointer = (600., 100.);
         view.zoom_around(2., pointer, STAGE);
         let (offset_x, offset_y) = view.offset(STAGE);
-        let content = ((pointer.0 - offset_x) / view.zoom(), (pointer.1 - offset_y) / view.zoom());
+        let content = (
+            (pointer.0 - offset_x) / view.zoom(),
+            (pointer.1 - offset_y) / view.zoom(),
+        );
         assert!((content.0 - 600.).abs() < 0.01 && (content.1 - 100.).abs() < 0.01);
     }
 

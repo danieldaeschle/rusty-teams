@@ -162,8 +162,12 @@ mod tests {
         };
         let today = NaiveDate::from_ymd_opt(2026, 11, 8).unwrap();
         let offset = FixedOffset::east_opt(0).unwrap();
-        let results =
-            server_message_results(&[hit("19:a"), hit("19:unknown")], &conversations, today, offset);
+        let results = server_message_results(
+            &[hit("19:a"), hit("19:unknown")],
+            &conversations,
+            today,
+            offset,
+        );
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].snippet, "the build is green");
         assert_eq!(results[0].matches, [4..9]);
@@ -173,10 +177,17 @@ mod tests {
     fn merged_messages_keep_local_first_without_duplicates() {
         let merged = merge_messages(
             &[message("1", "19:a")],
-            vec![message("1", "19:a"), message("2", "19:a"), message("3", "19:a")],
+            vec![
+                message("1", "19:a"),
+                message("2", "19:a"),
+                message("3", "19:a"),
+            ],
             2,
         );
-        let ids: Vec<&str> = merged.iter().map(|message| message.message_id.as_str()).collect();
+        let ids: Vec<&str> = merged
+            .iter()
+            .map(|message| message.message_id.as_str())
+            .collect();
         assert_eq!(ids, ["1", "2"]);
     }
 }

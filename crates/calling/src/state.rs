@@ -39,14 +39,22 @@ impl CallState {
             (CallState::Idle | CallState::Ended { .. }, Dial) => CallState::Connecting,
             (CallState::Ended { .. }, _) | (CallState::Idle, _) => self.clone(),
             (CallState::Connecting, MediaConnected) => CallState::Connected { since: now },
-            (CallState::Reconnecting { since }, MediaConnected) => CallState::Connected { since: *since },
-            (CallState::Connected { since }, MediaDisconnected) => CallState::Reconnecting { since: *since },
+            (CallState::Reconnecting { since }, MediaConnected) => {
+                CallState::Connected { since: *since }
+            }
+            (CallState::Connected { since }, MediaDisconnected) => {
+                CallState::Reconnecting { since: *since }
+            }
             (CallState::Connecting, LocalLeave) => ended(EndReason::Cancelled),
             (_, LocalLeave) => ended(EndReason::LocalHangup),
             (_, RemoteEnd(kind)) => ended(EndReason::Remote(kind)),
-            (CallState::Reconnecting { .. }, ReconnectTimedOut | MediaFailed) => ended(EndReason::Dropped),
+            (CallState::Reconnecting { .. }, ReconnectTimedOut | MediaFailed) => {
+                ended(EndReason::Dropped)
+            }
             (CallState::Connected { .. }, MediaFailed) => ended(EndReason::Dropped),
-            (CallState::Connecting, MediaFailed) => ended(EndReason::Failed("connection failed".into())),
+            (CallState::Connecting, MediaFailed) => {
+                ended(EndReason::Failed("connection failed".into()))
+            }
             (_, Error(message)) => ended(EndReason::Failed(message)),
             (_, _) => self.clone(),
         }
@@ -85,14 +93,21 @@ mod tests {
         let state = run(&[CallSignal::Dial, CallSignal::MediaConnected]);
         assert!(matches!(state, CallState::Connected { .. }));
         assert_eq!(
-            run(&[CallSignal::Dial, CallSignal::MediaConnected, CallSignal::LocalLeave]),
+            run(&[
+                CallSignal::Dial,
+                CallSignal::MediaConnected,
+                CallSignal::LocalLeave
+            ]),
             ended(EndReason::LocalHangup)
         );
     }
 
     #[test]
     fn leaving_while_connecting_is_a_cancel() {
-        assert_eq!(run(&[CallSignal::Dial, CallSignal::LocalLeave]), ended(EndReason::Cancelled));
+        assert_eq!(
+            run(&[CallSignal::Dial, CallSignal::LocalLeave]),
+            ended(EndReason::Cancelled)
+        );
     }
 
     #[test]
@@ -112,7 +127,11 @@ mod tests {
 
     #[test]
     fn reconnect_timeout_and_media_failure_drop_the_call() {
-        let reconnecting = [CallSignal::Dial, CallSignal::MediaConnected, CallSignal::MediaDisconnected];
+        let reconnecting = [
+            CallSignal::Dial,
+            CallSignal::MediaConnected,
+            CallSignal::MediaDisconnected,
+        ];
         let timed_out = [reconnecting.as_slice(), &[CallSignal::ReconnectTimedOut]].concat();
         assert_eq!(run(&timed_out), ended(EndReason::Dropped));
         let failed = [reconnecting.as_slice(), &[CallSignal::MediaFailed]].concat();
@@ -138,20 +157,35 @@ mod tests {
             ended(EndReason::Remote(EndKind::Declined))
         );
         assert_eq!(
-            run(&[CallSignal::Dial, CallSignal::MediaConnected, CallSignal::RemoteEnd(EndKind::Normal)]),
+            run(&[
+                CallSignal::Dial,
+                CallSignal::MediaConnected,
+                CallSignal::RemoteEnd(EndKind::Normal)
+            ]),
             ended(EndReason::Remote(EndKind::Normal))
         );
     }
 
     #[test]
     fn ended_is_final_until_the_next_dial() {
-        let state = run(&[CallSignal::Dial, CallSignal::LocalLeave, CallSignal::MediaConnected, CallSignal::RemoteEnd(EndKind::Normal)]);
+        let state = run(&[
+            CallSignal::Dial,
+            CallSignal::LocalLeave,
+            CallSignal::MediaConnected,
+            CallSignal::RemoteEnd(EndKind::Normal),
+        ]);
         assert_eq!(state, ended(EndReason::Cancelled));
-        assert_eq!(state.next(CallSignal::Dial, Instant::now()), CallState::Connecting);
+        assert_eq!(
+            state.next(CallSignal::Dial, Instant::now()),
+            CallState::Connecting
+        );
     }
 
     #[test]
     fn idle_ignores_everything_but_dial() {
-        assert_eq!(run(&[CallSignal::MediaConnected, CallSignal::LocalLeave]), CallState::Idle);
+        assert_eq!(
+            run(&[CallSignal::MediaConnected, CallSignal::LocalLeave]),
+            CallState::Idle
+        );
     }
 }

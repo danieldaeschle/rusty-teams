@@ -9,9 +9,9 @@ use uuid::Uuid;
 use crate::app_state::{AppEvent, AppState};
 use crate::backend::Engine;
 use crate::notice::short_error;
+use crate::outgoing::Outgoing;
 use crate::runtime;
 use crate::stored_outgoing::{decode, encode};
-use crate::outgoing::Outgoing;
 
 const RETRY_BACKOFF: [Duration; 3] = [
     Duration::from_secs(2),
@@ -53,7 +53,9 @@ pub fn outgoing_of(record: &OutboxRecord) -> Option<Outgoing> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Delivered {
-    Complete { message_id: Option<String> },
+    Complete {
+        message_id: Option<String>,
+    },
     /// The post went out but its announcement banner could not be set.
     WithoutBanner,
 }
@@ -95,7 +97,9 @@ pub async fn deliver(
                     discard_banner_image(banner);
                 }
                 match posted {
-                    Err(teams_core::Error::PostedWithoutBanner) => return Ok(Delivered::WithoutBanner),
+                    Err(teams_core::Error::PostedWithoutBanner) => {
+                        return Ok(Delivered::WithoutBanner);
+                    }
                     other => other,
                 }
             }
@@ -122,7 +126,9 @@ pub async fn deliver(
             .attach_link_preview(conversation_id, &record.message_id, preview)
             .await;
     }
-    Ok(Delivered::Complete { message_id: Some(record.message_id) })
+    Ok(Delivered::Complete {
+        message_id: Some(record.message_id),
+    })
 }
 
 fn discard_banner_image(banner: &teams_core::AnnouncementBanner) {

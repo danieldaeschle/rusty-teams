@@ -56,7 +56,13 @@ mod tests {
     use super::*;
     use crate::activity_feed::ActivityHorizons;
 
-    fn item(id: &str, activity_type: &str, subtype: &str, version_ms: i64, read_flag: bool) -> ActivityItem {
+    fn item(
+        id: &str,
+        activity_type: &str,
+        subtype: &str,
+        version_ms: i64,
+        read_flag: bool,
+    ) -> ActivityItem {
         ActivityItem {
             message_id: id.into(),
             activity_id: id.into(),
@@ -104,6 +110,9 @@ mod tests {
                 ("8", MentionKind::Personal, true),
             ]
         );
-        assert_eq!(mentions[0].source_message_id.as_deref(), Some("1791368000000"));
+        assert_eq!(
+            mentions[0].source_message_id.as_deref(),
+            Some("1791368000000")
+        );
     }
 }

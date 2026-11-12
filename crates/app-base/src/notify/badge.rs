@@ -60,7 +60,11 @@ pub fn render_badge(badge: &Badge, size: u32) -> Vec<u8> {
     let size = size.max(1);
     let mut pixmap = tiny_skia::Pixmap::new(size, size).expect("badge size is not zero");
     if let Ok(tree) = usvg::Tree::from_str(&badge_svg(&badge.text, size), options()) {
-        resvg::render(&tree, tiny_skia::Transform::identity(), &mut pixmap.as_mut());
+        resvg::render(
+            &tree,
+            tiny_skia::Transform::identity(),
+            &mut pixmap.as_mut(),
+        );
     }
     let mut pixels = pixmap.take();
     for pixel in pixels.chunks_exact_mut(4) {

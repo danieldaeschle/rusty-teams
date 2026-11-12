@@ -24,14 +24,20 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     /// Copilot's proposal for the draft as Teams HTML; the draft itself stays untouched.
-    pub async fn rewrite_draft(&self, chat_id: &str, user_html: &str, action: ComposeAction) -> Result<String> {
+    pub async fn rewrite_draft(
+        &self,
+        chat_id: &str,
+        user_html: &str,
+        action: ComposeAction,
+    ) -> Result<String> {
         let rewrite = ComposeRewrite {
             tenant_id: self.my_tenant_id(chat_id).await?,
             thread_id: chat_id.to_owned(),
             user_html: user_html.to_owned(),
             action,
             ui_language: COPILOT_LOCALE.to_owned(),
-            time_zone: iana_time_zone::get_timezone().unwrap_or_else(|_| FALLBACK_TIME_ZONE.to_owned()),
+            time_zone: iana_time_zone::get_timezone()
+                .unwrap_or_else(|_| FALLBACK_TIME_ZONE.to_owned()),
         };
         self.remote.rewrite_draft(&rewrite).await
     }

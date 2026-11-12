@@ -10,7 +10,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
-use calling::{CallCommand, CallDiagnostics, CallState, CallUpdate, CaptionState, EndReason, HoldState, MediaPath};
+use calling::{
+    CallCommand, CallDiagnostics, CallState, CallUpdate, CaptionState, EndReason, HoldState,
+    MediaPath,
+};
 use chrono::{DateTime, Utc};
 
 pub use document::Document;
@@ -82,7 +85,13 @@ fn on_off(on: bool) -> &'static str {
 }
 
 impl CallRecorder {
-    pub fn begin(kind: CallKind, incoming: bool, demo: bool, me: OwnIdentity, people: Vec<(String, String)>) -> Self {
+    pub fn begin(
+        kind: CallKind,
+        incoming: bool,
+        demo: bool,
+        me: OwnIdentity,
+        people: Vec<(String, String)>,
+    ) -> Self {
         CallRecorder {
             started_at: Utc::now(),
             started: Instant::now(),
@@ -112,7 +121,12 @@ impl CallRecorder {
 
     pub fn feature(&mut self, feature: &'static str, detail: impl Into<String>) {
         let at_ms = self.elapsed_ms();
-        self.features.push(FeatureRecord { at_ms, feature, detail: detail.into(), outcome: Outcome::Requested });
+        self.features.push(FeatureRecord {
+            at_ms,
+            feature,
+            detail: detail.into(),
+            outcome: Outcome::Requested,
+        });
     }
 
     pub fn local_feature(&mut self, feature: &'static str, detail: impl Into<String>) {
@@ -160,7 +174,8 @@ impl CallRecorder {
             CallUpdate::Camera(_) => self.confirm("camera"),
             CallUpdate::LocalShare(_) | CallUpdate::ShareSound(_) => self.confirm("share"),
             CallUpdate::Hold(state) => {
-                self.states.push((at_ms, format!("hold {}", hold_name(*state))));
+                self.states
+                    .push((at_ms, format!("hold {}", hold_name(*state))));
                 self.confirm("hold");
             }
             CallUpdate::Recording(_) => self.confirm("recording"),
@@ -172,7 +187,10 @@ impl CallRecorder {
             CallUpdate::Captions(CaptionState::On) => self.confirm("captions"),
             CallUpdate::Caption(_) => self.captions += 1,
             CallUpdate::Organizer { outcome: Ok(_), .. } => self.confirm("people action"),
-            CallUpdate::Organizer { outcome: Err(message), .. } => {
+            CallUpdate::Organizer {
+                outcome: Err(message),
+                ..
+            } => {
                 self.settle("people action", Outcome::Failed(message.clone()));
             }
             CallUpdate::Roster(entries) => {
@@ -193,9 +211,12 @@ impl CallRecorder {
                 }
             }
             CallUpdate::Sample(sample) => {
-                self.series.observe_sample(sample, self.others_unmuted, self.own_unmuted);
+                self.series
+                    .observe_sample(sample, self.others_unmuted, self.own_unmuted);
             }
-            CallUpdate::Diagnostics(diagnostics) => self.diagnostics = Some((**diagnostics).clone()),
+            CallUpdate::Diagnostics(diagnostics) => {
+                self.diagnostics = Some((**diagnostics).clone())
+            }
             _ => {}
         }
     }
@@ -212,7 +233,9 @@ impl CallRecorder {
             self.states.push((at_ms, name.to_owned()));
         }
         match state {
-            CallState::Connected { .. } if self.connected_ms.is_none() => self.connected_ms = Some(at_ms),
+            CallState::Connected { .. } if self.connected_ms.is_none() => {
+                self.connected_ms = Some(at_ms)
+            }
             CallState::Ended { reason } if self.ended.is_none() => {
                 self.ended = Some((at_ms, reason.clone()));
                 self.confirm("hangup");
@@ -235,18 +258,32 @@ fn describe(command: &CallCommand) -> Option<(&'static str, String)> {
     Some(match command {
         Mute(mute) => ("mute", format!("{mute:?}").to_lowercase()),
         SetCamera(on) => ("camera", on_off(*on).to_owned()),
-        StartShare(source) => ("share", format!("start {}", format!("{:?}", source.kind).to_lowercase())),
+        StartShare(source) => (
+            "share",
+            format!("start {}", format!("{:?}", source.kind).to_lowercase()),
+        ),
         StopShare => ("share", "stop".to_owned()),
         SetShareSound(on) => ("share", format!("sound {}", on_off(*on))),
         SetShareMotion(on) => ("share", format!("motion {}", on_off(*on))),
         SetShareStandout(on) => ("share", format!("standout {}", on_off(*on))),
         Hold(on) => ("hold", (if *on { "hold" } else { "resume" }).to_owned()),
         Transfer { target, replaces } => {
-            let way = if replaces.is_some() { "consulted" } else { "blind" };
+            let way = if replaces.is_some() {
+                "consulted"
+            } else {
+                "blind"
+            };
             ("transfer", format!("{way} to {}", target.mri))
         }
-        Invite { callees, group_thread } => {
-            let group = if group_thread.is_some() { ", into a group chat" } else { "" };
+        Invite {
+            callees,
+            group_thread,
+        } => {
+            let group = if group_thread.is_some() {
+                ", into a group chat"
+            } else {
+                ""
+            };
             ("add people", format!("{} invited{group}", callees.len()))
         }
         StartRecording { kind, .. } => ("recording", format!("start {kind:?}")),
@@ -268,12 +305,24 @@ fn describe(command: &CallCommand) -> Option<(&'static str, String)> {
         RemoveParticipant { mri } => ("people action", format!("remove {mri}")),
         SetLock(on) => ("people action", format!("lock {}", on_off(*on))),
         SetRole { mri, role } => ("people action", format!("role {role:?} for {mri}")),
-        SetAttendeeModality { mri, modality, allowed } => {
-            ("people action", format!("{modality:?} {} for {mri}", if *allowed { "allowed" } else { "blocked" }))
-        }
-        SetAttendeeRestrictions { mic_off, camera_off } => {
-            ("people action", format!("attendee restrictions mic_off={mic_off} camera_off={camera_off}"))
-        }
+        SetAttendeeModality {
+            mri,
+            modality,
+            allowed,
+        } => (
+            "people action",
+            format!(
+                "{modality:?} {} for {mri}",
+                if *allowed { "allowed" } else { "blocked" }
+            ),
+        ),
+        SetAttendeeRestrictions {
+            mic_off,
+            camera_off,
+        } => (
+            "people action",
+            format!("attendee restrictions mic_off={mic_off} camera_off={camera_off}"),
+        ),
         EndMeeting => ("people action", "end meeting for all".to_owned()),
         OpenWhiteboard { .. } => ("whiteboard", "open".to_owned()),
         Hangup => ("hangup", "local".to_owned()),
@@ -286,7 +335,8 @@ mod tests {
     use calling::call::VideoReport;
     use calling::timeline::TimelineEntry;
     use calling::{
-        Callee, HealthSample, MuteCommand, NetworkLevel, RosterEntry, SdpLine, SdpSummary, StatsSample, TransportDetails,
+        Callee, HealthSample, MuteCommand, NetworkLevel, RosterEntry, SdpLine, SdpSummary,
+        StatsSample, TransportDetails,
     };
 
     use super::*;
@@ -299,14 +349,24 @@ mod tests {
             display_name: "Daniel Daeschle".to_owned(),
             email: "daniel@example.com".to_owned(),
         };
-        CallRecorder::begin(CallKind::Direct, false, true, me, vec![(PEER_MRI.to_owned(), "Mara Lindqvist".to_owned())])
+        CallRecorder::begin(
+            CallKind::Direct,
+            false,
+            true,
+            me,
+            vec![(PEER_MRI.to_owned(), "Mara Lindqvist".to_owned())],
+        )
     }
 
     fn sample(packets: u64) -> CallUpdate {
         CallUpdate::Sample(StatsSample {
             audio_in_packets: packets,
             audio_out_packets: packets,
-            video: VideoReport { inbound_width: 1280, inbound_height: 720, ..VideoReport::default() },
+            video: VideoReport {
+                inbound_width: 1280,
+                inbound_height: 720,
+                ..VideoReport::default()
+            },
             ..StatsSample::default()
         })
     }
@@ -319,8 +379,16 @@ mod tests {
         };
         CallUpdate::Diagnostics(Box::new(CallDiagnostics {
             timeline: vec![
-                entry(10, "roster", "Mara Lindqvist 8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee from 203.0.113.9"),
-                entry(20, "raise hand failed", "HTTP 500 for https://emea.msg.teams.microsoft.com/v1/users/ME/conversations/19%3Aabc%40thread.v2?token=secret"),
+                entry(
+                    10,
+                    "roster",
+                    "Mara Lindqvist 8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee from 203.0.113.9",
+                ),
+                entry(
+                    20,
+                    "raise hand failed",
+                    "HTTP 500 for https://emea.msg.teams.microsoft.com/v1/users/ME/conversations/19%3Aabc%40thread.v2?token=secret",
+                ),
                 entry(30, "escalation", "new peer connection, new offer sent"),
             ],
             sdp: vec![SdpSummary {
@@ -343,7 +411,9 @@ mod tests {
     fn finished_call() -> CallRecorder {
         let mut recorder = recorder();
         recorder.observe(&CallUpdate::State(CallState::Connecting));
-        recorder.observe(&CallUpdate::State(CallState::Connected { since: Instant::now() }));
+        recorder.observe(&CallUpdate::State(CallState::Connected {
+            since: Instant::now(),
+        }));
         recorder.observe(&CallUpdate::Roster(vec![RosterEntry {
             mri: PEER_MRI.to_owned(),
             display_name: "Mara Lindqvist".to_owned(),
@@ -355,20 +425,30 @@ mod tests {
         recorder.observe(&CallUpdate::Health(calling::CallHealth {
             level: NetworkLevel::Poor,
             cpu_limited: false,
-            sample: HealthSample { loss_percent: 6., ..HealthSample::default() },
+            sample: HealthSample {
+                loss_percent: 6.,
+                ..HealthSample::default()
+            },
             transport: TransportDetails::default(),
             path: MediaPath::Direct,
         }));
-        recorder.observe(&CallUpdate::Notice("Mara Lindqvist declined the transfer".to_owned()));
+        recorder.observe(&CallUpdate::Notice(
+            "Mara Lindqvist declined the transfer".to_owned(),
+        ));
         recorder.command(&CallCommand::Mute(MuteCommand::Toggle));
         recorder.observe(&CallUpdate::Muted(true));
         recorder.command(&CallCommand::SetHand(true));
         recorder.command(&CallCommand::Transfer {
-            target: Callee { mri: PEER_MRI.to_owned(), display_name: "Mara Lindqvist".to_owned() },
+            target: Callee {
+                mri: PEER_MRI.to_owned(),
+                display_name: "Mara Lindqvist".to_owned(),
+            },
             replaces: None,
         });
         recorder.command(&CallCommand::Hangup);
-        recorder.observe(&CallUpdate::State(CallState::Ended { reason: EndReason::LocalHangup }));
+        recorder.observe(&CallUpdate::State(CallState::Ended {
+            reason: EndReason::LocalHangup,
+        }));
         recorder.observe(&diagnostics());
         recorder
     }
@@ -388,14 +468,31 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .map(|feature| (feature["feature"].as_str().unwrap(), feature["result"].as_str().unwrap()))
+            .map(|feature| {
+                (
+                    feature["feature"].as_str().unwrap(),
+                    feature["result"].as_str().unwrap(),
+                )
+            })
             .collect();
-        assert_eq!(results, [("mute", "ok"), ("hand", "failed"), ("transfer", "no confirmation"), ("hangup", "ok")]);
+        assert_eq!(
+            results,
+            [
+                ("mute", "ok"),
+                ("hand", "failed"),
+                ("transfer", "no confirmation"),
+                ("hangup", "ok")
+            ]
+        );
         assert_eq!(json["timeline"].as_array().unwrap().len(), 3);
         assert_eq!(json["sdp"][0]["lines"][0]["codecs"][0], "opus");
         assert!(document.markdown.starts_with("# Call test report"));
         assert!(document.markdown.contains("## Findings"));
-        assert!(document.markdown.contains("Inbound audio stalled in 1 of 4 samples."));
+        assert!(
+            document
+                .markdown
+                .contains("Inbound audio stalled in 1 of 4 samples.")
+        );
         assert!(document.stem.ends_with("-1to1"));
     }
 
@@ -411,7 +508,8 @@ mod tests {
         for packets in [100, 100, 100, 100] {
             recorder.observe(&sample(packets));
         }
-        let json: serde_json::Value = serde_json::from_str(&recorder.document().json).expect("valid json");
+        let json: serde_json::Value =
+            serde_json::from_str(&recorder.document().json).expect("valid json");
         assert_eq!(json["stats"]["audio_in_stalled_samples"], 0);
     }
 
@@ -419,12 +517,19 @@ mod tests {
     fn each_transfer_answer_settles_the_transfer_it_belongs_to() {
         let mut recorder = recorder();
         let transfer = CallCommand::Transfer {
-            target: Callee { mri: PEER_MRI.to_owned(), display_name: "Mara Lindqvist".to_owned() },
+            target: Callee {
+                mri: PEER_MRI.to_owned(),
+                display_name: "Mara Lindqvist".to_owned(),
+            },
             replaces: None,
         };
         recorder.command(&transfer);
         recorder.command(&transfer);
-        let entry = |elapsed_ms, label: &str, detail: &str| TimelineEntry { elapsed_ms, label: label.to_owned(), detail: detail.to_owned() };
+        let entry = |elapsed_ms, label: &str, detail: &str| TimelineEntry {
+            elapsed_ms,
+            label: label.to_owned(),
+            detail: detail.to_owned(),
+        };
         recorder.observe(&CallUpdate::Diagnostics(Box::new(CallDiagnostics {
             timeline: vec![
                 entry(10, "transfer accepted", "by the target"),
@@ -434,15 +539,27 @@ mod tests {
             ],
             ..CallDiagnostics::default()
         })));
-        let json: serde_json::Value = serde_json::from_str(&recorder.document().json).expect("valid json");
+        let json: serde_json::Value =
+            serde_json::from_str(&recorder.document().json).expect("valid json");
         let transfers: Vec<(&str, &serde_json::Value)> = json["features"]
             .as_array()
             .unwrap()
             .iter()
             .filter(|feature| feature["feature"] == "transfer")
-            .map(|feature| (feature["result"].as_str().unwrap(), &feature["confirmed_at_ms"]))
+            .map(|feature| {
+                (
+                    feature["result"].as_str().unwrap(),
+                    &feature["confirmed_at_ms"],
+                )
+            })
             .collect();
-        assert_eq!(transfers, [("failed", &serde_json::Value::Null), ("ok", &serde_json::json!(40))]);
+        assert_eq!(
+            transfers,
+            [
+                ("failed", &serde_json::Value::Null),
+                ("ok", &serde_json::json!(40))
+            ]
+        );
     }
 
     #[test]
@@ -450,7 +567,16 @@ mod tests {
         let document = finished_call().document();
         for text in [&document.json, &document.markdown] {
             for leaked in [
-                "Mara", "Lindqvist", "Daniel", "Daeschle", "aaaaaaaa", "11111111", "example.com", "203.0.113.9", "token=secret", "abc%40thread",
+                "Mara",
+                "Lindqvist",
+                "Daniel",
+                "Daeschle",
+                "aaaaaaaa",
+                "11111111",
+                "example.com",
+                "203.0.113.9",
+                "token=secret",
+                "abc%40thread",
             ] {
                 assert!(!text.contains(leaked), "{leaked} leaked into: {text}");
             }

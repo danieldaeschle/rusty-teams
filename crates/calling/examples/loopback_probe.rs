@@ -28,7 +28,10 @@ fn main() {
             }
         }
     }
-    println!("process exclude mode available: {}", started.kind == LoopbackKind::ProcessExclude);
+    println!(
+        "process exclude mode available: {}",
+        started.kind == LoopbackKind::ProcessExclude
+    );
     println!("mode: {:?}", started.kind);
     if let Some(warning) = &started.warning {
         println!("warning: {warning}");

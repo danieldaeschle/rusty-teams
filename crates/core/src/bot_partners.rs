@@ -101,7 +101,11 @@ impl<R: Remote> SyncEngine<R> {
 
     pub(crate) fn partner_chat_record(&self, chat: &Chat, my_user_id: &str) -> ChatRecord {
         let mut record = self.bot_partners().chat_record(chat, my_user_id);
-        self.name_departed_partners(std::slice::from_ref(chat), std::slice::from_mut(&mut record), my_user_id);
+        self.name_departed_partners(
+            std::slice::from_ref(chat),
+            std::slice::from_mut(&mut record),
+            my_user_id,
+        );
         record
     }
 
@@ -127,7 +131,10 @@ impl<R: Remote> SyncEngine<R> {
         if departed.is_empty() {
             return;
         }
-        let partner_ids: Vec<String> = departed.iter().map(|(_, partner_id)| partner_id.clone()).collect();
+        let partner_ids: Vec<String> = departed
+            .iter()
+            .map(|(_, partner_id)| partner_id.clone())
+            .collect();
         let names = match self.store.display_names(&partner_ids) {
             Ok(names) => names,
             Err(error) => {

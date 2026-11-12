@@ -17,15 +17,41 @@ async fn main() {
         "endDateTime": (start + Duration::minutes(30)).to_rfc3339(),
     });
     let created = session
-        .request(Method::Post, "https://graph.microsoft.com/v1.0/me/onlineMeetings", &scope, Some(body))
+        .request(
+            Method::Post,
+            "https://graph.microsoft.com/v1.0/me/onlineMeetings",
+            &scope,
+            Some(body),
+        )
         .await
         .expect("create");
     println!("# create online meeting: HTTP {}", created.status);
-    let id = created.body.get("id").and_then(Value::as_str).map(str::to_owned);
-    let code = created.body.pointer("/joinMeetingIdSettings/joinMeetingId").and_then(Value::as_str).map(|code| code.replace(' ', ""));
-    let passcode = created.body.pointer("/joinMeetingIdSettings/passcode").and_then(Value::as_str).map(str::to_owned);
-    let thread = created.body.pointer("/chatInfo/threadId").and_then(Value::as_str).map(str::to_owned);
-    println!("# meeting id found {}, passcode found {}, thread found {}", code.is_some(), passcode.is_some(), thread.is_some());
+    let id = created
+        .body
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let code = created
+        .body
+        .pointer("/joinMeetingIdSettings/joinMeetingId")
+        .and_then(Value::as_str)
+        .map(|code| code.replace(' ', ""));
+    let passcode = created
+        .body
+        .pointer("/joinMeetingIdSettings/passcode")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let thread = created
+        .body
+        .pointer("/chatInfo/threadId")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    println!(
+        "# meeting id found {}, passcode found {}, thread found {}",
+        code.is_some(),
+        passcode.is_some(),
+        thread.is_some()
+    );
     if let Some(code) = &code {
         let config = EngineConfig {
             ringable: false,
@@ -36,7 +62,9 @@ async fn main() {
             },
             ..EngineConfig::default()
         };
-        let (engine, _events) = CallEngine::start(session.clone(), poll_session, config).await.expect("engine");
+        let (engine, _events) = CallEngine::start(session.clone(), poll_session, config)
+            .await
+            .expect("engine");
         let url = match &passcode {
             Some(passcode) => format!("https://teams.microsoft.com/meet/{code}?p={passcode}"),
             None => format!("https://teams.microsoft.com/meet/{code}"),
@@ -48,13 +76,21 @@ async fn main() {
                 thread.as_deref() == Some(target.thread_id.as_str()),
                 !target.tenant_id.is_empty() && !target.organizer_id.is_empty()
             ),
-            Err(error) => println!("# resolve by id: failed: {}", error.to_string().chars().take(200).collect::<String>()),
+            Err(error) => println!(
+                "# resolve by id: failed: {}",
+                error.to_string().chars().take(200).collect::<String>()
+            ),
         }
         engine.stop().await;
     }
     if let Some(id) = id {
         let deleted = session
-            .request(Method::Delete, &format!("https://graph.microsoft.com/v1.0/me/onlineMeetings/{id}"), &scope, None)
+            .request(
+                Method::Delete,
+                &format!("https://graph.microsoft.com/v1.0/me/onlineMeetings/{id}"),
+                &scope,
+                None,
+            )
             .await
             .expect("delete");
         println!("# delete online meeting: HTTP {}", deleted.status);

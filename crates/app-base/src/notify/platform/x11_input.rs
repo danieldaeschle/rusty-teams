@@ -18,10 +18,21 @@ fn x11_window_id(window: &Window) -> Option<u32> {
     }
 }
 
-pub fn empty_input_region(display: Option<&str>, window: u32) -> Result<(), Box<dyn std::error::Error>> {
+pub fn empty_input_region(
+    display: Option<&str>,
+    window: u32,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (connection, _) = RustConnection::connect(display)?;
     connection
-        .shape_rectangles(SO::SET, SK::INPUT, ClipOrdering::UNSORTED, window, 0, 0, &[])?
+        .shape_rectangles(
+            SO::SET,
+            SK::INPUT,
+            ClipOrdering::UNSORTED,
+            window,
+            0,
+            0,
+            &[],
+        )?
         .check()?;
     Ok(())
 }
@@ -35,7 +46,10 @@ pub fn make_input_transparent(window: &Window) {
 pub fn compositor_running(display: Option<&str>) -> Result<bool, Box<dyn std::error::Error>> {
     let (connection, screen_number) = RustConnection::connect(display)?;
     let selection = format!("_NET_WM_CM_S{screen_number}");
-    let atom = connection.intern_atom(false, selection.as_bytes())?.reply()?.atom;
+    let atom = connection
+        .intern_atom(false, selection.as_bytes())?
+        .reply()?
+        .atom;
     let owner = connection.get_selection_owner(atom)?.reply()?.owner;
     Ok(owner != x11rb::NONE)
 }
@@ -72,9 +86,18 @@ pub fn write_window_icon(
     property: &[u32],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (connection, _) = RustConnection::connect(display)?;
-    let atom = connection.intern_atom(false, b"_NET_WM_ICON")?.reply()?.atom;
+    let atom = connection
+        .intern_atom(false, b"_NET_WM_ICON")?
+        .reply()?
+        .atom;
     connection
-        .change_property32(PropMode::REPLACE, window, atom, AtomEnum::CARDINAL, property)?
+        .change_property32(
+            PropMode::REPLACE,
+            window,
+            atom,
+            AtomEnum::CARDINAL,
+            property,
+        )?
         .check()?;
     connection.flush()?;
     Ok(())
@@ -93,9 +116,9 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    use x11rb::COPY_DEPTH_FROM_PARENT;
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{CreateWindowAux, WindowClass};
-    use x11rb::COPY_DEPTH_FROM_PARENT;
 
     use super::*;
 
@@ -113,7 +136,16 @@ mod tests {
 
     fn start_server() -> Option<(Server, String)> {
         let mut child = Command::new("Xvfb")
-            .args(["-displayfd", "1", "-screen", "0", "320x200x24", "-nolisten", "tcp", "-noreset"])
+            .args([
+                "-displayfd",
+                "1",
+                "-screen",
+                "0",
+                "320x200x24",
+                "-nolisten",
+                "tcp",
+                "-noreset",
+            ])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -141,13 +173,33 @@ mod tests {
         let root = connection.setup().roots[screen_number].root;
         let window = connection.generate_id().unwrap();
         connection
-            .create_window(COPY_DEPTH_FROM_PARENT, window, root, 0, 0, 100, 100, 0, WindowClass::INPUT_OUTPUT, 0, &CreateWindowAux::new())
+            .create_window(
+                COPY_DEPTH_FROM_PARENT,
+                window,
+                root,
+                0,
+                0,
+                100,
+                100,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                0,
+                &CreateWindowAux::new(),
+            )
             .unwrap();
         connection.flush().unwrap();
-        let before = connection.shape_get_rectangles(window, SK::INPUT).unwrap().reply().unwrap();
+        let before = connection
+            .shape_get_rectangles(window, SK::INPUT)
+            .unwrap()
+            .reply()
+            .unwrap();
         assert_eq!(before.rectangles.len(), 1);
         empty_input_region(Some(&display), window).unwrap();
-        let after = connection.shape_get_rectangles(window, SK::INPUT).unwrap().reply().unwrap();
+        let after = connection
+            .shape_get_rectangles(window, SK::INPUT)
+            .unwrap()
+            .reply()
+            .unwrap();
         assert!(after.rectangles.is_empty());
     }
 
@@ -161,11 +213,32 @@ mod tests {
         let root = connection.setup().roots[screen_number].root;
         let window = connection.generate_id().unwrap();
         connection
-            .create_window(COPY_DEPTH_FROM_PARENT, window, root, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, 0, &CreateWindowAux::new())
+            .create_window(
+                COPY_DEPTH_FROM_PARENT,
+                window,
+                root,
+                0,
+                0,
+                1,
+                1,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                0,
+                &CreateWindowAux::new(),
+            )
             .unwrap();
         let selection = format!("_NET_WM_CM_S{screen_number}");
-        let atom = connection.intern_atom(false, selection.as_bytes()).unwrap().reply().unwrap().atom;
-        connection.set_selection_owner(window, atom, x11rb::CURRENT_TIME).unwrap().check().unwrap();
+        let atom = connection
+            .intern_atom(false, selection.as_bytes())
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
+        connection
+            .set_selection_owner(window, atom, x11rb::CURRENT_TIME)
+            .unwrap()
+            .check()
+            .unwrap();
         assert!(compositor_running(Some(&display)).unwrap());
     }
 
@@ -191,12 +264,29 @@ mod tests {
         let root = connection.setup().roots[screen_number].root;
         let window = connection.generate_id().unwrap();
         connection
-            .create_window(COPY_DEPTH_FROM_PARENT, window, root, 0, 0, 100, 100, 0, WindowClass::INPUT_OUTPUT, 0, &CreateWindowAux::new())
+            .create_window(
+                COPY_DEPTH_FROM_PARENT,
+                window,
+                root,
+                0,
+                0,
+                100,
+                100,
+                0,
+                WindowClass::INPUT_OUTPUT,
+                0,
+                &CreateWindowAux::new(),
+            )
             .unwrap();
         connection.flush().unwrap();
         let property = window_icon_property(crate::appearance::AppIcon::RustyTeams.png()).unwrap();
         write_window_icon(Some(&display), window, &property).unwrap();
-        let atom = connection.intern_atom(false, b"_NET_WM_ICON").unwrap().reply().unwrap().atom;
+        let atom = connection
+            .intern_atom(false, b"_NET_WM_ICON")
+            .unwrap()
+            .reply()
+            .unwrap()
+            .atom;
         let reply = connection
             .get_property(false, window, atom, AtomEnum::CARDINAL, 0, u32::MAX)
             .unwrap()

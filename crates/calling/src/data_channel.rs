@@ -42,7 +42,13 @@ impl Depacketizer {
         let source_id = u32::from_be_bytes([frame[6], frame[7], frame[8], frame[9]]);
         let pending = self.pending.entry(data_id).or_default();
         if frame[2] & START_FLAG != 0 {
-            *pending = Pending { source_id, remaining, next_sequence: sequence, payload: Vec::new(), started: true };
+            *pending = Pending {
+                source_id,
+                remaining,
+                next_sequence: sequence,
+                payload: Vec::new(),
+                started: true,
+            };
         } else if !pending.started || pending.next_sequence != sequence {
             *pending = Pending::default();
             return None;
@@ -55,13 +61,28 @@ impl Depacketizer {
             return None;
         }
         let finished = std::mem::take(pending);
-        Some(DataMessage { data_id, source_id: finished.source_id, payload: finished.payload })
+        Some(DataMessage {
+            data_id,
+            source_id: finished.source_id,
+            payload: finished.payload,
+        })
     }
 }
 
 #[cfg(test)]
-pub fn frame(data_id: u8, sequence: u16, remaining: u8, start: bool, source_id: u32, payload: &[u8]) -> Vec<u8> {
-    let mut bytes = vec![0x10, FIXED_HEADER as u8, data_id | if start { START_FLAG } else { 0 }];
+pub fn frame(
+    data_id: u8,
+    sequence: u16,
+    remaining: u8,
+    start: bool,
+    source_id: u32,
+    payload: &[u8],
+) -> Vec<u8> {
+    let mut bytes = vec![
+        0x10,
+        FIXED_HEADER as u8,
+        data_id | if start { START_FLAG } else { 0 },
+    ];
     bytes.extend_from_slice(&sequence.to_be_bytes());
     bytes.push(remaining);
     bytes.extend_from_slice(&source_id.to_be_bytes());
@@ -77,16 +98,33 @@ mod tests {
     #[test]
     fn a_single_frame_is_one_message() {
         let mut depacketizer = Depacketizer::default();
-        let message = depacketizer.push(&frame(3, 0, 0, true, 77, b"{\"a\":1}")).unwrap();
-        assert_eq!(message, DataMessage { data_id: 3, source_id: 77, payload: b"{\"a\":1}".to_vec() });
+        let message = depacketizer
+            .push(&frame(3, 0, 0, true, 77, b"{\"a\":1}"))
+            .unwrap();
+        assert_eq!(
+            message,
+            DataMessage {
+                data_id: 3,
+                source_id: 77,
+                payload: b"{\"a\":1}".to_vec()
+            }
+        );
     }
 
     #[test]
     fn fragments_join_in_sequence_and_other_ids_do_not_interfere() {
         let mut depacketizer = Depacketizer::default();
-        assert!(depacketizer.push(&frame(3, 10, 2, true, 5, b"he")).is_none());
+        assert!(
+            depacketizer
+                .push(&frame(3, 10, 2, true, 5, b"he"))
+                .is_none()
+        );
         assert!(depacketizer.push(&frame(9, 0, 0, true, 6, b"x")).is_some());
-        assert!(depacketizer.push(&frame(3, 11, 2, false, 5, b"ll")).is_none());
+        assert!(
+            depacketizer
+                .push(&frame(3, 11, 2, false, 5, b"ll"))
+                .is_none()
+        );
         let message = depacketizer.push(&frame(3, 12, 2, false, 5, b"o")).unwrap();
         assert_eq!(message.payload, b"hello");
         assert_eq!(message.source_id, 5);

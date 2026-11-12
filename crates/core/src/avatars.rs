@@ -75,7 +75,10 @@ impl<R: Remote> SyncEngine<R> {
         let (teams, people): (Vec<String>, Vec<String>) = people
             .into_iter()
             .partition(|key| key.starts_with(TEAM_AVATAR_PREFIX));
-        for chunk in teams.chunks(AVATAR_BATCH).chain(people.chunks(AVATAR_BATCH)) {
+        for chunk in teams
+            .chunks(AVATAR_BATCH)
+            .chain(people.chunks(AVATAR_BATCH))
+        {
             let photos = match chunk.first() {
                 Some(key) if key.starts_with(TEAM_AVATAR_PREFIX) => {
                     let team_ids: Vec<String> = chunk

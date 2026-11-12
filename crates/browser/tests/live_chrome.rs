@@ -8,7 +8,10 @@ const TEST_PORT: u16 = 9444;
 #[ignore = "starts a real Chrome on port 9444 with a throwaway profile"]
 async fn start_status_stop_on_a_separate_port_and_profile() {
     let profile_name = format!("rusty-teams-chrome-test-{}", std::process::id());
-    let config = Config::detect().unwrap().with_port(TEST_PORT).with_profile_name(&profile_name);
+    let config = Config::detect()
+        .unwrap()
+        .with_port(TEST_PORT)
+        .with_profile_name(&profile_name);
     let mode_file = config.mode_file.clone();
     let profile_directory = mode_file.with_extension("");
     let browser = Browser::new(config);

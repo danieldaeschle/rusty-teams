@@ -300,9 +300,10 @@ impl Switcher {
             if !still_current {
                 return;
             }
-            let receiver = runtime::spawn(async move {
-                engine.server_suggestions(&search_session, &query).await
-            });
+            let receiver =
+                runtime::spawn(
+                    async move { engine.server_suggestions(&search_session, &query).await },
+                );
             let suggestions = match receiver.await {
                 Ok(Ok(suggestions)) => suggestions,
                 _ => return,
@@ -380,8 +381,7 @@ impl Switcher {
             cx.emit(SwitcherEvent::PickPerson {
                 user_id: person.user_id.clone(),
             });
-        } else if let Some(message) = message_index.and_then(|index| self.messages.get(index))
-        {
+        } else if let Some(message) = message_index.and_then(|index| self.messages.get(index)) {
             cx.emit(SwitcherEvent::PickMessage {
                 selection: message.selection.clone(),
                 message_id: message.message_id.clone(),
@@ -677,10 +677,9 @@ impl Render for Switcher {
                             .items_center()
                             .child(icon(IconName::Search, 14., theme::text_muted()))
                             .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .child(Input::new(&self.input).appearance(false).bordered(false)),
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.input).appearance(false).bordered(false),
+                                ),
                             ),
                     )
                     .child(

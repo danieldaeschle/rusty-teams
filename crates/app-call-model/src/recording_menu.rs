@@ -62,7 +62,11 @@ impl RecordingChip {
     }
 }
 
-pub fn recording_chip(recording: bool, audio_only: bool, transcribing: bool) -> Option<RecordingChip> {
+pub fn recording_chip(
+    recording: bool,
+    audio_only: bool,
+    transcribing: bool,
+) -> Option<RecordingChip> {
     match (recording, audio_only, transcribing) {
         (true, true, _) => Some(RecordingChip::RecordingAudio),
         (true, false, _) => Some(RecordingChip::Recording),
@@ -76,42 +80,88 @@ mod tests {
     use super::*;
 
     fn labels(recording: bool, transcribing: bool) -> Vec<&'static str> {
-        record_actions(recording, transcribing).into_iter().map(|(_, label)| label).collect()
+        record_actions(recording, transcribing)
+            .into_iter()
+            .map(|(_, label)| label)
+            .collect()
     }
 
     #[test]
     fn nothing_running_offers_the_three_starts() {
-        assert_eq!(labels(false, false), ["Start recording", "Record audio only", "Start transcription only"]);
+        assert_eq!(
+            labels(false, false),
+            [
+                "Start recording",
+                "Record audio only",
+                "Start transcription only"
+            ]
+        );
     }
 
     #[test]
     fn recording_with_transcript_offers_the_three_stop_variants() {
         let actions = record_actions(true, true);
         assert_eq!(actions[0].0, RecordAction::Stop(StopScope::RecordingOnly));
-        assert_eq!(actions[1].0, RecordAction::Stop(StopScope::TranscriptionOnly));
+        assert_eq!(
+            actions[1].0,
+            RecordAction::Stop(StopScope::TranscriptionOnly)
+        );
         assert_eq!(actions[2].0, RecordAction::Stop(StopScope::Both));
-        assert_eq!(labels(true, true), ["Stop recording", "Stop transcription", "Stop both"]);
+        assert_eq!(
+            labels(true, true),
+            ["Stop recording", "Stop transcription", "Stop both"]
+        );
     }
 
     #[test]
     fn a_single_running_part_offers_the_one_matching_stop() {
-        assert_eq!(record_actions(true, false), [(RecordAction::Stop(StopScope::Both), "Stop recording")]);
-        assert_eq!(record_actions(false, true), [(RecordAction::Stop(StopScope::TranscriptionOnly), "Stop transcription")]);
+        assert_eq!(
+            record_actions(true, false),
+            [(RecordAction::Stop(StopScope::Both), "Stop recording")]
+        );
+        assert_eq!(
+            record_actions(false, true),
+            [(
+                RecordAction::Stop(StopScope::TranscriptionOnly),
+                "Stop transcription"
+            )]
+        );
     }
 
     #[test]
     fn only_stops_ask_for_confirmation() {
-        assert_eq!(RecordAction::Start(RecordingKind::Video).confirm_title(), None);
-        assert_eq!(RecordAction::Stop(StopScope::Both).confirm_title(), Some("Stop recording and transcription?"));
-        assert_eq!(RecordAction::Stop(StopScope::RecordingOnly).confirm_title(), Some("Stop recording?"));
-        assert_eq!(RecordAction::Stop(StopScope::TranscriptionOnly).confirm_title(), Some("Stop transcription?"));
+        assert_eq!(
+            RecordAction::Start(RecordingKind::Video).confirm_title(),
+            None
+        );
+        assert_eq!(
+            RecordAction::Stop(StopScope::Both).confirm_title(),
+            Some("Stop recording and transcription?")
+        );
+        assert_eq!(
+            RecordAction::Stop(StopScope::RecordingOnly).confirm_title(),
+            Some("Stop recording?")
+        );
+        assert_eq!(
+            RecordAction::Stop(StopScope::TranscriptionOnly).confirm_title(),
+            Some("Stop transcription?")
+        );
     }
 
     #[test]
     fn the_chip_names_what_is_running() {
-        assert_eq!(recording_chip(true, false, true), Some(RecordingChip::Recording));
-        assert_eq!(recording_chip(true, true, true), Some(RecordingChip::RecordingAudio));
-        assert_eq!(recording_chip(false, false, true), Some(RecordingChip::Transcribing));
+        assert_eq!(
+            recording_chip(true, false, true),
+            Some(RecordingChip::Recording)
+        );
+        assert_eq!(
+            recording_chip(true, true, true),
+            Some(RecordingChip::RecordingAudio)
+        );
+        assert_eq!(
+            recording_chip(false, false, true),
+            Some(RecordingChip::Transcribing)
+        );
         assert_eq!(recording_chip(false, false, false), None);
         assert_eq!(RecordingChip::RecordingAudio.label(), "Recording audio");
     }

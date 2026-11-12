@@ -228,10 +228,13 @@ mod tests {
         );
         let owner = json!({"memberRole": 2, "teamSettings": {}});
         let owner_rights = parse_team_rights(&owner);
-        assert!(owner_rights.owner && owner_rights.add_private_channel && owner_rights.delete_channel);
+        assert!(
+            owner_rights.owner && owner_rights.add_private_channel && owner_rights.delete_channel
+        );
         let archived = json!({"memberRole": 2, "isArchived": true});
         assert_eq!(parse_team_rights(&archived), TeamRights::default());
-        let channel_only = json!({"memberRole": 1, "channelOnlyMember": true, "teamSettings": settings});
+        let channel_only =
+            json!({"memberRole": 1, "channelOnlyMember": true, "teamSettings": settings});
         assert_eq!(parse_team_rights(&channel_only), TeamRights::default());
     }
 

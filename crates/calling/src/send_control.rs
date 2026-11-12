@@ -8,8 +8,18 @@ const BITRATE_UNIT: u64 = 1200;
 const SCALE_STEP: f64 = 1.01;
 const MAX_SCALE: f64 = 16.0;
 pub const KEYFRAME_NUDGE: f64 = 1.1;
-const KNOWN_KEYS: [&str; 10] =
-    ["max-fs", "max-fps", "max-mbps", "max-br", "KeyFrame", "profile-level-id", "rid", "ssrc", "sequence-number", "packetization-mode"];
+const KNOWN_KEYS: [&str; 10] = [
+    "max-fs",
+    "max-fps",
+    "max-mbps",
+    "max-br",
+    "KeyFrame",
+    "profile-level-id",
+    "rid",
+    "ssrc",
+    "sequence-number",
+    "packetization-mode",
+];
 
 /// One layer of a mixer `controlVideoStreaming` request (VDCLC) for what we send.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -54,13 +64,20 @@ fn pairs(value: &Value) -> BTreeMap<String, String> {
             .filter_map(|pair| pair.split_once('='))
             .map(|(key, value)| (key.trim().to_owned(), value.trim().to_owned()))
             .collect(),
-        Value::Object(map) => map.iter().filter_map(|(key, value)| Some((key.clone(), text_of(value)?))).collect(),
+        Value::Object(map) => map
+            .iter()
+            .filter_map(|(key, value)| Some((key.clone(), text_of(value)?)))
+            .collect(),
         _ => BTreeMap::new(),
     }
 }
 
 fn limit_from(parameters: &BTreeMap<String, String>) -> SendLimit {
-    let number = |key: &str| parameters.get(key).and_then(|value| value.parse::<f64>().ok());
+    let number = |key: &str| {
+        parameters
+            .get(key)
+            .and_then(|value| value.parse::<f64>().ok())
+    };
     SendLimit {
         max_fs: number("max-fs").map(|value| value as u32),
         max_mbps: number("max-mbps").map(|value| value as u32),
@@ -75,7 +92,13 @@ fn limit_from(parameters: &BTreeMap<String, String>) -> SendLimit {
 fn describe(parameters: &BTreeMap<String, String>) -> String {
     parameters
         .iter()
-        .map(|(key, value)| if KNOWN_KEYS.contains(&key.as_str()) { format!("{key}={value}") } else { key.clone() })
+        .map(|(key, value)| {
+            if KNOWN_KEYS.contains(&key.as_str()) {
+                format!("{key}={value}")
+            } else {
+                key.clone()
+            }
+        })
         .collect::<Vec<_>>()
         .join(";")
 }
@@ -93,7 +116,10 @@ pub fn parse_request(body: &Value) -> Option<SendRequest> {
         (_, single) if !single.is_null() => vec![pairs(single)],
         _ => Vec::new(),
     };
-    let mut fields: Vec<&str> = info.as_object().map(|map| map.keys().map(String::as_str).collect()).unwrap_or_default();
+    let mut fields: Vec<&str> = info
+        .as_object()
+        .map(|map| map.keys().map(String::as_str).collect())
+        .unwrap_or_default();
     fields.sort_unstable();
     let shape = format!(
         "seq {} source {} control {} fields [{}] layers [{}]",
@@ -103,7 +129,9 @@ pub fn parse_request(body: &Value) -> Option<SendRequest> {
         fields.join(","),
         layers.iter().map(describe).collect::<Vec<_>>().join(" | ")
     );
-    let layer_sequence = layers.iter().find_map(|layer| layer.get("sequence-number")?.parse().ok());
+    let layer_sequence = layers
+        .iter()
+        .find_map(|layer| layer.get("sequence-number")?.parse().ok());
     Some(SendRequest {
         source_id: info["sourceId"].as_i64(),
         sequence: layer_sequence.or_else(|| control["sequenceNumber"].as_i64()),
@@ -125,14 +153,18 @@ impl RequestFilter {
             return None;
         }
         if let Some(sequence) = request.sequence {
-            let last = self.last_sequence.entry(request.source_id).or_insert(i64::MIN);
+            let last = self
+                .last_sequence
+                .entry(request.source_id)
+                .or_insert(i64::MIN);
             if sequence < *last {
                 return None;
             }
             *last = sequence;
         }
         let unchanged = self.last_limits.get(&request.source_id) == Some(&request.limits);
-        self.last_limits.insert(request.source_id, request.limits.clone());
+        self.last_limits
+            .insert(request.source_id, request.limits.clone());
         let keyframe = request.limits.iter().any(|limit| limit.keyframe);
         (!unchanged || keyframe).then(|| request.limits.clone())
     }
@@ -161,7 +193,11 @@ pub fn encoder_limits(limit: &SendLimit, frame: Option<(u32, u32)>) -> EncoderLi
     };
     let rate_by_mbps = match (limit.max_mbps, frame) {
         (Some(max_mbps), Some((width, height))) if max_mbps > 0 => {
-            let blocks = macroblocks(f64::from(width) / scale_down_by, f64::from(height) / scale_down_by).max(1);
+            let blocks = macroblocks(
+                f64::from(width) / scale_down_by,
+                f64::from(height) / scale_down_by,
+            )
+            .max(1);
             Some(f64::from(max_mbps) / f64::from(blocks))
         }
         _ => None,
@@ -172,7 +208,11 @@ pub fn encoder_limits(limit: &SendLimit, frame: Option<(u32, u32)>) -> EncoderLi
     }
     .filter(|fps| *fps > 0.0)
     .map(|fps| fps.max(1.0));
-    EncoderLimits { scale_down_by, max_framerate, max_bitrate: limit.max_bitrate.filter(|bitrate| *bitrate > 0) }
+    EncoderLimits {
+        scale_down_by,
+        max_framerate,
+        max_bitrate: limit.max_bitrate.filter(|bitrate| *bitrate > 0),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,9 +223,17 @@ pub struct LayerPlan {
     pub keyframe: bool,
 }
 
-pub fn plan_layers(limits: &[SendLimit], frame: Option<(u32, u32)>, rids: &[String]) -> Vec<LayerPlan> {
+pub fn plan_layers(
+    limits: &[SendLimit],
+    frame: Option<(u32, u32)>,
+    rids: &[String],
+) -> Vec<LayerPlan> {
     let encoding_of = |limit: &SendLimit| {
-        limit.rid.as_ref().and_then(|rid| rids.iter().position(|candidate| candidate == rid)).unwrap_or(0)
+        limit
+            .rid
+            .as_ref()
+            .and_then(|rid| rids.iter().position(|candidate| candidate == rid))
+            .unwrap_or(0)
     };
     rids.iter()
         .enumerate()
@@ -219,7 +267,18 @@ mod tests {
         let request = parse_request(&body).unwrap();
         assert_eq!(request.source_id, Some(405));
         assert_eq!(request.sequence, Some(12));
-        assert_eq!(request.limits, vec![SendLimit { max_fs: Some(920), max_mbps: Some(27600), max_fps: Some(30.0), max_bitrate: None, keyframe: true, rid: None, ssrc: None }]);
+        assert_eq!(
+            request.limits,
+            vec![SendLimit {
+                max_fs: Some(920),
+                max_mbps: Some(27600),
+                max_fps: Some(30.0),
+                max_bitrate: None,
+                keyframe: true,
+                rid: None,
+                ssrc: None
+            }]
+        );
         assert_eq!(
             request.shape,
             "seq 12 source 405 control start fields [control,fmtParams,sourceId,streamMsid] layers [KeyFrame=1;max-fps=3000;max-fs=920;max-mbps=27600;x-secret]"
@@ -252,7 +311,10 @@ mod tests {
         assert!(filter.admit(&request(6, "max-fs=920")).is_none());
         assert!(filter.admit(&request(4, "max-fs=3600")).is_none());
         assert!(filter.admit(&request(7, "max-fs=920;KeyFrame=1")).is_some());
-        assert_eq!(filter.admit(&request(8, "max-fs=3600")).unwrap()[0].max_fs, Some(3600));
+        assert_eq!(
+            filter.admit(&request(8, "max-fs=3600")).unwrap()[0].max_fs,
+            Some(3600)
+        );
     }
 
     #[test]
@@ -265,12 +327,22 @@ mod tests {
         assert!(macroblocks(960.0 / scale, 720.0 / scale) <= 920);
         assert_eq!(scale_for(1280, 720, 0), 1.0);
         let screen = scale_for(1920, 1200, 8160);
-        assert!(screen > 1.0 && macroblocks(1920.0 / screen, 1200.0 / screen) <= 8160, "{screen}");
+        assert!(
+            screen > 1.0 && macroblocks(1920.0 / screen, 1200.0 / screen) <= 8160,
+            "{screen}"
+        );
     }
 
     #[test]
     fn frame_rate_follows_max_fps_and_max_mbps() {
-        let limit = SendLimit { max_fs: Some(920), max_mbps: Some(13_800), max_fps: Some(30.0), max_bitrate: Some(600_000), keyframe: false, ..SendLimit::default() };
+        let limit = SendLimit {
+            max_fs: Some(920),
+            max_mbps: Some(13_800),
+            max_fps: Some(30.0),
+            max_bitrate: Some(600_000),
+            keyframe: false,
+            ..SendLimit::default()
+        };
         let limits = encoder_limits(&limit, Some((1280, 720)));
         assert!(limits.scale_down_by > 1.0);
         assert!(limits.max_framerate.unwrap() <= 30.0 && limits.max_framerate.unwrap() >= 14.0);
@@ -297,18 +369,35 @@ mod tests {
     #[test]
     fn three_layers_keep_their_rid_ssrc_and_limits() {
         let request = simulcast_request(1, THREE_LAYERS);
-        let seen: Vec<(Option<&str>, Option<u32>, Option<u32>)> =
-            request.limits.iter().map(|limit| (limit.rid.as_deref(), limit.ssrc, limit.max_fs)).collect();
-        assert_eq!(seen, vec![(Some("1"), Some(1111), Some(405)), (Some("2"), Some(1112), Some(920)), (Some("3"), Some(1113), Some(3600))]);
+        let seen: Vec<(Option<&str>, Option<u32>, Option<u32>)> = request
+            .limits
+            .iter()
+            .map(|limit| (limit.rid.as_deref(), limit.ssrc, limit.max_fs))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                (Some("1"), Some(1111), Some(405)),
+                (Some("2"), Some(1112), Some(920)),
+                (Some("3"), Some(1113), Some(3600))
+            ]
+        );
         assert_eq!(request.limits[2].max_bitrate, Some(1_800_000));
     }
 
     #[test]
     fn a_missing_rid_switches_that_layer_off() {
         let request = simulcast_request(1, THREE_LAYERS);
-        let limits: Vec<SendLimit> = request.limits.into_iter().filter(|limit| limit.rid.as_deref() != Some("2")).collect();
+        let limits: Vec<SendLimit> = request
+            .limits
+            .into_iter()
+            .filter(|limit| limit.rid.as_deref() != Some("2"))
+            .collect();
         let plans = plan_layers(&limits, Some((1280, 720)), &rids());
-        assert_eq!(plans.iter().map(|plan| plan.active).collect::<Vec<_>>(), vec![true, false, true]);
+        assert_eq!(
+            plans.iter().map(|plan| plan.active).collect::<Vec<_>>(),
+            vec![true, false, true]
+        );
         assert!(plans[1].limits.is_none());
         assert!(plans[0].limits.unwrap().scale_down_by > plans[2].limits.unwrap().scale_down_by);
         assert_eq!(plans[2].limits.unwrap().scale_down_by, 1.0);
@@ -316,9 +405,15 @@ mod tests {
 
     #[test]
     fn an_entry_without_rid_drives_the_first_encoding() {
-        let limits = [SendLimit { max_fs: Some(920), ..SendLimit::default() }];
+        let limits = [SendLimit {
+            max_fs: Some(920),
+            ..SendLimit::default()
+        }];
         let plans = plan_layers(&limits, Some((1280, 720)), &rids());
-        assert_eq!(plans.iter().map(|plan| plan.active).collect::<Vec<_>>(), vec![true, false, false]);
+        assert_eq!(
+            plans.iter().map(|plan| plan.active).collect::<Vec<_>>(),
+            vec![true, false, false]
+        );
         assert!(plans[0].limits.unwrap().scale_down_by > 1.0);
     }
 
@@ -327,13 +422,22 @@ mod tests {
         let mut limits = simulcast_request(1, THREE_LAYERS).limits;
         limits[1].keyframe = true;
         let plans = plan_layers(&limits, Some((1280, 720)), &rids());
-        assert_eq!(plans.iter().map(|plan| plan.keyframe).collect::<Vec<_>>(), vec![false, true, false]);
+        assert_eq!(
+            plans.iter().map(|plan| plan.keyframe).collect::<Vec<_>>(),
+            vec![false, true, false]
+        );
     }
 
     #[test]
     fn the_filter_compares_the_whole_layer_set() {
         let mut filter = RequestFilter::default();
-        assert_eq!(filter.admit(&simulcast_request(1, THREE_LAYERS)).unwrap().len(), 3);
+        assert_eq!(
+            filter
+                .admit(&simulcast_request(1, THREE_LAYERS))
+                .unwrap()
+                .len(),
+            3
+        );
         assert!(filter.admit(&simulcast_request(2, THREE_LAYERS)).is_none());
         let mut changed = THREE_LAYERS;
         changed[1] = "max-fs=405;max-fps=3000;max-br=250;rid=2;ssrc=1112";

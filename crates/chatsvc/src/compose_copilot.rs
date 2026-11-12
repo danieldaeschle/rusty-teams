@@ -217,7 +217,10 @@ pub fn exchange(rewrite: &ComposeRewrite, session_id: &str) -> AugloopExchange {
 fn add_operation_header() -> Value {
     header(
         "AugLoop_Core_AddOperation",
-        &["AugLoop_Core_OperationWithSiblingContext", "AugLoop_Core_Operation"],
+        &[
+            "AugLoop_Core_OperationWithSiblingContext",
+            "AugLoop_Core_Operation",
+        ],
     )
 }
 
@@ -272,7 +275,10 @@ pub fn answer_of(received: &Value) -> Result<String> {
         return Err(Error::UnexpectedAnswer(failure_reason(received)));
     };
     if body["status"].as_i64().unwrap_or(0) != 0 {
-        return Err(Error::UnexpectedAnswer(format!("Copilot status {}", body["status"])));
+        return Err(Error::UnexpectedAnswer(format!(
+            "Copilot status {}",
+            body["status"]
+        )));
     }
     body["answer"]
         .as_str()
@@ -319,20 +325,43 @@ mod tests {
         let body = &signal["ops"][0]["items"][0]["body"];
         assert_eq!(body["userText"], "<p>hallo</p>");
         assert_eq!(body["requestContext"]["threadId"], "19:chat@thread.v2");
-        assert_eq!((body["tone"].as_str(), body["length"].as_str()), (Some("default"), Some("medium")));
+        assert_eq!(
+            (body["tone"].as_str(), body["length"].as_str()),
+            (Some("default"), Some("medium"))
+        );
         assert!(body.get("customPrompt").is_none());
     }
 
     #[test]
     fn actions_send_the_tone_and_length_teams_sends() {
         let sent = |action: ComposeAction| {
-            let body = signal(&ComposeRewrite { action, ..rewrite() })["ops"][0]["items"][0]["body"].clone();
-            (body["tone"].as_str().unwrap().to_owned(), body["length"].as_str().unwrap().to_owned(), body.get("customPrompt").cloned())
+            let body = signal(&ComposeRewrite {
+                action,
+                ..rewrite()
+            })["ops"][0]["items"][0]["body"]
+                .clone();
+            (
+                body["tone"].as_str().unwrap().to_owned(),
+                body["length"].as_str().unwrap().to_owned(),
+                body.get("customPrompt").cloned(),
+            )
         };
-        assert_eq!(sent(ComposeAction::Proofread), ("PROOFREAD_SCENARIO".into(), "medium".into(), None));
-        assert_eq!(sent(ComposeAction::Adjust(Adjustment::Concise)), ("default".into(), "short".into(), None));
-        assert_eq!(sent(ComposeAction::Adjust(Adjustment::Longer)), ("default".into(), "long".into(), None));
-        assert_eq!(sent(ComposeAction::Adjust(Adjustment::Confident)), ("confident".into(), "medium".into(), None));
+        assert_eq!(
+            sent(ComposeAction::Proofread),
+            ("PROOFREAD_SCENARIO".into(), "medium".into(), None)
+        );
+        assert_eq!(
+            sent(ComposeAction::Adjust(Adjustment::Concise)),
+            ("default".into(), "short".into(), None)
+        );
+        assert_eq!(
+            sent(ComposeAction::Adjust(Adjustment::Longer)),
+            ("default".into(), "long".into(), None)
+        );
+        assert_eq!(
+            sent(ComposeAction::Adjust(Adjustment::Confident)),
+            ("confident".into(), "medium".into(), None)
+        );
         assert_eq!(
             sent(ComposeAction::Custom("as a haiku".into())),
             ("default".into(), "medium".into(), Some(json!("as a haiku")))

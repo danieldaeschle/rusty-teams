@@ -2,9 +2,9 @@ use chrono::{DateTime, TimeZone, Utc};
 use rusqlite::Connection;
 use store::{
     AvatarRecord, ChannelLayoutRecord, ChannelMentions, ChannelNotificationLevel,
-    ChannelNotifications, ChannelReadState, ChannelRecord, ChannelTabRecord, ChatPreview, ChatRecord, FolderRecord,
-    MemberRecord, MessageImportance, MessageRecord, ReadHorizonRecord, RecentScope, Store,
-    SyncState, TeamLayoutRecord, TeamRecord, TeamRights, UNKNOWN_USER_NAME,
+    ChannelNotifications, ChannelReadState, ChannelRecord, ChannelTabRecord, ChatPreview,
+    ChatRecord, FolderRecord, MemberRecord, MessageImportance, MessageRecord, ReadHorizonRecord,
+    RecentScope, Store, SyncState, TeamLayoutRecord, TeamRecord, TeamRights, UNKNOWN_USER_NAME,
 };
 
 #[test]
@@ -289,7 +289,10 @@ fn chat_upsert_keeps_a_real_title_over_the_only_you_fallback() {
     store
         .upsert_chats(&[chat("chat-3", UNKNOWN_USER_NAME, Some(at(2)))])
         .unwrap();
-    assert_eq!(store.chat("chat-3").unwrap().unwrap().title, UNKNOWN_USER_NAME);
+    assert_eq!(
+        store.chat("chat-3").unwrap().unwrap().title,
+        UNKNOWN_USER_NAME
+    );
 }
 
 #[test]
@@ -1778,7 +1781,10 @@ fn migration_to_v25_drops_copies_stored_under_a_float_id() {
     {
         let store = Store::open(&path).unwrap();
         store
-            .upsert_messages(&[message("c", "1793871826192.0", 1), message("c", "1793871826192", 1)])
+            .upsert_messages(&[
+                message("c", "1793871826192.0", 1),
+                message("c", "1793871826192", 1),
+            ])
             .unwrap();
         drop(store);
         Connection::open(&path)
@@ -1802,7 +1808,10 @@ fn team_rights_come_back_with_the_sidebar() {
             name: "Team".to_owned(),
         }])
         .unwrap();
-    assert_eq!(store.sidebar().unwrap().teams[0].rights, TeamRights::default());
+    assert_eq!(
+        store.sidebar().unwrap().teams[0].rights,
+        TeamRights::default()
+    );
     let rights = TeamRights {
         owner: false,
         add_channel: true,
@@ -1828,7 +1837,9 @@ fn migration_to_v29_names_departed_people_from_their_messages() {
     {
         let store = Store::open(&path).unwrap();
         store.upsert_chats(&[chat("c", "?", Some(at(1)))]).unwrap();
-        store.upsert_chats(&[chat("gone", "?", Some(at(2)))]).unwrap();
+        store
+            .upsert_chats(&[chat("gone", "?", Some(at(2)))])
+            .unwrap();
         store.upsert_messages(&[message("c", "m1", 1)]).unwrap();
         store.set_meta("me_user_id", "user-me").unwrap();
         drop(store);
@@ -1847,28 +1858,50 @@ fn migration_to_v29_names_departed_people_from_their_messages() {
     let named = store.chat("c").unwrap().unwrap();
     assert_eq!(named.title, "Ada Example");
     assert_eq!(named.member_summary, "Ada Example");
-    assert_eq!(store.chat("gone").unwrap().unwrap().title, UNKNOWN_USER_NAME);
+    assert_eq!(
+        store.chat("gone").unwrap().unwrap().title,
+        UNKNOWN_USER_NAME
+    );
 }
 
 #[test]
 fn a_chat_without_a_last_message_keeps_the_time_of_its_last_real_activity() {
     let store = Store::open_in_memory().unwrap();
-    store.upsert_chats(&[chat("meeting", "Review", Some(at(1)))]).unwrap();
+    store
+        .upsert_chats(&[chat("meeting", "Review", Some(at(1)))])
+        .unwrap();
     let left = MessageRecord {
-        call_event_json: Some(r#"{"roster":{"change":"Left","member_ids":["user-bob"]}}"#.to_owned()),
+        call_event_json: Some(
+            r#"{"roster":{"change":"Left","member_ids":["user-bob"]}}"#.to_owned(),
+        ),
         ..call_message("left", 40)
     };
     store
-        .upsert_messages(&[MessageRecord { conversation_id: "meeting".to_owned(), ..call_message("ended", 10) }, MessageRecord { conversation_id: "meeting".to_owned(), ..left }])
+        .upsert_messages(&[
+            MessageRecord {
+                conversation_id: "meeting".to_owned(),
+                ..call_message("ended", 10)
+            },
+            MessageRecord {
+                conversation_id: "meeting".to_owned(),
+                ..left
+            },
+        ])
         .unwrap();
     let mut bumped = chat("meeting", "Review", Some(at(40)));
     bumped.without_last_message = true;
     store.upsert_chats(&[bumped]).unwrap();
-    assert_eq!(store.chat("meeting").unwrap().unwrap().last_message_at, Some(at(10)));
+    assert_eq!(
+        store.chat("meeting").unwrap().unwrap().last_message_at,
+        Some(at(10))
+    );
 
     let mut never_used = chat("empty", "Planning", Some(at(3)));
     never_used.without_last_message = true;
     store.upsert_chats(&[never_used.clone()]).unwrap();
     store.upsert_chats(&[never_used]).unwrap();
-    assert_eq!(store.chat("empty").unwrap().unwrap().last_message_at, Some(at(3)));
+    assert_eq!(
+        store.chat("empty").unwrap().unwrap().last_message_at,
+        Some(at(3))
+    );
 }

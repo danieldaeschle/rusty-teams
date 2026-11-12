@@ -240,7 +240,8 @@ mod tests {
     fn a_hidden_time_hides_the_chat_although_chatsvc_says_visible() {
         let mut locally = LocallyHidden::default();
         let mut hidden = states(Some(false));
-        hidden.get_mut("19:a").unwrap().hidden_at_ms = Some(at("2026-10-01T10:00:00Z").timestamp_millis());
+        hidden.get_mut("19:a").unwrap().hidden_at_ms =
+            Some(at("2026-10-01T10:00:00Z").timestamp_millis());
         assert!(resolve_hidden(
             &chat(Some("2026-10-01T09:00:00Z"), true),
             &hidden,

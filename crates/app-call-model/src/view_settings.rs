@@ -89,12 +89,16 @@ impl ViewSettings {
                 .meta(CAPTION_SIZE_META_KEY)
                 .ok()
                 .flatten()
-                .map_or(CaptionSize::default(), |value| CaptionSize::from_meta(&value)),
+                .map_or(CaptionSize::default(), |value| {
+                    CaptionSize::from_meta(&value)
+                }),
             caption_position: store
                 .meta(CAPTION_POSITION_META_KEY)
                 .ok()
                 .flatten()
-                .map_or(CaptionPosition::default(), |value| CaptionPosition::from_meta(&value)),
+                .map_or(CaptionPosition::default(), |value| {
+                    CaptionPosition::from_meta(&value)
+                }),
             ..ViewSettings::default()
         }
     }
@@ -109,10 +113,7 @@ impl ViewSettings {
             CHAT_BUBBLES_META_KEY,
             if self.chat_bubbles { "1" } else { "0" },
         );
-        let _ = store.set_meta(
-            HIDE_TIMER_META_KEY,
-            if self.hide_timer { "1" } else { "0" },
-        );
+        let _ = store.set_meta(HIDE_TIMER_META_KEY, if self.hide_timer { "1" } else { "0" });
         let _ = store.set_meta(CAPTION_SIZE_META_KEY, self.caption_size.meta());
         let _ = store.set_meta(CAPTION_POSITION_META_KEY, self.caption_position.meta());
     }

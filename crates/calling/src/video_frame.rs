@@ -3,7 +3,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use libwebrtc::video_frame::{BoxVideoBuffer, BoxVideoFrame, I420Buffer, VideoBuffer, VideoFormatType};
+use libwebrtc::video_frame::{
+    BoxVideoBuffer, BoxVideoFrame, I420Buffer, VideoBuffer, VideoFormatType,
+};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::control::CallUpdate;
@@ -48,7 +50,10 @@ pub struct VideoPicture {
 
 impl VideoPicture {
     pub fn flip_horizontally(&mut self) {
-        for row in self.bgra.chunks_exact_mut(self.width as usize * BYTES_PER_PIXEL) {
+        for row in self
+            .bgra
+            .chunks_exact_mut(self.width as usize * BYTES_PER_PIXEL)
+        {
             let (pixels, _) = row.as_chunks_mut::<BYTES_PER_PIXEL>();
             pixels.reverse();
         }
@@ -59,7 +64,12 @@ impl VideoPicture {
         VideoPicture {
             width,
             height,
-            bgra: pixel.iter().copied().cycle().take(width as usize * height as usize * BYTES_PER_PIXEL).collect(),
+            bgra: pixel
+                .iter()
+                .copied()
+                .cycle()
+                .take(width as usize * height as usize * BYTES_PER_PIXEL)
+                .collect(),
         }
     }
 }
@@ -80,7 +90,10 @@ impl VideoHub {
     }
 
     pub fn publish(&self, key: VideoKey, picture: VideoPicture) {
-        self.frames.lock().expect("video frames lock").insert(key, Arc::new(picture));
+        self.frames
+            .lock()
+            .expect("video frames lock")
+            .insert(key, Arc::new(picture));
         if !self.pending.swap(true, Ordering::SeqCst) {
             let _ = self.notify.send(CallUpdate::VideoReady);
         }
@@ -88,7 +101,11 @@ impl VideoHub {
 
     pub fn drain(&self) -> Vec<(VideoKey, Arc<VideoPicture>)> {
         self.pending.store(false, Ordering::SeqCst);
-        self.frames.lock().expect("video frames lock").drain().collect()
+        self.frames
+            .lock()
+            .expect("video frames lock")
+            .drain()
+            .collect()
     }
 
     pub fn forget(&self, key: &VideoKey) {
@@ -112,7 +129,9 @@ impl FrameGate {
     }
 
     pub fn admit(&mut self, now: Instant) -> bool {
-        let due = self.last.is_none_or(|last| now.duration_since(last) >= self.interval);
+        let due = self
+            .last
+            .is_none_or(|last| now.duration_since(last) >= self.interval);
         if due {
             self.last = Some(now);
         }
@@ -150,8 +169,18 @@ pub fn bgra_from_i420(i420: I420Buffer) -> VideoPicture {
     let stride = width as usize * BYTES_PER_PIXEL;
     let mut bgra = vec![0u8; stride * height as usize];
     let buffer: BoxVideoBuffer = Box::new(i420);
-    buffer.to_argb(VideoFormatType::ARGB, &mut bgra, stride as u32, width as i32, height as i32);
-    VideoPicture { width, height, bgra }
+    buffer.to_argb(
+        VideoFormatType::ARGB,
+        &mut bgra,
+        stride as u32,
+        width as i32,
+        height as i32,
+    );
+    VideoPicture {
+        width,
+        height,
+        bgra,
+    }
 }
 
 #[cfg(test)]
@@ -160,7 +189,11 @@ mod tests {
 
     #[test]
     fn flipping_mirrors_every_row() {
-        let mut picture = VideoPicture { width: 3, height: 2, bgra: (0u8..24).collect() };
+        let mut picture = VideoPicture {
+            width: 3,
+            height: 2,
+            bgra: (0u8..24).collect(),
+        };
         picture.flip_horizontally();
         assert_eq!(&picture.bgra[..12], &[8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3]);
         assert_eq!(&picture.bgra[12..16], &[20, 21, 22, 23]);
@@ -173,7 +206,10 @@ mod tests {
         let admitted = (0..120)
             .filter(|tick| gate.admit(start + Duration::from_millis(tick * 8)))
             .count();
-        assert!((28..=32).contains(&admitted), "{admitted} frames in a second");
+        assert!(
+            (28..=32).contains(&admitted),
+            "{admitted} frames in a second"
+        );
     }
 
     #[test]
@@ -205,7 +241,11 @@ mod tests {
         assert!(receiver.try_recv().is_err());
         let drained = hub.drain();
         assert_eq!(drained.len(), 2);
-        assert!(drained.iter().any(|(key, picture)| *key == VideoKey::Screen && picture.width == 4));
+        assert!(
+            drained
+                .iter()
+                .any(|(key, picture)| *key == VideoKey::Screen && picture.width == 4)
+        );
         hub.publish(VideoKey::Screen, VideoPicture::solid(2, 2, 0, 0, 0));
         assert!(matches!(receiver.try_recv(), Ok(CallUpdate::VideoReady)));
     }
@@ -218,7 +258,15 @@ mod tests {
         u_plane.fill(90);
         v_plane.fill(240);
         let picture = bgra_from_i420(buffer);
-        let [blue, green, red, alpha] = [picture.bgra[0], picture.bgra[1], picture.bgra[2], picture.bgra[3]];
-        assert!(red > 200 && green < 60 && blue < 60 && alpha == 255, "{blue} {green} {red} {alpha}");
+        let [blue, green, red, alpha] = [
+            picture.bgra[0],
+            picture.bgra[1],
+            picture.bgra[2],
+            picture.bgra[3],
+        ];
+        assert!(
+            red > 200 && green < 60 && blue < 60 && alpha == 255,
+            "{blue} {green} {red} {alpha}"
+        );
     }
 }

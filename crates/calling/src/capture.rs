@@ -10,16 +10,27 @@ const STOP_POLL: Duration = Duration::from_millis(5);
 
 /// A running frame source; dropping it stops the capture.
 pub enum Capture {
-    Thread { stop: Arc<AtomicBool>, thread: Option<JoinHandle<()>> },
+    Thread {
+        stop: Arc<AtomicBool>,
+        thread: Option<JoinHandle<()>>,
+    },
     Task(TaskHandle<()>),
 }
 
 impl Capture {
-    pub fn spawn_thread(name: &str, body: impl FnOnce(Arc<AtomicBool>) + Send + 'static) -> std::io::Result<Self> {
+    pub fn spawn_thread(
+        name: &str,
+        body: impl FnOnce(Arc<AtomicBool>) + Send + 'static,
+    ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
-        let thread = std::thread::Builder::new().name(name.to_owned()).spawn(move || body(thread_stop))?;
-        Ok(Capture::Thread { stop, thread: Some(thread) })
+        let thread = std::thread::Builder::new()
+            .name(name.to_owned())
+            .spawn(move || body(thread_stop))?;
+        Ok(Capture::Thread {
+            stop,
+            thread: Some(thread),
+        })
     }
 }
 
@@ -50,8 +61,10 @@ mod tests {
 
     #[test]
     fn a_stuck_capture_thread_does_not_hold_up_the_caller() {
-        let capture = Capture::spawn_thread("stuck", |_| loop {
-            std::thread::sleep(Duration::from_secs(60));
+        let capture = Capture::spawn_thread("stuck", |_| {
+            loop {
+                std::thread::sleep(Duration::from_secs(60));
+            }
         })
         .unwrap();
         let started = Instant::now();

@@ -2,18 +2,19 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use calling::CameraDevice;
+use calling::call::VideoReport;
+use calling::timeline::TimelineEntry;
 use calling::video_frame::bgra_from_i420;
 use calling::video_pattern::{PatternKind, pattern_frame};
 use calling::{
-    AttendeeLimits, AudioDevice, BackgroundChoice, BreakoutMove, CallCommand, CallControl, CallHandle, CallHealth,
-    CallState, CallUpdate, Caller, CaptionEntry, CaptionState, ContentShare, DeviceChoice,
-    DeviceLists, EndReason, HealthSample, HoldState, IncomingRing, Limitation, MediaPath,
-    MeetingCapability, MeetingOptions, MeetingRole, MeetingTarget, Modality, NetworkLevel, Progress,
-    PublishedState, RaisedHand, Reaction, RecordingKind, Replacement, RosterEntry, ShareKind, ShareSource, StopScope,
-    TransportDetails, VideoKey, VideoPicture, call_channel,
+    AttendeeLimits, AudioDevice, BackgroundChoice, BreakoutMove, CallCommand, CallControl,
+    CallHandle, CallHealth, CallState, CallUpdate, Caller, CaptionEntry, CaptionState,
+    ContentShare, DeviceChoice, DeviceLists, EndReason, HealthSample, HoldState, IncomingRing,
+    Limitation, MediaPath, MeetingCapability, MeetingOptions, MeetingRole, MeetingTarget, Modality,
+    NetworkLevel, Progress, PublishedState, RaisedHand, Reaction, RecordingKind, Replacement,
+    RosterEntry, ShareKind, ShareSource, StopScope, TransportDetails, VideoKey, VideoPicture,
+    call_channel,
 };
-use calling::call::VideoReport;
-use calling::timeline::TimelineEntry;
 use calling::{CallDiagnostics, SdpLine, SdpSummary, StatsSample};
 
 use super::demo_scene::self_view;
@@ -163,7 +164,10 @@ impl DemoScene {
     }
 
     pub fn minimized(self) -> bool {
-        matches!(self, DemoScene::Mini | DemoScene::MiniOff | DemoScene::MiniShare)
+        matches!(
+            self,
+            DemoScene::Mini | DemoScene::MiniOff | DemoScene::MiniShare
+        )
     }
 
     pub fn guests(self) -> Option<usize> {
@@ -287,7 +291,10 @@ fn send_demo_share_sources(control: &CallControl) {
     let sources = demo_share_sources();
     control.send(CallUpdate::ShareSources(sources.clone()));
     for (index, source) in sources.into_iter().take(DEMO_THUMBNAILS).enumerate() {
-        control.send(CallUpdate::ShareThumbnail { source, picture: Arc::new(demo_thumbnail(index as u8)) });
+        control.send(CallUpdate::ShareThumbnail {
+            source,
+            picture: Arc::new(demo_thumbnail(index as u8)),
+        });
     }
 }
 
@@ -301,11 +308,21 @@ fn demo_thumbnail(seed: u8) -> VideoPicture {
             bgra.extend_from_slice(&if header {
                 [70, 50, 40, 255]
             } else {
-                [shade / 2 + 60, seed.wrapping_mul(60).wrapping_add((row * 120 / height) as u8), 90, 255]
+                [
+                    shade / 2 + 60,
+                    seed.wrapping_mul(60)
+                        .wrapping_add((row * 120 / height) as u8),
+                    90,
+                    255,
+                ]
             });
         }
     }
-    VideoPicture { width, height, bgra }
+    VideoPicture {
+        width,
+        height,
+        bgra,
+    }
 }
 
 fn demo_devices() -> DeviceLists {
@@ -383,7 +400,10 @@ async fn run_demo_call(mut control: CallControl, script: DemoCall, scene: DemoSc
     }
     let mut roster = roster_of(&people, scene.cameras());
     if scene == DemoScene::Sharing {
-        roster.push(RosterEntry { mri: calling::captions::RECORDING_BOT_MRI.to_owned(), ..RosterEntry::default() });
+        roster.push(RosterEntry {
+            mri: calling::captions::RECORDING_BOT_MRI.to_owned(),
+            ..RosterEntry::default()
+        });
     }
     if matches!(script, DemoCall::People(_)) {
         control.send(CallUpdate::ReplacementLink(Replacement::of_call(
@@ -794,7 +814,10 @@ fn demo_limits(index: usize) -> AttendeeLimits {
 }
 
 fn demo_state(id: &str, rank: u64) -> PublishedState {
-    PublishedState { state_id: id.to_owned(), rank }
+    PublishedState {
+        state_id: id.to_owned(),
+        rank,
+    }
 }
 
 fn demo_options() -> MeetingOptions {
@@ -959,8 +982,16 @@ fn demo_diagnostics() -> CallDiagnostics {
             entry(950, "PeerConnection state", "Connected"),
         ],
         sdp: vec![
-            SdpSummary { at_ms: 40, role: "local offer".to_owned(), lines: vec![line("audio", "0", &["opus"]), line("video", "1", &["H264"])] },
-            SdpSummary { at_ms: 800, role: "remote answer".to_owned(), lines: vec![line("audio", "0", &["opus"]), line("video", "1", &["H264"])] },
+            SdpSummary {
+                at_ms: 40,
+                role: "local offer".to_owned(),
+                lines: vec![line("audio", "0", &["opus"]), line("video", "1", &["H264"])],
+            },
+            SdpSummary {
+                at_ms: 800,
+                role: "remote answer".to_owned(),
+                lines: vec![line("audio", "0", &["opus"]), line("video", "1", &["H264"])],
+            },
         ],
         ice_connected_ms: Some(900),
         peer_connected_ms: Some(950),

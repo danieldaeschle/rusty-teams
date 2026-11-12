@@ -67,7 +67,10 @@ pub fn directory() -> Option<PathBuf> {
 
 pub fn record_if_slow(label: &str, elapsed: std::time::Duration) {
     if elapsed >= SLOW_UI_HANDLER {
-        record(format!("slow ui handler: {label} took {} ms", elapsed.as_millis()));
+        record(format!(
+            "slow ui handler: {label} took {} ms",
+            elapsed.as_millis()
+        ));
     }
 }
 

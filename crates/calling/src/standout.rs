@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 
+use crate::blur::BlurSettings;
 use crate::mask::{Mask, axis};
 use crate::matte::{Planes, refine};
-use crate::blur::BlurSettings;
 
 const CUTOUT_WIDTH: u32 = 480;
 const WIDTH_SHARE: f32 = 0.22;
@@ -36,7 +36,8 @@ impl Cutout {
             return None;
         }
         let width = CUTOUT_WIDTH.min(camera.width()) & !1;
-        let height = (u64::from(camera.height()) * u64::from(width) / u64::from(camera.width())) as u32 & !1;
+        let height =
+            (u64::from(camera.height()) * u64::from(width) / u64::from(camera.width())) as u32 & !1;
         let scaled = camera.scale(width as i32, height as i32);
         let (width, height) = (width as usize, height as usize);
         let (stride_y, stride_u, stride_v) = scaled.strides();
@@ -56,8 +57,12 @@ impl Cutout {
                 let person = f32::from(matte.alpha[row * width + column]) / 255.;
                 let coverage = person * corner_coverage(column, row, width, height, radius);
                 cutout.luma.push(plane_y[row * stride_y as usize + column]);
-                cutout.chroma_blue.push(plane_u[(row / 2) * stride_u as usize + column / 2]);
-                cutout.chroma_red.push(plane_v[(row / 2) * stride_v as usize + column / 2]);
+                cutout
+                    .chroma_blue
+                    .push(plane_u[(row / 2) * stride_u as usize + column / 2]);
+                cutout
+                    .chroma_red
+                    .push(plane_v[(row / 2) * stride_v as usize + column / 2]);
                 cutout.alpha.push((coverage * 255. + 0.5) as u8);
             }
         }
@@ -70,12 +75,22 @@ impl Cutout {
         let resample = |plane: &[u8]| -> Vec<u8> {
             let mut output = Vec::with_capacity(width * height);
             for row in 0..height {
-                let (top, bottom, vertical) = (down.first[row] * self.width, down.second[row] * self.width, down.weight[row]);
+                let (top, bottom, vertical) = (
+                    down.first[row] * self.width,
+                    down.second[row] * self.width,
+                    down.weight[row],
+                );
                 for column in 0..width {
-                    let (left, right, horizontal) = (across.first[column], across.second[column], across.weight[column]);
+                    let (left, right, horizontal) = (
+                        across.first[column],
+                        across.second[column],
+                        across.weight[column],
+                    );
                     let sample = |index: usize| f32::from(plane[index]);
-                    let upper = sample(top + left) * (1. - horizontal) + sample(top + right) * horizontal;
-                    let lower = sample(bottom + left) * (1. - horizontal) + sample(bottom + right) * horizontal;
+                    let upper =
+                        sample(top + left) * (1. - horizontal) + sample(top + right) * horizontal;
+                    let lower = sample(bottom + left) * (1. - horizontal)
+                        + sample(bottom + right) * horizontal;
                     output.push((upper * (1. - vertical) + lower * vertical + 0.5) as u8);
                 }
             }
@@ -110,9 +125,11 @@ impl Cutout {
                 *luma = mix(*luma, self.luma[source], alpha);
                 if x % 2 == 0 && y % 2 == 0 {
                     let chroma_index = (y / 2) * stride_u as usize + x / 2;
-                    plane_u[chroma_index] = mix(plane_u[chroma_index], self.chroma_blue[source], alpha);
+                    plane_u[chroma_index] =
+                        mix(plane_u[chroma_index], self.chroma_blue[source], alpha);
                     let chroma_index = (y / 2) * stride_v as usize + x / 2;
-                    plane_v[chroma_index] = mix(plane_v[chroma_index], self.chroma_red[source], alpha);
+                    plane_v[chroma_index] =
+                        mix(plane_v[chroma_index], self.chroma_red[source], alpha);
                 }
             }
         }
@@ -132,14 +149,19 @@ struct ScaledCutout {
 
 impl StandoutOverlay {
     pub fn new(settings: Arc<BlurSettings>) -> Self {
-        StandoutOverlay { settings, scaled: None }
+        StandoutOverlay {
+            settings,
+            scaled: None,
+        }
     }
 
     pub fn apply(&mut self, mut frame: I420Buffer) -> I420Buffer {
         if !self.settings.standout() {
             return frame;
         }
-        let Some(source) = self.settings.cutout() else { return frame };
+        let Some(source) = self.settings.cutout() else {
+            return frame;
+        };
         let (frame_width, frame_height) = (frame.width() as usize, frame.height() as usize);
         let width = (frame_width as f32 * WIDTH_SHARE) as usize & !1;
         if width < MIN_TARGET_WIDTH {
@@ -150,9 +172,15 @@ impl StandoutOverlay {
         if height + margin >= frame_height || width + margin >= frame_width {
             return frame;
         }
-        let fresh = self.scaled.as_ref().is_some_and(|scaled| Arc::ptr_eq(&scaled.source, &source) && scaled.frame == (frame_width, frame_height));
+        let fresh = self.scaled.as_ref().is_some_and(|scaled| {
+            Arc::ptr_eq(&scaled.source, &source) && scaled.frame == (frame_width, frame_height)
+        });
         if !fresh {
-            self.scaled = Some(ScaledCutout { cutout: source.scaled_to(width, height), source, frame: (frame_width, frame_height) });
+            self.scaled = Some(ScaledCutout {
+                cutout: source.scaled_to(width, height),
+                source,
+                frame: (frame_width, frame_height),
+            });
         }
         if let Some(scaled) = &self.scaled {
             let left = (frame_width - width - margin) & !1;
@@ -227,10 +255,24 @@ mod tests {
     fn switched_off_or_without_a_cutout_the_frame_passes_through() {
         let (mut overlay, settings) = overlay_with(1.);
         settings.set_standout(false);
-        assert_eq!(luma_at(&overlay.apply(gray_frame(1280, 720, 16)), 1280 - 100, 720 - 100), 16);
+        assert_eq!(
+            luma_at(
+                &overlay.apply(gray_frame(1280, 720, 16)),
+                1280 - 100,
+                720 - 100
+            ),
+            16
+        );
         settings.set_standout(true);
         settings.set_cutout(None);
-        assert_eq!(luma_at(&overlay.apply(gray_frame(1280, 720, 16)), 1280 - 100, 720 - 100), 16);
+        assert_eq!(
+            luma_at(
+                &overlay.apply(gray_frame(1280, 720, 16)),
+                1280 - 100,
+                720 - 100
+            ),
+            16
+        );
     }
 
     #[test]

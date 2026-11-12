@@ -281,7 +281,12 @@ impl MenuActions {
         popup
     }
 
-    fn fill_rest(&self, popup: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>) -> PopupMenu {
+    fn fill_rest(
+        &self,
+        popup: PopupMenu,
+        window: &mut Window,
+        cx: &mut Context<PopupMenu>,
+    ) -> PopupMenu {
         let item = |label: &'static str, glyph: IconName, action: Action| {
             PopupMenuItem::new(label)
                 .icon(glyph)
@@ -396,7 +401,11 @@ fn more_button(menu: &MessageMenu, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn delegate_entries(popup: PopupMenu, entries: &[DelegateEntry], manage_agents: Option<Action>) -> PopupMenu {
+fn delegate_entries(
+    popup: PopupMenu,
+    entries: &[DelegateEntry],
+    manage_agents: Option<Action>,
+) -> PopupMenu {
     let mut popup = popup;
     for entry in entries {
         popup = popup.item(delegate_item(entry));

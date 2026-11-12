@@ -31,7 +31,10 @@ pub(crate) struct CallContext<'a> {
 pub(crate) fn failure_reason(context: &CallContext, hresult: &str, json: &str) -> String {
     let parsed = serde_json::from_str::<Value>(json).unwrap_or(Value::Null);
     let error = parsed.get("error").unwrap_or(&parsed);
-    let message = error.get("message").and_then(Value::as_str).unwrap_or(hresult);
+    let message = error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or(hresult);
     let code = error
         .get("code")
         .and_then(Value::as_i64)
@@ -70,7 +73,10 @@ mod tests {
     #[test]
     fn a_nested_protocol_error_is_read_too() {
         let json = r#"{"error":{"code":-32601,"message":"'Foo.bar' wasn't found"}}"#;
-        assert!(failure_reason(&context(), HRESULT, json).starts_with("'Foo.bar' wasn't found [Runtime.evaluate code -32601,"));
+        assert!(
+            failure_reason(&context(), HRESULT, json)
+                .starts_with("'Foo.bar' wasn't found [Runtime.evaluate code -32601,")
+        );
     }
 
     #[test]
@@ -83,11 +89,23 @@ mod tests {
 
     #[test]
     fn the_tab_state_never_carries_the_url() {
-        assert_eq!(tab_state(App::Teams, "https://teams.cloud.microsoft/robots.txt"), "parked");
-        assert_eq!(tab_state(App::Teams, "https://teams.cloud.microsoft/v2/?ctx=chat"), "app");
+        assert_eq!(
+            tab_state(App::Teams, "https://teams.cloud.microsoft/robots.txt"),
+            "parked"
+        );
+        assert_eq!(
+            tab_state(App::Teams, "https://teams.cloud.microsoft/v2/?ctx=chat"),
+            "app"
+        );
         assert_eq!(tab_state(App::Teams, "about:blank"), "about");
-        assert_eq!(tab_state(App::Teams, "chrome-error://chromewebdata/"), "error page");
+        assert_eq!(
+            tab_state(App::Teams, "chrome-error://chromewebdata/"),
+            "error page"
+        );
         assert_eq!(tab_state(App::Teams, ""), "no document");
-        assert_eq!(tab_state(App::Teams, "https://example.com/private/path"), "other");
+        assert_eq!(
+            tab_state(App::Teams, "https://example.com/private/path"),
+            "other"
+        );
     }
 }

@@ -46,11 +46,18 @@ fn sections(lines: &[String]) -> Vec<Section> {
     for (index, line) in lines.iter().enumerate() {
         if let Some(rest) = line.strip_prefix("m=") {
             let kind = rest.split(' ').next().unwrap_or_default().to_owned();
-            found.push(Section { kind, mid: String::new(), direction_line: None });
+            found.push(Section {
+                kind,
+                mid: String::new(),
+                direction_line: None,
+            });
         } else if let Some(section) = found.last_mut() {
             if let Some(mid) = line.strip_prefix("a=mid:") {
                 section.mid = mid.to_owned();
-            } else if line.strip_prefix("a=").is_some_and(|name| DIRECTIONS.contains(&name)) {
+            } else if line
+                .strip_prefix("a=")
+                .is_some_and(|name| DIRECTIONS.contains(&name))
+            {
                 section.direction_line = Some(index);
             }
         }
@@ -58,12 +65,23 @@ fn sections(lines: &[String]) -> Vec<Section> {
     found
 }
 
-pub fn rewrite_directions(sdp: &str, pick: impl Fn(MediaLine<'_>) -> Option<&'static str>) -> String {
+pub fn rewrite_directions(
+    sdp: &str,
+    pick: impl Fn(MediaLine<'_>) -> Option<&'static str>,
+) -> String {
     let newline = if sdp.contains("\r\n") { "\r\n" } else { "\n" };
-    let mut lines: Vec<String> = sdp.split('\n').map(|line| line.trim_end_matches('\r').to_owned()).collect();
+    let mut lines: Vec<String> = sdp
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r').to_owned())
+        .collect();
     for section in sections(&lines) {
-        let Some(direction_line) = section.direction_line else { continue };
-        if let Some(direction) = pick(MediaLine { kind: &section.kind, mid: &section.mid }) {
+        let Some(direction_line) = section.direction_line else {
+            continue;
+        };
+        if let Some(direction) = pick(MediaLine {
+            kind: &section.kind,
+            mid: &section.mid,
+        }) {
             lines[direction_line] = format!("a={direction}");
         }
     }
@@ -71,7 +89,10 @@ pub fn rewrite_directions(sdp: &str, pick: impl Fn(MediaLine<'_>) -> Option<&'st
 }
 
 pub fn direction_of(sdp: &str, mid: &str) -> Option<String> {
-    let lines: Vec<String> = sdp.split('\n').map(|line| line.trim_end_matches('\r').to_owned()).collect();
+    let lines: Vec<String> = sdp
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r').to_owned())
+        .collect();
     sections(&lines)
         .into_iter()
         .find(|section| section.mid == mid)
@@ -81,9 +102,14 @@ pub fn direction_of(sdp: &str, mid: &str) -> Option<String> {
 
 pub fn stop_sending_on(sdp: &str, mid: &str) -> String {
     let newline = if sdp.contains("\r\n") { "\r\n" } else { "\n" };
-    let mut lines: Vec<String> = sdp.split('\n').map(|line| line.trim_end_matches('\r').to_owned()).collect();
+    let mut lines: Vec<String> = sdp
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r').to_owned())
+        .collect();
     for section in sections(&lines) {
-        let Some(direction_line) = section.direction_line else { continue };
+        let Some(direction_line) = section.direction_line else {
+            continue;
+        };
         if section.mid != mid {
             continue;
         }
@@ -107,7 +133,10 @@ fn mirrored(direction: &str) -> &'static str {
 }
 
 pub fn keep_media_running(browser_answer: &str, browser_offer: &str) -> String {
-    let offer_lines: Vec<String> = browser_offer.split('\n').map(|line| line.trim_end_matches('\r').to_owned()).collect();
+    let offer_lines: Vec<String> = browser_offer
+        .split('\n')
+        .map(|line| line.trim_end_matches('\r').to_owned())
+        .collect();
     let offered: HashMap<String, &'static str> = sections(&offer_lines)
         .into_iter()
         .filter_map(|section| {
@@ -140,7 +169,9 @@ pub fn offer_sends_video(teams_sdp: &str) -> bool {
         description.media.iter().any(|line| {
             line.kind == "video"
                 && line.port != REJECTED_PORT
-                && line.value("label").is_none_or(|label| label == MAIN_VIDEO_LABEL)
+                && line
+                    .value("label")
+                    .is_none_or(|label| label == MAIN_VIDEO_LABEL)
                 && matches!(line.direction(), None | Some("sendrecv" | "sendonly"))
         })
     })
@@ -187,7 +218,12 @@ mod tests {
     const OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1 2\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=sendrecv\r\na=rtpmap:111 opus/48000/2\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=mid:1\r\na=sendrecv\r\na=rtpmap:102 H264/90000\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=mid:2\r\na=recvonly\r\na=rtpmap:102 H264/90000\r\n";
 
     fn directions(sdp: &str) -> Vec<String> {
-        parse(sdp).unwrap().media.iter().map(|line| line.direction().unwrap_or("none").to_owned()).collect()
+        parse(sdp)
+            .unwrap()
+            .media
+            .iter()
+            .map(|line| line.direction().unwrap_or("none").to_owned())
+            .collect()
     }
 
     #[test]
@@ -203,7 +239,10 @@ mod tests {
     fn resuming_keeps_the_offer_as_libwebrtc_wrote_it() {
         let resumed = rewrite_directions(OFFER, |_| None);
         assert_eq!(resumed, OFFER);
-        assert_eq!(directions(&resumed), vec!["sendrecv", "sendrecv", "recvonly"]);
+        assert_eq!(
+            directions(&resumed),
+            vec!["sendrecv", "sendrecv", "recvonly"]
+        );
     }
 
     #[test]
@@ -213,7 +252,10 @@ mod tests {
             ("video", "2") => Some("sendonly"),
             _ => None,
         });
-        assert_eq!(directions(&picked), vec!["sendrecv", "inactive", "sendonly"]);
+        assert_eq!(
+            directions(&picked),
+            vec!["sendrecv", "inactive", "sendonly"]
+        );
     }
 
     #[test]
@@ -236,7 +278,9 @@ mod tests {
     fn a_hold_is_every_audio_and_video_line_inactive() {
         assert!(is_hold(&all_inactive(OFFER)).unwrap());
         assert!(!is_hold(OFFER).unwrap());
-        let sendonly_audio = rewrite_directions(&all_inactive(OFFER), |line| (line.kind == "audio").then_some("sendonly"));
+        let sendonly_audio = rewrite_directions(&all_inactive(OFFER), |line| {
+            (line.kind == "audio").then_some("sendonly")
+        });
         assert!(!is_hold(&sendonly_audio).unwrap());
     }
 
@@ -249,12 +293,19 @@ mod tests {
 
     #[test]
     fn an_offer_with_a_sending_main_video_line_is_a_video_call() {
-        let teams = |direction: &str, label: &str| format!("v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 1234 RTP/SAVP 111\r\na=mid:0\r\na=sendrecv\r\nm=video 1234 RTP/SAVP 102\r\na=mid:1\r\na={direction}\r\na=label:{label}\r\n");
+        let teams = |direction: &str, label: &str| {
+            format!(
+                "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 1234 RTP/SAVP 111\r\na=mid:0\r\na=sendrecv\r\nm=video 1234 RTP/SAVP 102\r\na=mid:1\r\na={direction}\r\na=label:{label}\r\n"
+            )
+        };
         assert!(offer_sends_video(&teams("sendrecv", "main-video")));
         assert!(offer_sends_video(&teams("sendonly", "main-video")));
         assert!(!offer_sends_video(&teams("recvonly", "main-video")));
         assert!(!offer_sends_video(&teams("inactive", "main-video")));
-        assert!(!offer_sends_video(&teams("sendrecv", "applicationsharing-video")));
+        assert!(!offer_sends_video(&teams(
+            "sendrecv",
+            "applicationsharing-video"
+        )));
     }
 
     #[test]
@@ -268,7 +319,13 @@ mod tests {
     fn accepting_with_video_adds_the_modality() {
         assert_eq!(accepted_modalities(false), vec!["Audio"]);
         assert_eq!(accepted_modalities(true), vec!["Audio", "Video"]);
-        assert_eq!(super::offer_modalities(false, true), vec!["Audio", "ScreenSharer"]);
-        assert_eq!(super::offer_modalities(true, true), vec!["Audio", "Video", "ScreenSharer"]);
+        assert_eq!(
+            super::offer_modalities(false, true),
+            vec!["Audio", "ScreenSharer"]
+        );
+        assert_eq!(
+            super::offer_modalities(true, true),
+            vec!["Audio", "Video", "ScreenSharer"]
+        );
     }
 }

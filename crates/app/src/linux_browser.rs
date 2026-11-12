@@ -218,11 +218,7 @@ impl session::Transport for LinuxTransport {
     fn check(&self) -> session::BoxFuture<'_, session::Result<()>> {
         Box::pin(async move {
             let mut init_done = self.init_done.clone();
-            let _ = tokio::time::timeout(
-                STARTUP_WAIT,
-                init_done.wait_for(|done| *done),
-            )
-            .await;
+            let _ = tokio::time::timeout(STARTUP_WAIT, init_done.wait_for(|done| *done)).await;
             let mut down_since: Option<tokio::time::Instant> = None;
             loop {
                 let busy = self.browser.is_busy();
@@ -350,7 +346,10 @@ mod tests {
         let stuck_login = status(
             browser::Mode::Visible,
             browser::LoginState::Required,
-            vec![tab(Some(browser::App::Teams), false, false), tab(None, true, false)],
+            vec![
+                tab(Some(browser::App::Teams), false, false),
+                tab(None, true, false),
+            ],
         );
         for _ in 0..HIDE_STABLE_CHECKS + 2 {
             assert!(!tracker.step(Some(&stuck_login), true));

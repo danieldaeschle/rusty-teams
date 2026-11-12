@@ -78,8 +78,14 @@ fn time_label(event: &CalendarEvent, offset: FixedOffset) -> String {
     }
     format!(
         "{} - {}",
-        event.start.with_timezone(&offset).format(app_base::format::clock_format()),
-        event.end.with_timezone(&offset).format(app_base::format::clock_format())
+        event
+            .start
+            .with_timezone(&offset)
+            .format(app_base::format::clock_format()),
+        event
+            .end
+            .with_timezone(&offset)
+            .format(app_base::format::clock_format())
     )
 }
 

@@ -126,7 +126,12 @@ impl Request {
     }
 
     /// Sent without an Authorization header, for pre-authenticated URLs such as upload sessions.
-    pub fn anonymous_bytes(method: Method, url: impl Into<String>, headers: Vec<(String, String)>, body_base64: String) -> Self {
+    pub fn anonymous_bytes(
+        method: Method,
+        url: impl Into<String>,
+        headers: Vec<(String, String)>,
+        body_base64: String,
+    ) -> Self {
         Request {
             method,
             headers,
@@ -204,7 +209,11 @@ impl<'a> From<&'a Request> for WireRequest<'a> {
             .iter()
             .map(|(name, value)| (name.clone(), Value::String(value.clone())))
             .collect();
-        if request.body.is_some() && !headers.keys().any(|name| name.eq_ignore_ascii_case("content-type")) {
+        if request.body.is_some()
+            && !headers
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case("content-type"))
+        {
             headers.insert("Content-Type".into(), "application/json".into());
         }
         WireRequest {
@@ -278,7 +287,11 @@ mod tests {
 
     #[test]
     fn json_body_gets_content_type() {
-        let request = Request::with_body(Method::Post, "https://graph.microsoft.com/v1.0/x", json!({"a": 1}));
+        let request = Request::with_body(
+            Method::Post,
+            "https://graph.microsoft.com/v1.0/x",
+            json!({"a": 1}),
+        );
         let wire = WireRequest::from(&request);
         assert_eq!(wire.method, "POST");
         assert_eq!(wire.body.as_deref(), Some(r#"{"a":1}"#));
@@ -288,7 +301,9 @@ mod tests {
     #[test]
     fn explicit_content_type_is_kept() {
         let mut request = Request::with_body(Method::Post, "u", json!({}));
-        request.headers.push(("content-type".into(), "text/plain".into()));
+        request
+            .headers
+            .push(("content-type".into(), "text/plain".into()));
         let wire = WireRequest::from(&request);
         assert_eq!(wire.headers.len(), 1);
     }
@@ -319,7 +334,10 @@ mod tests {
 
     #[test]
     fn anonymous_binary_get_keeps_range_header_and_flags() {
-        let request = Request::anonymous_binary_get("https://download.example/file", vec![("Range".into(), "bytes=0-9".into())]);
+        let request = Request::anonymous_binary_get(
+            "https://download.example/file",
+            vec![("Range".into(), "bytes=0-9".into())],
+        );
         let wire = serde_json::to_value(WireRequest::from(&request)).unwrap();
         assert_eq!(wire["method"], "GET");
         assert_eq!(wire["anonymous"], true);
@@ -358,7 +376,12 @@ mod tests {
             "results": [{"status": 200, "retryAfter": null, "body": {"value": []}}, {"status": 429, "retryAfter": "4", "body": "slow"}]
         }))
         .unwrap();
-        let responses: Vec<ApiResponse> = outcome.results.unwrap().into_iter().map(Into::into).collect();
+        let responses: Vec<ApiResponse> = outcome
+            .results
+            .unwrap()
+            .into_iter()
+            .map(Into::into)
+            .collect();
         assert_eq!(responses[0].status, 200);
         assert_eq!(responses[1].retry_after.as_deref(), Some("4"));
         assert!(!responses[1].is_success());
@@ -367,7 +390,8 @@ mod tests {
     #[test]
     fn parses_no_token_outcome() {
         let outcome: Outcome =
-            serde_json::from_value(json!({"noToken": true, "refreshError": "invalid_grant"})).unwrap();
+            serde_json::from_value(json!({"noToken": true, "refreshError": "invalid_grant"}))
+                .unwrap();
         assert!(outcome.results.is_none());
         assert_eq!(outcome.refresh_error.as_deref(), Some("invalid_grant"));
     }

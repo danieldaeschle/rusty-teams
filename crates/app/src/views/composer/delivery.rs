@@ -9,8 +9,8 @@ use store::MessageImportance;
 
 use super::{COMPOSER_BUTTON_INSET, COMPOSER_BUTTON_SIZE, COMPOSER_ICON_SIZE, Composer};
 use crate::delivery_options::{
-    DeliveryOption, URGENT_TOO_MANY_MEMBERS, UrgentAvailability,
-    allowed_importance, delivery_options, urgent_banner,
+    DeliveryOption, URGENT_TOO_MANY_MEMBERS, UrgentAvailability, allowed_importance,
+    delivery_options, urgent_banner,
 };
 use crate::importance::importance_label;
 use crate::theme::{self, ElevatedSurface as _};

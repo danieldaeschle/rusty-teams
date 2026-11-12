@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
+use chatsvc::sound_settings::SoundSettings;
 use chatsvc::{
     ConversationRef, Language, LanguageSettings, MAX_TRANSLATE_BATCH, MessageLanguage,
     TranslateRequest, Translation, TranslationTrigger,
 };
-use chatsvc::sound_settings::SoundSettings;
 use serde_json::Value;
 
 use crate::engine::{Conversation, SyncEngine};

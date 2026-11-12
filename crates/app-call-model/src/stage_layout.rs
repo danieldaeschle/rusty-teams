@@ -88,7 +88,12 @@ pub struct Filmstrip {
     pub overflow: Overflow,
 }
 
-pub fn focus_stage_size(stage: (f32, f32), padding: f32, gap: f32, filmstrip_height: Option<f32>) -> (f32, f32) {
+pub fn focus_stage_size(
+    stage: (f32, f32),
+    padding: f32,
+    gap: f32,
+    filmstrip_height: Option<f32>,
+) -> (f32, f32) {
     let strip = filmstrip_height.map_or(0., |height| height + gap);
     (
         (stage.0 - 2. * padding).max(0.),
@@ -100,7 +105,9 @@ pub fn contain_size(container: (f32, f32), picture: (f32, f32)) -> (f32, f32) {
     if picture.0 <= 0. || picture.1 <= 0. {
         return (0., 0.);
     }
-    let scale = (container.0 / picture.0).min(container.1 / picture.1).max(0.);
+    let scale = (container.0 / picture.0)
+        .min(container.1 / picture.1)
+        .max(0.);
     (picture.0 * scale, picture.1 * scale)
 }
 
@@ -155,7 +162,8 @@ impl VisibleRotation {
         self.speaking_since
             .iter()
             .filter(|(mri, since)| {
-                members.contains(mri) && now.saturating_duration_since(**since) >= SPEAKER_SWITCH_AFTER
+                members.contains(mri)
+                    && now.saturating_duration_since(**since) >= SPEAKER_SWITCH_AFTER
             })
             .min_by_key(|(_, since)| **since)
             .map(|(mri, _)| mri.as_str())
@@ -245,10 +253,9 @@ impl VisibleRotation {
             .filter(|(_, since)| now.saturating_duration_since(*since) >= SWAP_AFTER_SPEAKING)
             .collect();
         candidates.sort_by_key(|(index, since)| (*since, *index));
-        let Some((index, target)) = candidates
-            .into_iter()
-            .find_map(|(index, since)| Some((index, self.promotion_target(front, index, since, priority)?)))
-        else {
+        let Some((index, target)) = candidates.into_iter().find_map(|(index, since)| {
+            Some((index, self.promotion_target(front, index, since, priority)?))
+        }) else {
             return;
         };
         let speaker = self.order.remove(index);
@@ -259,16 +266,21 @@ impl VisibleRotation {
         self.last_swap = Some(now);
     }
 
-    fn promotion_target(&self, front: usize, index: usize, since: Instant, priority: &[String]) -> Option<usize> {
+    fn promotion_target(
+        &self,
+        front: usize,
+        index: usize,
+        since: Instant,
+        priority: &[String],
+    ) -> Option<usize> {
         self.order[front..index]
             .iter()
             .position(|mri| {
                 !priority.contains(mri)
                     && !self.speaking_since.contains_key(mri)
-                    && self
-                        .last_spoke
-                        .get(mri)
-                        .is_none_or(|spoke| since.saturating_duration_since(*spoke) >= KEEP_RECENT_ON_TOP)
+                    && self.last_spoke.get(mri).is_none_or(|spoke| {
+                        since.saturating_duration_since(*spoke) >= KEEP_RECENT_ON_TOP
+                    })
             })
             .map(|offset| front + offset)
     }
@@ -308,8 +320,14 @@ mod tests {
 
     #[test]
     fn focus_stage_takes_the_stage_minus_padding_and_filmstrip() {
-        assert_eq!(focus_stage_size((1000., 600.), 24., 20., Some(100.)), (952., 432.));
-        assert_eq!(focus_stage_size((1000., 600.), 24., 20., None), (952., 552.));
+        assert_eq!(
+            focus_stage_size((1000., 600.), 24., 20., Some(100.)),
+            (952., 432.)
+        );
+        assert_eq!(
+            focus_stage_size((1000., 600.), 24., 20., None),
+            (952., 552.)
+        );
         assert_eq!(focus_stage_size((10., 10.), 24., 20., Some(100.)), (0., 0.));
     }
 
@@ -331,9 +349,21 @@ mod tests {
         let members = names(4);
         let mut rotation = VisibleRotation::default();
         rotation.update(start, &members, &[], &speak(&["p2"]), 4);
-        assert_eq!(rotation.steady_speaker(start + Duration::from_millis(300), &members), None);
-        rotation.update(start + SPEAKER_SWITCH_AFTER, &members, &[], &speak(&["p2"]), 4);
-        assert_eq!(rotation.steady_speaker(start + SPEAKER_SWITCH_AFTER, &members), Some("p2"));
+        assert_eq!(
+            rotation.steady_speaker(start + Duration::from_millis(300), &members),
+            None
+        );
+        rotation.update(
+            start + SPEAKER_SWITCH_AFTER,
+            &members,
+            &[],
+            &speak(&["p2"]),
+            4,
+        );
+        assert_eq!(
+            rotation.steady_speaker(start + SPEAKER_SWITCH_AFTER, &members),
+            Some("p2")
+        );
         let silent = start + SPEAKER_SWITCH_AFTER + Duration::from_secs(1);
         rotation.update(silent, &members, &[], &[], 4);
         assert!(rotation.spoke_within("p2", silent, SPEAKER_HOLD));
@@ -515,7 +545,13 @@ mod tests {
         rotation.update(start, &members, &[], &talking, 4);
         rotation.update(start + SWAP_AFTER_SPEAKING, &members, &[], &talking, 4);
         assert_eq!(visible(&rotation, 4), speak(&["p0", "p1", "p3", "p2"]));
-        rotation.update(start + SWAP_AFTER_SPEAKING + SWAP_INTERVAL, &members, &[], &talking, 4);
+        rotation.update(
+            start + SWAP_AFTER_SPEAKING + SWAP_INTERVAL,
+            &members,
+            &[],
+            &talking,
+            4,
+        );
         assert_eq!(visible(&rotation, 4), speak(&["p0", "p1", "p3", "p5"]));
     }
 
@@ -541,7 +577,13 @@ mod tests {
         let start = Instant::now();
         let members = names(4);
         rotation.update(start, &members, &[], &speak(&["p2"]), 4);
-        rotation.update(start + SWAP_AFTER_SPEAKING, &members, &[], &speak(&["p2"]), 4);
+        rotation.update(
+            start + SWAP_AFTER_SPEAKING,
+            &members,
+            &[],
+            &speak(&["p2"]),
+            4,
+        );
         let mut now = start + SWAP_AFTER_SPEAKING;
         for _ in 0..2 {
             now += Duration::from_secs(1);
@@ -553,7 +595,10 @@ mod tests {
             now += SWAP_INTERVAL;
             rotation.update(now, &members, &[], &speak(&["p2"]), 4);
         }
-        assert_eq!(rotation.order(), speak(&["p2", "p3", "p0", "p1"]).as_slice());
+        assert_eq!(
+            rotation.order(),
+            speak(&["p2", "p3", "p0", "p1"]).as_slice()
+        );
     }
 
     #[test]

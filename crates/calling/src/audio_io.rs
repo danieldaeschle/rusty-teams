@@ -64,7 +64,10 @@ impl AudioSetup {
     ) -> Self {
         let platform_acquired = mode == AudioMode::Platform && factory.acquire_platform_adm();
         let (recording_devices, playout_devices) = if platform_acquired {
-            (Some(factory.recording_devices()), Some(factory.playout_devices()))
+            (
+                Some(factory.recording_devices()),
+                Some(factory.playout_devices()),
+            )
         } else {
             (None, None)
         };
@@ -100,11 +103,21 @@ impl AudioSetup {
             AudioMode::File => std::env::var_os(AUDIO_FILE_ENV)
                 .and_then(|path| std::fs::read(path).ok())
                 .and_then(|bytes| ClipGenerator::from_wav(&bytes))
-                .map_or(FrameGenerator::Sine(SineGenerator::new(tone_hz, 0.0)), FrameGenerator::Clip),
+                .map_or(
+                    FrameGenerator::Sine(SineGenerator::new(tone_hz, 0.0)),
+                    FrameGenerator::Clip,
+                ),
             AudioMode::Tone => FrameGenerator::Sine(SineGenerator::new(tone_hz, TONE_AMPLITUDE)),
-            AudioMode::Platform | AudioMode::Silence => FrameGenerator::Sine(SineGenerator::new(tone_hz, 0.0)),
+            AudioMode::Platform | AudioMode::Silence => {
+                FrameGenerator::Sine(SineGenerator::new(tone_hz, 0.0))
+            }
         };
-        let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, SOURCE_QUEUE_MS);
+        let source = NativeAudioSource::new(
+            AudioSourceOptions::default(),
+            SAMPLE_RATE,
+            1,
+            SOURCE_QUEUE_MS,
+        );
         let track = factory.create_audio_track("microphone", source.clone());
         let running = Arc::new(AtomicBool::new(true));
         let task = tokio::spawn(feed_frames(source, generator, running.clone()));
@@ -149,7 +162,11 @@ impl FrameGenerator {
     }
 }
 
-async fn feed_frames(source: NativeAudioSource, mut generator: FrameGenerator, running: Arc<AtomicBool>) {
+async fn feed_frames(
+    source: NativeAudioSource,
+    mut generator: FrameGenerator,
+    running: Arc<AtomicBool>,
+) {
     let mut tick = interval(FRAME_PERIOD);
     while running.load(Ordering::SeqCst) {
         tick.tick().await;

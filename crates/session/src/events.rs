@@ -21,7 +21,9 @@ pub struct TabEvent {
 
 impl TabEvent {
     pub fn binding_payload(&self, binding_name: &str) -> Option<&str> {
-        if self.method != "Runtime.bindingCalled" || self.params.get("name")?.as_str()? != binding_name {
+        if self.method != "Runtime.bindingCalled"
+            || self.params.get("name")?.as_str()? != binding_name
+        {
             return None;
         }
         self.params.get("payload")?.as_str()
@@ -102,7 +104,9 @@ impl TabControl {
         self.commands
             .send(command)
             .map_err(|_| Error::Cdp("tab connection closed".into()))?;
-        answer.await.map_err(|_| Error::Cdp("tab connection closed".into()))?
+        answer
+            .await
+            .map_err(|_| Error::Cdp("tab connection closed".into()))?
     }
 
     pub async fn enable_events(&self) -> Result<()> {
@@ -112,7 +116,9 @@ impl TabControl {
     }
 
     pub async fn add_binding(&self, name: &str) -> Result<()> {
-        self.call("Runtime.addBinding", json!({"name": name})).await.map(drop)
+        self.call("Runtime.addBinding", json!({"name": name}))
+            .await
+            .map(drop)
     }
 
     pub async fn evaluate(&self, expression: &str) -> Result<Value> {
@@ -132,27 +138,43 @@ impl TabControl {
                 .unwrap_or("unknown");
             return Err(Error::Cdp(format!("page script failed: {text}")));
         }
-        Ok(result.pointer("/result/value").cloned().unwrap_or(Value::Null))
+        Ok(result
+            .pointer("/result/value")
+            .cloned()
+            .unwrap_or(Value::Null))
     }
 
     /// Runs `source` in every future document of the tab and once in the current one.
     pub async fn inject_script(&self, source: &str) -> Result<String> {
         let added = self
-            .call("Page.addScriptToEvaluateOnNewDocument", json!({"source": source}))
+            .call(
+                "Page.addScriptToEvaluateOnNewDocument",
+                json!({"source": source}),
+            )
             .await?;
-        let identifier = added.get("identifier").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let identifier = added
+            .get("identifier")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
         self.evaluate(source).await?;
         Ok(identifier)
     }
 
     pub async fn remove_injected_script(&self, identifier: &str) -> Result<()> {
-        self.call("Page.removeScriptToEvaluateOnNewDocument", json!({"identifier": identifier}))
-            .await
-            .map(drop)
+        self.call(
+            "Page.removeScriptToEvaluateOnNewDocument",
+            json!({"identifier": identifier}),
+        )
+        .await
+        .map(drop)
     }
 }
 
-pub(crate) async fn open(websocket_url: &str, with_events: bool) -> Result<(TabControl, Option<TabEvents>)> {
+pub(crate) async fn open(
+    websocket_url: &str,
+    with_events: bool,
+) -> Result<(TabControl, Option<TabEvents>)> {
     let (stream, _) = connect_async(websocket_url)
         .await
         .map_err(|error| Error::Cdp(format!("websocket connect failed: {error}")))?;
@@ -172,8 +194,7 @@ async fn pump<S>(
     mut stream: S,
     mut commands: mpsc::UnboundedReceiver<TabCommand>,
     events: Option<mpsc::UnboundedSender<TabEvent>>,
-)
-where
+) where
     S: Stream<Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>>
         + futures_util::Sink<Message>
         + Unpin,
@@ -235,7 +256,10 @@ where
 
 fn answer_of(frame: &Value) -> Result<Value> {
     if let Some(failure) = frame.get("error") {
-        let reason = failure.get("message").and_then(Value::as_str).unwrap_or("unknown");
+        let reason = failure
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
         return Err(Error::Cdp(reason.to_owned()));
     }
     Ok(frame.get("result").cloned().unwrap_or(Value::Null))

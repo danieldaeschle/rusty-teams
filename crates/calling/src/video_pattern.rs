@@ -46,8 +46,22 @@ pub fn pattern_frame(kind: PatternKind, tick: u32) -> I420Buffer {
     let (stride_y, stride_u, stride_v) = buffer.strides();
     let (y_plane, u_plane, v_plane) = buffer.data_mut();
     match kind {
-        PatternKind::Camera => paint_camera(y_plane, u_plane, v_plane, (width, height), (stride_y, stride_u, stride_v), tick),
-        PatternKind::Screen => paint_screen(y_plane, u_plane, v_plane, (width, height), (stride_y, stride_u, stride_v), tick),
+        PatternKind::Camera => paint_camera(
+            y_plane,
+            u_plane,
+            v_plane,
+            (width, height),
+            (stride_y, stride_u, stride_v),
+            tick,
+        ),
+        PatternKind::Screen => paint_screen(
+            y_plane,
+            u_plane,
+            v_plane,
+            (width, height),
+            (stride_y, stride_u, stride_v),
+            tick,
+        ),
     }
     buffer
 }
@@ -64,20 +78,33 @@ fn paint_camera(
     let square_y = (tick * 4) % (height - SQUARE);
     for row in 0..height {
         for column in 0..width {
-            let inside = column >= square_x && column < square_x + SQUARE && row >= square_y && row < square_y + SQUARE;
+            let inside = column >= square_x
+                && column < square_x + SQUARE
+                && row >= square_y
+                && row < square_y + SQUARE;
             let shade = ((column + tick * 3) * 255 / width) as u8;
-            let on_border = column < BORDER || row < BORDER || column >= width - BORDER || row >= height - BORDER;
+            let on_border = column < BORDER
+                || row < BORDER
+                || column >= width - BORDER
+                || row >= height - BORDER;
             let delta_x = column as i64 - width as i64 / 2;
             let delta_y = row as i64 - height as i64 / 2;
             let radius = height as i64 / 2 - 8;
-            let on_circle = (delta_x * delta_x + delta_y * delta_y - radius * radius).abs() < radius * 6;
-            y_plane[(row * stride_y + column) as usize] = if on_border || on_circle || inside { 235 } else { shade / 2 + 24 };
+            let on_circle =
+                (delta_x * delta_x + delta_y * delta_y - radius * radius).abs() < radius * 6;
+            y_plane[(row * stride_y + column) as usize] = if on_border || on_circle || inside {
+                235
+            } else {
+                shade / 2 + 24
+            };
         }
     }
     for row in 0..height / 2 {
         for column in 0..width / 2 {
-            u_plane[(row * stride_u + column) as usize] = (64 + (column * 128 / (width / 2)) as u8).wrapping_add((tick * 2) as u8 / 4);
-            v_plane[(row * stride_v + column) as usize] = (192 - (row * 128 / (height / 2)) as u8).wrapping_add((tick % 64) as u8);
+            u_plane[(row * stride_u + column) as usize] =
+                (64 + (column * 128 / (width / 2)) as u8).wrapping_add((tick * 2) as u8 / 4);
+            v_plane[(row * stride_v + column) as usize] =
+                (192 - (row * 128 / (height / 2)) as u8).wrapping_add((tick % 64) as u8);
         }
     }
 }
@@ -95,7 +122,10 @@ fn paint_screen(
     let cursor_y = (tick * 5) % (height - SQUARE / 2);
     for row in 0..height {
         for column in 0..width {
-            let on_cursor = column >= cursor_x && column < cursor_x + SQUARE / 2 && row >= cursor_y && row < cursor_y + SQUARE / 2;
+            let on_cursor = column >= cursor_x
+                && column < cursor_x + SQUARE / 2
+                && row >= cursor_y
+                && row < cursor_y + SQUARE / 2;
             let line = (row / 18) % 2 == 0 && column % 11 < 7 && column > 40 && column < width - 40;
             let title_bar = row < 40;
             y_plane[(row * stride_y + column) as usize] = match (on_cursor, title_bar, line) {
@@ -110,7 +140,11 @@ fn paint_screen(
     v_plane[..(stride_v * height / 2) as usize].fill(128);
 }
 
-pub fn spawn_pattern(mut sink: LocalSink, kind: PatternKind, effects: Option<Arc<BlurSettings>>) -> JoinHandle<()> {
+pub fn spawn_pattern(
+    mut sink: LocalSink,
+    kind: PatternKind,
+    effects: Option<Arc<BlurSettings>>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = interval(Duration::from_secs(1) / kind.fps());
         let mut tick = 0u32;
@@ -140,17 +174,26 @@ mod tests {
 
     #[test]
     fn the_camera_pattern_moves_between_frames() {
-        assert_ne!(luma_checksum(PatternKind::Camera, 0), luma_checksum(PatternKind::Camera, 9));
+        assert_ne!(
+            luma_checksum(PatternKind::Camera, 0),
+            luma_checksum(PatternKind::Camera, 9)
+        );
     }
 
     #[test]
     fn the_screen_pattern_moves_between_frames() {
-        assert_ne!(luma_checksum(PatternKind::Screen, 0), luma_checksum(PatternKind::Screen, 4));
+        assert_ne!(
+            luma_checksum(PatternKind::Screen, 0),
+            luma_checksum(PatternKind::Screen, 4)
+        );
     }
 
     #[test]
     fn patterns_have_the_documented_sizes() {
-        assert_eq!(pattern_frame(PatternKind::Camera, 1).strides().0, CAMERA_WIDTH);
+        assert_eq!(
+            pattern_frame(PatternKind::Camera, 1).strides().0,
+            CAMERA_WIDTH
+        );
         assert_eq!(PatternKind::Screen.size(), (SCREEN_WIDTH, SCREEN_HEIGHT));
     }
 }

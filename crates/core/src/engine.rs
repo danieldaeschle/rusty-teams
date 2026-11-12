@@ -527,7 +527,11 @@ impl<R: Remote> SyncEngine<R> {
             self.meeting_activities(conversation_id, covered_from)
                 .await
                 .into_iter()
-                .filter(|record| state.oldest_loaded.is_none_or(|oldest| record.created_at < oldest)),
+                .filter(|record| {
+                    state
+                        .oldest_loaded
+                        .is_none_or(|oldest| record.created_at < oldest)
+                }),
         );
         self.ingest(conversation_id, records.clone())?;
         self.store.set_sync_state(

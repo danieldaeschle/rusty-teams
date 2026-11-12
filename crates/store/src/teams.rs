@@ -49,10 +49,7 @@ impl Store {
     }
 
     /// Read state comes from chatsvc only; channel metadata refreshes leave it alone.
-    pub fn apply_channel_read_states(
-        &self,
-        states: &[ChannelReadState],
-    ) -> Result<()> {
+    pub fn apply_channel_read_states(&self, states: &[ChannelReadState]) -> Result<()> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction()?;
         {

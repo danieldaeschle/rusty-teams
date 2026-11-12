@@ -19,7 +19,13 @@ impl Default for HighBandMeter {
         let a0 = 1. + alpha;
         let b0 = (1. + cosine) / 2. / a0;
         HighBandMeter {
-            coefficients: [b0, -(1. + cosine) / a0, b0, -2. * cosine / a0, (1. - alpha) / a0],
+            coefficients: [
+                b0,
+                -(1. + cosine) / a0,
+                b0,
+                -2. * cosine / a0,
+                (1. - alpha) / a0,
+            ],
             history: [0.; 4],
             total_energy: 0.,
             high_energy: 0.,
@@ -41,7 +47,8 @@ impl HighBandMeter {
     }
 
     pub fn take_share(&mut self) -> Option<f64> {
-        let share = (self.total_energy > SILENCE_ENERGY).then(|| self.high_energy / self.total_energy);
+        let share =
+            (self.total_energy > SILENCE_ENERGY).then(|| self.high_energy / self.total_energy);
         self.total_energy = 0.;
         self.high_energy = 0.;
         share
@@ -54,7 +61,10 @@ mod tests {
 
     fn sine(hertz: f32) -> Vec<i16> {
         (0..SAMPLE_RATE as usize)
-            .map(|index| ((2. * std::f32::consts::PI * hertz * index as f32 / SAMPLE_RATE as f32).sin() * 8000.) as i16)
+            .map(|index| {
+                ((2. * std::f32::consts::PI * hertz * index as f32 / SAMPLE_RATE as f32).sin()
+                    * 8000.) as i16
+            })
             .collect()
     }
 

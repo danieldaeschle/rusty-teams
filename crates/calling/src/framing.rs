@@ -36,7 +36,11 @@ pub struct Crop {
     pub zoom: f32,
 }
 
-pub const FULL_FRAME: Crop = Crop { center_x: 0.5, center_y: 0.5, zoom: MIN_ZOOM };
+pub const FULL_FRAME: Crop = Crop {
+    center_x: 0.5,
+    center_y: 0.5,
+    zoom: MIN_ZOOM,
+};
 
 pub fn find_subject(mask: &[f32], width: usize, height: usize) -> Option<Subject> {
     let mut visited = vec![false; mask.len()];
@@ -48,12 +52,18 @@ pub fn find_subject(mask: &[f32], width: usize, height: usize) -> Option<Subject
         }
         visited[start] = true;
         stack.push(start);
-        let (mut area, mut left, mut right, mut top, mut bottom) = (0usize, width, 0usize, height, 0usize);
+        let (mut area, mut left, mut right, mut top, mut bottom) =
+            (0usize, width, 0usize, height, 0usize);
         while let Some(index) = stack.pop() {
             let (x, y) = (index % width, index / width);
             area += 1;
             (left, right, top, bottom) = (left.min(x), right.max(x), top.min(y), bottom.max(y));
-            let neighbors = [(x > 0).then(|| index - 1), (x + 1 < width).then(|| index + 1), (y > 0).then(|| index - width), (y + 1 < height).then(|| index + width)];
+            let neighbors = [
+                (x > 0).then(|| index - 1),
+                (x + 1 < width).then(|| index + 1),
+                (y > 0).then(|| index - width),
+                (y + 1 < height).then(|| index + width),
+            ];
             for next in neighbors.into_iter().flatten() {
                 if !visited[next] && mask[next] >= PERSON_THRESHOLD {
                     visited[next] = true;
@@ -103,18 +113,49 @@ fn ease(current: f32, target: f32, time_constant: f32, speed_cap: f32, seconds: 
 
 pub fn step_crop(current: Crop, target: Crop, seconds: f32, deadband: bool) -> Crop {
     let current_size = 1. / current.zoom;
-    let offset = (target.center_x - current.center_x).abs().max((target.center_y - current.center_y).abs());
+    let offset = (target.center_x - current.center_x)
+        .abs()
+        .max((target.center_y - current.center_y).abs());
     let resize = (1. / target.zoom - current_size).abs();
     let pans = !deadband || offset / current_size > POSITION_DEADBAND;
     let zooms = !deadband || resize / current_size > SIZE_DEADBAND;
-    let zoom = if zooms { ease(current.zoom, target.zoom, ZOOM_TIME_CONSTANT, ZOOM_SPEED_CAP, seconds) } else { current.zoom };
+    let zoom = if zooms {
+        ease(
+            current.zoom,
+            target.zoom,
+            ZOOM_TIME_CONSTANT,
+            ZOOM_SPEED_CAP,
+            seconds,
+        )
+    } else {
+        current.zoom
+    };
     let size = 1. / zoom;
     let (center_x, center_y) = if pans {
-        (ease(current.center_x, target.center_x, PAN_TIME_CONSTANT, PAN_SPEED_CAP, seconds), ease(current.center_y, target.center_y, PAN_TIME_CONSTANT, PAN_SPEED_CAP, seconds))
+        (
+            ease(
+                current.center_x,
+                target.center_x,
+                PAN_TIME_CONSTANT,
+                PAN_SPEED_CAP,
+                seconds,
+            ),
+            ease(
+                current.center_y,
+                target.center_y,
+                PAN_TIME_CONSTANT,
+                PAN_SPEED_CAP,
+                seconds,
+            ),
+        )
     } else {
         (current.center_x, current.center_y)
     };
-    Crop { center_x: fit_center(center_x, size), center_y: fit_center(center_y, size), zoom }
+    Crop {
+        center_x: fit_center(center_x, size),
+        center_y: fit_center(center_y, size),
+        zoom,
+    }
 }
 
 pub struct CropPlanner {
@@ -125,13 +166,19 @@ pub struct CropPlanner {
 
 impl Default for CropPlanner {
     fn default() -> Self {
-        CropPlanner { crop: FULL_FRAME, lost_seconds: 0., moving: false }
+        CropPlanner {
+            crop: FULL_FRAME,
+            lost_seconds: 0.,
+            moving: false,
+        }
     }
 }
 
 fn settled(current: &Crop, target: &Crop) -> bool {
     let size = 1. / current.zoom;
-    let offset = (target.center_x - current.center_x).abs().max((target.center_y - current.center_y).abs());
+    let offset = (target.center_x - current.center_x)
+        .abs()
+        .max((target.center_y - current.center_y).abs());
     offset / size < ARRIVED && (1. / target.zoom - size).abs() / size < ARRIVED
 }
 
@@ -170,14 +217,22 @@ pub fn crop_rectangle(crop: &Crop, width: usize, height: usize) -> (usize, usize
     let crop_width = even(width as f32 / crop.zoom).clamp(2, width);
     let crop_height = even(height as f32 / crop.zoom).clamp(2, height);
     let left = even(crop.center_x * width as f32 - crop_width as f32 / 2.).min(width - crop_width);
-    let top = even(crop.center_y * height as f32 - crop_height as f32 / 2.).min(height - crop_height);
+    let top =
+        even(crop.center_y * height as f32 - crop_height as f32 / 2.).min(height - crop_height);
     (left, top, crop_width, crop_height)
 }
 
-fn copy_plane(source: &[u8], source_stride: usize, rectangle: (usize, usize, usize, usize), target: &mut [u8], target_stride: usize) {
+fn copy_plane(
+    source: &[u8],
+    source_stride: usize,
+    rectangle: (usize, usize, usize, usize),
+    target: &mut [u8],
+    target_stride: usize,
+) {
     let (left, top, width, height) = rectangle;
     for row in 0..height {
-        target[row * target_stride..][..width].copy_from_slice(&source[(top + row) * source_stride + left..][..width]);
+        target[row * target_stride..][..width]
+            .copy_from_slice(&source[(top + row) * source_stride + left..][..width]);
     }
 }
 
@@ -188,9 +243,27 @@ pub fn crop_and_scale(buffer: &I420Buffer, crop: &Crop) -> I420Buffer {
     let (source_strides, target_strides) = (buffer.strides(), cropped.strides());
     let (source_y, source_u, source_v) = buffer.data();
     let (target_y, target_u, target_v) = cropped.data_mut();
-    copy_plane(source_y, source_strides.0 as usize, (left, top, crop_width, crop_height), target_y, target_strides.0 as usize);
-    copy_plane(source_u, source_strides.1 as usize, (left / 2, top / 2, crop_width / 2, crop_height / 2), target_u, target_strides.1 as usize);
-    copy_plane(source_v, source_strides.2 as usize, (left / 2, top / 2, crop_width / 2, crop_height / 2), target_v, target_strides.2 as usize);
+    copy_plane(
+        source_y,
+        source_strides.0 as usize,
+        (left, top, crop_width, crop_height),
+        target_y,
+        target_strides.0 as usize,
+    );
+    copy_plane(
+        source_u,
+        source_strides.1 as usize,
+        (left / 2, top / 2, crop_width / 2, crop_height / 2),
+        target_u,
+        target_strides.1 as usize,
+    );
+    copy_plane(
+        source_v,
+        source_strides.2 as usize,
+        (left / 2, top / 2, crop_width / 2, crop_height / 2),
+        target_v,
+        target_strides.2 as usize,
+    );
     cropped.scale(width as i32, height as i32)
 }
 
@@ -215,7 +288,12 @@ mod tests {
     }
 
     fn small_person() -> Subject {
-        Subject { left: 0.4, top: 0.3, right: 0.5, bottom: 0.7 }
+        Subject {
+            left: 0.4,
+            top: 0.3,
+            right: 0.5,
+            bottom: 0.7,
+        }
     }
 
     fn settle(planner: &mut CropPlanner, subject: Option<&Subject>, seconds: u32) -> Crop {
@@ -230,7 +308,15 @@ mod tests {
     fn the_largest_region_wins_and_small_ones_are_dropped() {
         let mask = mask_with(&[(10, 5, 30, 30), (40, 5, 46, 10), (50, 20, 54, 24)]);
         let subject = find_subject(&mask, WIDTH, HEIGHT).expect("a person");
-        assert_eq!(subject, Subject { left: 10. / 64., top: 5. / 36., right: 30. / 64., bottom: 30. / 36. });
+        assert_eq!(
+            subject,
+            Subject {
+                left: 10. / 64.,
+                top: 5. / 36.,
+                right: 30. / 64.,
+                bottom: 30. / 36.
+            }
+        );
         assert!(find_subject(&mask_with(&[(40, 5, 46, 10)]), WIDTH, HEIGHT).is_none());
         assert!(find_subject(&vec![0.4; WIDTH * HEIGHT], WIDTH, HEIGHT).is_none());
         assert!(find_subject(&vec![0.6; WIDTH * HEIGHT], WIDTH, HEIGHT).is_some());
@@ -244,21 +330,45 @@ mod tests {
         let size = 1. / crop.zoom;
         assert!(crop.center_y - size / 2. <= 0.3 - 0.12 * size + 1e-4);
         assert!(crop.center_x - size / 2. >= 0. && crop.center_y + size / 2. <= 1.);
-        let wide = Subject { left: 0.1, top: 0.1, right: 0.9, bottom: 0.9 };
+        let wide = Subject {
+            left: 0.1,
+            top: 0.1,
+            right: 0.9,
+            bottom: 0.9,
+        };
         assert_eq!(crop_for(&wide).zoom, 1.);
-        let medium = Subject { left: 0.3, top: 0.2, right: 0.7, bottom: 0.9 };
+        let medium = Subject {
+            left: 0.3,
+            top: 0.2,
+            right: 0.7,
+            bottom: 0.9,
+        };
         assert!((crop_for(&medium).zoom - 1. / 0.72).abs() < 1e-4);
     }
 
     #[test]
     fn the_crop_holds_while_the_target_is_inside_the_deadband() {
-        let current = Crop { center_x: 0.5, center_y: 0.5, zoom: 1.5 };
+        let current = Crop {
+            center_x: 0.5,
+            center_y: 0.5,
+            zoom: 1.5,
+        };
         let size = 1. / current.zoom;
-        let near = Crop { center_x: 0.5 + 0.05 * size, center_y: 0.5, zoom: 1. / (size * 1.09) };
+        let near = Crop {
+            center_x: 0.5 + 0.05 * size,
+            center_y: 0.5,
+            zoom: 1. / (size * 1.09),
+        };
         assert_eq!(step_crop(current, near, 0.033, true), current);
-        let far = Crop { center_x: 0.5 + 0.2 * size, ..current };
+        let far = Crop {
+            center_x: 0.5 + 0.2 * size,
+            ..current
+        };
         assert!(step_crop(current, far, 0.033, true).center_x > current.center_x);
-        let bigger = Crop { zoom: 1. / (size * 1.2), ..current };
+        let bigger = Crop {
+            zoom: 1. / (size * 1.2),
+            ..current
+        };
         assert!(step_crop(current, bigger, 0.033, true).zoom < current.zoom);
     }
 
@@ -273,12 +383,28 @@ mod tests {
 
     #[test]
     fn panning_never_exceeds_the_speed_cap() {
-        let current = Crop { center_x: 0.3, center_y: 0.5, zoom: 2. };
-        let target = Crop { center_x: 0.7, center_y: 0.5, zoom: 2. };
+        let current = Crop {
+            center_x: 0.3,
+            center_y: 0.5,
+            zoom: 2.,
+        };
+        let target = Crop {
+            center_x: 0.7,
+            center_y: 0.5,
+            zoom: 2.,
+        };
         let moved = step_crop(current, target, 0.1, true);
         assert!((moved.center_x - current.center_x) <= PAN_SPEED_CAP * 0.1 + 1e-6);
         assert!(moved.center_x > current.center_x);
-        let zoomed = step_crop(FULL_FRAME, Crop { zoom: 2., ..FULL_FRAME }, 0.5, true);
+        let zoomed = step_crop(
+            FULL_FRAME,
+            Crop {
+                zoom: 2.,
+                ..FULL_FRAME
+            },
+            0.5,
+            true,
+        );
         assert!(zoomed.zoom - 1. <= ZOOM_SPEED_CAP * 0.5 + 1e-6);
     }
 
@@ -299,13 +425,28 @@ mod tests {
 
     #[test]
     fn the_crop_rectangle_is_even_inside_the_frame_and_scales_back() {
-        let (left, top, width, height) = crop_rectangle(&Crop { center_x: 0.9, center_y: 0.1, zoom: 2. }, 1280, 720);
+        let (left, top, width, height) = crop_rectangle(
+            &Crop {
+                center_x: 0.9,
+                center_y: 0.1,
+                zoom: 2.,
+            },
+            1280,
+            720,
+        );
         assert_eq!((width, height), (640, 360));
         assert_eq!((left, top), (640, 0));
         assert!(left % 2 == 0 && top % 2 == 0);
         assert_eq!(crop_rectangle(&FULL_FRAME, 1280, 720), (0, 0, 1280, 720));
         let buffer = I420Buffer::new(64, 36);
-        let scaled = crop_and_scale(&buffer, &Crop { center_x: 0.5, center_y: 0.5, zoom: 2. });
+        let scaled = crop_and_scale(
+            &buffer,
+            &Crop {
+                center_x: 0.5,
+                center_y: 0.5,
+                zoom: 2.,
+            },
+        );
         assert_eq!((scaled.width(), scaled.height()), (64, 36));
     }
 }

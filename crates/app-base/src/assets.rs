@@ -242,14 +242,20 @@ const LUCIDE_AS_MATERIAL: [(&str, &str); 159] = [
     ("icons/calendar-clock.svg", "symbols/calendar_clock.svg"),
     ("icons/camera.svg", "symbols/photo_camera.svg"),
     ("icons/captions.svg", "symbols/closed_caption.svg"),
-    ("icons/captions-off.svg", "symbols/closed_caption_disabled.svg"),
+    (
+        "icons/captions-off.svg",
+        "symbols/closed_caption_disabled.svg",
+    ),
     ("icons/case-sensitive.svg", "symbols/match_case.svg"),
     ("icons/chart-bar.svg", "symbols/bar_chart.svg"),
     ("icons/check.svg", "symbols/check.svg"),
     ("icons/check-check.svg", "symbols/done_all.svg"),
     ("icons/chevron-down.svg", "symbols/keyboard_arrow_down.svg"),
     ("icons/chevron-left.svg", "symbols/keyboard_arrow_left.svg"),
-    ("icons/chevron-right.svg", "symbols/keyboard_arrow_right.svg"),
+    (
+        "icons/chevron-right.svg",
+        "symbols/keyboard_arrow_right.svg",
+    ),
     ("icons/chevron-up.svg", "symbols/keyboard_arrow_up.svg"),
     ("icons/chevrons-down-up.svg", "symbols/unfold_less.svg"),
     ("icons/chevrons-up-down.svg", "symbols/unfold_more.svg"),
@@ -259,7 +265,10 @@ const LUCIDE_AS_MATERIAL: [(&str, &str); 159] = [
     ("icons/circle-user.svg", "symbols/account_circle.svg"),
     ("icons/circle-x.svg", "symbols/cancel.svg"),
     ("icons/clipboard.svg", "symbols/content_paste.svg"),
-    ("icons/clipboard-check.svg", "symbols/assignment_turned_in.svg"),
+    (
+        "icons/clipboard-check.svg",
+        "symbols/assignment_turned_in.svg",
+    ),
     ("icons/clock.svg", "symbols/schedule.svg"),
     ("icons/close.svg", "symbols/close.svg"),
     ("icons/cloud.svg", "symbols/cloud.svg"),
@@ -318,12 +327,18 @@ const LUCIDE_AS_MATERIAL: [(&str, &str); 159] = [
     ("icons/monitor.svg", "symbols/desktop_windows.svg"),
     ("icons/palette.svg", "symbols/palette.svg"),
     ("icons/panel-bottom.svg", "symbols/bottom_panel_open.svg"),
-    ("icons/panel-bottom-open.svg", "symbols/bottom_panel_open.svg"),
+    (
+        "icons/panel-bottom-open.svg",
+        "symbols/bottom_panel_open.svg",
+    ),
     ("icons/panel-left.svg", "symbols/left_panel_open.svg"),
     ("icons/panel-left-close.svg", "symbols/left_panel_close.svg"),
     ("icons/panel-left-open.svg", "symbols/left_panel_open.svg"),
     ("icons/panel-right.svg", "symbols/right_panel_open.svg"),
-    ("icons/panel-right-close.svg", "symbols/right_panel_close.svg"),
+    (
+        "icons/panel-right-close.svg",
+        "symbols/right_panel_close.svg",
+    ),
     ("icons/panel-right-open.svg", "symbols/right_panel_open.svg"),
     ("icons/paperclip.svg", "symbols/attach_file.svg"),
     ("icons/pencil.svg", "symbols/edit.svg"),
@@ -341,7 +356,10 @@ const LUCIDE_AS_MATERIAL: [(&str, &str); 159] = [
     ("icons/rotate-ccw.svg", "symbols/rotate_left.svg"),
     ("icons/rotate-cw.svg", "symbols/rotate_right.svg"),
     ("icons/screen-share.svg", "symbols/present_to_all.svg"),
-    ("icons/screen-share-off.svg", "symbols/cancel_presentation.svg"),
+    (
+        "icons/screen-share-off.svg",
+        "symbols/cancel_presentation.svg",
+    ),
     ("icons/search.svg", "symbols/search.svg"),
     ("icons/send.svg", "symbols/send.svg"),
     ("icons/send-horizontal.svg", "symbols/send.svg"),
@@ -355,7 +373,10 @@ const LUCIDE_AS_MATERIAL: [(&str, &str); 159] = [
     ("icons/sort-ascending.svg", "symbols/arrow_upward.svg"),
     ("icons/sort-descending.svg", "symbols/arrow_downward.svg"),
     ("icons/square.svg", "symbols/crop_square.svg"),
-    ("icons/square-arrow-down-left.svg", "symbols/picture_in_picture_alt.svg"),
+    (
+        "icons/square-arrow-down-left.svg",
+        "symbols/picture_in_picture_alt.svg",
+    ),
     ("icons/star.svg", "symbols/star.svg"),
     ("icons/star-fill.svg", "symbols/star_fill.svg"),
     ("icons/table.svg", "symbols/table.svg"),
@@ -385,18 +406,29 @@ const VIEW_BOX_START: &[u8] = b"viewBox=\"";
 const LUCIDE_SIZED_VIEW_BOX: &[u8] = b"viewBox=\"80 -880 800 800\"";
 
 fn symbol_bytes(path: &str) -> Option<&'static [u8]> {
-    SYMBOLS.iter().find(|(name, _)| *name == path).map(|(_, bytes)| *bytes)
+    SYMBOLS
+        .iter()
+        .find(|(name, _)| *name == path)
+        .map(|(_, bytes)| *bytes)
 }
 
 fn at_lucide_size(svg: &[u8]) -> Vec<u8> {
-    let Some(start) = svg.windows(VIEW_BOX_START.len()).position(|window| window == VIEW_BOX_START) else {
+    let Some(start) = svg
+        .windows(VIEW_BOX_START.len())
+        .position(|window| window == VIEW_BOX_START)
+    else {
         return svg.to_vec();
     };
     let values_start = start + VIEW_BOX_START.len();
     let Some(values_length) = svg[values_start..].iter().position(|&byte| byte == b'"') else {
         return svg.to_vec();
     };
-    [&svg[..start], LUCIDE_SIZED_VIEW_BOX, &svg[values_start + values_length + 1..]].concat()
+    [
+        &svg[..start],
+        LUCIDE_SIZED_VIEW_BOX,
+        &svg[values_start + values_length + 1..],
+    ]
+    .concat()
 }
 
 pub const FILLED_PREFIX: &str = "filled/";
@@ -406,12 +438,19 @@ pub struct AppAssets;
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if let Some(stem) = path.strip_prefix(FILLED_PREFIX)
-            && let Some((_, material)) = LUCIDE_AS_MATERIAL.iter().find(|(lucide, _)| lucide.strip_prefix("icons/") == Some(stem))
+            && let Some((_, material)) = LUCIDE_AS_MATERIAL
+                .iter()
+                .find(|(lucide, _)| lucide.strip_prefix("icons/") == Some(stem))
         {
             let filled = material.replace(".svg", "_fill.svg");
-            return Ok(symbol_bytes(&filled).or_else(|| symbol_bytes(material)).map(|bytes| Cow::Owned(at_lucide_size(bytes))));
+            return Ok(symbol_bytes(&filled)
+                .or_else(|| symbol_bytes(material))
+                .map(|bytes| Cow::Owned(at_lucide_size(bytes))));
         }
-        if let Some((_, material)) = LUCIDE_AS_MATERIAL.iter().find(|(lucide, _)| *lucide == path) {
+        if let Some((_, material)) = LUCIDE_AS_MATERIAL
+            .iter()
+            .find(|(lucide, _)| *lucide == path)
+        {
             return Ok(symbol_bytes(material).map(|bytes| Cow::Owned(at_lucide_size(bytes))));
         }
         if let Some((_, bytes)) = SYMBOLS.iter().find(|(name, _)| *name == path) {
@@ -441,16 +480,27 @@ mod tests {
         let filled = AppAssets.load("filled/bell.svg").unwrap().unwrap();
         let outline = AppAssets.load("icons/bell.svg").unwrap().unwrap();
         assert_ne!(filled, outline);
-        assert_eq!(AppAssets.load("filled/search.svg").unwrap().unwrap(), AppAssets.load("icons/search.svg").unwrap().unwrap());
+        assert_eq!(
+            AppAssets.load("filled/search.svg").unwrap().unwrap(),
+            AppAssets.load("icons/search.svg").unwrap().unwrap()
+        );
     }
 
     #[test]
     fn every_lucide_icon_we_replace_loads_a_bundled_material_symbol() {
         for (lucide, material) in LUCIDE_AS_MATERIAL {
-            assert!(SYMBOLS.iter().any(|(name, _)| *name == material), "{lucide} -> {material}");
+            assert!(
+                SYMBOLS.iter().any(|(name, _)| *name == material),
+                "{lucide} -> {material}"
+            );
             let bytes = AppAssets.load(lucide).unwrap().unwrap();
             assert!(bytes.starts_with(b"<svg"), "{lucide}");
-            assert!(bytes.windows(LUCIDE_SIZED_VIEW_BOX.len()).any(|window| window == LUCIDE_SIZED_VIEW_BOX), "{lucide}");
+            assert!(
+                bytes
+                    .windows(LUCIDE_SIZED_VIEW_BOX.len())
+                    .any(|window| window == LUCIDE_SIZED_VIEW_BOX),
+                "{lucide}"
+            );
         }
     }
 }

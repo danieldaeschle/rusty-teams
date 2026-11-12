@@ -4,7 +4,9 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 
-use super::call_toolbar::{GROUP_DIVIDER_WIDTH, GROUP_GAP, SPLIT_CHEVRON_WIDTH, TOOL_GAP, TOOL_WIDTH};
+use super::call_toolbar::{
+    GROUP_DIVIDER_WIDTH, GROUP_GAP, SPLIT_CHEVRON_WIDTH, TOOL_GAP, TOOL_WIDTH,
+};
 use super::call_view::reaction_glyph;
 use super::call_view_menu::view_items;
 use crate::app_state::AppState;
@@ -37,14 +39,29 @@ impl FoldedControls {
     }
 }
 
-pub fn fixed_controls_width(has_camera_menu: bool, has_more: bool, has_leave_menu: bool, has_pop_out: bool) -> f32 {
+pub fn fixed_controls_width(
+    has_camera_menu: bool,
+    has_more: bool,
+    has_leave_menu: bool,
+    has_pop_out: bool,
+) -> f32 {
     let devices = [
-        TOOL_WIDTH + if has_camera_menu { SPLIT_CHEVRON_WIDTH } else { 0. },
+        TOOL_WIDTH
+            + if has_camera_menu {
+                SPLIT_CHEVRON_WIDTH
+            } else {
+                0.
+            },
         TOOL_WIDTH + SPLIT_CHEVRON_WIDTH,
         TOOL_WIDTH,
     ];
     let devices_width = devices.iter().sum::<f32>() + TOOL_GAP * (devices.len() - 1) as f32;
-    let more_width = if has_more { TOOL_WIDTH } else { 0. } + if has_pop_out { TOOL_WIDTH + TOOL_GAP } else { 0. };
+    let more_width = if has_more { TOOL_WIDTH } else { 0. }
+        + if has_pop_out {
+            TOOL_WIDTH + TOOL_GAP
+        } else {
+            0.
+        };
     let leave_width = LEAVE_WIDTH
         + if has_leave_menu {
             SPLIT_CHEVRON_WIDTH + 4. + 1.
@@ -136,11 +153,17 @@ fn reactions_submenu(
             for reaction in Reaction::ALL {
                 let app = app.clone();
                 menu = menu.item(
-                    PopupMenuItem::new(format!("{} {}", reaction_glyph(&reaction), reaction.name()))
-                        .disabled(!can_react)
-                        .on_click(move |_, _, cx| {
-                            app.update(cx, |state, cx| state.send_call_reaction(reaction.clone(), cx))
-                        }),
+                    PopupMenuItem::new(format!(
+                        "{} {}",
+                        reaction_glyph(&reaction),
+                        reaction.name()
+                    ))
+                    .disabled(!can_react)
+                    .on_click(move |_, _, cx| {
+                        app.update(cx, |state, cx| {
+                            state.send_call_reaction(reaction.clone(), cx)
+                        })
+                    }),
                 );
             }
             menu
@@ -162,9 +185,13 @@ fn hand_item(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> Pop
 fn people_item(popup: PopupMenu, app: &Entity<AppState>, open: bool) -> PopupMenu {
     let app = app.clone();
     popup.item(
-        PopupMenuItem::new(if open { "Close the people list" } else { "Show people" })
-            .icon(IconName::Users)
-            .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_people(cx))),
+        PopupMenuItem::new(if open {
+            "Close the people list"
+        } else {
+            "Show people"
+        })
+        .icon(IconName::Users)
+        .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_people(cx))),
     )
 }
 
@@ -202,7 +229,10 @@ mod tests {
 
     #[test]
     fn folds_reactions_first_then_people() {
-        assert_eq!(folded_for_width(width_for(2.), FIXED, &ALL), [Foldable::Reactions]);
+        assert_eq!(
+            folded_for_width(width_for(2.), FIXED, &ALL),
+            [Foldable::Reactions]
+        );
         assert_eq!(
             folded_for_width(width_for(1.), FIXED, &ALL),
             [Foldable::Reactions, Foldable::People]
@@ -220,7 +250,12 @@ mod tests {
         assert_eq!(in_more_menu(Vec::new()), [Foldable::View]);
         assert_eq!(
             in_more_menu(vec![Foldable::Reactions, Foldable::Chat]),
-            [Foldable::View, Foldable::Reactions, Foldable::RaiseHand, Foldable::Chat]
+            [
+                Foldable::View,
+                Foldable::Reactions,
+                Foldable::RaiseHand,
+                Foldable::Chat
+            ]
         );
     }
 

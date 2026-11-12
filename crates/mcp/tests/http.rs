@@ -5,9 +5,10 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, TimeZone, Utc};
 use mcp::{
-    Access, AgentHub, AgentPolicy, BusySlot, CreatedMeeting, EncodedImage, MeetingDraft, MeetingOutcome, PersonAvailability, FileInfo, ForwardedInfo, ImageInfo, ImageKind,
-    LinkInfo, Meeting, MentionInfo, MessageExtras, Outcome, QuoteInfo, ReactionInfo, ServerHandle,
-    SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn,
+    Access, AgentHub, AgentPolicy, BusySlot, CreatedMeeting, EncodedImage, FileInfo, ForwardedInfo,
+    ImageInfo, ImageKind, LinkInfo, Meeting, MeetingDraft, MeetingOutcome, MentionInfo,
+    MessageExtras, Outcome, PersonAvailability, QuoteInfo, ReactionInfo, ServerHandle, SourceError,
+    SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
 use rmcp::ServiceExt;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ClientConfig};
@@ -15,7 +16,9 @@ use rmcp::service::RunningService;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use serde_json::{Value, json};
-use store::{ChannelReadState, ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamRecord};
+use store::{
+    ChannelReadState, ChannelRecord, ChatRecord, MemberRecord, MessageRecord, Store, TeamRecord,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -442,7 +445,8 @@ async fn lists_all_thirteen_tools_and_marks_reads_read_only() {
             .annotations
             .as_ref()
             .and_then(|annotations| annotations.read_only_hint);
-        let writes = ["write_message", "add_reaction", "create_meeting"].contains(&tool.name.as_ref());
+        let writes =
+            ["write_message", "add_reaction", "create_meeting"].contains(&tool.name.as_ref());
         assert_eq!(read_only == Some(true), !writes, "{}", tool.name);
         if writes {
             let annotations = tool.annotations.as_ref().unwrap();
@@ -649,8 +653,17 @@ async fn an_agent_asks_for_a_window_and_writes_freely_once_it_is_granted() {
     let pending = harness.hub.pending_proposal(ALLOWED_CHAT).unwrap();
     assert_eq!(pending.free_writing_ask.unwrap().minutes, 480);
 
-    harness.hub.grant_free_writing(ALLOWED_CHAT, chrono::Utc::now() + chrono::Duration::minutes(30), None);
-    let (_, body) = call(&client, "write_message", json!({"conversation_id": ALLOWED_CHAT, "text": "Second"})).await;
+    harness.hub.grant_free_writing(
+        ALLOWED_CHAT,
+        chrono::Utc::now() + chrono::Duration::minutes(30),
+        None,
+    );
+    let (_, body) = call(
+        &client,
+        "write_message",
+        json!({"conversation_id": ALLOWED_CHAT, "text": "Second"}),
+    )
+    .await;
     let body: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(body["state"], "sending");
     assert!(body["free_until"].is_string());
@@ -1746,7 +1759,10 @@ async fn meetings_need_the_permission_and_go_through_review() {
         "description": "Agenda",
     });
     let (is_error, text) = call(&client, "create_meeting", meeting.clone()).await;
-    assert!(is_error && text.contains("organizing meetings is turned off"), "{text}");
+    assert!(
+        is_error && text.contains("organizing meetings is turned off"),
+        "{text}"
+    );
 
     let mut policy = harness.hub.policy();
     policy.meetings = true;
@@ -1767,9 +1783,21 @@ async fn meetings_need_the_permission_and_go_through_review() {
     assert_eq!(body["state"], "pending");
     let pending = harness.hub.pending_meetings();
     assert_eq!(pending[0].draft.subject, "Release review");
-    harness.hub.resolve_meeting(&pending[0].id, MeetingOutcome::Created, Some("https://teams.example/new".to_owned()));
-    let (_, events) = call(&client, "wait_for_event", json!({"timeout_seconds": 1, "since": 0})).await;
-    assert!(events.contains("meeting_resolved") && events.contains("teams.example/new"), "{events}");
+    harness.hub.resolve_meeting(
+        &pending[0].id,
+        MeetingOutcome::Created,
+        Some("https://teams.example/new".to_owned()),
+    );
+    let (_, events) = call(
+        &client,
+        "wait_for_event",
+        json!({"timeout_seconds": 1, "since": 0}),
+    )
+    .await;
+    assert!(
+        events.contains("meeting_resolved") && events.contains("teams.example/new"),
+        "{events}"
+    );
     assert!(harness.hub.pending_meetings().is_empty());
 
     policy.review = false;
@@ -1777,5 +1805,8 @@ async fn meetings_need_the_permission_and_go_through_review() {
     let (is_error, body) = call(&client, "create_meeting", meeting).await;
     assert!(!is_error, "{body}");
     let body: Value = serde_json::from_str(&body).unwrap();
-    assert_eq!((body["state"].as_str(), body["join_url"].as_str()), (Some("created"), Some("https://teams.example/new")));
+    assert_eq!(
+        (body["state"].as_str(), body["join_url"].as_str()),
+        (Some("created"), Some("https://teams.example/new"))
+    );
 }

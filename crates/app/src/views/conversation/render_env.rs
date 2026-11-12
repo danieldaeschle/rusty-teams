@@ -20,8 +20,8 @@ use crate::views::attachments::ImageActions;
 use crate::views::call_card::CallActions;
 use crate::views::call_notice::RecapActions;
 use crate::views::composer::Composer;
-use crate::views::message_context_menu::message_context_menu;
 use crate::views::message_appear::AppearKind;
+use crate::views::message_context_menu::message_context_menu;
 use crate::views::message_row::{DeliveryActions, RowActions, RowSelect, SharedRowAction};
 use crate::views::post_card::{PostAction, PostActions};
 use crate::views::reaction_proposal_pill::ReactionPill;
@@ -272,10 +272,14 @@ impl RenderEnv {
                     menu,
                     &open,
                     Rc::new(move |cx| {
-                        closing.update(cx, |this, cx| this.close_context_menu(false, cx)).ok();
+                        closing
+                            .update(cx, |this, cx| this.close_context_menu(false, cx))
+                            .ok();
                     }),
                     Rc::new(move |cx| {
-                        outside.update(cx, |this, cx| this.close_context_menu(true, cx)).ok();
+                        outside
+                            .update(cx, |this, cx| this.close_context_menu(true, cx))
+                            .ok();
                     }),
                     window,
                     cx,

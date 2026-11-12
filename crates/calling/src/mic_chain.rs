@@ -77,7 +77,10 @@ mod tests {
 
     #[test]
     fn off_leaves_the_frame_untouched() {
-        let off = MicSettings { noise_suppression: crate::mic_processing::NoiseSuppression::Off, music_mode: false };
+        let off = MicSettings {
+            noise_suppression: crate::mic_processing::NoiseSuppression::Off,
+            music_mode: false,
+        };
         let mut chain = MicChain::new(off.apm_config(), off.ml_noise_suppression(), None);
         let mut generator = SineGenerator::new(300.0, 0.2);
         let original = generator.next_frame();

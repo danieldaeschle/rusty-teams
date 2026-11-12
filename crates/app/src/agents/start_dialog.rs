@@ -361,7 +361,8 @@ impl StartDialog {
             .text_size(px(12.))
             .line_height(relative(1.4))
             .text_color(theme::text_soft())
-            .line_clamp(QUOTE_LINES).text_ellipsis()
+            .line_clamp(QUOTE_LINES)
+            .text_ellipsis()
             .child(StyledText::new(text).with_highlights([(sender_range, sender_style)]))
     }
 

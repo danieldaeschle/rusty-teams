@@ -30,15 +30,29 @@ pub struct Rung {
 }
 
 pub fn rungs(onnx_runtime: bool, gpu: bool, on_battery: bool) -> Vec<Rung> {
-    let mut rungs = vec![Rung { spec: MEDIAPIPE, device: Device::Cpu { threads: 1 } }];
+    let mut rungs = vec![Rung {
+        spec: MEDIAPIPE,
+        device: Device::Cpu { threads: 1 },
+    }];
     if on_battery || !onnx_runtime {
         return rungs;
     }
     if gpu {
-        rungs.push(Rung { spec: MODNET_SMALL, device: Device::Gpu });
-        rungs.push(Rung { spec: MODNET_LARGE, device: Device::Gpu });
+        rungs.push(Rung {
+            spec: MODNET_SMALL,
+            device: Device::Gpu,
+        });
+        rungs.push(Rung {
+            spec: MODNET_LARGE,
+            device: Device::Gpu,
+        });
     } else {
-        rungs.push(Rung { spec: MODNET_SMALL, device: Device::Cpu { threads: MODNET_CPU_THREADS } });
+        rungs.push(Rung {
+            spec: MODNET_SMALL,
+            device: Device::Cpu {
+                threads: MODNET_CPU_THREADS,
+            },
+        });
     }
     rungs
 }
@@ -79,15 +93,21 @@ pub struct FixedSegmenter {
 
 impl FixedSegmenter {
     pub fn new(spec: ModelSpec, device: Device) -> Result<Self> {
-        let runner = runtime::runner(&spec, device).map_err(|error| Error::Webrtc(format!("segmentation model: {error}")))?;
+        let runner = runtime::runner(&spec, device)
+            .map_err(|error| Error::Webrtc(format!("segmentation model: {error}")))?;
         Ok(FixedSegmenter { spec, runner })
     }
 }
 
 impl MaskInference for FixedSegmenter {
     fn infer(&mut self, mut frame: I420Buffer) -> Result<Mask> {
-        let output = self.runner.run(self.spec.input(&mut frame)).map_err(|error| Error::Webrtc(format!("segmentation: {error}")))?;
-        self.spec.mask(&output).ok_or_else(|| Error::Webrtc(format!("segmentation output has {} values", output.len())))
+        let output = self
+            .runner
+            .run(self.spec.input(&mut frame))
+            .map_err(|error| Error::Webrtc(format!("segmentation: {error}")))?;
+        self.spec.mask(&output).ok_or_else(|| {
+            Error::Webrtc(format!("segmentation output has {} values", output.len()))
+        })
     }
 }
 
@@ -103,15 +123,30 @@ pub struct LadderSegmenter {
 
 impl LadderSegmenter {
     pub fn new() -> Result<Self> {
-        Self::with_rungs(rungs(runtime::environment().is_some(), runtime::gpu_available(), on_battery()))
+        Self::with_rungs(rungs(
+            runtime::environment().is_some(),
+            runtime::gpu_available(),
+            on_battery(),
+        ))
     }
 
     pub fn with_rungs(rungs: Vec<Rung>) -> Result<Self> {
-        let first = rungs.first().ok_or_else(|| Error::Webrtc("segmentation: no model".into()))?;
-        let runner = runtime::runner(&first.spec, first.device).map_err(|error| Error::Webrtc(format!("segmentation model: {error}")))?;
+        let first = rungs
+            .first()
+            .ok_or_else(|| Error::Webrtc("segmentation: no model".into()))?;
+        let runner = runtime::runner(&first.spec, first.device)
+            .map_err(|error| Error::Webrtc(format!("segmentation model: {error}")))?;
         let mut runners: Vec<Option<Box<dyn Runner>>> = rungs.iter().map(|_| None).collect();
         runners[0] = Some(runner);
-        Ok(LadderSegmenter { next_probe: 1, rungs, runners, active: 0, probe: None, served: 0, timings: VecDeque::new() })
+        Ok(LadderSegmenter {
+            next_probe: 1,
+            rungs,
+            runners,
+            active: 0,
+            probe: None,
+            served: 0,
+            timings: VecDeque::new(),
+        })
     }
 
     pub fn active(&self) -> ModelSpec {
@@ -119,7 +154,9 @@ impl LadderSegmenter {
     }
 
     fn adopt_probe(&mut self) {
-        let Some((rung, handle)) = self.probe.take_if(|(_, handle)| handle.is_finished()) else { return };
+        let Some((rung, handle)) = self.probe.take_if(|(_, handle)| handle.is_finished()) else {
+            return;
+        };
         match handle.join().ok().flatten() {
             Some((runner, typical)) if typical <= budget(self.rungs[rung].device) => {
                 self.runners[rung] = Some(runner);
@@ -133,7 +170,8 @@ impl LadderSegmenter {
     }
 
     fn start_probe(&mut self, frame: &mut I420Buffer) {
-        if self.probe.is_some() || self.served < PROBE_AFTER || self.next_probe >= self.rungs.len() {
+        if self.probe.is_some() || self.served < PROBE_AFTER || self.next_probe >= self.rungs.len()
+        {
             return;
         }
         let rung = self.rungs[self.next_probe];
@@ -145,7 +183,8 @@ impl LadderSegmenter {
         if self.timings.len() > TIMING_WINDOW {
             self.timings.pop_front();
         }
-        let behind = self.timings.len() == TIMING_WINDOW && median(self.timings.iter().copied()) > BEHIND;
+        let behind =
+            self.timings.len() == TIMING_WINDOW && median(self.timings.iter().copied()) > BEHIND;
         if behind && self.active > 0 {
             self.runners[self.active] = None;
             self.active -= 1;
@@ -169,15 +208,21 @@ impl MaskInference for LadderSegmenter {
         self.start_probe(&mut frame);
         let spec = self.rungs[self.active].spec;
         let input = spec.input(&mut frame);
-        let runner = self.runners[self.active].as_mut().ok_or_else(|| Error::Webrtc("segmentation: runner missing".into()))?;
+        let runner = self.runners[self.active]
+            .as_mut()
+            .ok_or_else(|| Error::Webrtc("segmentation: runner missing".into()))?;
         let started = Instant::now();
-        let output = runner.run(input).map_err(|error| Error::Webrtc(format!("segmentation: {error}")))?;
+        let output = runner
+            .run(input)
+            .map_err(|error| Error::Webrtc(format!("segmentation: {error}")))?;
         let elapsed = started.elapsed();
         self.served += 1;
         if self.active > 0 {
             self.record(elapsed);
         }
-        spec.mask(&output).ok_or_else(|| Error::Webrtc(format!("segmentation output has {} values", output.len())))
+        spec.mask(&output).ok_or_else(|| {
+            Error::Webrtc(format!("segmentation output has {} values", output.len()))
+        })
     }
 }
 
@@ -190,10 +235,15 @@ fn on_battery() -> bool {
 
 #[cfg(not(windows))]
 fn on_battery() -> bool {
-    std::fs::read_dir("/sys/class/power_supply").into_iter().flatten().flatten().any(|supply| {
-        let read = |name: &str| std::fs::read_to_string(supply.path().join(name)).unwrap_or_default();
-        read("type").trim() == "Battery" && read("status").trim() == "Discharging"
-    })
+    std::fs::read_dir("/sys/class/power_supply")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|supply| {
+            let read =
+                |name: &str| std::fs::read_to_string(supply.path().join(name)).unwrap_or_default();
+            read("type").trim() == "Battery" && read("status").trim() == "Discharging"
+        })
 }
 
 #[cfg(test)]
@@ -211,10 +261,25 @@ mod tests {
     }
 
     fn ladder(times: [Duration; 2]) -> LadderSegmenter {
-        let rungs = vec![Rung { spec: MEDIAPIPE, device: Device::Cpu { threads: 1 } }, Rung { spec: MODNET_SMALL, device: Device::Cpu { threads: 1 } }];
+        let rungs = vec![
+            Rung {
+                spec: MEDIAPIPE,
+                device: Device::Cpu { threads: 1 },
+            },
+            Rung {
+                spec: MODNET_SMALL,
+                device: Device::Cpu { threads: 1 },
+            },
+        ];
         let mut ladder = LadderSegmenter::with_rungs(rungs.clone()).expect("mediapipe loads");
-        ladder.runners[0] = Some(Box::new(Fixed(times[0], MEDIAPIPE.width * MEDIAPIPE.height)));
-        ladder.runners[1] = Some(Box::new(Fixed(times[1], MODNET_SMALL.width * MODNET_SMALL.height)));
+        ladder.runners[0] = Some(Box::new(Fixed(
+            times[0],
+            MEDIAPIPE.width * MEDIAPIPE.height,
+        )));
+        ladder.runners[1] = Some(Box::new(Fixed(
+            times[1],
+            MODNET_SMALL.width * MODNET_SMALL.height,
+        )));
         ladder
     }
 
@@ -238,7 +303,15 @@ mod tests {
 
     fn finished_probe(ladder: &mut LadderSegmenter, typical: Duration) {
         ladder.runners[1] = None;
-        let handle = std::thread::spawn(move || Some((Box::new(Fixed(Duration::ZERO, MODNET_SMALL.width * MODNET_SMALL.height)) as Box<dyn Runner>, typical)));
+        let handle = std::thread::spawn(move || {
+            Some((
+                Box::new(Fixed(
+                    Duration::ZERO,
+                    MODNET_SMALL.width * MODNET_SMALL.height,
+                )) as Box<dyn Runner>,
+                typical,
+            ))
+        });
         while !handle.is_finished() {
             std::thread::yield_now();
         }
@@ -272,20 +345,46 @@ mod tests {
     #[test]
     fn battery_missing_gpu_and_missing_onnx_runtime_shorten_the_ladder() {
         assert_eq!(rungs(true, true, true).len(), 1);
-        assert_eq!(rungs(false, false, false).len(), 1, "no matting model on tract");
-        assert_eq!(rungs(true, false, false).iter().map(|rung| rung.spec).collect::<Vec<_>>(), vec![MEDIAPIPE, MODNET_SMALL]);
-        assert_eq!(rungs(true, true, false).last().unwrap(), &Rung { spec: MODNET_LARGE, device: Device::Gpu });
+        assert_eq!(
+            rungs(false, false, false).len(),
+            1,
+            "no matting model on tract"
+        );
+        assert_eq!(
+            rungs(true, false, false)
+                .iter()
+                .map(|rung| rung.spec)
+                .collect::<Vec<_>>(),
+            vec![MEDIAPIPE, MODNET_SMALL]
+        );
+        assert_eq!(
+            rungs(true, true, false).last().unwrap(),
+            &Rung {
+                spec: MODNET_LARGE,
+                device: Device::Gpu
+            }
+        );
     }
 
     #[test]
     fn every_ladder_model_runs_and_answers_one_value_per_cell() {
-        let onnx_specs = if runtime::environment().is_some() { vec![MEDIAPIPE, MODNET_SMALL] } else { Vec::new() };
+        let onnx_specs = if runtime::environment().is_some() {
+            vec![MEDIAPIPE, MODNET_SMALL]
+        } else {
+            Vec::new()
+        };
         for spec in onnx_specs {
-            let mut runner = runtime::runner(&spec, Device::Cpu { threads: 2 }).expect("model loads");
-            let output = runner.run(spec.input(&mut frame())).expect("inference runs");
+            let mut runner =
+                runtime::runner(&spec, Device::Cpu { threads: 2 }).expect("model loads");
+            let output = runner
+                .run(spec.input(&mut frame()))
+                .expect("inference runs");
             assert!(spec.mask(&output).is_some(), "{}", spec.name);
         }
         let mut tract = runtime::tract_only(&MEDIAPIPE);
-        assert_eq!(tract.run(MEDIAPIPE.input(&mut frame())).unwrap().len(), MEDIAPIPE.width * MEDIAPIPE.height);
+        assert_eq!(
+            tract.run(MEDIAPIPE.input(&mut frame())).unwrap().len(),
+            MEDIAPIPE.width * MEDIAPIPE.height
+        );
     }
 }

@@ -128,7 +128,11 @@ mod tests {
             ]}}
         ]});
         let parsed = parse_message_emotions(&body);
-        let keys: Vec<&str> = parsed[0].reactions.iter().map(|reaction| reaction.key.as_str()).collect();
+        let keys: Vec<&str> = parsed[0]
+            .reactions
+            .iter()
+            .map(|reaction| reaction.key.as_str())
+            .collect();
         assert_eq!(keys, ["like"]);
     }
 }

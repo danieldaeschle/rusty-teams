@@ -100,15 +100,20 @@ pub fn system_default_id(flow: Flow) -> Option<String> {
 
 #[cfg(windows)]
 fn default_endpoint_id(flow: Flow) -> Option<String> {
-    use windows::Win32::Media::Audio::{IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eCommunications, eRender};
+    use windows::Win32::Media::Audio::{
+        IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eCommunications, eRender,
+    };
     use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
     let data_flow = match flow {
         Flow::Capture => eCapture,
         Flow::Render => eRender,
     };
     unsafe {
-        let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
-        let device = enumerator.GetDefaultAudioEndpoint(data_flow, eCommunications).ok()?;
+        let enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+        let device = enumerator
+            .GetDefaultAudioEndpoint(data_flow, eCommunications)
+            .ok()?;
         let id = device.GetId().ok()?;
         let text = id.to_string().ok();
         CoTaskMemFree(Some(id.0 as *const _));
@@ -121,10 +126,18 @@ pub fn system_default_id(_flow: Flow) -> Option<String> {
     None
 }
 
-pub fn resolve_index(devices: &[AudioDevice], choice: &DeviceChoice, system_default: Option<&str>) -> Option<u16> {
+pub fn resolve_index(
+    devices: &[AudioDevice],
+    choice: &DeviceChoice,
+    system_default: Option<&str>,
+) -> Option<u16> {
     match choice {
         DeviceChoice::SystemDefault => system_default
-            .and_then(|id| devices.iter().find(|device| device.guid.eq_ignore_ascii_case(id)))
+            .and_then(|id| {
+                devices
+                    .iter()
+                    .find(|device| device.guid.eq_ignore_ascii_case(id))
+            })
             .or_else(|| devices.iter().find(|device| device.is_system_alias()))
             .or(devices.first())
             .map(|device| device.index),
@@ -148,7 +161,11 @@ pub enum Reselect {
     FallBack(u16),
 }
 
-pub fn applied_device(devices: &[AudioDevice], choice: &DeviceChoice, system_default: Option<&str>) -> Option<AppliedDevice> {
+pub fn applied_device(
+    devices: &[AudioDevice],
+    choice: &DeviceChoice,
+    system_default: Option<&str>,
+) -> Option<AppliedDevice> {
     let index = resolve_index(devices, choice, system_default)?;
     device_at(devices, index)
 }
@@ -157,22 +174,36 @@ fn device_at(devices: &[AudioDevice], index: u16) -> Option<AppliedDevice> {
     devices
         .iter()
         .find(|device| device.index == index)
-        .map(|device| AppliedDevice { index, key: device.key() })
+        .map(|device| AppliedDevice {
+            index,
+            key: device.key(),
+        })
 }
 
-pub fn reselect(applied: Option<&AppliedDevice>, devices: &[AudioDevice], choice: &DeviceChoice, system_default: Option<&str>) -> Reselect {
+pub fn reselect(
+    applied: Option<&AppliedDevice>,
+    devices: &[AudioDevice],
+    choice: &DeviceChoice,
+    system_default: Option<&str>,
+) -> Reselect {
     let unchanged = |index: u16| device_at(devices, index).as_ref() == applied;
     match resolve_index(devices, choice, system_default) {
         Some(index) if unchanged(index) => Reselect::Keep,
         Some(index) => Reselect::Select(index),
         None => match resolve_index(devices, &DeviceChoice::SystemDefault, system_default) {
-            Some(index) if !unchanged(index) && matches!(choice, DeviceChoice::Device(_)) => Reselect::FallBack(index),
+            Some(index) if !unchanged(index) && matches!(choice, DeviceChoice::Device(_)) => {
+                Reselect::FallBack(index)
+            }
             _ => Reselect::Keep,
         },
     }
 }
 
-pub fn disconnect_notice(previous: &[AudioDevice], choice: &DeviceChoice, fallback: Option<&AudioDevice>) -> String {
+pub fn disconnect_notice(
+    previous: &[AudioDevice],
+    choice: &DeviceChoice,
+    fallback: Option<&AudioDevice>,
+) -> String {
     let lost = previous
         .iter()
         .find(|device| matches!(choice, DeviceChoice::Device(key) if device.key() == *key))
@@ -211,11 +242,17 @@ pub fn list_devices(factory: &PeerConnectionFactory) -> DeviceLists {
 }
 
 fn default_for(choice: &DeviceChoice, flow: Flow) -> Option<String> {
-    (*choice == DeviceChoice::SystemDefault).then(|| system_default_id(flow)).flatten()
+    (*choice == DeviceChoice::SystemDefault)
+        .then(|| system_default_id(flow))
+        .flatten()
 }
 
 pub fn select_input(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
-    let Some(index) = resolve_index(&enumerate(factory).inputs, choice, default_for(choice, Flow::Capture).as_deref()) else {
+    let Some(index) = resolve_index(
+        &enumerate(factory).inputs,
+        choice,
+        default_for(choice, Flow::Capture).as_deref(),
+    ) else {
         return false;
     };
     select_input_index(factory, index)
@@ -230,7 +267,11 @@ pub fn select_input_index(factory: &PeerConnectionFactory, index: u16) -> bool {
 }
 
 pub fn select_output(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
-    let Some(index) = resolve_index(&enumerate(factory).outputs, choice, default_for(choice, Flow::Render).as_deref()) else {
+    let Some(index) = resolve_index(
+        &enumerate(factory).outputs,
+        choice,
+        default_for(choice, Flow::Render).as_deref(),
+    ) else {
         return false;
     };
     select_output_index(factory, index)
@@ -266,7 +307,10 @@ mod tests {
         ];
         let entries = menu_entries(&devices);
         let labels: Vec<&str> = entries.iter().map(|entry| entry.label.as_str()).collect();
-        assert_eq!(labels, ["Default device", "Headset Microphone", "Webcam Microphone"]);
+        assert_eq!(
+            labels,
+            ["Default device", "Headset Microphone", "Webcam Microphone"]
+        );
         assert_eq!(entries[0].choice, DeviceChoice::SystemDefault);
         assert_eq!(entries[1].choice, DeviceChoice::Device("{b}".into()));
     }
@@ -280,26 +324,49 @@ mod tests {
 
     #[test]
     fn linux_default_names_are_aliases() {
-        let devices = [device(0, "default", "default"), device(1, "sysdefault:CARD=PCH", "x"), device(2, "USB Audio", "usb")];
-        let labels: Vec<String> = menu_entries(&devices).into_iter().map(|entry| entry.label).collect();
+        let devices = [
+            device(0, "default", "default"),
+            device(1, "sysdefault:CARD=PCH", "x"),
+            device(2, "USB Audio", "usb"),
+        ];
+        let labels: Vec<String> = menu_entries(&devices)
+            .into_iter()
+            .map(|entry| entry.label)
+            .collect();
         assert_eq!(labels, ["Default device", "USB Audio"]);
     }
 
     #[test]
     fn devices_without_a_guid_are_keyed_by_name() {
-        let devices = [device(0, "default: Speakers", ""), device(1, "Speakers", ""), device(2, "Headset", "")];
+        let devices = [
+            device(0, "default: Speakers", ""),
+            device(1, "Speakers", ""),
+            device(2, "Headset", ""),
+        ];
         let entries = menu_entries(&devices);
         assert_eq!(entries[1].choice, DeviceChoice::Device("Speakers".into()));
-        assert_eq!(resolve_index(&devices, &DeviceChoice::Device("Headset".into()), None), Some(2));
-        assert_eq!(resolve_index(&devices, &DeviceChoice::Device("Gone".into()), None), None);
+        assert_eq!(
+            resolve_index(&devices, &DeviceChoice::Device("Headset".into()), None),
+            Some(2)
+        );
+        assert_eq!(
+            resolve_index(&devices, &DeviceChoice::Device("Gone".into()), None),
+            None
+        );
     }
 
     #[test]
     fn the_system_default_resolves_to_the_alias_or_the_first_device() {
         let with_alias = [device(0, "USB", "u"), device(1, "default: USB", "")];
-        assert_eq!(resolve_index(&with_alias, &DeviceChoice::SystemDefault, None), Some(1));
+        assert_eq!(
+            resolve_index(&with_alias, &DeviceChoice::SystemDefault, None),
+            Some(1)
+        );
         let without_alias = [device(0, "Speakers", "s"), device(1, "Headset", "h")];
-        assert_eq!(resolve_index(&without_alias, &DeviceChoice::SystemDefault, None), Some(0));
+        assert_eq!(
+            resolve_index(&without_alias, &DeviceChoice::SystemDefault, None),
+            Some(0)
+        );
         assert_eq!(resolve_index(&[], &DeviceChoice::SystemDefault, None), None);
     }
 
@@ -310,9 +377,26 @@ mod tests {
             device(1, "Headset Earphone", "{0.0.0.00000000}.{BBBB}"),
         ];
         let headset = Some("{0.0.0.00000000}.{bbbb}");
-        assert_eq!(resolve_index(&devices, &DeviceChoice::SystemDefault, headset), Some(1));
-        assert_eq!(resolve_index(&devices, &DeviceChoice::SystemDefault, Some("{0.0.0.00000000}.{gone}")), Some(0));
-        assert_eq!(resolve_index(&devices, &DeviceChoice::Device("{0.0.0.00000000}.{aaaa}".into()), headset), Some(0));
+        assert_eq!(
+            resolve_index(&devices, &DeviceChoice::SystemDefault, headset),
+            Some(1)
+        );
+        assert_eq!(
+            resolve_index(
+                &devices,
+                &DeviceChoice::SystemDefault,
+                Some("{0.0.0.00000000}.{gone}")
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            resolve_index(
+                &devices,
+                &DeviceChoice::Device("{0.0.0.00000000}.{aaaa}".into()),
+                headset
+            ),
+            Some(0)
+        );
     }
 
     fn headset_lists() -> (Vec<AudioDevice>, Vec<AudioDevice>) {
@@ -325,17 +409,36 @@ mod tests {
     fn the_default_moving_to_a_new_headset_selects_it() {
         let (before, after) = headset_lists();
         let applied = applied_device(&before, &DeviceChoice::SystemDefault, Some("{s}"));
-        assert_eq!(reselect(applied.as_ref(), &after, &DeviceChoice::SystemDefault, Some("{h}")), Reselect::Select(1));
+        assert_eq!(
+            reselect(
+                applied.as_ref(),
+                &after,
+                &DeviceChoice::SystemDefault,
+                Some("{h}")
+            ),
+            Reselect::Select(1)
+        );
     }
 
     #[test]
     fn nothing_changed_keeps_the_device_running() {
         let (_, after) = headset_lists();
         let applied = applied_device(&after, &DeviceChoice::SystemDefault, Some("{h}"));
-        assert_eq!(reselect(applied.as_ref(), &after, &DeviceChoice::SystemDefault, Some("{h}")), Reselect::Keep);
+        assert_eq!(
+            reselect(
+                applied.as_ref(),
+                &after,
+                &DeviceChoice::SystemDefault,
+                Some("{h}")
+            ),
+            Reselect::Keep
+        );
         let explicit = DeviceChoice::Device("{h}".into());
         let applied = applied_device(&after, &explicit, Some("{s}"));
-        assert_eq!(reselect(applied.as_ref(), &after, &explicit, Some("{s}")), Reselect::Keep);
+        assert_eq!(
+            reselect(applied.as_ref(), &after, &explicit, Some("{s}")),
+            Reselect::Keep
+        );
     }
 
     #[test]
@@ -343,33 +446,60 @@ mod tests {
         let (before, after) = headset_lists();
         let explicit = DeviceChoice::Device("{h}".into());
         let applied = applied_device(&after, &explicit, Some("{h}"));
-        assert_eq!(reselect(applied.as_ref(), &before, &explicit, Some("{s}")), Reselect::FallBack(0));
+        assert_eq!(
+            reselect(applied.as_ref(), &before, &explicit, Some("{s}")),
+            Reselect::FallBack(0)
+        );
         let fallen_back = applied_device(&before, &DeviceChoice::SystemDefault, Some("{s}"));
-        assert_eq!(reselect(fallen_back.as_ref(), &before, &explicit, Some("{s}")), Reselect::Keep);
-        assert_eq!(reselect(fallen_back.as_ref(), &after, &explicit, Some("{s}")), Reselect::Select(1));
+        assert_eq!(
+            reselect(fallen_back.as_ref(), &before, &explicit, Some("{s}")),
+            Reselect::Keep
+        );
+        assert_eq!(
+            reselect(fallen_back.as_ref(), &after, &explicit, Some("{s}")),
+            Reselect::Select(1)
+        );
     }
 
     #[test]
     fn a_shifted_index_with_the_same_key_is_reselected() {
         let explicit = DeviceChoice::Device("{h}".into());
         let before = [device(0, "Speakers", "{s}"), device(1, "Headset", "{h}")];
-        let after = [device(0, "Dock", "{d}"), device(1, "Speakers", "{s}"), device(2, "Headset", "{h}")];
+        let after = [
+            device(0, "Dock", "{d}"),
+            device(1, "Speakers", "{s}"),
+            device(2, "Headset", "{h}"),
+        ];
         let applied = applied_device(&before, &explicit, None);
-        assert_eq!(reselect(applied.as_ref(), &after, &explicit, None), Reselect::Select(2));
+        assert_eq!(
+            reselect(applied.as_ref(), &after, &explicit, None),
+            Reselect::Select(2)
+        );
     }
 
     #[test]
     fn a_removed_default_selects_the_new_default() {
         let (before, after) = headset_lists();
         let applied = applied_device(&after, &DeviceChoice::SystemDefault, Some("{h}"));
-        assert_eq!(reselect(applied.as_ref(), &before, &DeviceChoice::SystemDefault, Some("{s}")), Reselect::Select(0));
+        assert_eq!(
+            reselect(
+                applied.as_ref(),
+                &before,
+                &DeviceChoice::SystemDefault,
+                Some("{s}")
+            ),
+            Reselect::Select(0)
+        );
     }
 
     #[test]
     fn the_notice_names_both_devices() {
         let (before, after) = headset_lists();
         let explicit = DeviceChoice::Device("{h}".into());
-        assert_eq!(disconnect_notice(&after, &explicit, before.first()), "Headset disconnected. Using Speakers.");
+        assert_eq!(
+            disconnect_notice(&after, &explicit, before.first()),
+            "Headset disconnected. Using Speakers."
+        );
     }
 
     #[test]

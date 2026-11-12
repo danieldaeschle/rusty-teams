@@ -3,7 +3,11 @@ use crate::audio::FRAME_SAMPLES;
 pub fn mix_frames(microphone: &[i16], computer: &[i16], microphone_muted: bool) -> Vec<i16> {
     (0..FRAME_SAMPLES)
         .map(|index| {
-            let mic = if microphone_muted { 0 } else { i32::from(microphone.get(index).copied().unwrap_or(0)) };
+            let mic = if microphone_muted {
+                0
+            } else {
+                i32::from(microphone.get(index).copied().unwrap_or(0))
+            };
             let sound = i32::from(computer.get(index).copied().unwrap_or(0));
             (mic + sound).clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16
         })
@@ -24,9 +28,17 @@ mod tests {
     #[test]
     fn the_sum_clips_instead_of_wrapping() {
         let loud = [i16::MAX - 10; FRAME_SAMPLES];
-        assert!(mix_frames(&loud, &loud, false).iter().all(|&sample| sample == i16::MAX));
+        assert!(
+            mix_frames(&loud, &loud, false)
+                .iter()
+                .all(|&sample| sample == i16::MAX)
+        );
         let low = [i16::MIN + 10; FRAME_SAMPLES];
-        assert!(mix_frames(&low, &low, false).iter().all(|&sample| sample == i16::MIN));
+        assert!(
+            mix_frames(&low, &low, false)
+                .iter()
+                .all(|&sample| sample == i16::MIN)
+        );
     }
 
     #[test]

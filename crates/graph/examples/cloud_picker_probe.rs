@@ -15,7 +15,10 @@ async fn main() {
                 "my files {} entries, {} folders, {} with modifier",
                 children.len(),
                 children.iter().filter(|entry| entry.is_folder()).count(),
-                children.iter().filter(|entry| entry.modified_by.is_some()).count()
+                children
+                    .iter()
+                    .filter(|entry| entry.modified_by.is_some())
+                    .count()
             ),
             Err(error) => println!("my files error: {error}"),
         },
@@ -25,8 +28,14 @@ async fn main() {
         Ok(shared) => println!(
             "shared {} entries, {} with sharer, {} with date",
             shared.len(),
-            shared.iter().filter(|entry| entry.modified_by.is_some()).count(),
-            shared.iter().filter(|entry| entry.modified_at.is_some()).count()
+            shared
+                .iter()
+                .filter(|entry| entry.modified_by.is_some())
+                .count(),
+            shared
+                .iter()
+                .filter(|entry| entry.modified_at.is_some())
+                .count()
         ),
         Err(error) => println!("shared error: {error}"),
     }

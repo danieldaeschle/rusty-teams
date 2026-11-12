@@ -5,9 +5,15 @@ fn main() {
     for (kind, devices) in [("input", &lists.inputs), ("output", &lists.outputs)] {
         println!("{kind} devices: {}", devices.len());
         for device in devices {
-            println!("  {}: {:?} guid {:?}", device.index, device.name, device.guid);
+            println!(
+                "  {}: {:?} guid {:?}",
+                device.index, device.name, device.guid
+            );
         }
-        let labels: Vec<String> = menu_entries(devices).into_iter().map(|entry| entry.label).collect();
+        let labels: Vec<String> = menu_entries(devices)
+            .into_iter()
+            .map(|entry| entry.label)
+            .collect();
         println!("  menu: {labels:?}");
     }
 }

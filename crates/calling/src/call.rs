@@ -24,51 +24,64 @@ use crate::background::{BackgroundChoice, BackgroundPicture};
 use crate::breakout::{self, RoomWatcher};
 use crate::callee_gate::{CalleeGate, EchoWatch, roster_has_callee};
 use crate::camera::{CameraDevice, list_cameras};
+use crate::candidates::{SdpKind, is_udp_relay, negotiated_setup, with_candidates};
 use crate::captions::{
     BotAction, CAPTIONS_DATA_ID, CaptionEntry, CaptionFlow, CaptionState, CaptionStep,
     parse_caption_message,
 };
 use crate::control::{CallCommand, CallControl, CallUpdate, Progress};
-use crate::diagnostics::{CallDiagnostics, StatsSample};
 use crate::data_channel::Depacketizer;
 use crate::device_watch::{self, Debounce};
 use crate::devices::{self, AppliedDevice, AudioDevice, DeviceChoice, Flow, Reselect};
+use crate::diagnostics::{CallDiagnostics, StatsSample};
 use crate::end::EndKind;
 use crate::engine::{CallEngine, EngineConfig, Inner};
 use crate::error::{Error, Result};
-use crate::health::{CallHealth, HealthCounters, HealthSampler, QualityTracker, TransportDetails, health_from_stats};
-use crate::hold::{HoldState, INACTIVE, MediaLine, accepted_modalities, direction_of, offer_modalities, is_hold, keep_media_running, offer_sends_video, rewrite_directions, stop_sending_on};
+use crate::health::{
+    CallHealth, HealthCounters, HealthSampler, QualityTracker, TransportDetails, health_from_stats,
+};
+use crate::hold::{
+    HoldState, INACTIVE, MediaLine, accepted_modalities, direction_of, is_hold, keep_media_running,
+    offer_modalities, offer_sends_video, rewrite_directions, stop_sending_on,
+};
+use crate::meeting_options::{self, OptionWrite};
 use crate::mic_processing::MicSettings;
 use crate::mute::{MuteCommand, MuteEffect};
+use crate::organizer::{MeetingCapability, Modality, StateStep, Target, modality_steps};
+use crate::outcome::{embedded_end, failed_participant_count, outcome_summary};
 use crate::push::CallNotification;
+use crate::recording::{Consent, RecordingPlan, RecordingStatus};
 use crate::relay::{DEFAULT_RELAY_HOST, RelayGrant};
 use crate::renegotiation::{MediaAction, MediaNegotiator, MediaPath, RejectedOffer};
-use crate::candidates::{SdpKind, is_udp_relay, negotiated_setup, with_candidates};
-use crate::outcome::{embedded_end, failed_participant_count, outcome_summary};
-use crate::organizer::{MeetingCapability, Modality, StateStep, Target, modality_steps};
-use crate::meeting_options::{self, OptionWrite};
-use crate::recording::{Consent, RecordingPlan, RecordingStatus};
 use crate::roster::{Roster, direct_roster};
-use crate::sdp::{LineRole, OfferPlan, RemoteOffer, SignaledOffer, from_teams_offer, stream_lines, to_browser_answer, to_teams_answer, to_teams_offer};
+use crate::screen::{ShareKind, ShareSource, list_share_sources, share_thumbnail};
+use crate::sdp::{
+    LineRole, OfferPlan, RemoteOffer, SignaledOffer, from_teams_offer, stream_lines,
+    to_browser_answer, to_teams_answer, to_teams_offer,
+};
+use crate::send_control::{RequestFilter, parse_request};
 use crate::signaling::{
-    Answer, Attached, Callee, one_to_one_thread, Conversation, Invitation, InviteTarget, LeaveReason, MeetingTarget, NegotiationFailure, Participant, Signaling,
-    TenantRouting, chat_thread_id, find_echo_bot_thread, escalation_answer_body, renegotiation_body,
+    Answer, Attached, Callee, Conversation, Invitation, InviteTarget, LeaveReason, MeetingTarget,
+    NegotiationFailure, Participant, Signaling, TenantRouting, chat_thread_id,
+    escalation_answer_body, find_echo_bot_thread, one_to_one_thread, renegotiation_body,
 };
 use crate::software_audio::{SoftwareAudio, SoftwareAudioPlan};
 use crate::state::{CallSignal, CallState};
 use crate::timeline::{Timeline, TimelineEntry};
 use crate::transfer::{Replacement, TransferEvent, TransferTarget};
-use crate::video_frame::{VideoKey, VideoPicture};
-use crate::video_layout::{
-    CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SCREEN_STREAM, SendCapabilityReporter, SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_share_line, add_video_lines, offer_plan, one_to_one_plan,
-};
-use crate::send_control::{RequestFilter, parse_request};
-use crate::video_send::{LocalVideo, SendSource, VideoMode};
-use crate::screen::{ShareKind, ShareSource, list_share_sources, share_thumbnail};
-use crate::video_receive::{ReceiveChange, SourceRequester, VideoCounters, VideoReceive, spawn_video_pump};
 use crate::trouter_events::{
     CallEnd, CallEvent, CallbackLinks, ProgressStatus, callback_tag, classify, decode_body,
 };
+use crate::video_frame::{VideoKey, VideoPicture};
+use crate::video_layout::{
+    CAMERA_MID, MediaDescription, ONE_TO_ONE_SHARE_MID, SCREEN_STREAM, SendCapabilityReporter,
+    SlotTable, VideoLines, VideoRouter, add_one_to_one_lines, add_share_line, add_video_lines,
+    offer_plan, one_to_one_plan,
+};
+use crate::video_receive::{
+    ReceiveChange, SourceRequester, VideoCounters, VideoReceive, spawn_video_pump,
+};
+use crate::video_send::{LocalVideo, SendSource, VideoMode};
 use crate::whiteboard;
 
 const END_CALLBACK_WAIT: Duration = Duration::from_secs(4);
@@ -199,7 +212,10 @@ pub struct CallReport {
 #[derive(Debug, Clone)]
 pub enum CallSpec {
     Echo,
-    People { callees: Vec<Callee>, thread_id: String },
+    People {
+        callees: Vec<Callee>,
+        thread_id: String,
+    },
     Meeting(MeetingTarget),
 }
 
@@ -247,11 +263,16 @@ pub(crate) enum Plan {
 }
 
 fn data_channel_from_env() -> bool {
-    !matches!(std::env::var(DATA_CHANNEL_ENV).ok().as_deref(), Some("0" | "off"))
+    !matches!(
+        std::env::var(DATA_CHANNEL_ENV).ok().as_deref(),
+        Some("0" | "off")
+    )
 }
 
 pub fn keep_alive_period(seconds: Option<u64>) -> Duration {
-    let seconds = seconds.unwrap_or(DEFAULT_KEEP_ALIVE_SECONDS).max(MIN_KEEP_ALIVE_SECONDS);
+    let seconds = seconds
+        .unwrap_or(DEFAULT_KEEP_ALIVE_SECONDS)
+        .max(MIN_KEEP_ALIVE_SECONDS);
     Duration::from_secs_f64(seconds as f64 * KEEP_ALIVE_FRACTION)
 }
 
@@ -297,7 +318,11 @@ fn gathering_settled(complete: bool, since_udp_relay: Option<Duration>) -> bool 
 
 impl Gathered {
     fn settled(&self) -> bool {
-        let since_udp_relay = self.relay_seen_at.lock().expect("relay time lock").map(|at| at.elapsed());
+        let since_udp_relay = self
+            .relay_seen_at
+            .lock()
+            .expect("relay time lock")
+            .map(|at| at.elapsed());
         gathering_settled(self.complete.load(Ordering::SeqCst), since_udp_relay)
     }
 
@@ -307,13 +332,17 @@ impl Gathered {
             tokio::time::sleep(GATHERING_POLL).await;
         }
         self.complete.store(true, Ordering::SeqCst);
-        self.waited_ms.store(waited.elapsed().as_millis() as u64, Ordering::SeqCst);
+        self.waited_ms
+            .store(waited.elapsed().as_millis() as u64, Ordering::SeqCst);
         self.candidates.lock().expect("candidates lock").clone()
     }
 
     fn summary(&self) -> String {
         let count = self.candidates.lock().expect("candidates lock").len();
-        format!("{count} candidate(s) after {} ms", self.waited_ms.load(Ordering::SeqCst))
+        format!(
+            "{count} candidate(s) after {} ms",
+            self.waited_ms.load(Ordering::SeqCst)
+        )
     }
 }
 
@@ -439,14 +468,22 @@ pub async fn run_test_call(
             endpoint_storage_key: "__testCallEpid".into(),
         },
     };
-    let (engine, _events) = CallEngine::start(session.clone(), poll_session.clone(), config).await?;
-    let report = engine.run(Plan::Outgoing(CallSpec::Echo), options, control).await;
+    let (engine, _events) =
+        CallEngine::start(session.clone(), poll_session.clone(), config).await?;
+    let report = engine
+        .run(Plan::Outgoing(CallSpec::Echo), options, control)
+        .await;
     engine.stop().await;
     report
 }
 
 impl CallEngine {
-    pub(crate) async fn run(&self, plan: Plan, options: CallOptions, mut control: CallControl) -> Result<CallReport> {
+    pub(crate) async fn run(
+        &self,
+        plan: Plan,
+        options: CallOptions,
+        mut control: CallControl,
+    ) -> Result<CallReport> {
         let inner = self.inner.as_ref();
         let _one_call_at_a_time = if options.concurrent {
             None
@@ -463,7 +500,14 @@ impl CallEngine {
         };
         let timeline = Timeline::new(options.trace);
         let stay_awake = crate::awake::StayAwake::new();
-        timeline.record("stay awake", if stay_awake.holding() { "system and display kept awake" } else { "not available" });
+        timeline.record(
+            "stay awake",
+            if stay_awake.holding() {
+                "system and display kept awake"
+            } else {
+                "not available"
+            },
+        );
         let mut report = CallReport::default();
         let mut state = CallState::Idle;
         advance(&mut state, CallSignal::Dial, &control);
@@ -493,14 +537,24 @@ impl CallEngine {
             }
         };
         dump_timeline(&options, &timeline, failure.as_ref());
-        let cancelled = live.cancel_leave || matches!(&state, CallState::Ended { reason: crate::state::EndReason::Cancelled });
+        let cancelled = live.cancel_leave
+            || matches!(
+                &state,
+                CallState::Ended {
+                    reason: crate::state::EndReason::Cancelled
+                }
+            );
         tear_down(live, inner, &timeline, &mut report, cancelled).await;
         let recording = recording.lock().await;
         report.recorded_samples = recording.samples.len();
         report.timeline = timeline.entries();
-        control.send(CallUpdate::Diagnostics(Box::new(CallDiagnostics::new(&report, timeline.sdp_summaries()))));
+        control.send(CallUpdate::Diagnostics(Box::new(CallDiagnostics::new(
+            &report,
+            timeline.sdp_summaries(),
+        ))));
         if let Some(path) = &options.wav_path {
-            write_wav(path, &recording.samples).map_err(|error| Error::Webrtc(format!("wav: {error}")))?;
+            write_wav(path, &recording.samples)
+                .map_err(|error| Error::Webrtc(format!("wav: {error}")))?;
         }
         match failure {
             Some(error) => Err(error),
@@ -509,14 +563,21 @@ impl CallEngine {
     }
 }
 
-fn open_peer(factory: &PeerConnectionFactory, grant: &RelayGrant, relay_host: &str, with_data_channel: bool) -> Result<PeerSession> {
+fn open_peer(
+    factory: &PeerConnectionFactory,
+    grant: &RelayGrant,
+    relay_host: &str,
+    with_data_channel: bool,
+) -> Result<PeerSession> {
     let mut configuration = RtcConfiguration::default();
     configuration.ice_servers = vec![grant.ice_server(relay_host)];
     let peer = factory
         .create_peer_connection(configuration)
         .map_err(|error| Error::Webrtc(error.to_string()))?;
     let (sender, events) = mpsc::unbounded_channel();
-    let data_channel = with_data_channel.then(|| open_data_channel(&peer, sender.clone())).transpose()?;
+    let data_channel = with_data_channel
+        .then(|| open_data_channel(&peer, sender.clone()))
+        .transpose()?;
     let gathered = Gathered::default();
     let candidate_sink = gathered.candidates.clone();
     let relay_seen_at = gathered.relay_seen_at.clone();
@@ -524,7 +585,10 @@ fn open_peer(factory: &PeerConnectionFactory, grant: &RelayGrant, relay_host: &s
         if candidate.sdp_mline_index() == 0 {
             let text = candidate.candidate();
             if is_udp_relay(&text) {
-                relay_seen_at.lock().expect("relay time lock").get_or_insert_with(Instant::now);
+                relay_seen_at
+                    .lock()
+                    .expect("relay time lock")
+                    .get_or_insert_with(Instant::now);
             }
             candidate_sink.lock().expect("candidates lock").push(text);
         }
@@ -552,10 +616,18 @@ fn open_peer(factory: &PeerConnectionFactory, grant: &RelayGrant, relay_host: &s
             let _ = sender.send(PeerEvent::VideoTrack { mid, track });
         }
     })));
-    Ok(PeerSession { peer, events, _data_channel: data_channel, gathered })
+    Ok(PeerSession {
+        peer,
+        events,
+        _data_channel: data_channel,
+        gathered,
+    })
 }
 
-fn open_data_channel(peer: &PeerConnection, sender: mpsc::UnboundedSender<PeerEvent>) -> Result<DataChannel> {
+fn open_data_channel(
+    peer: &PeerConnection,
+    sender: mpsc::UnboundedSender<PeerEvent>,
+) -> Result<DataChannel> {
     let channel = peer
         .create_data_channel(DATA_CHANNEL_LABEL, DataChannelInit::default())
         .map_err(|error| Error::Webrtc(error.to_string()))?;
@@ -565,7 +637,13 @@ fn open_data_channel(peer: &PeerConnection, sender: mpsc::UnboundedSender<PeerEv
     Ok(channel)
 }
 
-fn one_to_one_directions<'a>(camera: bool, share: bool, camera_mid: &'a str, share_mid: Option<&'a str>, remote_shares: bool) -> impl Fn(MediaLine<'_>) -> Option<&'static str> + 'a {
+fn one_to_one_directions<'a>(
+    camera: bool,
+    share: bool,
+    camera_mid: &'a str,
+    share_mid: Option<&'a str>,
+    remote_shares: bool,
+) -> impl Fn(MediaLine<'_>) -> Option<&'static str> + 'a {
     move |line| match line.kind {
         "video" if line.mid == camera_mid => Some(if camera { "sendrecv" } else { INACTIVE }),
         "video" if Some(line.mid) == share_mid => Some(match (share, remote_shares) {
@@ -593,15 +671,33 @@ fn share_mid_in(offer_text: &str) -> Option<String> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn directions_for(layout: Layout, hold: bool, camera: bool, share: bool, camera_mid: &str, share_mid: Option<&str>, remote_shares: bool, text: &str) -> String {
+fn directions_for(
+    layout: Layout,
+    hold: bool,
+    camera: bool,
+    share: bool,
+    camera_mid: &str,
+    share_mid: Option<&str>,
+    remote_shares: bool,
+    text: &str,
+) -> String {
     match (hold, layout) {
         (true, _) => rewrite_directions(text, |_| Some(INACTIVE)),
-        (false, Layout::OneToOne) => rewrite_directions(text, one_to_one_directions(camera, share, camera_mid, share_mid, remote_shares)),
+        (false, Layout::OneToOne) => rewrite_directions(
+            text,
+            one_to_one_directions(camera, share, camera_mid, share_mid, remote_shares),
+        ),
         (false, Layout::Conference) => text.to_owned(),
     }
 }
 
-async fn create_offer(peer: &PeerConnection, factory: &PeerConnectionFactory, track: &RtcAudioTrack, layout: Layout, gathered: Option<&Gathered>) -> Result<OfferedMedia> {
+async fn create_offer(
+    peer: &PeerConnection,
+    factory: &PeerConnectionFactory,
+    track: &RtcAudioTrack,
+    layout: Layout,
+    gathered: Option<&Gathered>,
+) -> Result<OfferedMedia> {
     let transceiver_init = RtpTransceiverInit {
         direction: RtpTransceiverDirection::SendRecv,
         stream_ids: vec![MIC_STREAM.into()],
@@ -621,7 +717,16 @@ async fn create_offer(peer: &PeerConnection, factory: &PeerConnectionFactory, tr
         })
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
-    let browser_offer = directions_for(layout, false, false, false, CAMERA_MID, Some(ONE_TO_ONE_SHARE_MID), false, &offer.to_string());
+    let browser_offer = directions_for(
+        layout,
+        false,
+        false,
+        false,
+        CAMERA_MID,
+        Some(ONE_TO_ONE_SHARE_MID),
+        false,
+        &offer.to_string(),
+    );
     let description = parse_sdp(&browser_offer, SdpType::Offer)?;
     peer.set_local_description(description)
         .await
@@ -629,7 +734,13 @@ async fn create_offer(peer: &PeerConnection, factory: &PeerConnectionFactory, tr
     let mut numbers = random_u32;
     let mut signaled = to_teams_offer(&browser_offer, &plan, &mut numbers)?;
     signaled.sdp = direct_sdp(&signaled.sdp, gathered, SdpKind::Offer).await?;
-    Ok(OfferedMedia { browser_offer, signaled, video, plan, modalities: accepted_modalities(false) })
+    Ok(OfferedMedia {
+        browser_offer,
+        signaled,
+        video,
+        plan,
+        modalities: accepted_modalities(false),
+    })
 }
 
 struct AnsweredMedia {
@@ -640,11 +751,20 @@ struct AnsweredMedia {
 }
 
 fn main_video_mid(remote: &RemoteOffer) -> Option<String> {
-    remote.lines.iter().find(|line| line.role == LineRole::MainVideo).and_then(|line| line.browser_mids.first().cloned())
+    remote
+        .lines
+        .iter()
+        .find(|line| line.role == LineRole::MainVideo)
+        .and_then(|line| line.browser_mids.first().cloned())
 }
 
 fn share_mids(remote: &RemoteOffer) -> Vec<String> {
-    remote.lines.iter().filter(|line| line.role == LineRole::ScreenShare).filter_map(|line| line.browser_mids.first().cloned()).collect()
+    remote
+        .lines
+        .iter()
+        .filter(|line| line.role == LineRole::ScreenShare)
+        .filter_map(|line| line.browser_mids.first().cloned())
+        .collect()
 }
 
 async fn answer_offer(
@@ -658,17 +778,32 @@ async fn answer_offer(
 ) -> Result<AnsweredMedia> {
     let remote = from_teams_offer(teams_offer)?;
     let description = parse_sdp(&remote.browser_sdp, SdpType::Offer)?;
-    peer.set_remote_description(description).await.map_err(|error| {
-        let lines: Vec<String> = remote.lines.iter().map(|line| format!("{:?}{:?}", line.role, line.browser_mids)).collect();
-        Error::Webrtc(format!("{error} (offer lines: {})", lines.join(" ")))
-    })?;
+    peer.set_remote_description(description)
+        .await
+        .map_err(|error| {
+            let lines: Vec<String> = remote
+                .lines
+                .iter()
+                .map(|line| format!("{:?}{:?}", line.role, line.browser_mids))
+                .collect();
+            Error::Webrtc(format!("{error} (offer lines: {})", lines.join(" ")))
+        })?;
     let camera_mid = main_video_mid(&remote).filter(|_| !matches!(video, AnswerVideo::Reject));
-    let kept_share_mids = if matches!(video, AnswerVideo::Reject) { Vec::new() } else { share_mids(&remote) };
+    let kept_share_mids = if matches!(video, AnswerVideo::Reject) {
+        Vec::new()
+    } else {
+        share_mids(&remote)
+    };
     for transceiver in peer.transceivers() {
-        let is_video = matches!(transceiver.receiver().track(), Some(MediaStreamTrack::Video(_)));
-        let unused = transceiver
-            .mid()
-            .is_some_and(|mid| Some(&mid) != camera_mid.as_ref() && !kept_share_mids.contains(&mid) && Some(&mid) != sending_share_mid.as_ref());
+        let is_video = matches!(
+            transceiver.receiver().track(),
+            Some(MediaStreamTrack::Video(_))
+        );
+        let unused = transceiver.mid().is_some_and(|mid| {
+            Some(&mid) != camera_mid.as_ref()
+                && !kept_share_mids.contains(&mid)
+                && Some(&mid) != sending_share_mid.as_ref()
+        });
         if is_video && unused {
             let _ = transceiver.stop();
         }
@@ -686,7 +821,10 @@ async fn answer_offer(
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
     let mut answer_text = answer.to_string();
-    for mid in kept_share_mids.iter().filter(|mid| sending_share_mid.as_deref() != Some(mid.as_str())) {
+    for mid in kept_share_mids
+        .iter()
+        .filter(|mid| sending_share_mid.as_deref() != Some(mid.as_str()))
+    {
         answer_text = stop_sending_on(&answer_text, mid);
     }
     let sends_camera = camera_on || matches!(video, AnswerVideo::Send(_));
@@ -699,7 +837,12 @@ async fn answer_offer(
     let receiving_share_mid = kept_share_mids
         .into_iter()
         .filter(|mid| sending_share_mid.as_deref() != Some(mid.as_str()))
-        .find(|mid| matches!(direction_of(&answer_text, mid).as_deref(), Some("recvonly" | "sendrecv")));
+        .find(|mid| {
+            matches!(
+                direction_of(&answer_text, mid).as_deref(),
+                Some("recvonly" | "sendrecv")
+            )
+        });
     let mut numbers = random_u32;
     let signaled = to_teams_answer(&answer_text, &remote, &mut numbers)?;
     Ok(AnsweredMedia {
@@ -714,7 +857,10 @@ fn new_media_leg_id() -> String {
     uuid::Uuid::new_v4().simple().to_string().to_uppercase()
 }
 
-async fn setup_step<T, E>(control: &mut CallControl, step: impl std::future::Future<Output = std::result::Result<T, E>>) -> Result<T>
+async fn setup_step<T, E>(
+    control: &mut CallControl,
+    step: impl std::future::Future<Output = std::result::Result<T, E>>,
+) -> Result<T>
 where
     Error: From<E>,
 {
@@ -759,12 +905,16 @@ async fn drive(
     report: &mut CallReport,
 ) -> Result<()> {
     let own_mri = format!("8:orgid:{}", inner.identity.object_id);
-    control.send(CallUpdate::OwnIdentity { mri: own_mri.clone() });
+    control.send(CallUpdate::OwnIdentity {
+        mri: own_mri.clone(),
+    });
     let (spec, incoming) = match plan {
         Plan::Outgoing(spec) => (Some(spec), None),
         Plan::Incoming(incoming) => (None, Some(*incoming)),
     };
-    let accept_mode = incoming.as_ref().map_or(AcceptMode::Audio, |incoming| incoming.accept);
+    let accept_mode = incoming
+        .as_ref()
+        .map_or(AcceptMode::Audio, |incoming| incoming.accept);
     let (links, participant, mut callbacks, incoming_media) = match incoming {
         Some(IncomingCall {
             accept: _,
@@ -773,7 +923,12 @@ async fn drive(
             links,
             participant,
             callbacks,
-        }) => (links, participant, callbacks, Some((notification, attached))),
+        }) => (
+            links,
+            participant,
+            callbacks,
+            Some((notification, attached)),
+        ),
         None => {
             let links = inner.callback_links();
             let participant = inner.participant(&uuid::Uuid::new_v4().to_string());
@@ -786,15 +941,26 @@ async fn drive(
 
     let thread_id = if matches!(spec, Some(CallSpec::Echo)) {
         let thread_id = control
-            .until_hangup(find_echo_bot_thread(&inner.session, &inner.identity.object_id))
+            .until_hangup(find_echo_bot_thread(
+                &inner.session,
+                &inner.identity.object_id,
+            ))
             .await??;
-        timeline.record("echo bot chat", if thread_id.is_some() { "found" } else { "none" });
+        timeline.record(
+            "echo bot chat",
+            if thread_id.is_some() { "found" } else { "none" },
+        );
         thread_id
     } else {
         None
     };
-    let grant = control.until_hangup(inner.relay.grant(&inner.session)).await??;
-    timeline.record("GET trap/tokens", format!("relay grant, expires in {} s", grant.expires_in_seconds));
+    let grant = control
+        .until_hangup(inner.relay.grant(&inner.session))
+        .await??;
+    timeline.record(
+        "GET trap/tokens",
+        format!("relay grant, expires in {} s", grant.expires_in_seconds),
+    );
 
     let factory = devices::shared_factory();
     let mut input = options.input.clone();
@@ -802,15 +968,34 @@ async fn drive(
     let audio = AudioSetup::start(&factory, options.audio, options.tone_hz, &input, &output);
     control.send(CallUpdate::ListenOnly(audio.listen_only));
     let mut device_lists = devices::list_devices(&factory);
-    let mut applied_input = devices::applied_device(&device_lists.inputs, &input, devices::system_default_id(Flow::Capture).as_deref());
-    let mut applied_output = devices::applied_device(&device_lists.outputs, &output, devices::system_default_id(Flow::Render).as_deref());
+    let mut applied_input = devices::applied_device(
+        &device_lists.inputs,
+        &input,
+        devices::system_default_id(Flow::Capture).as_deref(),
+    );
+    let mut applied_output = devices::applied_device(
+        &device_lists.outputs,
+        &output,
+        devices::system_default_id(Flow::Render).as_deref(),
+    );
     let (_device_watcher, mut device_changes) = device_watch::watch();
     let mut device_debounce = Debounce::default();
     timeline.record(
         "audio setup",
-        format!("listen only {}, {} input(s), {} output(s); {}", audio.listen_only, device_lists.inputs.len(), device_lists.outputs.len(), audio.adm_state),
+        format!(
+            "listen only {}, {} input(s), {} output(s); {}",
+            audio.listen_only,
+            device_lists.inputs.len(),
+            device_lists.outputs.len(),
+            audio.adm_state
+        ),
     );
-    record_audio_devices(timeline, &device_lists, applied_input.as_ref(), applied_output.as_ref());
+    record_audio_devices(
+        timeline,
+        &device_lists,
+        applied_input.as_ref(),
+        applied_output.as_ref(),
+    );
     control.send(CallUpdate::Devices(device_lists.clone()));
     control.send(CallUpdate::Selected {
         input: input.clone(),
@@ -818,7 +1003,12 @@ async fn drive(
     });
     let track = audio.track.clone();
     live.audio = Some(audio);
-    let mut local_video = LocalVideo::new(&factory, options.video, control.video.clone(), control.updates());
+    let mut local_video = LocalVideo::new(
+        &factory,
+        options.video,
+        control.video.clone(),
+        control.updates(),
+    );
     let mut camera_choice = options.camera.clone();
     if options.start_camera {
         match local_video.preview_camera(&camera_choice) {
@@ -830,7 +1020,8 @@ async fn drive(
     refresh_cameras(control.updates(), options.video, timeline.clone());
     refresh_share_sources(control.updates(), options.video, false);
 
-    let wants_data_channel = options.data_channel && spec.as_ref().is_some_and(CallSpec::is_meeting);
+    let wants_data_channel =
+        options.data_channel && spec.as_ref().is_some_and(CallSpec::is_meeting);
     let mut current = open_peer(&factory, &grant, &options.relay_host, wants_data_channel)?;
     live.peers.push(current.peer.clone());
 
@@ -854,7 +1045,9 @@ async fn drive(
         _ => None,
     };
     let people_thread = match &spec {
-        Some(CallSpec::People { thread_id, .. }) if !thread_id.is_empty() => Some(thread_id.clone()),
+        Some(CallSpec::People { thread_id, .. }) if !thread_id.is_empty() => {
+            Some(thread_id.clone())
+        }
         _ => incoming_media
             .as_ref()
             .filter(|(notification, _)| !notification.is_multi_party)
@@ -863,7 +1056,9 @@ async fn drive(
                     .thread_id
                     .clone()
                     .filter(|thread| *thread != notification.caller.mri)
-                    .or_else(|| one_to_one_thread(&inner.identity.object_id, &notification.caller.mri))
+                    .or_else(|| {
+                        one_to_one_thread(&inner.identity.object_id, &notification.caller.mri)
+                    })
             }),
     };
     let mut layout = match &spec {
@@ -871,8 +1066,12 @@ async fn drive(
         _ => Layout::Conference,
     };
     let peer_mri = match &spec {
-        Some(CallSpec::People { callees, .. }) if callees.len() == 1 => Some(callees[0].mri.clone()),
-        _ => incoming_media.as_ref().map(|(notification, _)| notification.caller.mri.clone()),
+        Some(CallSpec::People { callees, .. }) if callees.len() == 1 => {
+            Some(callees[0].mri.clone())
+        }
+        _ => incoming_media
+            .as_ref()
+            .map(|(notification, _)| notification.caller.mri.clone()),
     };
     let mut layout_plan: OfferPlan;
     let mut direct_video_mid: Option<String> = None;
@@ -884,14 +1083,26 @@ async fn drive(
             let direct_invite = spec.target().is_one_to_one() && !options.concurrent;
             let offer_started = Instant::now();
             let media = control
-                .until_hangup(create_offer(&current.peer, &factory, &track, layout, direct_invite.then_some(&current.gathered)))
+                .until_hangup(create_offer(
+                    &current.peer,
+                    &factory,
+                    &track,
+                    layout,
+                    direct_invite.then_some(&current.gathered),
+                ))
                 .await??;
-            timeline.record("offer created", format!("{} ms", offer_started.elapsed().as_millis()));
+            timeline.record(
+                "offer created",
+                format!("{} ms", offer_started.elapsed().as_millis()),
+            );
             layout_plan = media.plan.clone();
             if layout == Layout::OneToOne {
                 direct_video_mid = Some(CAMERA_MID.to_owned());
             }
-            timeline.record("setLocalDescription", format!("{} m-line(s) signaled", media.signaled.lines.len()));
+            timeline.record(
+                "setLocalDescription",
+                format!("{} m-line(s) signaled", media.signaled.lines.len()),
+            );
             timeline.record_sdp("local offer", &media.signaled.sdp);
             dump_sdp(options, "1-browser-offer.sdp", &media.browser_offer);
             dump_sdp(options, "2-teams-offer.sdp", &media.signaled.sdp);
@@ -950,7 +1161,11 @@ async fn drive(
                 threadless: notification.thread_id.is_none(),
             });
             let one_to_one = !attached.from_mixer && !notification.is_multi_party;
-            layout = if one_to_one { Layout::OneToOne } else { Layout::Conference };
+            layout = if one_to_one {
+                Layout::OneToOne
+            } else {
+                Layout::Conference
+            };
             let camera_track = local_video.camera_track();
             let video_answer = match accept_mode {
                 _ if !one_to_one => AnswerVideo::Reject,
@@ -958,21 +1173,37 @@ async fn drive(
                 _ => AnswerVideo::Receive,
             };
             dump_sdp(options, "3-teams-offer.sdp", &teams_offer);
-            let answered = answer_offer(&current.peer, Some(&track), &teams_offer, video_answer, None, false, one_to_one.then_some(&current.gathered)).await?;
+            let answered = answer_offer(
+                &current.peer,
+                Some(&track),
+                &teams_offer,
+                video_answer,
+                None,
+                false,
+                one_to_one.then_some(&current.gathered),
+            )
+            .await?;
             layout_plan = answered.remote.plan();
             direct_video_mid = answered.camera_mid.clone();
-            timeline.record("setRemoteDescription", format!("offer applied, {} signaled line(s)", answered.remote.lines.len()));
+            timeline.record(
+                "setRemoteDescription",
+                format!(
+                    "offer applied, {} signaled line(s)",
+                    answered.remote.lines.len()
+                ),
+            );
             if one_to_one {
                 timeline.record("ice gathered", current.gathered.summary());
             }
             timeline.record_sdp("remote offer", &teams_offer);
             timeline.record_sdp("local answer", &answered.answer_sdp);
             dump_sdp(options, "4-teams-answer.sdp", &answered.answer_sdp);
-            let acceptance_url = attached
-                .links
-                .get("acceptance")
-                .ok_or_else(|| Error::Signaling("attach answer without an acceptance link".into()))?;
-            let modalities = accepted_modalities(matches!(video_answer, AnswerVideo::Send(_)) && answered.camera_mid.is_some());
+            let acceptance_url = attached.links.get("acceptance").ok_or_else(|| {
+                Error::Signaling("attach answer without an acceptance link".into())
+            })?;
+            let modalities = accepted_modalities(
+                matches!(video_answer, AnswerVideo::Send(_)) && answered.camera_mid.is_some(),
+            );
             let acknowledged = signaling
                 .accept(
                     acceptance_url,
@@ -991,20 +1222,36 @@ async fn drive(
             media_links.extend(acknowledged);
             if let (AnswerVideo::Send(_), Some(mid)) = (video_answer, &answered.camera_mid) {
                 let camera = peer_transceiver(&current.peer, mid);
-                match camera.map(|camera| local_video.set_lines(VideoLines { camera, share: None })) {
+                match camera.map(|camera| {
+                    local_video.set_lines(VideoLines {
+                        camera,
+                        share: None,
+                    })
+                }) {
                     Some(Ok(())) => match local_video.start_camera(&camera_choice) {
                         Ok(()) => sending_camera = true,
-                        Err(error) => control.send(CallUpdate::Notice(format!("Camera could not start: {error}"))),
+                        Err(error) => control.send(CallUpdate::Notice(format!(
+                            "Camera could not start: {error}"
+                        ))),
                     },
-                    Some(Err(error)) => timeline.record("video lines not attached", error.to_string()),
-                    None => timeline.record("video lines not attached", "no transceiver for the camera line"),
+                    Some(Err(error)) => {
+                        timeline.record("video lines not attached", error.to_string())
+                    }
+                    None => timeline.record(
+                        "video lines not attached",
+                        "no transceiver for the camera line",
+                    ),
                 }
             }
             keep_alive_link = media_links.get("callLeg").cloned();
             keep_alive_at = Some(Instant::now() + keep_alive_period(None));
             conversation
         }
-        _ => return Err(Error::Callback("call plan without an offer or an invitation".into())),
+        _ => {
+            return Err(Error::Callback(
+                "call plan without an offer or an invitation".into(),
+            ));
+        }
     };
     let remote = live.remote.clone().expect("remote call set above");
     live.broker_running.store(true, Ordering::SeqCst);
@@ -1016,11 +1263,20 @@ async fn drive(
 
     let initial = MuteEffect::initial(is_meeting);
     let mut muted = initial.muted;
-    live.audio.as_ref().expect("audio set above").track.set_enabled(initial.track_enabled);
+    live.audio
+        .as_ref()
+        .expect("audio set above")
+        .track
+        .set_enabled(initial.track_enabled);
     if muted {
         control.send(CallUpdate::Muted(true));
     }
-    match setup_step(control, signaling.update_endpoint_state(&conversation, &participant, initial.endpoint_is_muted)).await {
+    match setup_step(
+        control,
+        signaling.update_endpoint_state(&conversation, &participant, initial.endpoint_is_muted),
+    )
+    .await
+    {
         Err(Error::Cancelled) => return Err(Error::Cancelled),
         Err(error) => timeline.record("updateEndpointState failed", error.to_string()),
         Ok(()) => {}
@@ -1038,7 +1294,13 @@ async fn drive(
         && roster.apply_snapshot(snapshot)
     {
         let entries = roster.entries();
-        timeline.record("roster", format!("{} participant(s) from the conversation answer", entries.len()));
+        timeline.record(
+            "roster",
+            format!(
+                "{} participant(s) from the conversation answer",
+                entries.len()
+            ),
+        );
         control.send(CallUpdate::Roster(entries));
     }
     let mut lobby = false;
@@ -1063,7 +1325,25 @@ async fn drive(
     crate::noise_stage::apply(mic_settings);
     let mut audio_disabled = false;
     let mut remote_audio: Option<RtcAudioTrack> = None;
-    sync_software_audio(&factory, options, &input, muted, None, &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), false, &mut software_audio, control, timeline);
+    sync_software_audio(
+        &factory,
+        options,
+        &input,
+        muted,
+        None,
+        &current.peer,
+        &track,
+        software_wanted(
+            mic_settings,
+            share_sound_wanted,
+            &local_video,
+            live.audio.as_ref(),
+        ),
+        false,
+        &mut software_audio,
+        control,
+        timeline,
+    );
     let mut own_hand: Option<String> = None;
     let mut depacketizer = Depacketizer::default();
     let mut caption_flow = CaptionFlow::default();
@@ -1109,10 +1389,14 @@ async fn drive(
         {
             control.defer(CallCommand::StartShare(source));
         }
-        if next.as_ref().is_some_and(|pending| pending.connected && (pending.offered.is_some() || pending.retargeted))
-            && let Some(pending) = next.take()
+        if next.as_ref().is_some_and(|pending| {
+            pending.connected && (pending.offered.is_some() || pending.retargeted)
+        }) && let Some(pending) = next.take()
         {
-            timeline.record("escalation", "new peer connection connected, old one dropped");
+            timeline.record(
+                "escalation",
+                "new peer connection connected, old one dropped",
+            );
             deferred_changes.clear();
             negotiator.server_escalation_done();
             if let Some(mid) = remote_direct_share.take() {
@@ -1137,15 +1421,40 @@ async fn drive(
                     timeline.record("video lines not attached", error.to_string());
                 }
                 if local_video.camera_on() {
-                    tell_media_descriptions(&remote, &media_links, MediaDescription::camera(true), &mut media_description_request, timeline);
+                    tell_media_descriptions(
+                        &remote,
+                        &media_links,
+                        MediaDescription::camera(true),
+                        &mut media_description_request,
+                        timeline,
+                    );
                 }
                 if local_video.sharing() {
-                    tell_media_descriptions(&remote, &media_links, MediaDescription::share(true), &mut media_description_request, timeline);
+                    tell_media_descriptions(
+                        &remote,
+                        &media_links,
+                        MediaDescription::share(true),
+                        &mut media_description_request,
+                        timeline,
+                    );
                 }
             }
             remote_set = true;
             if layout == Layout::OneToOne && negotiator.begin_conference_upgrade() {
-                let pending = escalate(&factory, &grant, options, outgoing_track(software_audio.as_ref(), &track), &remote, &links, &media_leg_id, &media_links, &mut negotiator, live, timeline).await;
+                let pending = escalate(
+                    &factory,
+                    &grant,
+                    options,
+                    outgoing_track(software_audio.as_ref(), &track),
+                    &remote,
+                    &links,
+                    &media_leg_id,
+                    &media_links,
+                    &mut negotiator,
+                    live,
+                    timeline,
+                )
+                .await;
                 if pending.is_none() {
                     drop_local_media(&mut local_video, control);
                 }
@@ -2578,9 +2887,20 @@ async fn start_escalation(
         .ok_or_else(|| Error::Signaling("acceptance without a mediaRenegotiation link".into()))?;
     let session = open_peer(factory, grant, &options.relay_host, false)?;
     let media = create_offer(&session.peer, factory, track, Layout::Conference, None).await?;
-    let body = renegotiation_body(&remote.participant, links, &media.signaled.sdp, media_leg_id, &media.modalities, true, false);
+    let body = renegotiation_body(
+        &remote.participant,
+        links,
+        &media.signaled.sdp,
+        media_leg_id,
+        &media.modalities,
+        true,
+        false,
+    );
     let reply_tags = offer_reply_tags(&body);
-    remote.signaling.post_json("POST mediaRenegotiation", url, body).await?;
+    remote
+        .signaling
+        .post_json("POST mediaRenegotiation", url, body)
+        .await?;
     Ok(NextPeer {
         session,
         offered: Some(media),
@@ -2641,7 +2961,16 @@ async fn answer_on_new_peer(
     teams_offer: &str,
 ) -> Result<(PeerSession, AnsweredMedia)> {
     let session = open_peer(factory, grant, &options.relay_host, false)?;
-    let answered = answer_offer(&session.peer, Some(track), teams_offer, AnswerVideo::Reject, None, false, None).await?;
+    let answered = answer_offer(
+        &session.peer,
+        Some(track),
+        teams_offer,
+        AnswerVideo::Reject,
+        None,
+        false,
+        None,
+    )
+    .await?;
     Ok((session, answered))
 }
 
@@ -2655,8 +2984,16 @@ async fn send_media_answer(
     let url = reply_links
         .get("mediaAnswer")
         .ok_or_else(|| Error::Signaling("renegotiation without a mediaAnswer link".into()))?;
-    let body = escalation_answer_body(&remote.participant, links, &answered.answer_sdp, media_leg_id);
-    remote.signaling.post_json("POST mediaAnswer", url, body).await
+    let body = escalation_answer_body(
+        &remote.participant,
+        links,
+        &answered.answer_sdp,
+        media_leg_id,
+    );
+    remote
+        .signaling
+        .post_json("POST mediaAnswer", url, body)
+        .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2679,7 +3016,9 @@ fn negotiate_video(
         }
     };
     let table = SlotTable::from_streams(&streams);
-    let link = links.get("applyChannelParameters").or_else(|| links.get("controlVideoStreaming"));
+    let link = links
+        .get("applyChannelParameters")
+        .or_else(|| links.get("controlVideoStreaming"));
     timeline.record(
         "video slots",
         format!(
@@ -2689,9 +3028,15 @@ fn negotiate_video(
             link.is_some()
         ),
     );
-    let requester = link
-        .filter(|_| from_mixer)
-        .map(|url| SourceRequester::start(signaling.clone(), url.clone(), video.router().clone(), control.video.clone(), timeline.clone()));
+    let requester = link.filter(|_| from_mixer).map(|url| {
+        SourceRequester::start(
+            signaling.clone(),
+            url.clone(),
+            video.router().clone(),
+            control.video.clone(),
+            timeline.clone(),
+        )
+    });
     video.negotiated(table, requester);
     send_receive_change(control, video.reselect(roster));
 }
@@ -2705,17 +3050,33 @@ const SHARE_REFUSED_NOTICE: &str = "The other side did not accept the screen sha
 
 async fn camera_devices(mode: VideoMode) -> Vec<CameraDevice> {
     match mode {
-        VideoMode::Pattern => vec![CameraDevice { key: "pattern".into(), name: "Test pattern".into() }],
+        VideoMode::Pattern => vec![CameraDevice {
+            key: "pattern".into(),
+            name: "Test pattern".into(),
+        }],
         VideoMode::Off => Vec::new(),
-        VideoMode::Platform => tokio::task::spawn_blocking(list_cameras).await.unwrap_or_default(),
+        VideoMode::Platform => tokio::task::spawn_blocking(list_cameras)
+            .await
+            .unwrap_or_default(),
     }
 }
 
-fn refresh_cameras(updates: mpsc::UnboundedSender<CallUpdate>, mode: VideoMode, timeline: Timeline) {
+fn refresh_cameras(
+    updates: mpsc::UnboundedSender<CallUpdate>,
+    mode: VideoMode,
+    timeline: Timeline,
+) {
     tokio::spawn(async move {
         let started = Instant::now();
         let cameras = camera_devices(mode).await;
-        timeline.record("camera list", format!("{} camera(s) in {} ms", cameras.len(), started.elapsed().as_millis()));
+        timeline.record(
+            "camera list",
+            format!(
+                "{} camera(s) in {} ms",
+                cameras.len(),
+                started.elapsed().as_millis()
+            ),
+        );
         let _ = updates.send(CallUpdate::Cameras(cameras));
     });
 }
@@ -2724,15 +3085,29 @@ const SHARE_THUMBNAIL_WINDOWS: usize = 12;
 const SHARE_THUMBNAIL_WIDTH: u32 = 320;
 const SHARE_THUMBNAIL_HEIGHT: u32 = 180;
 
-fn refresh_share_sources(updates: mpsc::UnboundedSender<CallUpdate>, mode: VideoMode, with_thumbnails: bool) {
+fn refresh_share_sources(
+    updates: mpsc::UnboundedSender<CallUpdate>,
+    mode: VideoMode,
+    with_thumbnails: bool,
+) {
     tokio::spawn(async move {
         let sources = match mode {
             VideoMode::Pattern => vec![
-                ShareSource { id: 1, kind: ShareKind::Screen, title: "Test screen".into() },
-                ShareSource { id: 2, kind: ShareKind::Window, title: "Test window".into() },
+                ShareSource {
+                    id: 1,
+                    kind: ShareKind::Screen,
+                    title: "Test screen".into(),
+                },
+                ShareSource {
+                    id: 2,
+                    kind: ShareKind::Window,
+                    title: "Test window".into(),
+                },
             ],
             VideoMode::Off => Vec::new(),
-            VideoMode::Platform => tokio::task::spawn_blocking(list_share_sources).await.unwrap_or_default(),
+            VideoMode::Platform => tokio::task::spawn_blocking(list_share_sources)
+                .await
+                .unwrap_or_default(),
         };
         let _ = updates.send(CallUpdate::ShareSources(sources.clone()));
         if !with_thumbnails {
@@ -2741,20 +3116,41 @@ fn refresh_share_sources(updates: mpsc::UnboundedSender<CallUpdate>, mode: Video
         let wanted: Vec<ShareSource> = sources
             .iter()
             .filter(|source| source.kind == ShareKind::Screen)
-            .chain(sources.iter().filter(|source| source.kind == ShareKind::Window).take(SHARE_THUMBNAIL_WINDOWS))
+            .chain(
+                sources
+                    .iter()
+                    .filter(|source| source.kind == ShareKind::Window)
+                    .take(SHARE_THUMBNAIL_WINDOWS),
+            )
             .cloned()
             .collect();
         for source in wanted {
             let picture = match mode {
                 VideoMode::Platform => {
                     let wanted = source.clone();
-                    tokio::task::spawn_blocking(move || share_thumbnail(&wanted, SHARE_THUMBNAIL_WIDTH, SHARE_THUMBNAIL_HEIGHT)).await.ok().flatten()
+                    tokio::task::spawn_blocking(move || {
+                        share_thumbnail(&wanted, SHARE_THUMBNAIL_WIDTH, SHARE_THUMBNAIL_HEIGHT)
+                    })
+                    .await
+                    .ok()
+                    .flatten()
                 }
-                VideoMode::Pattern => Some(VideoPicture::solid(SHARE_THUMBNAIL_WIDTH, SHARE_THUMBNAIL_HEIGHT, 120, 80, 40)),
+                VideoMode::Pattern => Some(VideoPicture::solid(
+                    SHARE_THUMBNAIL_WIDTH,
+                    SHARE_THUMBNAIL_HEIGHT,
+                    120,
+                    80,
+                    40,
+                )),
                 VideoMode::Off => None,
             };
             if let Some(picture) = picture
-                && updates.send(CallUpdate::ShareThumbnail { source, picture: Arc::new(picture) }).is_err()
+                && updates
+                    .send(CallUpdate::ShareThumbnail {
+                        source,
+                        picture: Arc::new(picture),
+                    })
+                    .is_err()
             {
                 return;
             }
@@ -2778,8 +3174,14 @@ fn tell_media_descriptions(
     let signaling = remote.signaling.clone();
     let timeline = timeline.clone();
     tokio::spawn(async move {
-        let sent = format!("{} {} request {request_id}", description.mid, description.direction);
-        if let Err(error) = signaling.update_media_descriptions(&url, &[description], request_id).await {
+        let sent = format!(
+            "{} {} request {request_id}",
+            description.mid, description.direction
+        );
+        if let Err(error) = signaling
+            .update_media_descriptions(&url, &[description], request_id)
+            .await
+        {
             timeline.record("updateMediaDescriptions failed", format!("{sent}: {error}"));
         }
     });
@@ -2789,30 +3191,54 @@ fn is_own_meeting(own: Option<&MeetingTarget>, target: &MeetingTarget) -> bool {
     own.is_some_and(|own| own.thread_id == target.thread_id)
 }
 
-fn attach_share_line(peer: &PeerConnection, factory: &PeerConnectionFactory, local_video: &mut LocalVideo, camera_mid: Option<&str>) -> Result<()> {
+fn attach_share_line(
+    peer: &PeerConnection,
+    factory: &PeerConnectionFactory,
+    local_video: &mut LocalVideo,
+    camera_mid: Option<&str>,
+) -> Result<()> {
     let camera = camera_mid.and_then(|mid| peer_transceiver(peer, mid));
     if !local_video.has_lines() && camera.is_none() {
         return Err(Error::Webrtc("no video line negotiated".into()));
     }
     let share = add_share_line(peer, factory)?;
-    local_video.add_share_line(share.clone(), camera).inspect_err(|_| {
-        let _ = share.stop();
-    })
+    local_video
+        .add_share_line(share.clone(), camera)
+        .inspect_err(|_| {
+            let _ = share.stop();
+        })
 }
 
 fn peer_transceiver(peer: &PeerConnection, mid: &str) -> Option<RtpTransceiver> {
-    peer.transceivers().into_iter().find(|transceiver| transceiver.mid().as_deref() == Some(mid))
+    peer.transceivers()
+        .into_iter()
+        .find(|transceiver| transceiver.mid().as_deref() == Some(mid))
 }
 
-fn start_camera_line(local_video: &mut LocalVideo, peer: &PeerConnection, direct_mid: Option<&str>, choice: &DeviceChoice) -> Result<()> {
+fn start_camera_line(
+    local_video: &mut LocalVideo,
+    peer: &PeerConnection,
+    direct_mid: Option<&str>,
+    choice: &DeviceChoice,
+) -> Result<()> {
     if !local_video.has_lines() {
         let mid = direct_mid.ok_or_else(|| Error::Webrtc("no video line negotiated".into()))?;
-        let camera = peer_transceiver(peer, mid).ok_or_else(|| Error::Webrtc("no transceiver for the camera line".into()))?;
-        if !matches!(camera.direction(), RtpTransceiverDirection::SendRecv | RtpTransceiverDirection::SendOnly) {
-            peer.add_track(MediaStreamTrack::Video(local_video.camera_track()), &[CAMERA_STREAM])
-                .map_err(|error| Error::Webrtc(error.to_string()))?;
+        let camera = peer_transceiver(peer, mid)
+            .ok_or_else(|| Error::Webrtc("no transceiver for the camera line".into()))?;
+        if !matches!(
+            camera.direction(),
+            RtpTransceiverDirection::SendRecv | RtpTransceiverDirection::SendOnly
+        ) {
+            peer.add_track(
+                MediaStreamTrack::Video(local_video.camera_track()),
+                &[CAMERA_STREAM],
+            )
+            .map_err(|error| Error::Webrtc(error.to_string()))?;
         }
-        local_video.set_lines(VideoLines { camera, share: None })?;
+        local_video.set_lines(VideoLines {
+            camera,
+            share: None,
+        })?;
     }
     local_video.start_camera(choice)
 }
@@ -2840,9 +3266,22 @@ async fn offer_same_peer(
         .cloned()
         .ok_or_else(|| Error::Signaling("this call has no mediaRenegotiation link".into()))?;
     if !negotiator.begin_same_peer_offer() {
-        return Err(Error::Signaling("another media negotiation is running".into()));
+        return Err(Error::Signaling(
+            "another media negotiation is running".into(),
+        ));
     }
-    let offered = build_same_peer_offer(peer, plan, layout, hold, camera, share, camera_mid, own_share_mid, direct.then_some(gathered)).await;
+    let offered = build_same_peer_offer(
+        peer,
+        plan,
+        layout,
+        hold,
+        camera,
+        share,
+        camera_mid,
+        own_share_mid,
+        direct.then_some(gathered),
+    )
+    .await;
     let (text, signaled) = match offered {
         Ok(offered) => offered,
         Err(error) => {
@@ -2850,10 +3289,25 @@ async fn offer_same_peer(
             return Err(error);
         }
     };
-    let modalities = offer_modalities(layout == Layout::OneToOne && camera && !hold, share && !hold);
-    let body = renegotiation_body(&remote.participant, links, &signaled.sdp, media_leg_id, &modalities, false, direct);
+    let modalities = offer_modalities(
+        layout == Layout::OneToOne && camera && !hold,
+        share && !hold,
+    );
+    let body = renegotiation_body(
+        &remote.participant,
+        links,
+        &signaled.sdp,
+        media_leg_id,
+        &modalities,
+        false,
+        direct,
+    );
     let reply_tags = offer_reply_tags(&body);
-    if let Err(error) = remote.signaling.post_json("POST mediaRenegotiation (same peer)", &url, body).await {
+    if let Err(error) = remote
+        .signaling
+        .post_json("POST mediaRenegotiation (same peer)", &url, body)
+        .await
+    {
         negotiator.same_peer_offer_failed();
         rollback_offer(peer).await;
         return Err(error);
@@ -2862,9 +3316,23 @@ async fn offer_same_peer(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn build_same_peer_offer(peer: &PeerConnection, plan: &OfferPlan, layout: Layout, hold: bool, camera: bool, share: bool, camera_mid: &str, own_share_mid: Option<String>, gathered: Option<&Gathered>) -> Result<(String, SignaledOffer)> {
+async fn build_same_peer_offer(
+    peer: &PeerConnection,
+    plan: &OfferPlan,
+    layout: Layout,
+    hold: bool,
+    camera: bool,
+    share: bool,
+    camera_mid: &str,
+    own_share_mid: Option<String>,
+    gathered: Option<&Gathered>,
+) -> Result<(String, SignaledOffer)> {
     let offer = peer
-        .create_offer(OfferOptions { offer_to_receive_audio: true, offer_to_receive_video: true, ..OfferOptions::default() })
+        .create_offer(OfferOptions {
+            offer_to_receive_audio: true,
+            offer_to_receive_video: true,
+            ..OfferOptions::default()
+        })
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
     let offer_text = offer.to_string();
@@ -2874,25 +3342,56 @@ async fn build_same_peer_offer(peer: &PeerConnection, plan: &OfferPlan, layout: 
             .and_then(|remote| direction_of(&remote.to_string(), mid))
             .is_some_and(|direction| matches!(direction.as_str(), "sendonly" | "sendrecv"))
     });
-    let text = directions_for(layout, false, camera, share, camera_mid, share_mid.as_deref(), remote_shares, &offer_text);
+    let text = directions_for(
+        layout,
+        false,
+        camera,
+        share,
+        camera_mid,
+        share_mid.as_deref(),
+        remote_shares,
+        &offer_text,
+    );
     let description = parse_sdp(&text, SdpType::Offer)?;
     peer.set_local_description(description)
         .await
         .map_err(|error| Error::Webrtc(error.to_string()))?;
     let mut numbers = random_u32;
     let mut plan = plan.clone();
-    if let Some(mid) = share_mid.as_ref().filter(|mid| !plan.screen_share_mids.contains(mid)) {
+    if let Some(mid) = share_mid
+        .as_ref()
+        .filter(|mid| !plan.screen_share_mids.contains(mid))
+    {
         plan.screen_share_mids.push(mid.clone());
     }
-    let mut signaled = to_teams_offer(&directions_for(layout, hold, camera, share, camera_mid, share_mid.as_deref(), remote_shares, &text), &plan, &mut numbers)?;
+    let mut signaled = to_teams_offer(
+        &directions_for(
+            layout,
+            hold,
+            camera,
+            share,
+            camera_mid,
+            share_mid.as_deref(),
+            remote_shares,
+            &text,
+        ),
+        &plan,
+        &mut numbers,
+    )?;
     signaled.sdp = direct_sdp(&signaled.sdp, gathered, SdpKind::Offer).await?;
     if gathered.is_some()
         && let Some(role) = negotiated_setup(
-            peer.current_local_description().map(|local| local.to_string()).as_deref(),
-            peer.current_remote_description().map(|remote| remote.to_string()).as_deref(),
+            peer.current_local_description()
+                .map(|local| local.to_string())
+                .as_deref(),
+            peer.current_remote_description()
+                .map(|remote| remote.to_string())
+                .as_deref(),
         )
     {
-        signaled.sdp = signaled.sdp.replace("a=setup:actpass", &format!("a=setup:{role}"));
+        signaled.sdp = signaled
+            .sdp
+            .replace("a=setup:actpass", &format!("a=setup:{role}"));
     }
     Ok((text, signaled))
 }
@@ -2901,8 +3400,13 @@ async fn build_same_peer_offer(peer: &PeerConnection, plan: &OfferPlan, layout: 
 fn parse_sdp(text: &str, kind: SdpType) -> Result<SessionDescription> {
     match std::panic::catch_unwind(|| SessionDescription::parse(text, kind)) {
         Ok(Ok(description)) => Ok(description),
-        Ok(Err(error)) => Err(Error::Sdp(format!("{kind:?} rejected: {}", error.description))),
-        Err(_) => Err(Error::Sdp(format!("{kind:?} rejected, libwebrtc gave no readable reason"))),
+        Ok(Err(error)) => Err(Error::Sdp(format!(
+            "{kind:?} rejected: {}",
+            error.description
+        ))),
+        Err(_) => Err(Error::Sdp(format!(
+            "{kind:?} rejected, libwebrtc gave no readable reason"
+        ))),
     }
 }
 
@@ -2924,7 +3428,10 @@ fn is_glare_rejection(body: &serde_json::Value) -> bool {
 
 fn offer_reply_tags(body: &serde_json::Value) -> Vec<String> {
     let links = &body["mediaNegotiation"]["links"];
-    ["mediaAnswer", "rejection"].iter().filter_map(|name| links[*name].as_str().and_then(callback_tag)).collect()
+    ["mediaAnswer", "rejection"]
+        .iter()
+        .filter_map(|name| links[*name].as_str().and_then(callback_tag))
+        .collect()
 }
 
 #[cfg(test)]
@@ -2934,9 +3441,15 @@ mod reply_tag_tests {
     #[test]
     fn answers_and_rejections_match_the_offer_by_tag() {
         let tags = vec!["aaaa1111".to_owned(), "bbbb2222".to_owned()];
-        assert!(answers_offer("callAgent/c/aaaa1111/call/mediaAnswer/", &tags));
+        assert!(answers_offer(
+            "callAgent/c/aaaa1111/call/mediaAnswer/",
+            &tags
+        ));
         assert!(answers_offer("callAgent/c/bbbb2222/call/rejection/", &tags));
-        assert!(!answers_offer("callAgent/c/cccc3333/call/mediaAnswer/", &tags));
+        assert!(!answers_offer(
+            "callAgent/c/cccc3333/call/mediaAnswer/",
+            &tags
+        ));
         assert!(answers_offer("callAgent/c/cccc3333/call/mediaAnswer/", &[]));
     }
 
@@ -2945,11 +3458,19 @@ mod reply_tag_tests {
         let body = serde_json::json!({"mediaNegotiation": {"links": {
             "mediaAnswer": "https://t.example/callAgent/c/aaaa1111/call/mediaAnswer/",
             "rejection": "https://t.example/callAgent/c/bbbb2222/call/rejection/"}}});
-        assert_eq!(offer_reply_tags(&body), vec!["aaaa1111".to_owned(), "bbbb2222".to_owned()]);
+        assert_eq!(
+            offer_reply_tags(&body),
+            vec!["aaaa1111".to_owned(), "bbbb2222".to_owned()]
+        );
     }
 }
 
-fn defer_to_new_peer(change: Change, deferred: &mut Vec<Change>, local_video: &mut LocalVideo, control: &CallControl) {
+fn defer_to_new_peer(
+    change: Change,
+    deferred: &mut Vec<Change>,
+    local_video: &mut LocalVideo,
+    control: &CallControl,
+) {
     match change {
         Change::Camera(true) => {
             control.send(CallUpdate::Camera(true));
@@ -2961,7 +3482,14 @@ fn defer_to_new_peer(change: Change, deferred: &mut Vec<Change>, local_video: &m
 }
 
 /// A server escalation that fails leaves the call direct, so only what waited for the new peer is undone.
-fn settle_failed_escalation(server: bool, layout: Layout, negotiator: &mut MediaNegotiator, deferred: &mut Vec<Change>, local_video: &mut LocalVideo, control: &CallControl) {
+fn settle_failed_escalation(
+    server: bool,
+    layout: Layout,
+    negotiator: &mut MediaNegotiator,
+    deferred: &mut Vec<Change>,
+    local_video: &mut LocalVideo,
+    control: &CallControl,
+) {
     if server {
         negotiator.server_escalation_failed();
         for change in deferred.drain(..) {
@@ -3008,37 +3536,65 @@ fn withhold_media(
     local_video: &mut LocalVideo,
     control: &CallControl,
 ) {
-    *muted = apply_mute(MuteCommand::Mute, *muted, audio, software_audio, remote, control);
+    *muted = apply_mute(
+        MuteCommand::Mute,
+        *muted,
+        audio,
+        software_audio,
+        remote,
+        control,
+    );
     if local_video.camera_on() {
         local_video.stop_camera();
         control.send(CallUpdate::Camera(false));
     }
 }
 
-async fn apply_background(choice: BackgroundChoice, local_video: &LocalVideo, control: &CallControl, timeline: &Timeline) {
+async fn apply_background(
+    choice: BackgroundChoice,
+    local_video: &LocalVideo,
+    control: &CallControl,
+    timeline: &Timeline,
+) {
     match choice {
         BackgroundChoice::None => local_video.set_background(false, None),
         BackgroundChoice::Blur => local_video.set_background(true, None),
-        BackgroundChoice::Image(path) => match tokio::task::spawn_blocking(move || BackgroundPicture::load(&path)).await {
-            Ok(Ok(picture)) => local_video.set_background(true, Some(Arc::new(picture))),
-            Ok(Err(error)) => {
-                timeline.record("background image failed", error.to_string());
-                control.send(CallUpdate::Notice("That background image could not be used".into()));
+        BackgroundChoice::Image(path) => {
+            match tokio::task::spawn_blocking(move || BackgroundPicture::load(&path)).await {
+                Ok(Ok(picture)) => local_video.set_background(true, Some(Arc::new(picture))),
+                Ok(Err(error)) => {
+                    timeline.record("background image failed", error.to_string());
+                    control.send(CallUpdate::Notice(
+                        "That background image could not be used".into(),
+                    ));
+                }
+                Err(_) => {}
             }
-            Err(_) => {}
-        },
+        }
     }
 }
 
-async fn save_meeting_options(session: &session::Session, target: &MeetingTarget, writes: &[OptionWrite]) -> std::result::Result<meeting_options::MeetingOptions, String> {
+async fn save_meeting_options(
+    session: &session::Session,
+    target: &MeetingTarget,
+    writes: &[OptionWrite],
+) -> std::result::Result<meeting_options::MeetingOptions, String> {
     for change in writes {
-        meeting_options::write(session, target, change).await.map_err(|error| error.to_string())?;
+        meeting_options::write(session, target, change)
+            .await
+            .map_err(|error| error.to_string())?;
     }
-    meeting_options::fetch(session, target).await.map_err(|error| error.to_string())
+    meeting_options::fetch(session, target)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 fn target_of<'a>(roster: &'a Roster, mri: &'a str) -> Target<'a> {
-    let display_name = roster.members().iter().find(|member| member.mri == mri).map_or("", |member| member.display_name.as_str());
+    let display_name = roster
+        .members()
+        .iter()
+        .find(|member| member.mri == mri)
+        .map_or("", |member| member.display_name.as_str());
     Target { mri, display_name }
 }
 
@@ -3050,17 +3606,29 @@ fn recorder_busy(error: &Error) -> bool {
     matches!(error, Error::Signaling(reason) if reason.contains("HTTP 409"))
 }
 
-fn report_organizer_result(result: Result<u16>, label: &str, notice: &str, control: &CallControl, timeline: &Timeline) {
+fn report_organizer_result(
+    result: Result<u16>,
+    label: &str,
+    notice: &str,
+    control: &CallControl,
+    timeline: &Timeline,
+) {
     if let Err(error) = &result {
         timeline.record(format!("{label} failed"), error.to_string());
         control.send(CallUpdate::Notice(notice.into()));
     }
-    control.send(CallUpdate::Organizer { action: label.to_owned(), outcome: result.map_err(|error| error.to_string()) });
+    control.send(CallUpdate::Organizer {
+        action: label.to_owned(),
+        outcome: result.map_err(|error| error.to_string()),
+    });
 }
 
 fn named_caption(mut entry: CaptionEntry, roster: &Roster) -> CaptionEntry {
     if entry.display_name.is_empty() {
-        entry.display_name = roster.name_of(&entry.user_id).unwrap_or_default().to_owned();
+        entry.display_name = roster
+            .name_of(&entry.user_id)
+            .unwrap_or_default()
+            .to_owned();
     }
     entry
 }
@@ -3099,8 +3667,14 @@ async fn run_bot_steps(
         }
     };
     let (join_failure, start_failure) = match job {
-        BotJob::Captions => ("The captions service could not join", "Captions could not start"),
-        BotJob::Recording => ("The recording service could not join", "The recording could not start"),
+        BotJob::Captions => (
+            "The captions service could not join",
+            "Captions could not start",
+        ),
+        BotJob::Recording => (
+            "The recording service could not join",
+            "The recording could not start",
+        ),
     };
     loop {
         match flow.next_for(roster.caption_bot(), is_active) {
@@ -3110,12 +3684,33 @@ async fn run_bot_steps(
                     continue;
                 }
                 let Some(thread) = meeting_chat else {
-                    return fail(flow, "This call has no chat for the captions and the recording");
+                    return fail(
+                        flow,
+                        "This call has no chat for the captions and the recording",
+                    );
                 };
                 *bot_pending = true;
-                let added = remote.signaling.add_caption_bot(&remote.conversation, &remote.participant, thread, links, remote.threadless).await;
+                let added = remote
+                    .signaling
+                    .add_caption_bot(
+                        &remote.conversation,
+                        &remote.participant,
+                        thread,
+                        links,
+                        remote.threadless,
+                    )
+                    .await;
                 if job == BotJob::Recording {
-                    report_organizer_result(added.as_ref().map(|status| *status).map_err(|error| Error::Signaling(error.to_string())), "recording add bot", join_failure, control, timeline);
+                    report_organizer_result(
+                        added
+                            .as_ref()
+                            .map(|status| *status)
+                            .map_err(|error| Error::Signaling(error.to_string())),
+                        "recording add bot",
+                        join_failure,
+                        control,
+                        timeline,
+                    );
                 }
                 if let Err(error) = added {
                     timeline.record("bot invitation failed", error.to_string());
@@ -3124,21 +3719,40 @@ async fn run_bot_steps(
                 }
             }
             CaptionStep::Start => {
-                let Some(url) = roster.caption_bot().and_then(|bot| bot.command_url.clone()) else { return };
+                let Some(url) = roster.caption_bot().and_then(|bot| bot.command_url.clone()) else {
+                    return;
+                };
                 match job {
                     BotJob::Captions => {
-                        if let Err(error) = remote.signaling.caption_command(&url, BotAction::Start, &remote.participant).await {
+                        if let Err(error) = remote
+                            .signaling
+                            .caption_command(&url, BotAction::Start, &remote.participant)
+                            .await
+                        {
                             timeline.record("caption start failed", error.to_string());
                             return fail(flow, start_failure);
                         }
-                        if let Err(error) = remote.signaling.set_caption_preference(&remote.conversation, &remote.participant, true).await {
+                        if let Err(error) = remote
+                            .signaling
+                            .set_caption_preference(&remote.conversation, &remote.participant, true)
+                            .await
+                        {
                             timeline.record("caption preference failed", error.to_string());
                         }
                     }
                     BotJob::Recording => {
-                        let started = remote.signaling.recording_command(&url, plan.start(), &remote.participant, &plan.title).await;
+                        let started = remote
+                            .signaling
+                            .recording_command(&url, plan.start(), &remote.participant, &plan.title)
+                            .await;
                         let failed = started.is_err();
-                        report_organizer_result(started, "recording start", start_failure, control, timeline);
+                        report_organizer_result(
+                            started,
+                            "recording start",
+                            start_failure,
+                            control,
+                            timeline,
+                        );
                         if failed {
                             return fail(flow, start_failure);
                         }
@@ -3146,13 +3760,27 @@ async fn run_bot_steps(
                 }
             }
             CaptionStep::Stop => {
-                let Some(url) = roster.caption_bot().and_then(|bot| bot.command_url.clone()) else { continue };
+                let Some(url) = roster.caption_bot().and_then(|bot| bot.command_url.clone()) else {
+                    continue;
+                };
                 match job {
                     BotJob::Captions => {
-                        if let Err(error) = remote.signaling.caption_command(&url, BotAction::Stop, &remote.participant).await {
+                        if let Err(error) = remote
+                            .signaling
+                            .caption_command(&url, BotAction::Stop, &remote.participant)
+                            .await
+                        {
                             timeline.record("caption stop failed", error.to_string());
                         }
-                        if let Err(error) = remote.signaling.set_caption_preference(&remote.conversation, &remote.participant, false).await {
+                        if let Err(error) = remote
+                            .signaling
+                            .set_caption_preference(
+                                &remote.conversation,
+                                &remote.participant,
+                                false,
+                            )
+                            .await
+                        {
                             timeline.record("caption preference failed", error.to_string());
                         }
                     }
@@ -3161,18 +3789,29 @@ async fn run_bot_steps(
                         let updates = control.updates();
                         let (command, title) = (plan.stop(), plan.title.clone());
                         tokio::spawn(async move {
-                            let mut stopped = remote.signaling.recording_command(&url, command, &remote.participant, &title).await;
+                            let mut stopped = remote
+                                .signaling
+                                .recording_command(&url, command, &remote.participant, &title)
+                                .await;
                             for _ in 0..RECORDING_STOP_RETRIES {
                                 if !stopped.as_ref().is_err_and(recorder_busy) {
                                     break;
                                 }
                                 tokio::time::sleep(RECORDING_STOP_RETRY_WAIT).await;
-                                stopped = remote.signaling.recording_command(&url, command, &remote.participant, &title).await;
+                                stopped = remote
+                                    .signaling
+                                    .recording_command(&url, command, &remote.participant, &title)
+                                    .await;
                             }
                             if stopped.is_err() {
-                                let _ = updates.send(CallUpdate::Notice("The recording could not be stopped".into()));
+                                let _ = updates.send(CallUpdate::Notice(
+                                    "The recording could not be stopped".into(),
+                                ));
                             }
-                            let _ = updates.send(CallUpdate::Organizer { action: "recording stop".into(), outcome: stopped.map_err(|error| error.to_string()) });
+                            let _ = updates.send(CallUpdate::Organizer {
+                                action: "recording stop".into(),
+                                outcome: stopped.map_err(|error| error.to_string()),
+                            });
                         });
                     }
                 }
@@ -3192,7 +3831,12 @@ fn send_receive_change(control: &CallControl, change: ReceiveChange) {
     }
 }
 
-fn record_audio_devices(timeline: &Timeline, lists: &devices::DeviceLists, input: Option<&AppliedDevice>, output: Option<&AppliedDevice>) {
+fn record_audio_devices(
+    timeline: &Timeline,
+    lists: &devices::DeviceLists,
+    input: Option<&AppliedDevice>,
+    output: Option<&AppliedDevice>,
+) {
     let name = |devices: &[AudioDevice], applied: Option<&AppliedDevice>| {
         applied
             .and_then(|applied| devices.iter().find(|device| device.index == applied.index))
@@ -3201,7 +3845,11 @@ fn record_audio_devices(timeline: &Timeline, lists: &devices::DeviceLists, input
     };
     timeline.record(
         "audio devices",
-        format!("input={} output={}", name(&lists.inputs, input), name(&lists.outputs, output)),
+        format!(
+            "input={} output={}",
+            name(&lists.inputs, input),
+            name(&lists.outputs, output)
+        ),
     );
 }
 
@@ -3215,19 +3863,31 @@ fn follow_device_change(
     control: &CallControl,
 ) -> bool {
     let system_default = devices::system_default_id(flow);
-    let (index, fell_back) = match devices::reselect(applied.as_ref(), current, choice, system_default.as_deref()) {
-        Reselect::Keep => return false,
-        Reselect::Select(index) => (index, false),
-        Reselect::FallBack(index) => (index, true),
-    };
+    let (index, fell_back) =
+        match devices::reselect(applied.as_ref(), current, choice, system_default.as_deref()) {
+            Reselect::Keep => return false,
+            Reselect::Select(index) => (index, false),
+            Reselect::FallBack(index) => (index, true),
+        };
     let selected = select(index);
-    timeline.record("device change", format!("{flow:?} {choice:?} -> index {index} fallback={fell_back} applied={selected}"));
+    timeline.record(
+        "device change",
+        format!("{flow:?} {choice:?} -> index {index} fallback={fell_back} applied={selected}"),
+    );
     if selected {
-        *applied = current.iter().find(|device| device.index == index).map(|device| AppliedDevice { index, key: device.key() });
+        *applied = current
+            .iter()
+            .find(|device| device.index == index)
+            .map(|device| AppliedDevice {
+                index,
+                key: device.key(),
+            });
     }
     if fell_back {
         let fallback = current.iter().find(|device| device.index == index);
-        control.send(CallUpdate::Notice(devices::disconnect_notice(previous, choice, fallback)));
+        control.send(CallUpdate::Notice(devices::disconnect_notice(
+            previous, choice, fallback,
+        )));
     }
     selected
 }
@@ -3254,16 +3914,27 @@ fn apply_mute(
     tokio::spawn(async move {
         let _ = remote
             .signaling
-            .update_endpoint_state(&remote.conversation, &remote.participant, effect.endpoint_is_muted)
+            .update_endpoint_state(
+                &remote.conversation,
+                &remote.participant,
+                effect.endpoint_is_muted,
+            )
             .await;
     });
     effect.muted
 }
 
-fn silence_for_hold(on_hold: bool, muted: bool, audio: Option<&AudioSetup>, software_audio: Option<&SoftwareAudio>) {
+fn silence_for_hold(
+    on_hold: bool,
+    muted: bool,
+    audio: Option<&AudioSetup>,
+    software_audio: Option<&SoftwareAudio>,
+) {
     let silent = on_hold || muted;
     if let Some(audio) = audio {
-        audio.track.set_enabled(MuteEffect::for_muted(silent).track_enabled);
+        audio
+            .track
+            .set_enabled(MuteEffect::for_muted(silent).track_enabled);
     }
     if let Some(software_audio) = software_audio {
         software_audio.set_microphone_muted(silent);
@@ -3281,7 +3952,10 @@ fn swap_audio_track(peer: &PeerConnection, track: &RtcAudioTrack) -> Result<()> 
         .map_err(|error| Error::Webrtc(error.to_string()))
 }
 
-fn outgoing_track<'a>(software_audio: Option<&'a SoftwareAudio>, device_track: &'a RtcAudioTrack) -> &'a RtcAudioTrack {
+fn outgoing_track<'a>(
+    software_audio: Option<&'a SoftwareAudio>,
+    device_track: &'a RtcAudioTrack,
+) -> &'a RtcAudioTrack {
     pick_track(software_audio.map(|audio| &audio.track), device_track)
 }
 
@@ -3296,10 +3970,20 @@ fn software_wanted(
     audio: Option<&AudioSetup>,
 ) -> Option<SoftwareAudioPlan> {
     let sharing_sound = share_sound_wanted && local_video.sharing();
-    SoftwareAudioPlan::wanted(mic_settings, sharing_sound, audio.is_some_and(AudioSetup::uses_devices))
+    SoftwareAudioPlan::wanted(
+        mic_settings,
+        sharing_sound,
+        audio.is_some_and(AudioSetup::uses_devices),
+    )
 }
 
-fn restore_device_track(factory: &PeerConnectionFactory, input: &DeviceChoice, peer: &PeerConnection, device_track: &RtcAudioTrack, timeline: &Timeline) {
+fn restore_device_track(
+    factory: &PeerConnectionFactory,
+    input: &DeviceChoice,
+    peer: &PeerConnection,
+    device_track: &RtcAudioTrack,
+    timeline: &Timeline,
+) {
     use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
     if !factory.adm_recording_enabled() {
         factory.set_adm_recording_enabled(true);
@@ -3339,11 +4023,22 @@ fn sync_software_audio(
         control.send(CallUpdate::ShareSound(false));
         return;
     };
-    let started = SoftwareAudio::start(factory, options.audio, options.tone_hz, input, plan, muted, remote_audio)
-        .and_then(|audio| swap_audio_track(peer, &audio.track).map(|()| audio));
+    let started = SoftwareAudio::start(
+        factory,
+        options.audio,
+        options.tone_hz,
+        input,
+        plan,
+        muted,
+        remote_audio,
+    )
+    .and_then(|audio| swap_audio_track(peer, &audio.track).map(|()| audio));
     match started {
         Ok(audio) => {
-            timeline.record("software audio", format!("{:?}, computer sound {:?}", plan.processing, audio.loopback));
+            timeline.record(
+                "software audio",
+                format!("{:?}, computer sound {:?}", plan.processing, audio.loopback),
+            );
             if let Some(source) = &audio.microphone_source {
                 timeline.record("mic capture", source.clone());
             }
@@ -3373,7 +4068,13 @@ fn sync_software_audio(
     }
 }
 
-async fn tear_down(mut live: Live, inner: &Inner, timeline: &Timeline, report: &mut CallReport, cancelled: bool) {
+async fn tear_down(
+    mut live: Live,
+    inner: &Inner,
+    timeline: &Timeline,
+    report: &mut CallReport,
+    cancelled: bool,
+) {
     for peer in &live.peers {
         peer.close();
     }
@@ -3384,8 +4085,16 @@ async fn tear_down(mut live: Live, inner: &Inner, timeline: &Timeline, report: &
     if !live.skip_leave
         && let Some(remote) = &live.remote
     {
-        let reason = if cancelled { LeaveReason::Cancel } else { LeaveReason::Hangup };
-        match remote.signaling.leave(&remote.conversation, &remote.participant, reason).await {
+        let reason = if cancelled {
+            LeaveReason::Cancel
+        } else {
+            LeaveReason::Hangup
+        };
+        match remote
+            .signaling
+            .leave(&remote.conversation, &remote.participant, reason)
+            .await
+        {
             Ok(()) => report.left_cleanly = true,
             Err(error) => timeline.record("leave failed", error.to_string()),
         }
@@ -3429,31 +4138,53 @@ fn handle_callback(callback: &TrouterCallback, timeline: &Timeline) -> Result<Ca
     let body = decode_body(callback)?;
     let (_, event) = classify(&callback.path, body)?;
     let detail = match &event {
-        CallEvent::Acceptance(acceptance) => format!("answer sdp {} bytes, fromMixer={}", acceptance.sdp.len(), acceptance.from_mixer),
-        CallEvent::End(end) => format!("code={} subCode={} phrase={}", end.code, end.sub_code, end.phrase),
+        CallEvent::Acceptance(acceptance) => format!(
+            "answer sdp {} bytes, fromMixer={}",
+            acceptance.sdp.len(),
+            acceptance.from_mixer
+        ),
+        CallEvent::End(end) => format!(
+            "code={} subCode={} phrase={}",
+            end.code, end.sub_code, end.phrase
+        ),
         CallEvent::Progress(status) => format!("{status:?}"),
-        CallEvent::ConversationEnd(body) | CallEvent::Rejection(body) | CallEvent::AddParticipantFailure(body) | CallEvent::RetargetCompletion(body) => outcome_summary(body),
-        CallEvent::ControlVideoStreaming(body) => parse_request(body).map_or_else(|| "body not understood".to_owned(), |request| request.shape),
+        CallEvent::ConversationEnd(body)
+        | CallEvent::Rejection(body)
+        | CallEvent::AddParticipantFailure(body)
+        | CallEvent::RetargetCompletion(body) => outcome_summary(body),
+        CallEvent::ControlVideoStreaming(body) => parse_request(body)
+            .map_or_else(|| "body not understood".to_owned(), |request| request.shape),
         _ => String::new(),
     };
     timeline.record(format!("Trouter {}", event.name()), detail);
     match &event {
         CallEvent::Acceptance(acceptance) => timeline.record_sdp("remote answer", &acceptance.sdp),
         CallEvent::MediaAnswer(answer) => timeline.record_sdp("remote answer", &answer.sdp),
-        CallEvent::MediaRenegotiation(renegotiation) => timeline.record_sdp("remote offer", &renegotiation.sdp),
+        CallEvent::MediaRenegotiation(renegotiation) => {
+            timeline.record_sdp("remote offer", &renegotiation.sdp)
+        }
         _ => {}
     }
     Ok(event)
 }
 
-
-async fn apply_answer(peer: &PeerConnection, teams_answer: &str, signaled: &SignaledOffer, browser_offer: &str) -> Result<()> {
+async fn apply_answer(
+    peer: &PeerConnection,
+    teams_answer: &str,
+    signaled: &SignaledOffer,
+    browser_offer: &str,
+) -> Result<()> {
     let answer = to_browser_answer(teams_answer, signaled, browser_offer)?;
     set_browser_answer(peer, &answer).await
 }
 
 /// libwebrtc does not restart a send stream that an inactive answer stopped, so a hold keeps the streams and only mutes.
-async fn apply_hold_answer(peer: &PeerConnection, teams_answer: &str, signaled: &SignaledOffer, browser_offer: &str) -> Result<()> {
+async fn apply_hold_answer(
+    peer: &PeerConnection,
+    teams_answer: &str,
+    signaled: &SignaledOffer,
+    browser_offer: &str,
+) -> Result<()> {
     let answer = to_browser_answer(teams_answer, signaled, browser_offer)?;
     set_browser_answer(peer, &keep_media_running(&answer, browser_offer)).await
 }
@@ -3478,7 +4209,10 @@ fn dump_sdp(options: &CallOptions, name: &str, sdp: &str) {
                     return format!("{prefix}<masked>");
                 }
             }
-            line.split(' ').map(mask_address).collect::<Vec<_>>().join(" ")
+            line.split(' ')
+                .map(mask_address)
+                .collect::<Vec<_>>()
+                .join(" ")
         })
         .collect();
     let _ = std::fs::create_dir_all(directory);
@@ -3489,8 +4223,16 @@ fn dump_timeline(options: &CallOptions, timeline: &Timeline, failure: Option<&Er
     let Some(directory) = &options.sdp_dump_dir else {
         return;
     };
-    let mut lines: Vec<String> =
-        timeline.entries().iter().map(|entry| format!("{:>6} ms  {}  {}", entry.elapsed_ms, entry.label, entry.detail)).collect();
+    let mut lines: Vec<String> = timeline
+        .entries()
+        .iter()
+        .map(|entry| {
+            format!(
+                "{:>6} ms  {}  {}",
+                entry.elapsed_ms, entry.label, entry.detail
+            )
+        })
+        .collect();
     lines.push(match failure {
         Some(error) => format!("failed: {error}"),
         None => "ended without error".to_owned(),
@@ -3500,9 +4242,13 @@ fn dump_timeline(options: &CallOptions, timeline: &Timeline, failure: Option<&Er
 }
 
 fn mask_address(token: &str) -> String {
-    let dotted_quad = token.split('.').count() == 4 && token.split('.').all(|part| part.parse::<u8>().is_ok());
-    let colon_address = token.matches(':').count() >= 2 && !token.starts_with("a=") && !token.starts_with("urn:");
-    if (dotted_quad && token != "10.10.10.10" && token != "0.0.0.0" && token != "127.0.0.1") || colon_address {
+    let dotted_quad =
+        token.split('.').count() == 4 && token.split('.').all(|part| part.parse::<u8>().is_ok());
+    let colon_address =
+        token.matches(':').count() >= 2 && !token.starts_with("a=") && !token.starts_with("urn:");
+    if (dotted_quad && token != "10.10.10.10" && token != "0.0.0.0" && token != "127.0.0.1")
+        || colon_address
+    {
         "<addr>".to_owned()
     } else {
         token.to_owned()
@@ -3523,7 +4269,11 @@ async fn record_track(track: RtcAudioTrack, recording: Arc<Mutex<Recording>>, to
     }
 }
 
-async fn poll_broker(signaling: Arc<Signaling>, conversation: Conversation, running: Arc<AtomicBool>) {
+async fn poll_broker(
+    signaling: Arc<Signaling>,
+    conversation: Conversation,
+    running: Arc<AtomicBool>,
+) {
     let Ok(first) = conversation.link("subscribe") else {
         return;
     };
@@ -3577,7 +4327,9 @@ struct ShareReceive {
 
 impl ShareReceive {
     fn average_qp(&self) -> u64 {
-        self.qp_sum.checked_div(u64::from(self.frames_decoded)).unwrap_or(0)
+        self.qp_sum
+            .checked_div(u64::from(self.frames_decoded))
+            .unwrap_or(0)
     }
 
     fn summary(&self) -> String {
@@ -3613,7 +4365,10 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
             }
             RtcStats::MediaSource(source) if source.source.kind == "audio" => {
                 snapshot.local_level = snapshot.local_level.max(source.audio.audio_level);
-                snapshot.source_levels.push(format!("{}={:.3}", source.source.track_identifier, source.audio.audio_level));
+                snapshot.source_levels.push(format!(
+                    "{}={:.3}",
+                    source.source.track_identifier, source.audio.audio_level
+                ));
                 snapshot.echo_return_loss_enhancement = source.audio.echo_return_loss_enhancement;
             }
             RtcStats::OutboundRtp(outbound) if outbound.stream.kind == "audio" => {
@@ -3638,19 +4393,29 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
                     });
                 }
                 snapshot.video.inbound_frames_decoded += u64::from(inbound.inbound.frames_decoded);
-                snapshot.video.inbound_width = snapshot.video.inbound_width.max(inbound.inbound.frame_width);
-                snapshot.video.inbound_height = snapshot.video.inbound_height.max(inbound.inbound.frame_height);
+                snapshot.video.inbound_width = snapshot
+                    .video
+                    .inbound_width
+                    .max(inbound.inbound.frame_width);
+                snapshot.video.inbound_height = snapshot
+                    .video
+                    .inbound_height
+                    .max(inbound.inbound.frame_height);
             }
             RtcStats::RemoteInboundRtp(remote) if remote.stream.kind == "video" => {
                 snapshot.video.remote_reports += remote.remote_inbound.round_trip_time_measurements;
-                snapshot.video.remote_round_trip_ms = snapshot.video.remote_round_trip_ms.max(remote.remote_inbound.round_trip_time * 1000.0);
+                snapshot.video.remote_round_trip_ms = snapshot
+                    .video
+                    .remote_round_trip_ms
+                    .max(remote.remote_inbound.round_trip_time * 1000.0);
             }
             RtcStats::OutboundRtp(outbound) if outbound.stream.kind == "video" => {
                 snapshot.video.outbound_packets += outbound.sent.packets_sent;
                 if share_mids.contains(&outbound.outbound.mid) {
                     snapshot.share_outbound_packets += outbound.sent.packets_sent;
                 }
-                snapshot.video.outbound_frames_encoded += u64::from(outbound.outbound.frames_encoded);
+                snapshot.video.outbound_frames_encoded +=
+                    u64::from(outbound.outbound.frames_encoded);
                 snapshot.video_senders.push(format!(
                     "mid {} packets={} key={} pli={} fir={} nack={} target={:.0}kbps limit={:?} active={}",
                     outbound.outbound.mid,
@@ -3663,8 +4428,14 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
                     outbound.outbound.quality_limitation_reason,
                     outbound.outbound.active
                 ));
-                snapshot.video.outbound_width = snapshot.video.outbound_width.max(outbound.outbound.frame_width);
-                snapshot.video.outbound_height = snapshot.video.outbound_height.max(outbound.outbound.frame_height);
+                snapshot.video.outbound_width = snapshot
+                    .video
+                    .outbound_width
+                    .max(outbound.outbound.frame_width);
+                snapshot.video.outbound_height = snapshot
+                    .video
+                    .outbound_height
+                    .max(outbound.outbound.frame_height);
             }
             RtcStats::Transport(transport) => {
                 snapshot.dtls_state = format!("{:?}", transport.transport.dtls_state);
@@ -3688,13 +4459,23 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
                 stats
                     .iter()
                     .find_map(|entry| match entry {
-                        RtcStats::LocalCandidate(local) if local.rtc.id == candidate_id => Some(&local.local_candidate),
-                        RtcStats::RemoteCandidate(remote) if remote.rtc.id == candidate_id => Some(&remote.remote_candidate),
+                        RtcStats::LocalCandidate(local) if local.rtc.id == candidate_id => {
+                            Some(&local.local_candidate)
+                        }
+                        RtcStats::RemoteCandidate(remote) if remote.rtc.id == candidate_id => {
+                            Some(&remote.remote_candidate)
+                        }
                         _ => None,
                     })
                     .map(|candidate| {
-                        let kind = candidate.candidate_type.map(|kind| format!("{kind:?}")).unwrap_or_default();
-                        let relay = candidate.relay_protocol.map(|relay| format!(" via {relay:?}")).unwrap_or_default();
+                        let kind = candidate
+                            .candidate_type
+                            .map(|kind| format!("{kind:?}"))
+                            .unwrap_or_default();
+                        let relay = candidate
+                            .relay_protocol
+                            .map(|relay| format!(" via {relay:?}"))
+                            .unwrap_or_default();
                         format!("{kind}/{}{relay}", candidate.protocol)
                     })
                     .unwrap_or_else(|| "?".into())
@@ -3724,9 +4505,19 @@ mod tests {
         let (handle, mut control) = crate::control::call_channel();
         handle.commands.send(CallCommand::Hangup).unwrap();
         let limit = Duration::from_millis(20);
-        let cancelled = setup_step_within(&mut control, limit, std::future::pending::<std::result::Result<(), Error>>()).await;
+        let cancelled = setup_step_within(
+            &mut control,
+            limit,
+            std::future::pending::<std::result::Result<(), Error>>(),
+        )
+        .await;
         assert!(matches!(cancelled, Err(Error::Cancelled)));
-        let timed_out = setup_step_within(&mut control, limit, std::future::pending::<std::result::Result<(), Error>>()).await;
+        let timed_out = setup_step_within(
+            &mut control,
+            limit,
+            std::future::pending::<std::result::Result<(), Error>>(),
+        )
+        .await;
         assert!(matches!(timed_out, Err(Error::Signaling(_))));
     }
 
@@ -3741,8 +4532,12 @@ mod tests {
 
     #[test]
     fn only_a_conflict_answer_retries_a_recording_stop() {
-        assert!(recorder_busy(&Error::Signaling("recording command answered HTTP 409 no answer".into())));
-        assert!(!recorder_busy(&Error::Signaling("recording command answered HTTP 500 no answer".into())));
+        assert!(recorder_busy(&Error::Signaling(
+            "recording command answered HTTP 409 no answer".into()
+        )));
+        assert!(!recorder_busy(&Error::Signaling(
+            "recording command answered HTTP 500 no answer".into()
+        )));
         assert!(!recorder_busy(&Error::Cancelled));
     }
 
@@ -3774,14 +4569,21 @@ mod tests {
     const BROWSER_OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=sendrecv\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\na=mid:1\r\na=sendrecv\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\na=mid:2\r\na=recvonly\r\n";
 
     fn directions(sdp: &str) -> Vec<String> {
-        crate::sdp::parse(sdp).unwrap().media.iter().map(|line| line.direction().unwrap_or("none").to_owned()).collect()
+        crate::sdp::parse(sdp)
+            .unwrap()
+            .media
+            .iter()
+            .map(|line| line.direction().unwrap_or("none").to_owned())
+            .collect()
     }
 
     async fn local_offer(layout: Layout) -> Result<OfferedMedia> {
         use libwebrtc::audio_source::native::NativeAudioSource;
         use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
         let factory = devices::shared_factory();
-        let peer = factory.create_peer_connection(RtcConfiguration::default()).unwrap();
+        let peer = factory
+            .create_peer_connection(RtcConfiguration::default())
+            .unwrap();
         let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, 100);
         let track = factory.create_audio_track("microphone", source);
         let offer = create_offer(&peer, &factory, &track, layout, None).await;
@@ -3803,11 +4605,22 @@ mod tests {
         use libwebrtc::audio_source::native::NativeAudioSource;
         use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
         let factory = devices::shared_factory();
-        let peer = factory.create_peer_connection(RtcConfiguration::default()).unwrap();
+        let peer = factory
+            .create_peer_connection(RtcConfiguration::default())
+            .unwrap();
         let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, 100);
         let track = factory.create_audio_track("microphone", source);
         let offer = include_str!("../tests/fixtures/teams_p2p_offer.sdp");
-        let answered = answer_offer(&peer, Some(&track), offer, AnswerVideo::Receive, None, false, None).await;
+        let answered = answer_offer(
+            &peer,
+            Some(&track),
+            offer,
+            AnswerVideo::Receive,
+            None,
+            false,
+            None,
+        )
+        .await;
         peer.close();
         if let Err(error) = answered {
             panic!("{error}");
@@ -3816,51 +4629,144 @@ mod tests {
 
     #[test]
     fn a_one_to_one_offer_has_audio_and_an_inactive_camera_until_the_camera_is_on() {
-        assert_eq!(directions(&directions_for(Layout::OneToOne, false, false, false, CAMERA_MID, Some(ONE_TO_ONE_SHARE_MID), false, BROWSER_OFFER)), vec!["sendrecv", "inactive", "inactive"]);
-        assert_eq!(directions(&directions_for(Layout::OneToOne, false, true, false, CAMERA_MID, Some(ONE_TO_ONE_SHARE_MID), false, BROWSER_OFFER)), vec!["sendrecv", "sendrecv", "inactive"]);
-        assert_eq!(directions(&directions_for(Layout::OneToOne, false, false, true, CAMERA_MID, Some(ONE_TO_ONE_SHARE_MID), false, BROWSER_OFFER)), vec!["sendrecv", "inactive", "sendonly"]);
+        assert_eq!(
+            directions(&directions_for(
+                Layout::OneToOne,
+                false,
+                false,
+                false,
+                CAMERA_MID,
+                Some(ONE_TO_ONE_SHARE_MID),
+                false,
+                BROWSER_OFFER
+            )),
+            vec!["sendrecv", "inactive", "inactive"]
+        );
+        assert_eq!(
+            directions(&directions_for(
+                Layout::OneToOne,
+                false,
+                true,
+                false,
+                CAMERA_MID,
+                Some(ONE_TO_ONE_SHARE_MID),
+                false,
+                BROWSER_OFFER
+            )),
+            vec!["sendrecv", "sendrecv", "inactive"]
+        );
+        assert_eq!(
+            directions(&directions_for(
+                Layout::OneToOne,
+                false,
+                false,
+                true,
+                CAMERA_MID,
+                Some(ONE_TO_ONE_SHARE_MID),
+                false,
+                BROWSER_OFFER
+            )),
+            vec!["sendrecv", "inactive", "sendonly"]
+        );
     }
 
     #[test]
     fn a_hold_silences_every_line_and_a_conference_offer_is_left_alone() {
         for layout in [Layout::OneToOne, Layout::Conference] {
-            assert_eq!(directions(&directions_for(layout, true, true, false, CAMERA_MID, None, false, BROWSER_OFFER)), vec!["inactive", "inactive", "inactive"]);
+            assert_eq!(
+                directions(&directions_for(
+                    layout,
+                    true,
+                    true,
+                    false,
+                    CAMERA_MID,
+                    None,
+                    false,
+                    BROWSER_OFFER
+                )),
+                vec!["inactive", "inactive", "inactive"]
+            );
         }
-        assert_eq!(directions_for(Layout::Conference, false, true, false, CAMERA_MID, None, false, BROWSER_OFFER), BROWSER_OFFER);
+        assert_eq!(
+            directions_for(
+                Layout::Conference,
+                false,
+                true,
+                false,
+                CAMERA_MID,
+                None,
+                false,
+                BROWSER_OFFER
+            ),
+            BROWSER_OFFER
+        );
     }
 
     #[test]
     fn a_hold_offer_body_is_inactive_on_every_teams_line_with_one_placeholder_candidate() {
-        let held = directions_for(Layout::Conference, true, false, false, CAMERA_MID, None, false, BROWSER_OFFER);
+        let held = directions_for(
+            Layout::Conference,
+            true,
+            false,
+            false,
+            CAMERA_MID,
+            None,
+            false,
+            BROWSER_OFFER,
+        );
         let mut numbers = || 7;
-        let signaled = to_teams_offer(&held, &offer_plan(), &mut numbers).unwrap().sdp;
-        assert_eq!(directions(&signaled), vec!["inactive", "inactive", "inactive"]);
+        let signaled = to_teams_offer(&held, &offer_plan(), &mut numbers)
+            .unwrap()
+            .sdp;
+        assert_eq!(
+            directions(&signaled),
+            vec!["inactive", "inactive", "inactive"]
+        );
         assert_eq!(signaled.matches("a=candidate:").count(), 1);
     }
 
     #[test]
     fn a_move_into_the_meeting_you_are_already_in_is_ignored() {
-        let target = |thread: &str| MeetingTarget { thread_id: thread.into(), tenant_id: "t".into(), organizer_id: "o".into(), meeting_data: None };
-        assert!(is_own_meeting(Some(&target("19:meeting_a@thread.v2")), &target("19:meeting_a@thread.v2")));
-        assert!(!is_own_meeting(Some(&target("19:meeting_a@thread.v2")), &target("19:meeting_b@thread.v2")));
+        let target = |thread: &str| MeetingTarget {
+            thread_id: thread.into(),
+            tenant_id: "t".into(),
+            organizer_id: "o".into(),
+            meeting_data: None,
+        };
+        assert!(is_own_meeting(
+            Some(&target("19:meeting_a@thread.v2")),
+            &target("19:meeting_a@thread.v2")
+        ));
+        assert!(!is_own_meeting(
+            Some(&target("19:meeting_a@thread.v2")),
+            &target("19:meeting_b@thread.v2")
+        ));
         assert!(!is_own_meeting(None, &target("19:meeting_a@thread.v2")));
     }
 
     #[test]
     fn a_video_call_names_the_video_modality_only_when_the_camera_sends() {
         assert_eq!(accepted_modalities(false), vec!["Audio".to_owned()]);
-        assert_eq!(accepted_modalities(true), vec!["Audio".to_owned(), "Video".to_owned()]);
+        assert_eq!(
+            accepted_modalities(true),
+            vec!["Audio".to_owned(), "Video".to_owned()]
+        );
     }
 
     #[test]
     fn specs_map_to_invitation_targets() {
         assert_eq!(CallSpec::Echo.target(), InviteTarget::Echo);
         let people = CallSpec::People {
-            callees: vec![Callee { mri: "8:orgid:b".into(), display_name: "Bea".into() }],
+            callees: vec![Callee {
+                mri: "8:orgid:b".into(),
+                display_name: "Bea".into(),
+            }],
             thread_id: "19:t@thread.v2".into(),
         };
         assert!(people.is_people() && !people.is_meeting());
-        assert!(matches!(people.target(), InviteTarget::People { thread_id, .. } if thread_id == "19:t@thread.v2"));
+        assert!(
+            matches!(people.target(), InviteTarget::People { thread_id, .. } if thread_id == "19:t@thread.v2")
+        );
         let meeting = CallSpec::Meeting(MeetingTarget {
             thread_id: "19:meeting@thread.v2".into(),
             tenant_id: "t".into(),

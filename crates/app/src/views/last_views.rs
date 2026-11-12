@@ -59,8 +59,14 @@ mod tests {
             last.restore(SidebarTab::Channels, Some(&chat), None, Some("19:general")),
             Some(channel.clone())
         );
-        assert_eq!(last.restore(SidebarTab::Chats, Some(&chat), None, None), None);
-        assert_eq!(last.restore(SidebarTab::Calendar, Some(&channel), None, None), None);
+        assert_eq!(
+            last.restore(SidebarTab::Chats, Some(&chat), None, None),
+            None
+        );
+        assert_eq!(
+            last.restore(SidebarTab::Calendar, Some(&channel), None, None),
+            None
+        );
     }
 
     #[test]
@@ -76,6 +82,9 @@ mod tests {
             last.restore(SidebarTab::Channels, Some(&chat), None, Some("19:general")),
             Some(Selection::Channel("19:general".to_owned()))
         );
-        assert_eq!(last.restore(SidebarTab::Channels, Some(&chat), None, None), None);
+        assert_eq!(
+            last.restore(SidebarTab::Channels, Some(&chat), None, None),
+            None
+        );
     }
 }

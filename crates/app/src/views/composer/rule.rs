@@ -54,7 +54,10 @@ impl Composer {
             let token = token(self.table_counter);
             self.input.update(cx, |state, cx| {
                 let selection = state.selected_range();
-                if state.replace_range_with_token(line, token, window, cx).is_ok() {
+                if state
+                    .replace_range_with_token(line, token, window, cx)
+                    .is_ok()
+                {
                     state.set_selected_range(selection, cx);
                 }
             });

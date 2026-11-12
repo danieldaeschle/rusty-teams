@@ -235,8 +235,16 @@ mod tests {
     fn writes_start_from_the_snapshot_in_memory() {
         let store = Store::open_in_memory().unwrap();
         let mut state = ActivityState::default();
-        assert!(state.commit(&store, snapshot_of(vec![unread_item("1")], 0)).unwrap());
-        assert!(!state.commit(&store, snapshot_of(vec![unread_item("1")], 0)).unwrap());
+        assert!(
+            state
+                .commit(&store, snapshot_of(vec![unread_item("1")], 0))
+                .unwrap()
+        );
+        assert!(
+            !state
+                .commit(&store, snapshot_of(vec![unread_item("1")], 0))
+                .unwrap()
+        );
         store.set_meta(META_ACTIVITY_FEED, "not json").unwrap();
         assert_eq!(state.current(&store).unwrap().items.len(), 1);
     }

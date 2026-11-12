@@ -92,7 +92,13 @@ impl Inline {
         self.push_part(text, style, link, None);
     }
 
-    fn push_part(&mut self, text: &str, style: StyleFlags, link: Option<&str>, emoji: Option<&str>) {
+    fn push_part(
+        &mut self,
+        text: &str,
+        style: StyleFlags,
+        link: Option<&str>,
+        emoji: Option<&str>,
+    ) {
         if text.is_empty() {
             return;
         }
@@ -176,7 +182,12 @@ impl Inline {
         let mut stripped = Inline::default();
         for segment in &self.segments {
             let text = self.text[segment.range.clone()].replace(needle, "");
-            stripped.push_part(&text, segment.style, segment.link.as_deref(), segment.emoji.as_deref());
+            stripped.push_part(
+                &text,
+                segment.style,
+                segment.link.as_deref(),
+                segment.emoji.as_deref(),
+            );
         }
         stripped.trim_end();
         let leading = stripped.text.len() - stripped.text.trim_start().len();
@@ -442,9 +453,9 @@ pub fn emoji_urls(blocks: &[Block]) -> Vec<String> {
         match block {
             Block::Paragraph(inline) | Block::Heading { inline, .. } => add(inline),
             Block::Table { rows, .. } => rows.iter().flatten().for_each(|cell| add(&cell.inline)),
-            Block::Reply { children, .. } | Block::Quote(children) | Block::Indent { children, .. } => {
-                pending.extend(children)
-            }
+            Block::Reply { children, .. }
+            | Block::Quote(children)
+            | Block::Indent { children, .. } => pending.extend(children),
             Block::List { items, .. } => pending.extend(items.iter().flatten()),
             Block::Code { .. } | Block::CodeLine { .. } | Block::Rule | Block::Image { .. } => {}
         }
@@ -831,7 +842,9 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
                 }
             }
             Span::Image { .. } => out.push(IMAGE_PLACEHOLDER, style, link),
-            Span::CustomEmoji { url, .. } => out.push_part(EMOJI_PLACEHOLDER, style, link, Some(url)),
+            Span::CustomEmoji { url, .. } => {
+                out.push_part(EMOJI_PLACEHOLDER, style, link, Some(url))
+            }
         }
     }
 }
@@ -1092,7 +1105,10 @@ mod tests {
                     ],
                 ],
             },
-            Span::Quote { message_id: Some("m1".into()), children: vec![text("quoted")] },
+            Span::Quote {
+                message_id: Some("m1".into()),
+                children: vec![text("quoted")],
+            },
         ]);
         assert_eq!(
             blocks,

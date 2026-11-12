@@ -4,14 +4,14 @@ use serde_json::{Map, Value, json};
 use session::{ApiResponse, App, GRAPH, Method, Request, SPACES, Scope, Session};
 
 use crate::captions::{self, BotAction};
-use crate::recording::{self, Consent, RecordingCommand, StartDetails};
-use crate::transfer::{self, TransferTarget};
 use crate::error::{Error, Result};
 use crate::organizer::{self, Invitee, Target};
-use crate::roster::MeetingRole;
 use crate::reaction::{DEFAULT_SKIN_TONE, Reaction, reaction_message};
+use crate::recording::{self, Consent, RecordingCommand, StartDetails};
 use crate::relay::ic3_scope;
+use crate::roster::MeetingRole;
 use crate::timeline::Timeline;
+use crate::transfer::{self, TransferTarget};
 use crate::trouter_events::{CallbackLinks, acceptance_links, acknowledgement_links};
 use crate::video_layout::MediaDescription;
 
@@ -25,7 +25,8 @@ const ENDPOINT_CAPABILITIES: u64 = 73463;
 const ONE_TO_ONE_THREAD_SUFFIX: &str = "@unq.gbl.spaces";
 const DIRECT_REQUIRED_FEATURES: &str = "nonByPass";
 const CLIENT_ENDPOINT_CAPABILITIES: u64 = 47150826;
-const ALLOWED_HOST_SUFFIXES: [&str; 2] = [".flightproxy.teams.microsoft.com", ".teams.microsoft.com"];
+const ALLOWED_HOST_SUFFIXES: [&str; 2] =
+    [".flightproxy.teams.microsoft.com", ".teams.microsoft.com"];
 const BACKEND_SUFFIX: &str = ".skype.com";
 const AUTHZ_SCOPE_NAME: &str = "authorization.readwrite";
 const FLIGHTPROXY_EP: &str = "https://api.flightproxy.teams.microsoft.com/api/v2/ep";
@@ -50,7 +51,13 @@ const SUBSCRIBE_LINK_NAMES: [&str; 6] = [
     "addParticipantFailure",
     "receiveMessage",
 ];
-const CALL_LINK_NAMES: [&str; 5] = ["progress", "mediaAnswer", "acceptance", "redirection", "end"];
+const CALL_LINK_NAMES: [&str; 5] = [
+    "progress",
+    "mediaAnswer",
+    "acceptance",
+    "redirection",
+    "end",
+];
 const AUDIO_MODALITIES: [&str; 1] = ["Audio"];
 pub(crate) const MEETING_MESSAGE_ID: &str = "0";
 const RAISE_HANDS: &str = "raiseHands";
@@ -95,7 +102,10 @@ pub struct MeetingTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub enum InviteTarget {
     Echo,
-    People { callees: Vec<Callee>, thread_id: String },
+    People {
+        callees: Vec<Callee>,
+        thread_id: String,
+    },
     Meeting(MeetingTarget),
 }
 
@@ -143,7 +153,11 @@ fn host_of(url: &str) -> Result<&str> {
 /// Bearer requests only go to Teams hosts; links come from server answers.
 pub fn ensure_teams_url(url: &str) -> Result<()> {
     let host = host_of(url)?;
-    if ALLOWED_HOST_SUFFIXES.iter().any(|suffix| host.ends_with(suffix)) || host == "teams.microsoft.com" {
+    if ALLOWED_HOST_SUFFIXES
+        .iter()
+        .any(|suffix| host.ends_with(suffix))
+        || host == "teams.microsoft.com"
+    {
         Ok(())
     } else {
         Err(Error::Signaling(format!("refusing link to host {host}")))
@@ -155,9 +169,9 @@ fn is_backend_host(host: &str) -> bool {
         && host.ends_with(BACKEND_SUFFIX)
         && !host.starts_with('.')
         && !host.contains("..")
-        && host
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'.' || byte == b'-')
+        && host.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'.' || byte == b'-'
+        })
 }
 
 /// Push links may name a backend host directly; the browser always reaches those through flightproxy.
@@ -168,7 +182,9 @@ pub fn routed_url(url: &str) -> Result<String> {
         return Ok(url.to_owned());
     }
     let rest = &url["https://".len()..];
-    let path = rest.find(['/', '?']).map_or("", |position| &rest[position..]);
+    let path = rest
+        .find(['/', '?'])
+        .map_or("", |position| &rest[position..]);
     Ok(format!("{FLIGHTPROXY_EP}/{host}{path}"))
 }
 
@@ -236,7 +252,12 @@ pub struct Attached {
 
 impl Signaling {
     /// `poll_session` is a second CDP connection so the broker long poll never blocks the call requests.
-    pub fn new(session: Session, poll_session: Session, routing: TenantRouting, timeline: Timeline) -> Self {
+    pub fn new(
+        session: Session,
+        poll_session: Session,
+        routing: TenantRouting,
+        timeline: Timeline,
+    ) -> Self {
         Signaling {
             session,
             poll_session,
@@ -251,11 +272,17 @@ impl Signaling {
     fn request(&self, method: Method, url: &str, body: Option<Value>) -> Request {
         let mut request = match body {
             Some(body) => Request::with_body(method, url, body),
-            None => Request { method, ..Request::get(url) },
+            None => Request {
+                method,
+                ..Request::get(url)
+            },
         };
         request.headers = vec![
             ("X-Microsoft-Skype-Chain-ID".into(), self.chain_id.clone()),
-            ("X-Microsoft-Skype-Message-ID".into(), uuid::Uuid::new_v4().to_string()),
+            (
+                "X-Microsoft-Skype-Message-ID".into(),
+                uuid::Uuid::new_v4().to_string(),
+            ),
             ("X-Microsoft-Skype-Client".into(), CLIENT_HEADER.into()),
             ("MS-Teams-Region".into(), self.routing.region.clone()),
             ("MS-Teams-Partition".into(), self.routing.partition.clone()),
@@ -266,23 +293,46 @@ impl Signaling {
         request
     }
 
-    async fn exchange(&self, session: &Session, label: &str, mut request: Request) -> Result<ApiResponse> {
+    async fn exchange(
+        &self,
+        session: &Session,
+        label: &str,
+        mut request: Request,
+    ) -> Result<ApiResponse> {
         request.url = routed_url(&request.url)?;
         let response = session.batch(&[request], &ic3_scope()).await?.remove(0);
-        self.timeline.record(label, format!("HTTP {}", response.status));
+        self.timeline
+            .record(label, format!("HTTP {}", response.status));
         if !response.is_success() {
-            let reason: String = response.body.to_string().chars().take(FAILURE_BODY_CHARS).collect();
-            return Err(Error::Signaling(format!("{label} answered HTTP {} {reason}", response.status)));
+            let reason: String = response
+                .body
+                .to_string()
+                .chars()
+                .take(FAILURE_BODY_CHARS)
+                .collect();
+            return Err(Error::Signaling(format!(
+                "{label} answered HTTP {} {reason}",
+                response.status
+            )));
         }
         Ok(response)
     }
 
-    async fn send(&self, label: &str, method: Method, url: &str, body: Option<Value>) -> Result<ApiResponse> {
-        self.exchange(&self.session, label, self.request(method, url, body)).await
+    async fn send(
+        &self,
+        label: &str,
+        method: Method,
+        url: &str,
+        body: Option<Value>,
+    ) -> Result<ApiResponse> {
+        self.exchange(&self.session, label, self.request(method, url, body))
+            .await
     }
 
     pub async fn post_json(&self, label: &str, url: &str, body: Value) -> Result<()> {
-        self.send(label, Method::Post, url, Some(body)).await.map(|_| ())
+        self.send(label, Method::Post, url, Some(body))
+            .await
+            .map(|_| ())
     }
 
     pub async fn post_empty(&self, label: &str, url: &str) -> Result<()> {
@@ -291,7 +341,12 @@ impl Signaling {
 
     pub async fn create_conversation(&self, invitation: &Invitation<'_>) -> Result<Conversation> {
         let response = self
-            .send("POST epconv", Method::Post, EPCONV_URL, Some(epconv_body(invitation)))
+            .send(
+                "POST epconv",
+                Method::Post,
+                EPCONV_URL,
+                Some(epconv_body(invitation)),
+            )
             .await?;
         conversation_from(&response.body)
     }
@@ -303,7 +358,14 @@ impl Signaling {
         meeting: &MeetingTarget,
     ) -> Result<Conversation> {
         let body = subscribe_body(from, callbacks, meeting);
-        let response = self.send("POST epconv subscribe", Method::Post, EPCONV_URL, Some(body)).await?;
+        let response = self
+            .send(
+                "POST epconv subscribe",
+                Method::Post,
+                EPCONV_URL,
+                Some(body),
+            )
+            .await?;
         conversation_from(&response.body)
     }
 
@@ -315,24 +377,42 @@ impl Signaling {
         meeting_data: &Value,
     ) -> Result<(MeetingTarget, Conversation)> {
         let body = crate::join::resolve_body(from, callbacks, meeting_data);
-        let response = self.send("POST epconv resolve", Method::Post, EPCONV_URL, Some(body)).await?;
+        let response = self
+            .send("POST epconv resolve", Method::Post, EPCONV_URL, Some(body))
+            .await?;
         let target = crate::join::target_from_answer(&response.body, meeting_data)?;
         Ok((target, conversation_from(&response.body)?))
     }
 
     /// A running meeting answers from the conversation that owns it, so its controller and links replace the subscribed ones.
-    pub async fn join_meeting(&self, subscribed: &Conversation, invitation: &Invitation<'_>) -> Result<Conversation> {
+    pub async fn join_meeting(
+        &self,
+        subscribed: &Conversation,
+        invitation: &Invitation<'_>,
+    ) -> Result<Conversation> {
         let response = self
-            .send("POST join", Method::Post, &subscribed.controller, Some(epconv_body(invitation)))
+            .send(
+                "POST join",
+                Method::Post,
+                &subscribed.controller,
+                Some(epconv_body(invitation)),
+            )
             .await?;
         Ok(joined_conversation(subscribed, &response.body))
     }
 
     pub fn next_endpoint_sequence(&self) -> u32 {
-        self.endpoint_state_sequence.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+        self.endpoint_state_sequence
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
     }
 
-    pub async fn update_endpoint_state(&self, conversation: &Conversation, from: &Participant, muted: bool) -> Result<()> {
+    pub async fn update_endpoint_state(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        muted: bool,
+    ) -> Result<()> {
         let body = json!({
             "from": from.wire(),
             "endpointState": {
@@ -346,31 +426,71 @@ impl Signaling {
     }
 
     fn next_state_sequence(&self) -> u32 {
-        self.state_sequence.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+        self.state_sequence
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
     }
 
-    pub async fn raise_hand(&self, conversation: &Conversation, from: &Participant) -> Result<HandReceipt> {
+    pub async fn raise_hand(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+    ) -> Result<HandReceipt> {
         let body = raise_hand_body(from.wire(), self.next_state_sequence());
-        let response = self.send("POST publishState", Method::Post, conversation.link("publishState")?, Some(body)).await?;
+        let response = self
+            .send(
+                "POST publishState",
+                Method::Post,
+                conversation.link("publishState")?,
+                Some(body),
+            )
+            .await?;
         Ok(hand_receipt_from(&response.body))
     }
 
-    pub async fn lower_hands(&self, conversation: &Conversation, from: &Participant, state_ids: &[String]) -> Result<()> {
+    pub async fn lower_hands(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        state_ids: &[String],
+    ) -> Result<()> {
         let body = remove_states_body(from.wire(), self.next_state_sequence(), state_ids);
-        self.post_json("POST removeState", conversation.link("removeState")?, body).await
+        self.post_json("POST removeState", conversation.link("removeState")?, body)
+            .await
     }
 
-    pub async fn lower_all_hands(&self, conversation: &Conversation, from: &Participant) -> Result<()> {
+    pub async fn lower_all_hands(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+    ) -> Result<()> {
         let body = remove_all_hands_body(from.wire(), self.next_state_sequence());
-        self.post_json("POST removeState", conversation.link("removeState")?, body).await
+        self.post_json("POST removeState", conversation.link("removeState")?, body)
+            .await
     }
 
-    pub async fn send_reaction(&self, conversation: &Conversation, from: &Participant, reaction: Reaction) -> Result<()> {
-        let body = reaction_message(from.wire(), reaction, &uuid::Uuid::new_v4().to_string(), &uuid::Uuid::new_v4().to_string());
-        self.post_json("POST sendMessage", conversation.link("sendMessage")?, body).await
+    pub async fn send_reaction(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        reaction: Reaction,
+    ) -> Result<()> {
+        let body = reaction_message(
+            from.wire(),
+            reaction,
+            &uuid::Uuid::new_v4().to_string(),
+            &uuid::Uuid::new_v4().to_string(),
+        );
+        self.post_json("POST sendMessage", conversation.link("sendMessage")?, body)
+            .await
     }
 
-    pub async fn update_media_descriptions(&self, url: &str, descriptions: &[MediaDescription], request_id: u32) -> Result<()> {
+    pub async fn update_media_descriptions(
+        &self,
+        url: &str,
+        descriptions: &[MediaDescription],
+        request_id: u32,
+    ) -> Result<()> {
         let body = json!({
             "UpdateMediaDescriptions": {
                 "mediaDescriptions": {
@@ -379,7 +499,8 @@ impl Signaling {
                 },
             },
         });
-        self.post_json("POST updateMediaDescriptions", url, body).await
+        self.post_json("POST updateMediaDescriptions", url, body)
+            .await
     }
 
     pub async fn add_echo_bot(
@@ -408,58 +529,187 @@ impl Signaling {
         self.post_json("POST add (echo bot)", url, body).await
     }
 
-    pub async fn update_endpoint_metadata(&self, conversation: &Conversation, from: &Participant) -> Result<()> {
-        self.put_endpoint_metadata(conversation, from, json!({"holographicCapabilities": 3})).await
+    pub async fn update_endpoint_metadata(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+    ) -> Result<()> {
+        self.put_endpoint_metadata(conversation, from, json!({"holographicCapabilities": 3}))
+            .await
     }
 
-    pub async fn set_caption_preference(&self, conversation: &Conversation, from: &Participant, captions: bool) -> Result<()> {
-        self.put_endpoint_metadata(conversation, from, captions::endpoint_metadata(captions)).await
+    pub async fn set_caption_preference(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        captions: bool,
+    ) -> Result<()> {
+        self.put_endpoint_metadata(conversation, from, captions::endpoint_metadata(captions))
+            .await
     }
 
-    async fn put_endpoint_metadata(&self, conversation: &Conversation, from: &Participant, metadata: Value) -> Result<()> {
+    async fn put_endpoint_metadata(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        metadata: Value,
+    ) -> Result<()> {
         let body = json!({"participants": {"from": from.wire()}, "endpointMetadata": metadata});
         let url = conversation.link("updateEndpointMetadata")?;
-        self.send("PUT updateEndpointMetadata", Method::Put, url, Some(body)).await.map(|_| ())
+        self.send("PUT updateEndpointMetadata", Method::Put, url, Some(body))
+            .await
+            .map(|_| ())
     }
 
-    pub async fn admit(&self, conversation: &Conversation, from: &Participant, target: Target<'_>, callbacks: &CallbackLinks) -> Result<u16> {
-        let body = organizer::admit_body(from.wire(), target, callbacks, &uuid::Uuid::new_v4().to_string());
-        self.send("POST admit", Method::Post, conversation.link("admit")?, Some(body)).await.map(|response| response.status)
+    pub async fn admit(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        target: Target<'_>,
+        callbacks: &CallbackLinks,
+    ) -> Result<u16> {
+        let body = organizer::admit_body(
+            from.wire(),
+            target,
+            callbacks,
+            &uuid::Uuid::new_v4().to_string(),
+        );
+        self.send(
+            "POST admit",
+            Method::Post,
+            conversation.link("admit")?,
+            Some(body),
+        )
+        .await
+        .map(|response| response.status)
     }
 
-    pub async fn remove_participant(&self, conversation: &Conversation, from: &Participant, target: Target<'_>, callbacks: &CallbackLinks) -> Result<u16> {
+    pub async fn remove_participant(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        target: Target<'_>,
+        callbacks: &CallbackLinks,
+    ) -> Result<u16> {
         let body = organizer::remove_participant_body(from.wire(), target, callbacks);
-        self.send("POST removeParticipant", Method::Post, conversation.link("removeParticipant")?, Some(body)).await.map(|response| response.status)
+        self.send(
+            "POST removeParticipant",
+            Method::Post,
+            conversation.link("removeParticipant")?,
+            Some(body),
+        )
+        .await
+        .map(|response| response.status)
     }
 
-    pub async fn mute_participant(&self, conversation: &Conversation, from: &Participant, mri: &str) -> Result<u16> {
+    pub async fn mute_participant(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        mri: &str,
+    ) -> Result<u16> {
         let body = organizer::mute_participants_body(from.wire(), &[mri.to_owned()]);
-        self.send("POST mute", Method::Post, conversation.link("mute")?, Some(body)).await.map(|response| response.status)
+        self.send(
+            "POST mute",
+            Method::Post,
+            conversation.link("mute")?,
+            Some(body),
+        )
+        .await
+        .map(|response| response.status)
     }
 
-    pub async fn mute_everyone(&self, conversation: &Conversation, from: &Participant, others: &[String]) -> Result<u16> {
+    pub async fn mute_everyone(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        others: &[String],
+    ) -> Result<u16> {
         let body = organizer::mute_everyone_body(from.wire(), others);
-        self.send("POST mute (all)", Method::Post, conversation.link("mute")?, Some(body)).await.map(|response| response.status)
+        self.send(
+            "POST mute (all)",
+            Method::Post,
+            conversation.link("mute")?,
+            Some(body),
+        )
+        .await
+        .map(|response| response.status)
     }
 
-    pub async fn spotlight(&self, conversation: &Conversation, from: &Participant, mri: &str) -> Result<u16> {
-        let body = organizer::spotlight_body(from.wire(), self.next_state_sequence(), mri, &from.mri);
-        self.send("POST publishState (spotlight)", Method::Post, conversation.link("publishState")?, Some(body)).await.map(|response| response.status)
+    pub async fn spotlight(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        mri: &str,
+    ) -> Result<u16> {
+        let body =
+            organizer::spotlight_body(from.wire(), self.next_state_sequence(), mri, &from.mri);
+        self.send(
+            "POST publishState (spotlight)",
+            Method::Post,
+            conversation.link("publishState")?,
+            Some(body),
+        )
+        .await
+        .map(|response| response.status)
     }
 
-    pub async fn set_lock(&self, conversation: &Conversation, from: &Participant, locked: bool) -> Result<u16> {
+    pub async fn set_lock(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        locked: bool,
+    ) -> Result<u16> {
         let body = organizer::lock_body(from.wire(), locked, self.next_state_sequence());
-        self.send("PUT updateMeetingSettings", Method::Put, conversation.link("updateMeetingSettings")?, Some(body)).await.map(|response| response.status)
+        self.send(
+            "PUT updateMeetingSettings",
+            Method::Put,
+            conversation.link("updateMeetingSettings")?,
+            Some(body),
+        )
+        .await
+        .map(|response| response.status)
     }
 
-    pub async fn change_role(&self, conversation: &Conversation, from: &Participant, mri: &str, role: MeetingRole) -> Result<u16> {
+    pub async fn change_role(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        mri: &str,
+        role: MeetingRole,
+    ) -> Result<u16> {
         let body = organizer::role_body(from.wire(), mri, role);
-        self.send("POST updateParticipantRole", Method::Post, conversation.link("updateParticipantRole")?, Some(body)).await.map(|response| response.status)
+        self.send(
+            "POST updateParticipantRole",
+            Method::Post,
+            conversation.link("updateParticipantRole")?,
+            Some(body),
+        )
+        .await
+        .map(|response| response.status)
     }
 
-    pub async fn publish_attendee_state(&self, conversation: &Conversation, from: &Participant, state_type: &str, mri: &str) -> Result<u16> {
-        let body = organizer::attendee_state_body(from.wire(), state_type, self.next_state_sequence(), mri);
-        self.send("POST publishState (attendee)", Method::Post, conversation.link("publishState")?, Some(body)).await.map(|response| response.status)
+    pub async fn publish_attendee_state(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        state_type: &str,
+        mri: &str,
+    ) -> Result<u16> {
+        let body = organizer::attendee_state_body(
+            from.wire(),
+            state_type,
+            self.next_state_sequence(),
+            mri,
+        );
+        self.send(
+            "POST publishState (attendee)",
+            Method::Post,
+            conversation.link("publishState")?,
+            Some(body),
+        )
+        .await
+        .map(|response| response.status)
     }
 
     pub async fn add_participants(
@@ -473,12 +723,25 @@ impl Signaling {
     ) -> Result<u16> {
         let invitees: Vec<Invitee> = callees
             .iter()
-            .map(|callee| Invitee { callee: callee.clone(), participant_id: uuid::Uuid::new_v4().to_string() })
+            .map(|callee| Invitee {
+                callee: callee.clone(),
+                participant_id: uuid::Uuid::new_v4().to_string(),
+            })
             .collect();
-        let group_chat = group_thread.map_or(Value::Null, |thread_id| organizer::group_chat_for(thread_id, meeting.is_some()));
-        let body = organizer::add_participants_body(from.wire(), &invitees, group_chat, meeting, callbacks);
+        let group_chat = group_thread.map_or(Value::Null, |thread_id| {
+            organizer::group_chat_for(thread_id, meeting.is_some())
+        });
+        let body = organizer::add_participants_body(
+            from.wire(),
+            &invitees,
+            group_chat,
+            meeting,
+            callbacks,
+        );
         let url = conversation.link(organizer::add_link_name(group_thread.is_some()))?;
-        self.send("POST add (invite)", Method::Post, url, Some(body)).await.map(|response| response.status)
+        self.send("POST add (invite)", Method::Post, url, Some(body))
+            .await
+            .map(|response| response.status)
     }
 
     pub async fn add_caption_bot(
@@ -489,25 +752,57 @@ impl Signaling {
         callbacks: &CallbackLinks,
         threadless: bool,
     ) -> Result<u16> {
-        let body = captions::add_bot_body(from.wire(), thread_id, callbacks.call_id(), &from.display_name, callbacks, threadless);
-        let link = if threadless { "addParticipant" } else { "addParticipantAndModality" };
+        let body = captions::add_bot_body(
+            from.wire(),
+            thread_id,
+            callbacks.call_id(),
+            &from.display_name,
+            callbacks,
+            threadless,
+        );
+        let link = if threadless {
+            "addParticipant"
+        } else {
+            "addParticipantAndModality"
+        };
         let mut request = self.request(Method::Post, conversation.link(link)?, Some(body));
-        request = request.with_body_token(captions::RECORDER_RESOURCE, captions::RECORDER_SCOPE, captions::INITIATOR_TOKEN_PLACEHOLDER);
-        self.exchange(&self.session, "POST add (caption bot)", request).await.map(|response| response.status)
+        request = request.with_body_token(
+            captions::RECORDER_RESOURCE,
+            captions::RECORDER_SCOPE,
+            captions::INITIATOR_TOKEN_PLACEHOLDER,
+        );
+        self.exchange(&self.session, "POST add (caption bot)", request)
+            .await
+            .map(|response| response.status)
     }
 
-    pub async fn caption_command(&self, command_url: &str, action: BotAction, from: &Participant) -> Result<()> {
+    pub async fn caption_command(
+        &self,
+        command_url: &str,
+        action: BotAction,
+        from: &Participant,
+    ) -> Result<()> {
         ensure_teams_url(command_url)?;
         let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let body = captions::command_body(action, &from.mri, &from.participant_id, &timestamp);
-        self.bot_command(command_url, body, "caption command").await.map(|_| ())
+        self.bot_command(command_url, body, "caption command")
+            .await
+            .map(|_| ())
     }
 
-    pub async fn caption_language_command(&self, command_url: &str, from: &Participant, language_tag: &str) -> Result<()> {
+    pub async fn caption_language_command(
+        &self,
+        command_url: &str,
+        from: &Participant,
+        language_tag: &str,
+    ) -> Result<()> {
         ensure_teams_url(command_url)?;
         let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let body = captions::language_body(&from.mri, &from.participant_id, &timestamp, language_tag);
-        self.bot_command(command_url, body, "caption language command").await.map(|_| ())
+        let body =
+            captions::language_body(&from.mri, &from.participant_id, &timestamp, language_tag);
+        self.bot_command(command_url, body, "caption language command")
+            .await
+            .map(|_| ())
     }
 
     async fn bot_command(&self, command_url: &str, body: Value, label: &str) -> Result<u16> {
@@ -519,17 +814,35 @@ impl Signaling {
             "requestId": uuid::Uuid::new_v4().to_string(),
             "chainId": self.chain_id,
         });
-        let answer = self.session.run_with_token(App::Teams, &spaces_scope(), captions::COMMAND_SCRIPT, &arguments, false).await?;
+        let answer = self
+            .session
+            .run_with_token(
+                App::Teams,
+                &spaces_scope(),
+                captions::COMMAND_SCRIPT,
+                &arguments,
+                false,
+            )
+            .await?;
         let status = answer["status"].as_u64().unwrap_or_default();
-        self.timeline.record(format!("POST {label}"), format!("HTTP {status}"));
+        self.timeline
+            .record(format!("POST {label}"), format!("HTTP {status}"));
         if (200..300).contains(&status) {
             return Ok(status as u16);
         }
         let reason = answer["error"].as_str().unwrap_or("no answer");
-        Err(Error::Signaling(format!("{label} answered HTTP {status} {reason}")))
+        Err(Error::Signaling(format!(
+            "{label} answered HTTP {status} {reason}"
+        )))
     }
 
-    pub async fn recording_command(&self, command_url: &str, command: RecordingCommand, from: &Participant, title: &str) -> Result<u16> {
+    pub async fn recording_command(
+        &self,
+        command_url: &str,
+        command: RecordingCommand,
+        from: &Participant,
+        title: &str,
+    ) -> Result<u16> {
         ensure_teams_url(command_url)?;
         let now = chrono::Utc::now();
         let timestamp = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -544,15 +857,38 @@ impl Signaling {
             organizer_name: &from.display_name,
             correlation_id: &correlation_id,
         };
-        self.bot_command(command_url, recording::command_body(command, details), "recording command").await
+        self.bot_command(
+            command_url,
+            recording::command_body(command, details),
+            "recording command",
+        )
+        .await
     }
 
-    pub async fn consent_to_recording(&self, conversation: &Conversation, from: &Participant, consent: Consent) -> Result<u16> {
+    pub async fn consent_to_recording(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        consent: Consent,
+    ) -> Result<u16> {
         let body = recording::consent_body(from.wire(), self.next_state_sequence(), consent);
-        self.send("POST publishState (recording consent)", Method::Post, conversation.link("publishState")?, Some(body)).await.map(|response| response.status)
+        self.send(
+            "POST publishState (recording consent)",
+            Method::Post,
+            conversation.link("publishState")?,
+            Some(body),
+        )
+        .await
+        .map(|response| response.status)
     }
 
-    pub async fn transfer(&self, transfer_url: &str, from: &Participant, target: TransferTarget<'_>, callbacks: &CallbackLinks) -> Result<()> {
+    pub async fn transfer(
+        &self,
+        transfer_url: &str,
+        from: &Participant,
+        target: TransferTarget<'_>,
+        callbacks: &CallbackLinks,
+    ) -> Result<()> {
         let body = transfer::transfer_body(from, target, callbacks);
         self.post_json("POST transfer", transfer_url, body).await
     }
@@ -561,13 +897,23 @@ impl Signaling {
     pub async fn poll_broker(&self, url: &str) -> Result<Option<String>> {
         let mut request = self.request(Method::Get, url, None);
         request.headers.push(("X-UseBatching".into(), "1".into()));
-        let response = self.exchange(&self.poll_session, "GET broker subscribe", request).await?;
-        Ok(response.body["nextSubscribeUrl"].as_str().map(str::to_owned))
+        let response = self
+            .exchange(&self.poll_session, "GET broker subscribe", request)
+            .await?;
+        Ok(response.body["nextSubscribeUrl"]
+            .as_str()
+            .map(str::to_owned))
     }
 
-    pub async fn leave(&self, conversation: &Conversation, from: &Participant, reason: LeaveReason) -> Result<()> {
+    pub async fn leave(
+        &self,
+        conversation: &Conversation,
+        from: &Participant,
+        reason: LeaveReason,
+    ) -> Result<()> {
         let url = conversation.link("leave")?;
-        self.post_json("POST leave", url, leave_body(from, reason)).await
+        self.post_json("POST leave", url, leave_body(from, reason))
+            .await
     }
 
     pub async fn end_for_all(&self, conversation: &Conversation, from: &Participant) -> Result<()> {
@@ -589,27 +935,55 @@ impl Signaling {
     }
 
     pub async fn send_ringing(&self, url: &str, from: &Participant) -> Result<()> {
-        self.post_json("POST progress", url, ringing_body(from)).await
+        self.post_json("POST progress", url, ringing_body(from))
+            .await
     }
 
     pub async fn accept(&self, url: &str, answer: &Answer<'_>) -> Result<BTreeMap<String, String>> {
-        let response = self.send("POST acceptance", Method::Post, url, Some(acceptance_body(answer))).await?;
+        let response = self
+            .send(
+                "POST acceptance",
+                Method::Post,
+                url,
+                Some(acceptance_body(answer)),
+            )
+            .await?;
         Ok(acknowledgement_links(&response.body))
     }
 
     pub async fn decline(&self, call_leg_url: &str) -> Result<()> {
-        self.send("DELETE callLeg (decline)", Method::Delete, call_leg_url, Some(decline_body()))
-            .await
-            .map(|_| ())
+        self.send(
+            "DELETE callLeg (decline)",
+            Method::Delete,
+            call_leg_url,
+            Some(decline_body()),
+        )
+        .await
+        .map(|_| ())
     }
 
-    pub async fn reject_renegotiation(&self, url: &str, from: &Participant, call_id: &str, failure: NegotiationFailure) -> Result<()> {
-        self.post_json("POST rejection (renegotiation)", url, negotiation_failure_body(from, call_id, failure)).await
+    pub async fn reject_renegotiation(
+        &self,
+        url: &str,
+        from: &Participant,
+        call_id: &str,
+        failure: NegotiationFailure,
+    ) -> Result<()> {
+        self.post_json(
+            "POST rejection (renegotiation)",
+            url,
+            negotiation_failure_body(from, call_id, failure),
+        )
+        .await
     }
 
     pub async fn keep_call_alive(&self, call_leg_url: &str) -> Result<()> {
-        self.post_json("POST callLeg keep-alive", call_leg_url, json!({"callParticipantUpdate": {}}))
-            .await
+        self.post_json(
+            "POST callLeg keep-alive",
+            call_leg_url,
+            json!({"callParticipantUpdate": {}}),
+        )
+        .await
     }
 
     pub async fn keep_conversation_alive(
@@ -619,7 +993,12 @@ impl Signaling {
         callbacks: &CallbackLinks,
     ) -> Result<()> {
         let url = conversation.link("notificationLinks")?;
-        self.post_json("POST notificationLinks", url, notification_links_body(from, callbacks)).await
+        self.post_json(
+            "POST notificationLinks",
+            url,
+            notification_links_body(from, callbacks),
+        )
+        .await
     }
 }
 
@@ -673,14 +1052,20 @@ fn media_controller_links(callbacks: &CallbackLinks) -> Value {
 /// The 1:1 chat of two people: both object ids sorted as plain strings.
 pub fn one_to_one_thread(own_object_id: &str, peer_mri: &str) -> Option<String> {
     let peer = peer_mri.strip_prefix("8:orgid:")?;
-    let (first, second) = if own_object_id <= peer { (own_object_id, peer) } else { (peer, own_object_id) };
+    let (first, second) = if own_object_id <= peer {
+        (own_object_id, peer)
+    } else {
+        (peer, own_object_id)
+    };
     Some(format!("19:{first}_{second}{ONE_TO_ONE_THREAD_SUFFIX}"))
 }
 
 impl InviteTarget {
     pub fn is_one_to_one(&self) -> bool {
         match self {
-            InviteTarget::People { callees, thread_id } => callees.len() == 1 && thread_id.ends_with(ONE_TO_ONE_THREAD_SUFFIX),
+            InviteTarget::People { callees, thread_id } => {
+                callees.len() == 1 && thread_id.ends_with(ONE_TO_ONE_THREAD_SUFFIX)
+            }
             InviteTarget::Echo | InviteTarget::Meeting(_) => false,
         }
     }
@@ -702,7 +1087,9 @@ fn group_chat(invitation: &Invitation<'_>) -> Value {
     match invitation.target {
         InviteTarget::Echo => Value::Null,
         InviteTarget::People { thread_id, .. } => json!({"threadId": thread_id, "messageId": null}),
-        InviteTarget::Meeting(meeting) => json!({"threadId": meeting.thread_id, "messageId": MEETING_MESSAGE_ID}),
+        InviteTarget::Meeting(meeting) => {
+            json!({"threadId": meeting.thread_id, "messageId": MEETING_MESSAGE_ID})
+        }
     }
 }
 
@@ -771,7 +1158,11 @@ pub(crate) fn subscribe_request(callbacks: &CallbackLinks) -> Value {
     })
 }
 
-pub fn subscribe_body(from: &Participant, callbacks: &CallbackLinks, meeting: &MeetingTarget) -> Value {
+pub fn subscribe_body(
+    from: &Participant,
+    callbacks: &CallbackLinks,
+    meeting: &MeetingTarget,
+) -> Value {
     json!({
         "conversationRequest": subscribe_request(callbacks),
         "participants": {"from": from.wire()},
@@ -783,8 +1174,12 @@ pub fn subscribe_body(from: &Participant, callbacks: &CallbackLinks, meeting: &M
 
 pub fn leave_body(from: &Participant, reason: LeaveReason) -> Value {
     let call_end = match reason {
-        LeaveReason::Hangup => json!({"code": 0, "subCode": 0, "phrase": "CallEndReasonLocalUserInitiated", "resultCategories": ["Success"]}),
-        LeaveReason::Cancel => json!({"code": CANCEL_CODE, "subCode": 0, "phrase": "CallEndReasonLocalUserInitiated"}),
+        LeaveReason::Hangup => {
+            json!({"code": 0, "subCode": 0, "phrase": "CallEndReasonLocalUserInitiated", "resultCategories": ["Success"]})
+        }
+        LeaveReason::Cancel => {
+            json!({"code": CANCEL_CODE, "subCode": 0, "phrase": "CallEndReasonLocalUserInitiated"})
+        }
     };
     json!({
         "participants": {"from": from.wire()},
@@ -870,7 +1265,11 @@ impl NegotiationFailure {
     }
 }
 
-pub fn negotiation_failure_body(from: &Participant, call_id: &str, failure: NegotiationFailure) -> Value {
+pub fn negotiation_failure_body(
+    from: &Participant,
+    call_id: &str,
+    failure: NegotiationFailure,
+) -> Value {
     let (code, sub_code, phrase) = failure.wire();
     json!({
         "mediaNegotiationFailure": {"sender": from.wire(), "code": code, "subCode": sub_code, "phrase": phrase},
@@ -948,8 +1347,15 @@ fn conversation_from(body: &Value) -> Result<Conversation> {
                 .collect()
         })
         .unwrap_or_default();
-    let roster = Some(&body["roster"]).filter(|roster| roster.is_object()).cloned();
-    Ok(Conversation { controller, links, chat_thread: chat_thread_id(body), roster })
+    let roster = Some(&body["roster"])
+        .filter(|roster| roster.is_object())
+        .cloned();
+    Ok(Conversation {
+        controller,
+        links,
+        chat_thread: chat_thread_id(body),
+        roster,
+    })
 }
 
 fn joined_conversation(subscribed: &Conversation, answer: &Value) -> Conversation {
@@ -961,7 +1367,9 @@ fn joined_conversation(subscribed: &Conversation, answer: &Value) -> Conversatio
     Conversation {
         controller: joined.controller,
         links,
-        chat_thread: joined.chat_thread.or_else(|| subscribed.chat_thread.clone()),
+        chat_thread: joined
+            .chat_thread
+            .or_else(|| subscribed.chat_thread.clone()),
         roster: joined.roster.or_else(|| subscribed.roster.clone()),
     }
 }
@@ -1001,13 +1409,17 @@ pub fn remove_all_hands_body(from: Value, sequence_number: u32) -> Value {
 }
 
 pub fn chat_thread_id(body: &Value) -> Option<String> {
-    body["activeModalities"]["groupChat"]["threadId"].as_str().map(str::to_owned)
+    body["activeModalities"]["groupChat"]["threadId"]
+        .as_str()
+        .map(str::to_owned)
 }
 
 fn attached_from(body: &Value) -> Result<Attached> {
     let invitation = &body["callInvitation"];
     if invitation.is_null() {
-        return Err(Error::Signaling("attach answer without callInvitation".into()));
+        return Err(Error::Signaling(
+            "attach answer without callInvitation".into(),
+        ));
     }
     let links = invitation["links"]
         .as_object()
@@ -1020,11 +1432,20 @@ fn attached_from(body: &Value) -> Result<Attached> {
         .unwrap_or_default();
     let modalities = invitation["callModalities"]
         .as_array()
-        .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
     Ok(Attached {
-        offer_sdp: invitation["mediaContent"]["blob"].as_str().map(str::to_owned),
-        from_mixer: invitation["mediaContent"]["fromMixer"].as_bool().unwrap_or(false),
+        offer_sdp: invitation["mediaContent"]["blob"]
+            .as_str()
+            .map(str::to_owned),
+        from_mixer: invitation["mediaContent"]["fromMixer"]
+            .as_bool()
+            .unwrap_or(false),
         modalities,
         links,
         conversation: conversation_from(&body["additionalActionResponses"][0]["output"]).ok(),
@@ -1051,19 +1472,28 @@ pub async fn fetch_self(session: &Session) -> Result<SelfIdentity> {
             .as_str()
             .ok_or_else(|| Error::Signaling("graph /me without id".into()))?
             .to_owned(),
-        display_name: response.body["displayName"].as_str().unwrap_or_default().to_owned(),
+        display_name: response.body["displayName"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
     })
 }
 
 /// The 1:1 chat with the Echo bot; Teams sends it as `groupChat` when adding the bot.
-pub async fn find_echo_bot_thread(session: &Session, self_object_id: &str) -> Result<Option<String>> {
+pub async fn find_echo_bot_thread(
+    session: &Session,
+    self_object_id: &str,
+) -> Result<Option<String>> {
     let bot_id = ECHO_BOT_MRI.trim_start_matches("28:");
     for thread_id in [
         format!("19:{self_object_id}_{bot_id}@unq.gbl.spaces"),
         format!("19:{bot_id}_{self_object_id}@unq.gbl.spaces"),
     ] {
         let url = chatsvc::conversations::thread_url(CHATSVC_REGION, &thread_id);
-        let response = session.batch(&[Request::get(url)], &ic3_scope()).await?.remove(0);
+        let response = session
+            .batch(&[Request::get(url)], &ic3_scope())
+            .await?
+            .remove(0);
         if response.is_success() {
             return Ok(Some(thread_id));
         }
@@ -1092,14 +1522,30 @@ mod tests {
     #[test]
     fn a_raised_hand_reads_state_id_and_rank_from_the_publish_response() {
         let body = json!({"publishStateResponse": {"stateId": "s-9", "typeRank": 3}});
-        assert_eq!(hand_receipt_from(&body), HandReceipt { state_id: Some("s-9".to_owned()), rank: 3 });
-        assert_eq!(hand_receipt_from(&json!({})), HandReceipt { state_id: None, rank: u64::MAX });
+        assert_eq!(
+            hand_receipt_from(&body),
+            HandReceipt {
+                state_id: Some("s-9".to_owned()),
+                rank: 3
+            }
+        );
+        assert_eq!(
+            hand_receipt_from(&json!({})),
+            HandReceipt {
+                state_id: None,
+                rank: u64::MAX
+            }
+        );
     }
 
     #[test]
     fn the_meeting_chat_thread_comes_from_the_group_chat_modality() {
-        let body = json!({"activeModalities": {"groupChat": {"threadId": "19:meeting_abc@thread.v2"}}});
-        assert_eq!(chat_thread_id(&body).as_deref(), Some("19:meeting_abc@thread.v2"));
+        let body =
+            json!({"activeModalities": {"groupChat": {"threadId": "19:meeting_abc@thread.v2"}}});
+        assert_eq!(
+            chat_thread_id(&body).as_deref(),
+            Some("19:meeting_abc@thread.v2")
+        );
         assert_eq!(chat_thread_id(&json!({"activeModalities": {}})), None);
     }
 
@@ -1114,7 +1560,10 @@ mod tests {
     }
 
     fn callbacks() -> CallbackLinks {
-        CallbackLinks::new("https://pub-ent-x-f.trouter.teams.microsoft.com:3443/v4/f/abc/", "call-1")
+        CallbackLinks::new(
+            "https://pub-ent-x-f.trouter.teams.microsoft.com:3443/v4/f/abc/",
+            "call-1",
+        )
     }
 
     fn body_for(target: &InviteTarget) -> Value {
@@ -1140,7 +1589,12 @@ mod tests {
 
     #[test]
     fn only_teams_hosts_get_the_bearer() {
-        assert!(ensure_teams_url("https://api.flightproxy.teams.microsoft.com/api/v2/ep/conv-x/conv/1/leave?i=1").is_ok());
+        assert!(
+            ensure_teams_url(
+                "https://api.flightproxy.teams.microsoft.com/api/v2/ep/conv-x/conv/1/leave?i=1"
+            )
+            .is_ok()
+        );
         assert!(ensure_teams_url(EPCONV_URL).is_ok());
         assert!(ensure_teams_url("https://teams.microsoft.com/trap/tokens").is_ok());
         assert!(ensure_teams_url("https://conv-euno-06-prod-aks.conv.skype.com/conv/1").is_err());
@@ -1151,7 +1605,8 @@ mod tests {
     #[test]
     fn backend_links_go_through_flightproxy() {
         assert_eq!(
-            routed_url("https://cc-euno-06-prod-aks.cc.skype.com/cc/v1/active/1/attach?i=2").unwrap(),
+            routed_url("https://cc-euno-06-prod-aks.cc.skype.com/cc/v1/active/1/attach?i=2")
+                .unwrap(),
             "https://api.flightproxy.teams.microsoft.com/api/v2/ep/cc-euno-06-prod-aks.cc.skype.com/cc/v1/active/1/attach?i=2"
         );
         assert_eq!(
@@ -1168,13 +1623,30 @@ mod tests {
     #[test]
     fn echo_body_matches_the_captured_test_call_shape() {
         let body = body_for(&InviteTarget::Echo);
-        assert_eq!(body["conversationRequest"]["scenario"], "UserInitiatedTestCall");
+        assert_eq!(
+            body["conversationRequest"]["scenario"],
+            "UserInitiatedTestCall"
+        );
         assert_eq!(body["participants"]["to"], json!([]));
         assert_eq!(body["groupChat"], Value::Null);
         assert_eq!(body["callInvitation"]["callModalities"], json!(["Audio"]));
-        assert_eq!(body["callInvitation"]["mediaContent"]["contentType"], SDP_CONTENT_TYPE);
-        assert!(body["callInvitation"]["links"]["acceptance"].as_str().unwrap().ends_with("/call/acceptance/"));
-        assert_eq!(body["conversationRequest"]["links"].as_object().unwrap().len(), 11);
+        assert_eq!(
+            body["callInvitation"]["mediaContent"]["contentType"],
+            SDP_CONTENT_TYPE
+        );
+        assert!(
+            body["callInvitation"]["links"]["acceptance"]
+                .as_str()
+                .unwrap()
+                .ends_with("/call/acceptance/")
+        );
+        assert_eq!(
+            body["conversationRequest"]["links"]
+                .as_object()
+                .unwrap()
+                .len(),
+            11
+        );
     }
 
     #[test]
@@ -1184,7 +1656,10 @@ mod tests {
             thread_id: "19:a_b@unq.gbl.spaces".into(),
         };
         let body = body_for(&target);
-        assert_eq!(body["participants"]["to"], json!([{"id": "8:orgid:b", "displayName": "Bea"}]));
+        assert_eq!(
+            body["participants"]["to"],
+            json!([{"id": "8:orgid:b", "displayName": "Bea"}])
+        );
         assert_eq!(body["groupChat"], Value::Null);
         let media = &body["callInvitation"]["mediaContent"];
         assert_eq!(media["requiredFeatures"], "nonByPass");
@@ -1198,9 +1673,20 @@ mod tests {
     fn a_one_to_one_call_that_may_not_go_direct_keeps_the_chat_thread() {
         let from = from();
         let callbacks = callbacks();
-        let target = InviteTarget::People { callees: vec![callee("8:orgid:b", "Bea")], thread_id: "19:a_b@unq.gbl.spaces".into() };
+        let target = InviteTarget::People {
+            callees: vec![callee("8:orgid:b", "Bea")],
+            thread_id: "19:a_b@unq.gbl.spaces".into(),
+        };
         let modalities = vec!["Audio".to_owned()];
-        let body = epconv_body(&Invitation { from: &from, offer_sdp: "v=0\r\n", media_leg_id: "AB", callbacks: &callbacks, target: &target, modalities: &modalities, direct: false });
+        let body = epconv_body(&Invitation {
+            from: &from,
+            offer_sdp: "v=0\r\n",
+            media_leg_id: "AB",
+            callbacks: &callbacks,
+            target: &target,
+            modalities: &modalities,
+            direct: false,
+        });
         assert_eq!(body["groupChat"]["threadId"], "19:a_b@unq.gbl.spaces");
         assert!(body["callInvitation"]["mediaContent"]["mediaDescriptions"].is_object());
     }
@@ -1208,7 +1694,11 @@ mod tests {
     #[test]
     fn group_body_invites_every_callee_on_the_group_thread() {
         let target = InviteTarget::People {
-            callees: vec![callee("8:orgid:b", "Bea"), callee("8:orgid:c", "Cy"), callee("8:orgid:d", "Di")],
+            callees: vec![
+                callee("8:orgid:b", "Bea"),
+                callee("8:orgid:c", "Cy"),
+                callee("8:orgid:d", "Di"),
+            ],
             thread_id: "19:group@thread.v2".into(),
         };
         let body = body_for(&target);
@@ -1231,12 +1721,22 @@ mod tests {
             meeting_data: Some(json!({"meetingCode": "123"})),
         });
         let body = body_for(&target);
-        assert_eq!(body["groupChat"], json!({"threadId": "19:meeting_x@thread.v2", "messageId": "0"}));
-        assert_eq!(body["meetingInfo"], json!({"tenantId": "tenant", "organizerId": "organizer"}));
+        assert_eq!(
+            body["groupChat"],
+            json!({"threadId": "19:meeting_x@thread.v2", "messageId": "0"})
+        );
+        assert_eq!(
+            body["meetingInfo"],
+            json!({"tenantId": "tenant", "organizerId": "organizer"})
+        );
         assert_eq!(body["meetingData"]["meetingCode"], "123");
         assert_eq!(body["participants"]["to"], json!([]));
         assert!(body["conversationRequest"].get("scenario").is_none());
-        assert!(body["endpointState"]["endpointProperties"].get("preheatProperties").is_none());
+        assert!(
+            body["endpointState"]["endpointProperties"]
+                .get("preheatProperties")
+                .is_none()
+        );
     }
 
     #[test]
@@ -1250,7 +1750,13 @@ mod tests {
         let body = subscribe_body(&from(), &callbacks(), &meeting);
         assert!(body.get("callInvitation").is_none());
         assert!(body["participants"].get("to").is_none());
-        assert_eq!(body["conversationRequest"]["links"].as_object().unwrap().len(), 6);
+        assert_eq!(
+            body["conversationRequest"]["links"]
+                .as_object()
+                .unwrap()
+                .len(),
+            6
+        );
         assert_eq!(body["groupChat"]["messageId"], "0");
         assert_eq!(body["meetingInfo"]["organizerId"], "organizer");
     }
@@ -1261,10 +1767,19 @@ mod tests {
         assert_eq!(hangup["callTransactionEnd"]["code"], 0);
         let cancel = leave_body(&from(), LeaveReason::Cancel);
         assert_eq!(cancel["callTransactionEnd"]["code"], 487);
-        assert_eq!(cancel["callTransactionEnd"]["phrase"], "CallEndReasonLocalUserInitiated");
-        assert_eq!(cancel["conversationTransactionEnd"]["phrase"], "ConversationEndNoModalityConnected");
+        assert_eq!(
+            cancel["callTransactionEnd"]["phrase"],
+            "CallEndReasonLocalUserInitiated"
+        );
+        assert_eq!(
+            cancel["conversationTransactionEnd"]["phrase"],
+            "ConversationEndNoModalityConnected"
+        );
         let end = end_for_all_body(&from());
-        assert_eq!(end["conversationTransactionEnd"]["phrase"], "ConversationEndForAllInitiated");
+        assert_eq!(
+            end["conversationTransactionEnd"]["phrase"],
+            "ConversationEndForAllInitiated"
+        );
     }
 
     #[test]
@@ -1285,12 +1800,23 @@ mod tests {
             needs_media: true,
         });
         assert_eq!(body["attach"]["requireMediaContent"], true);
-        assert!(body["attach"]["links"]["end"].as_str().unwrap().ends_with("/call/end/"));
+        assert!(
+            body["attach"]["links"]["end"]
+                .as_str()
+                .unwrap()
+                .ends_with("/call/end/")
+        );
         let action = &body["additionalActions"][0];
         assert_eq!(action["name"], "join");
         assert_eq!(action["url"], "https://conv/controller");
         assert_eq!(action["waitForResponse"], true);
-        assert_eq!(action["input"]["conversationRequest"]["links"].as_object().unwrap().len(), 6);
+        assert_eq!(
+            action["input"]["conversationRequest"]["links"]
+                .as_object()
+                .unwrap()
+                .len(),
+            6
+        );
         let without = attach_body(&AttachRequest {
             from: &from,
             callbacks: &callbacks,
@@ -1329,13 +1855,27 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(subscribed.roster, None);
-        let answer: Value = serde_json::from_str(include_str!("../tests/fixtures/meeting_join_answer.json")).unwrap();
+        let answer: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/meeting_join_answer.json"))
+                .unwrap();
         let joined = joined_conversation(&subscribed, &answer);
         assert_eq!(joined.controller, "https://conv.example/conv/joined");
-        assert_eq!(joined.link("leave").unwrap(), "https://conv.example/conv/joined/leave");
+        assert_eq!(
+            joined.link("leave").unwrap(),
+            "https://conv.example/conv/joined/leave"
+        );
         assert_eq!(joined.link("mute").unwrap(), "https://conv/subscribed/mute");
-        assert_eq!(joined.roster.unwrap()["participants"].as_object().unwrap().len(), 4);
-        assert_eq!(joined_conversation(&subscribed, &json!({})).controller, "https://conv/subscribed");
+        assert_eq!(
+            joined.roster.unwrap()["participants"]
+                .as_object()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert_eq!(
+            joined_conversation(&subscribed, &json!({})).controller,
+            "https://conv/subscribed"
+        );
     }
 
     #[test]
@@ -1355,14 +1895,25 @@ mod tests {
         assert_eq!(accepted["acceptedCallModalities"], json!(["Audio"]));
         assert_eq!(accepted["mediaContent"]["blob"], "v=0\r\n");
         assert_eq!(accepted["links"].as_object().unwrap().len(), 7);
-        assert!(accepted["links"]["mediaRenegotiation"].as_str().unwrap().ends_with("/call/mediaRenegotiation/"));
+        assert!(
+            accepted["links"]["mediaRenegotiation"]
+                .as_str()
+                .unwrap()
+                .ends_with("/call/mediaRenegotiation/")
+        );
         assert_eq!(accepted["callKeepAliveInterval"], Value::Null);
     }
 
     #[test]
     fn the_one_to_one_chat_sorts_both_ids() {
-        assert_eq!(one_to_one_thread("f74e", "8:orgid:a1b2").as_deref(), Some("19:a1b2_f74e@unq.gbl.spaces"));
-        assert_eq!(one_to_one_thread("a1b2", "8:orgid:f74e").as_deref(), Some("19:a1b2_f74e@unq.gbl.spaces"));
+        assert_eq!(
+            one_to_one_thread("f74e", "8:orgid:a1b2").as_deref(),
+            Some("19:a1b2_f74e@unq.gbl.spaces")
+        );
+        assert_eq!(
+            one_to_one_thread("a1b2", "8:orgid:f74e").as_deref(),
+            Some("19:a1b2_f74e@unq.gbl.spaces")
+        );
         assert_eq!(one_to_one_thread("a1b2", "28:bot"), None);
     }
 
@@ -1371,49 +1922,120 @@ mod tests {
         let body = negotiation_failure_body(&from(), "call-1", NegotiationFailure::InProgress);
         assert_eq!(body["mediaNegotiationFailure"]["code"], 491);
         assert_eq!(body["mediaNegotiationFailure"]["subCode"], 3118);
-        assert_eq!(body["mediaNegotiationFailure"]["phrase"], "NegotiationIsInProgress");
+        assert_eq!(
+            body["mediaNegotiationFailure"]["phrase"],
+            "NegotiationIsInProgress"
+        );
         assert_eq!(body["debugContent"]["callId"], "call-1");
-        assert_eq!(negotiation_failure_body(&from(), "c", NegotiationFailure::AnswerError)["mediaNegotiationFailure"]["code"], 488);
+        assert_eq!(
+            negotiation_failure_body(&from(), "c", NegotiationFailure::AnswerError)["mediaNegotiationFailure"]
+                ["code"],
+            488
+        );
     }
 
     #[test]
     fn renegotiation_messages_name_their_reply_links() {
         let from = from();
         let callbacks = callbacks();
-        let offer = renegotiation_body(&from, &callbacks, "v=0\r\n", "AB", &["Audio".to_owned()], true, false);
+        let offer = renegotiation_body(
+            &from,
+            &callbacks,
+            "v=0\r\n",
+            "AB",
+            &["Audio".to_owned()],
+            true,
+            false,
+        );
         let negotiation = &offer["mediaNegotiation"];
         assert_eq!(negotiation["mediaContent"]["newOffer"], true);
         assert_eq!(negotiation["callModalities"], json!(["Audio"]));
-        let same_peer = renegotiation_body(&from, &callbacks, "v=0\r\n", "AB", &["Audio".to_owned(), "Video".to_owned()], false, true);
-        assert_eq!(same_peer["mediaNegotiation"]["mediaContent"]["newOffer"], false);
-        assert_eq!(same_peer["mediaNegotiation"]["mediaContent"]["requiredFeatures"], "nonByPass");
-        assert!(same_peer["mediaNegotiation"]["mediaContent"].get("mediaDescriptions").is_none());
+        let same_peer = renegotiation_body(
+            &from,
+            &callbacks,
+            "v=0\r\n",
+            "AB",
+            &["Audio".to_owned(), "Video".to_owned()],
+            false,
+            true,
+        );
+        assert_eq!(
+            same_peer["mediaNegotiation"]["mediaContent"]["newOffer"],
+            false
+        );
+        assert_eq!(
+            same_peer["mediaNegotiation"]["mediaContent"]["requiredFeatures"],
+            "nonByPass"
+        );
+        assert!(
+            same_peer["mediaNegotiation"]["mediaContent"]
+                .get("mediaDescriptions")
+                .is_none()
+        );
         assert!(negotiation["mediaContent"]["mediaDescriptions"].is_object());
-        assert_eq!(same_peer["mediaNegotiation"]["callModalities"], json!(["Audio", "Video"]));
-        assert!(negotiation["links"]["mediaAnswer"].as_str().unwrap().ends_with("/call/mediaAnswer/"));
-        assert!(negotiation["links"]["rejection"].as_str().unwrap().ends_with("/call/rejection/"));
+        assert_eq!(
+            same_peer["mediaNegotiation"]["callModalities"],
+            json!(["Audio", "Video"])
+        );
+        assert!(
+            negotiation["links"]["mediaAnswer"]
+                .as_str()
+                .unwrap()
+                .ends_with("/call/mediaAnswer/")
+        );
+        assert!(
+            negotiation["links"]["rejection"]
+                .as_str()
+                .unwrap()
+                .ends_with("/call/rejection/")
+        );
         let answer = escalation_answer_body(&from, &callbacks, "v=0\r\n", "AB");
-        assert!(answer["mediaAnswer"]["links"]["mediaAcknowledgement"]
-            .as_str()
-            .unwrap()
-            .ends_with("/call/mediaAcknowledgement/"));
+        assert!(
+            answer["mediaAnswer"]["links"]["mediaAcknowledgement"]
+                .as_str()
+                .unwrap()
+                .ends_with("/call/mediaAcknowledgement/")
+        );
     }
 
     #[test]
     fn a_video_call_invites_with_audio_and_video() {
         let from = from();
         let callbacks = callbacks();
-        let target = InviteTarget::People { callees: vec![callee("8:orgid:b", "Bea")], thread_id: "19:a_b@unq.gbl.spaces".into() };
+        let target = InviteTarget::People {
+            callees: vec![callee("8:orgid:b", "Bea")],
+            thread_id: "19:a_b@unq.gbl.spaces".into(),
+        };
         let modalities = vec!["Audio".to_owned(), "Video".to_owned()];
-        let body = epconv_body(&Invitation { from: &from, offer_sdp: "v=0\r\n", media_leg_id: "AB", callbacks: &callbacks, target: &target, modalities: &modalities, direct: true });
-        assert_eq!(body["callInvitation"]["callModalities"], json!(["Audio", "Video"]));
+        let body = epconv_body(&Invitation {
+            from: &from,
+            offer_sdp: "v=0\r\n",
+            media_leg_id: "AB",
+            callbacks: &callbacks,
+            target: &target,
+            modalities: &modalities,
+            direct: true,
+        });
+        assert_eq!(
+            body["callInvitation"]["callModalities"],
+            json!(["Audio", "Video"])
+        );
     }
 
     #[test]
     fn people_calls_dial_out_and_echo_does_not() {
-        let people = InviteTarget::People { callees: vec![callee("8:orgid:b", "Bea")], thread_id: "19:a_b@unq.gbl.spaces".into() };
-        assert_eq!(body_for(&people)["conversationRequest"]["suppressDialout"], false);
-        assert_eq!(body_for(&InviteTarget::Echo)["conversationRequest"]["suppressDialout"], true);
+        let people = InviteTarget::People {
+            callees: vec![callee("8:orgid:b", "Bea")],
+            thread_id: "19:a_b@unq.gbl.spaces".into(),
+        };
+        assert_eq!(
+            body_for(&people)["conversationRequest"]["suppressDialout"],
+            false
+        );
+        assert_eq!(
+            body_for(&InviteTarget::Echo)["conversationRequest"]["suppressDialout"],
+            true
+        );
     }
 
     #[test]

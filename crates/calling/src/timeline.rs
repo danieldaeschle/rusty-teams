@@ -39,7 +39,10 @@ impl Timeline {
             detail: detail.into(),
         };
         if self.echo {
-            println!("{:>6} ms  {:<34} {}", entry.elapsed_ms, entry.label, entry.detail);
+            println!(
+                "{:>6} ms  {:<34} {}",
+                entry.elapsed_ms, entry.label, entry.detail
+            );
         }
         self.entries.lock().expect("timeline lock").push(entry);
     }

@@ -58,7 +58,9 @@ impl ConversationView {
                         .hover(|button| button.bg(theme::row_hover()))
                         .child(icon(IconName::Close, 14., theme::text_muted()))
                         .on_click(move |_, _, cx| {
-                            app.update(cx, |state, cx| state.dismiss_absence_notice(&conversation_id, cx));
+                            app.update(cx, |state, cx| {
+                                state.dismiss_absence_notice(&conversation_id, cx)
+                            });
                         }),
                 )
                 .into_any_element(),

@@ -77,7 +77,11 @@ mod tests {
     #[test]
     fn entries_keep_the_order_they_first_arrived_in() {
         let transcript = sample();
-        let ids: Vec<&str> = transcript.filtered("").iter().map(|entry| entry.id.as_str()).collect();
+        let ids: Vec<&str> = transcript
+            .filtered("")
+            .iter()
+            .map(|entry| entry.id.as_str())
+            .collect();
         assert_eq!(ids, ["a", "b", "c"]);
         assert_eq!(transcript.filtered("").len(), 3);
     }

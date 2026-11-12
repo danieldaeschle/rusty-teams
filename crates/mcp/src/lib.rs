@@ -1,7 +1,7 @@
 mod auth;
 mod hub;
-mod meetings;
 pub mod install;
+mod meetings;
 mod policy;
 mod server;
 mod settings;
@@ -9,8 +9,9 @@ mod source;
 mod tools;
 
 pub use hub::{
-    AgentHub, CaptionLine, Event, EventKind, FreeWriting, FreeWritingAsk, MeetingOutcome, MeetingProposal, NewProposal, NewReactionProposal, Outcome, Proposal,
-    ProposalImage, ProposalMention, ReactionOutcome, ReactionProposal, UiEvent,
+    AgentHub, CaptionLine, Event, EventKind, FreeWriting, FreeWritingAsk, MeetingOutcome,
+    MeetingProposal, NewProposal, NewReactionProposal, Outcome, Proposal, ProposalImage,
+    ProposalMention, ReactionOutcome, ReactionProposal, UiEvent,
 };
 pub use policy::{Access, AgentPolicy, ConversationKind, DEFAULT_PORT};
 pub use server::{ServerError, ServerHandle, start};
@@ -18,8 +19,9 @@ pub use settings::{
     load as load_policy, load_or_create_token, regenerate_token, save as save_policy,
 };
 pub use source::{
-    BusySlot, CreatedMeeting, EncodedImage, FileInfo, MeetingDraft, PersonAvailability, ForwardedInfo, ImageInfo, ImageKind, LinkInfo, Meeting, MentionInfo, MessageExtras,
-    QuoteInfo, ReactionInfo, SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn,
+    BusySlot, CreatedMeeting, EncodedImage, FileInfo, ForwardedInfo, ImageInfo, ImageKind,
+    LinkInfo, Meeting, MeetingDraft, MentionInfo, MessageExtras, PersonAvailability, QuoteInfo,
+    ReactionInfo, SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

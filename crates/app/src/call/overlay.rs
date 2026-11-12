@@ -18,10 +18,10 @@ use crate::app_state::AppState;
 use crate::notify::platform::{self, NativeHandle, ScreenRect, ShareGeometry, WorkArea};
 use crate::views::call_mini_window::MiniWindowView;
 use crate::views::call_pop_out::{POP_OUT_SIZE, POP_OUT_TITLE, SharePopOutView};
+use crate::views::call_share_gallery::ShareGalleryView;
 use crate::views::call_window::{
     CALL_WINDOW_MIN_SIZE, CALL_WINDOW_SIZE, CallWindowView, call_window_title,
 };
-use crate::views::call_share_gallery::ShareGalleryView;
 use crate::views::share_bar::{ShareBarView, ShareBorderView};
 
 const TICK: Duration = Duration::from_millis(100);
@@ -284,7 +284,9 @@ impl CallWindows {
             platform::restore_and_raise(native);
         }
         if let Some(stage) = self.stage {
-            stage.update(cx, |_, window, _| window.activate_window()).ok();
+            stage
+                .update(cx, |_, window, _| window.activate_window())
+                .ok();
         }
     }
 
@@ -340,7 +342,8 @@ impl CallWindows {
             size(px(CALL_WINDOW_SIZE.0), px(CALL_WINDOW_SIZE.1)),
             cx,
         )));
-        options.window_min_size = Some(size(px(CALL_WINDOW_MIN_SIZE.0), px(CALL_WINDOW_MIN_SIZE.1)));
+        options.window_min_size =
+            Some(size(px(CALL_WINDOW_MIN_SIZE.0), px(CALL_WINDOW_MIN_SIZE.1)));
         if let Some(titlebar) = options.titlebar.as_mut() {
             titlebar.title = Some(call_window_title(self.app.read(cx)).into());
         }
@@ -375,7 +378,8 @@ impl CallWindows {
             Some(seen) if seen == viewing => {
                 if self.stage_native.is_some() && viewing == self.minimized {
                     self.seen_viewing = Some(!viewing);
-                    self.app.update(cx, |state, cx| state.show_call(!viewing, cx));
+                    self.app
+                        .update(cx, |state, cx| state.show_call(!viewing, cx));
                 }
             }
             _ => {
@@ -383,7 +387,9 @@ impl CallWindows {
                 if viewing && self.minimized {
                     self.raise_stage(cx);
                 } else if !viewing && !self.minimized {
-                    stage.update(cx, |_, window, _| window.minimize_window()).ok();
+                    stage
+                        .update(cx, |_, window, _| window.minimize_window())
+                        .ok();
                 }
             }
         }
@@ -545,7 +551,9 @@ impl CallWindows {
         }
         self.minimized_for_share = true;
         if let Some(stage) = self.stage {
-            stage.update(cx, |_, window, _| window.minimize_window()).ok();
+            stage
+                .update(cx, |_, window, _| window.minimize_window())
+                .ok();
         }
     }
 

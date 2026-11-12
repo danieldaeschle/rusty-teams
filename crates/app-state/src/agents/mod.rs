@@ -11,14 +11,15 @@ pub mod store;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use agents::{AgentAction, Environment};
 pub use app_base::agents::{lanes, settings_problems};
 pub use app_ui_kit::{settings_controls, spinner};
-use agents::{AgentAction, Environment};
 use directories::ProjectDirs;
 use gpui_kit::*;
 
 pub use runs::{
-    AgentRun, AgentRuns, AgentRunsEvent, AgentRunsHandle, RunState, StartOptions, StartRequest, needs_dialog,
+    AgentRun, AgentRuns, AgentRunsEvent, AgentRunsHandle, RunState, StartOptions, StartRequest,
+    needs_dialog,
 };
 
 use crate::app_state::{AppHandle, AppState};

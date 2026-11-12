@@ -42,9 +42,16 @@ impl Graph {
         Ok(members.len())
     }
 
-    pub async fn channel_member_list(&self, team_id: &str, channel_id: &str) -> Result<Vec<Member>> {
-        self.get_all(&urls::channel_member_list(team_id, channel_id), Scope::graph(MEMBERS_SCOPE))
-            .await
+    pub async fn channel_member_list(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+    ) -> Result<Vec<Member>> {
+        self.get_all(
+            &urls::channel_member_list(team_id, channel_id),
+            Scope::graph(MEMBERS_SCOPE),
+        )
+        .await
     }
 }
 

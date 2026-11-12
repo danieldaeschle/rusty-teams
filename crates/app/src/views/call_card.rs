@@ -44,11 +44,9 @@ fn icon_circle(call: &CallCard) -> Div {
         CallIcon::Missed => (theme::red().opacity(0.2), "call_missed", theme::red_soft()),
         CallIcon::Call => (theme::popup(), "call", theme::text()),
         CallIcon::Video => (theme::popup(), "videocam", theme::text()),
-        CallIcon::Record | CallIcon::Saved => (
-            theme::popup(),
-            "radio_button_checked",
-            theme::accent_text(),
-        ),
+        CallIcon::Record | CallIcon::Saved => {
+            (theme::popup(), "radio_button_checked", theme::accent_text())
+        }
         CallIcon::RecordStop => (theme::popup(), "stop_circle", theme::text()),
         CallIcon::Roster => (theme::popup(), "group", theme::text()),
     };

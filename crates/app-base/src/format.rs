@@ -27,11 +27,17 @@ pub fn set_date_locale(locale: Option<&str>) {
 
 /// Teams desktop formats dates and times with the OS regional format, not the account language.
 pub fn os_regional_locale() -> Option<String> {
-    sys_locale::get_locale().as_deref().and_then(normalize_locale)
+    sys_locale::get_locale()
+        .as_deref()
+        .and_then(normalize_locale)
 }
 
 fn normalize_locale(raw: &str) -> Option<String> {
-    let tag = raw.split(['.', '@']).next().unwrap_or_default().replace('_', "-");
+    let tag = raw
+        .split(['.', '@'])
+        .next()
+        .unwrap_or_default()
+        .replace('_', "-");
     (!tag.is_empty() && tag != "C" && tag != "POSIX").then_some(tag)
 }
 
@@ -49,7 +55,11 @@ impl DateStyle {
     }
 
     fn day_number(&self) -> &'static str {
-        if self.day_month.starts_with("%d") { "%d" } else { "%-d" }
+        if self.day_month.starts_with("%d") {
+            "%d"
+        } else {
+            "%-d"
+        }
     }
 }
 
@@ -98,7 +108,9 @@ pub fn date_style(locale: &str) -> DateStyle {
         _ => "%-I:%M %p",
     };
     let (day_month, day_month_year) = match language {
-        _ if locale == "en-us" || locale == "en-ph" || locale == "en-ca" => ("%-m/%-d", "%-m/%-d/%Y"),
+        _ if locale == "en-us" || locale == "en-ph" || locale == "en-ca" => {
+            ("%-m/%-d", "%-m/%-d/%Y")
+        }
         "ja" | "zh" => ("%-m/%-d", "%Y/%-m/%-d"),
         "nl" => ("%-d-%-m", "%-d-%-m-%Y"),
         "sv" => ("%-d/%-m", "%Y-%m-%d"),
@@ -203,7 +215,9 @@ pub fn list_time_label_in(
     let day = local.date_naive();
     let days_ago = (today - day).num_days();
     if days_ago <= 0 {
-        local.format(style.map_or("%H:%M", |style| style.clock)).to_string()
+        local
+            .format(style.map_or("%H:%M", |style| style.clock))
+            .to_string()
     } else if days_ago <= WEEKDAY_WINDOW_DAYS {
         weekday_label(local.weekday()).to_owned()
     } else {
@@ -294,14 +308,26 @@ mod tests {
     fn calendar_range_follows_the_account_locale() {
         let date = |month, day| NaiveDate::from_ymd_opt(2026, month, day).unwrap();
         set_date_locale(Some("en-GB"));
-        assert_eq!(calendar_range_label(date(11, 9), date(11, 15)), "09-15 November, 2026");
-        assert_eq!(calendar_range_label(date(11, 30), date(12, 4)), "30 November - 04 December, 2026");
+        assert_eq!(
+            calendar_range_label(date(11, 9), date(11, 15)),
+            "09-15 November, 2026"
+        );
+        assert_eq!(
+            calendar_range_label(date(11, 30), date(12, 4)),
+            "30 November - 04 December, 2026"
+        );
         assert_eq!(calendar_day_number(date(11, 9)), "09");
         set_date_locale(Some("en-US"));
-        assert_eq!(calendar_range_label(date(11, 9), date(11, 13)), "November 9-13, 2026");
+        assert_eq!(
+            calendar_range_label(date(11, 9), date(11, 13)),
+            "November 9-13, 2026"
+        );
         assert_eq!(calendar_day_number(date(11, 9)), "9");
         set_date_locale(Some("de-DE"));
-        assert_eq!(calendar_range_label(date(11, 9), date(11, 9)), "9 November, 2026");
+        assert_eq!(
+            calendar_range_label(date(11, 9), date(11, 9)),
+            "9 November, 2026"
+        );
         set_date_locale(None);
     }
 
@@ -456,9 +482,8 @@ mod tests {
     #[test]
     fn post_time_follows_the_display_language_like_teams() {
         let september = Utc.with_ymd_and_hms(2026, 9, 24, 20, 54, 0).unwrap();
-        let label = |locale: &str| {
-            post_time_label_in(Some(date_style(locale)), september, today(), zero())
-        };
+        let label =
+            |locale: &str| post_time_label_in(Some(date_style(locale)), september, today(), zero());
         assert_eq!(label("en-GB"), "24/09 20:54");
         assert_eq!(label("de-DE"), "24.9. 20:54");
         assert_eq!(label("en-US"), "9/24 8:54 PM");
@@ -473,8 +498,14 @@ mod tests {
     fn list_time_follows_the_display_language_like_teams() {
         let september = Utc.with_ymd_and_hms(2026, 9, 24, 20, 54, 0).unwrap();
         let style = Some(date_style("en-GB"));
-        assert_eq!(list_time_label_in(style, september, today(), zero()), "24/09");
-        assert_eq!(list_time_label_in(style, utc(7, 13), today(), zero()), "13:05");
+        assert_eq!(
+            list_time_label_in(style, september, today(), zero()),
+            "24/09"
+        );
+        assert_eq!(
+            list_time_label_in(style, utc(7, 13), today(), zero()),
+            "13:05"
+        );
     }
 
     #[test]

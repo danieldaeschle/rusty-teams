@@ -37,7 +37,9 @@ impl<R: Remote> SyncEngine<R> {
             .store
             .team_thread_id(team_id)?
             .ok_or(Error::Unsupported("a team without its General channel"))?;
-        self.remote.channel_members(team_id, &general_channel_id).await
+        self.remote
+            .channel_members(team_id, &general_channel_id)
+            .await
     }
 
     pub async fn library_children(&self, folder: &DriveFolder) -> Result<Vec<DriveEntry>> {

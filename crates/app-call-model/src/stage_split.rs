@@ -1,9 +1,7 @@
 use calling::{TileDetail, VideoWant};
 
 use crate::model::{ActiveCall, CallModel, Focus, Tile};
-use crate::stage_layout::{
-    FILMSTRIP_MAX, Filmstrip, filmstrip, gallery_page_range, gallery_pages,
-};
+use crate::stage_layout::{FILMSTRIP_MAX, Filmstrip, filmstrip, gallery_page_range, gallery_pages};
 use crate::view_settings::CallLayout;
 
 pub const TILE_GAP: f32 = 20.;
@@ -67,7 +65,12 @@ pub fn speaker_split(model: &CallModel, stage: (f32, f32)) -> SpeakerSplit<'_> {
     if plan.overflow.shown < FILMSTRIP_MAX.min(others.len()) {
         others.sort_by_key(|tile| !model.is_recent_speaker(&tile.mri));
     }
-    SpeakerSplit { focus, others, own_cells, plan }
+    SpeakerSplit {
+        focus,
+        others,
+        own_cells,
+        plan,
+    }
 }
 
 pub struct StripSplit<'a> {
@@ -81,14 +84,23 @@ pub fn strip_split(model: &CallModel, stage: (f32, f32)) -> StripSplit<'_> {
         .into_iter()
         .filter(|tile| !model.hidden_for_no_video(tile))
         .collect();
-    let plan = filmstrip(others.len(), model.own_cells(), stage.0 - 2. * GRID_PADDING, STRIP_GAP, FILMSTRIP_TILE_MAX);
+    let plan = filmstrip(
+        others.len(),
+        model.own_cells(),
+        stage.0 - 2. * GRID_PADDING,
+        STRIP_GAP,
+        FILMSTRIP_TILE_MAX,
+    );
     StripSplit { others, plan }
 }
 
 const LARGE_GALLERY_TILES: usize = 4;
 
 fn want(tile: &Tile, detail: TileDetail) -> VideoWant {
-    VideoWant { mri: tile.mri.clone(), detail }
+    VideoWant {
+        mri: tile.mri.clone(),
+        detail,
+    }
 }
 
 pub fn video_wants(model: &CallModel, stage: (f32, f32)) -> Vec<VideoWant> {
@@ -104,16 +116,28 @@ pub fn video_wants(model: &CallModel, stage: (f32, f32)) -> Vec<VideoWant> {
     }
     if model.effective_layout() == CallLayout::Speaker {
         let split = speaker_split(model, stage);
-        let stage_person = split.focus.iter().filter(|focus| !focus.own).map(|focus| VideoWant {
-            mri: focus.mri.clone(),
-            detail: TileDetail::Stage,
-        });
+        let stage_person = split
+            .focus
+            .iter()
+            .filter(|focus| !focus.own)
+            .map(|focus| VideoWant {
+                mri: focus.mri.clone(),
+                detail: TileDetail::Stage,
+            });
         return stage_person
-            .chain(split.others[..split.plan.overflow.shown].iter().map(|tile| want(tile, TileDetail::Small)))
+            .chain(
+                split.others[..split.plan.overflow.shown]
+                    .iter()
+                    .map(|tile| want(tile, TileDetail::Small)),
+            )
             .collect();
     }
     let page = gallery_page(model);
-    let detail = if page.tiles.len() <= LARGE_GALLERY_TILES { TileDetail::Stage } else { TileDetail::Small };
+    let detail = if page.tiles.len() <= LARGE_GALLERY_TILES {
+        TileDetail::Stage
+    } else {
+        TileDetail::Small
+    };
     page.tiles.iter().map(|tile| want(tile, detail)).collect()
 }
 
@@ -148,7 +172,9 @@ mod tests {
 
     fn meeting(people: Vec<RosterEntry>) -> CallModel {
         let mut model = CallModel::meeting("Standup", false);
-        model.apply(CallUpdate::OwnIdentity { mri: "8:orgid:me".into() });
+        model.apply(CallUpdate::OwnIdentity {
+            mri: "8:orgid:me".into(),
+        });
         model.apply(CallUpdate::Roster(people));
         model
     }
@@ -165,7 +191,11 @@ mod tests {
     fn a_small_gallery_asks_for_large_pictures() {
         let wants = video_wants(&crowd(3), STAGE);
         assert_eq!(wants.len(), 3);
-        assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Stage));
+        assert!(
+            details(&wants)
+                .iter()
+                .all(|detail| *detail == TileDetail::Stage)
+        );
     }
 
     #[test]
@@ -173,9 +203,20 @@ mod tests {
         let model = crowd(14);
         let wants = video_wants(&model, STAGE);
         assert_eq!(wants.len(), first_page_size(14, 1));
-        assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Small));
-        let hidden: Vec<&str> = model.layout_tiles()[wants.len()..].iter().map(|tile| tile.mri.as_str()).collect();
-        assert!(wants.iter().all(|want| !hidden.contains(&want.mri.as_str())));
+        assert!(
+            details(&wants)
+                .iter()
+                .all(|detail| *detail == TileDetail::Small)
+        );
+        let hidden: Vec<&str> = model.layout_tiles()[wants.len()..]
+            .iter()
+            .map(|tile| tile.mri.as_str())
+            .collect();
+        assert!(
+            wants
+                .iter()
+                .all(|want| !hidden.contains(&want.mri.as_str()))
+        );
     }
 
     #[test]
@@ -183,7 +224,13 @@ mod tests {
         let mut model = meeting(vec![person(0, true), person(1, false), person(2, false)]);
         model.view.hide_no_video = true;
         let wants = video_wants(&model, STAGE);
-        assert_eq!(wants.iter().map(|want| want.mri.as_str()).collect::<Vec<_>>(), vec!["8:orgid:p0"]);
+        assert_eq!(
+            wants
+                .iter()
+                .map(|want| want.mri.as_str())
+                .collect::<Vec<_>>(),
+            vec!["8:orgid:p0"]
+        );
     }
 
     #[test]
@@ -193,9 +240,19 @@ mod tests {
         model.refresh_layout(Instant::now());
         let focus = model.speaker_focus().expect("a stage person").mri;
         let wants = video_wants(&model, STAGE);
-        assert_eq!(wants[0], VideoWant { mri: focus.clone(), detail: TileDetail::Stage });
+        assert_eq!(
+            wants[0],
+            VideoWant {
+                mri: focus.clone(),
+                detail: TileDetail::Stage
+            }
+        );
         assert_eq!(wants.len(), 5);
-        assert!(wants[1..].iter().all(|want| want.detail == TileDetail::Small && want.mri != focus));
+        assert!(
+            wants[1..]
+                .iter()
+                .all(|want| want.detail == TileDetail::Small && want.mri != focus)
+        );
     }
 
     #[test]
@@ -204,7 +261,15 @@ mod tests {
         model.view.choose(CallLayout::Speaker);
         model.refresh_layout(Instant::now());
         let wants = video_wants(&model, (500., 800.));
-        let fitting = filmstrip(11, 1, 500. - 2. * GRID_PADDING, TILE_GAP, FILMSTRIP_TILE_MAX).overflow.shown;
+        let fitting = filmstrip(
+            11,
+            1,
+            500. - 2. * GRID_PADDING,
+            TILE_GAP,
+            FILMSTRIP_TILE_MAX,
+        )
+        .overflow
+        .shown;
         assert!(fitting < 11);
         assert_eq!(wants.len(), 1 + fitting);
     }
@@ -215,7 +280,11 @@ mod tests {
         model.apply(CallUpdate::ScreenShare(Some("8:orgid:p1".into())));
         let wants = video_wants(&model, STAGE);
         assert_eq!(wants.len(), 3);
-        assert!(details(&wants).iter().all(|detail| *detail == TileDetail::Small));
+        assert!(
+            details(&wants)
+                .iter()
+                .all(|detail| *detail == TileDetail::Small)
+        );
         model.view.choose(CallLayout::Content);
         assert!(video_wants(&model, STAGE).is_empty());
     }
@@ -224,7 +293,15 @@ mod tests {
     fn the_share_strip_on_top_wants_video_for_every_shown_tile_and_none_behind_the_plus_tile() {
         let mut model = crowd(9);
         model.apply(CallUpdate::ScreenShare(Some("8:orgid:p1".into())));
-        let fitting = filmstrip(9, 1, 1400. - 2. * GRID_PADDING, STRIP_GAP, FILMSTRIP_TILE_MAX).overflow.shown;
+        let fitting = filmstrip(
+            9,
+            1,
+            1400. - 2. * GRID_PADDING,
+            STRIP_GAP,
+            FILMSTRIP_TILE_MAX,
+        )
+        .overflow
+        .shown;
         assert!(fitting < 9);
         assert_eq!(video_wants(&model, (1400., 800.)).len(), fitting);
     }

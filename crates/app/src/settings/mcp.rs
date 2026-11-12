@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     ActiveTheme as _, h_flex,
     input::{Input, InputEvent, InputState},
@@ -890,7 +890,11 @@ impl McpView {
                 } else {
                     "Off: agents send and react right away, as you"
                 },
-                if policy.review { theme::text_muted() } else { theme::amber() },
+                if policy.review {
+                    theme::text_muted()
+                } else {
+                    theme::amber()
+                },
                 policy.review,
                 |policy| policy.review = !policy.review,
             ),
@@ -910,7 +914,11 @@ impl McpView {
                 } else {
                     "Without review: agents create meetings and invite people right away"
                 },
-                if policy.review { theme::text_muted() } else { theme::amber() },
+                if policy.review {
+                    theme::text_muted()
+                } else {
+                    theme::amber()
+                },
                 policy.meetings,
                 |policy| policy.meetings = !policy.meetings,
             ),

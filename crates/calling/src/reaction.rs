@@ -14,7 +14,13 @@ pub enum Reaction {
 }
 
 impl Reaction {
-    pub const ALL: [Reaction; 5] = [Reaction::Like, Reaction::Heart, Reaction::Applause, Reaction::Laugh, Reaction::Surprised];
+    pub const ALL: [Reaction; 5] = [
+        Reaction::Like,
+        Reaction::Heart,
+        Reaction::Applause,
+        Reaction::Laugh,
+        Reaction::Surprised,
+    ];
 
     pub fn name(&self) -> &str {
         match self {
@@ -51,7 +57,12 @@ pub struct ReactionEvent {
     pub count: u32,
 }
 
-pub fn reaction_message(from: Value, reaction: Reaction, operation_id: &str, value_id: &str) -> Value {
+pub fn reaction_message(
+    from: Value,
+    reaction: Reaction,
+    operation_id: &str,
+    value_id: &str,
+) -> Value {
     let skin_tone = reaction.takes_skin_tone().then_some(DEFAULT_SKIN_TONE);
     json!({
         "from": from,
@@ -79,14 +90,23 @@ pub fn parse_reactions(body: &Value) -> Vec<ReactionEvent> {
         .into_iter()
         .filter(|item| item["type"].as_str() == Some(REACTION_TYPE))
         .flat_map(|item| {
-            let mri = item["from"]["id"].as_str().or_else(|| body["from"]["id"].as_str()).unwrap_or_default();
-            item["payload"]["values"].as_array().into_iter().flatten().filter_map(move |value| {
-                Some(ReactionEvent {
-                    mri: mri.to_owned(),
-                    reaction: Reaction::from_name(value["name"].as_str()?)?,
-                    count: value["count"].as_u64().map_or(1, |count| u32::try_from(count).unwrap_or(u32::MAX)),
+            let mri = item["from"]["id"]
+                .as_str()
+                .or_else(|| body["from"]["id"].as_str())
+                .unwrap_or_default();
+            item["payload"]["values"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(move |value| {
+                    Some(ReactionEvent {
+                        mri: mri.to_owned(),
+                        reaction: Reaction::from_name(value["name"].as_str()?)?,
+                        count: value["count"]
+                            .as_u64()
+                            .map_or(1, |count| u32::try_from(count).unwrap_or(u32::MAX)),
+                    })
                 })
-            })
         })
         .filter(|event| !event.mri.is_empty())
         .collect()
@@ -107,9 +127,14 @@ mod tests {
         assert_eq!(item["operationId"], "op-1");
         assert_eq!(item["payload"]["values"][0]["name"], "like");
         assert_eq!(item["payload"]["values"][0]["count"], 1);
-        assert_eq!(item["payload"]["values"][0]["attributes"]["skinTone"], DEFAULT_SKIN_TONE);
+        assert_eq!(
+            item["payload"]["values"][0]["attributes"]["skinTone"],
+            DEFAULT_SKIN_TONE
+        );
         let heart = reaction_message(from, Reaction::Heart, "op-2", "val-2");
-        assert!(heart["messageContent"][0]["payload"]["values"][0]["attributes"]["skinTone"].is_null());
+        assert!(
+            heart["messageContent"][0]["payload"]["values"][0]["attributes"]["skinTone"].is_null()
+        );
     }
 
     #[test]
@@ -117,7 +142,10 @@ mod tests {
         for reaction in Reaction::ALL {
             assert_eq!(Reaction::from_name(reaction.name()), Some(reaction));
         }
-        assert_eq!(Reaction::from_name("confetti"), Some(Reaction::Other("confetti".into())));
+        assert_eq!(
+            Reaction::from_name("confetti"),
+            Some(Reaction::Other("confetti".into()))
+        );
         assert_eq!(Reaction::from_name(""), None);
     }
 
@@ -129,7 +157,14 @@ mod tests {
             "payload": {"values": [{"name": "applause", "count": 2, "attributes": {"skinTone": "2"}}]},
             "operationId": "op",
         });
-        assert_eq!(parse_reactions(&body), vec![ReactionEvent { mri: "8:orgid:a".into(), reaction: Reaction::Applause, count: 2 }]);
+        assert_eq!(
+            parse_reactions(&body),
+            vec![ReactionEvent {
+                mri: "8:orgid:a".into(),
+                reaction: Reaction::Applause,
+                count: 2
+            }]
+        );
     }
 
     #[test]
@@ -144,7 +179,14 @@ mod tests {
         });
         let events = parse_reactions(&body);
         assert_eq!(events.len(), 3);
-        assert_eq!(events[0], ReactionEvent { mri: "8:orgid:a".into(), reaction: Reaction::Heart, count: 1 });
+        assert_eq!(
+            events[0],
+            ReactionEvent {
+                mri: "8:orgid:a".into(),
+                reaction: Reaction::Heart,
+                count: 1
+            }
+        );
         assert_eq!(events[1].reaction, Reaction::Other("unknown".into()));
         assert_eq!(events[2].mri, "8:orgid:b");
     }

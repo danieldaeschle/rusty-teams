@@ -16,16 +16,16 @@ use chatsvc::{
     ConversationState, Conversations, ForcedAvailability, ForwardResult, Gif, Gifs, HistoryShare,
     InvokeRequest, InvokeResponse, Language, LanguageSettings, LanguageSettingsClient, LinkInfo,
     MemberHorizon, MessageEmotions, MessageLanguage, MessageLinks, MessageWindow, Messages,
-    PinnedMessage, Pins, PostFollowState, PresenceLookup, PresenceService, PresenceStatus, Receipts,
-    RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote, ThreadMembers,
-    ThreadActivity, TranslateRequest, Translation, TranslationTrigger, Translator, WindowDirection,
-    WorkLocationKind,
+    PinnedMessage, Pins, PostFollowState, PresenceLookup, PresenceService, PresenceStatus,
+    Receipts, RecordingPolicy, SavedMessage, ScheduledDraft, ScheduledDrafts, StatusNote,
+    ThreadActivity, ThreadMembers, TranslateRequest, Translation, TranslationTrigger, Translator,
+    WindowDirection, WorkLocationKind,
 };
 use chrono::{DateTime, Utc};
 use graph::{
-    CloudFile, QuickSite,
-    Channel, Chat, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras, MessageTarget,
-    OutgoingMention, Photo, Presence, SharedFile, Tag, Team, UploadDestination, UploadedFile, User,
+    Channel, Chat, CloudFile, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras,
+    MessageTarget, OutgoingMention, Photo, Presence, QuickSite, SharedFile, Tag, Team,
+    UploadDestination, UploadedFile, User,
 };
 
 use crate::error::{Error, Result};
@@ -245,7 +245,11 @@ pub trait Remote {
         Err(Error::Unsupported("a channel member count"))
     }
 
-    async fn channel_members(&self, _team_id: &str, _channel_id: &str) -> Result<Vec<graph::Member>> {
+    async fn channel_members(
+        &self,
+        _team_id: &str,
+        _channel_id: &str,
+    ) -> Result<Vec<graph::Member>> {
         Err(Error::Unsupported("a channel member list"))
     }
 
@@ -275,7 +279,10 @@ pub trait Remote {
         Err(Error::Unsupported("recent files"))
     }
 
-    async fn recent_files_with_owners(&self, _top: usize) -> Result<(Vec<CloudFile>, Vec<(String, String)>)> {
+    async fn recent_files_with_owners(
+        &self,
+        _top: usize,
+    ) -> Result<(Vec<CloudFile>, Vec<(String, String)>)> {
         Err(Error::Unsupported("recent files"))
     }
 
@@ -1130,7 +1137,10 @@ impl Remote for Graph {
         Ok(Graph::recent_files(self, top).await?)
     }
 
-    async fn recent_files_with_owners(&self, top: usize) -> Result<(Vec<CloudFile>, Vec<(String, String)>)> {
+    async fn recent_files_with_owners(
+        &self,
+        top: usize,
+    ) -> Result<(Vec<CloudFile>, Vec<(String, String)>)> {
         Ok(Graph::recent_files_with_owners(self, top).await?)
     }
 
@@ -1337,7 +1347,9 @@ impl Remote for Graph {
     }
 
     async fn chat_thread_activities(&self, chat_id: &str) -> Result<Vec<ThreadActivity>> {
-        Ok(Messages::new(self.session()).thread_activities(chat_id).await?)
+        Ok(Messages::new(self.session())
+            .thread_activities(chat_id)
+            .await?)
     }
 
     async fn chat_messages_by_id(
@@ -1400,11 +1412,15 @@ impl Remote for Graph {
     }
 
     async fn mark_activity_read(&self, message_id: &str) -> Result<()> {
-        Ok(ActivityFeed::new(self.session()).mark_read(message_id).await?)
+        Ok(ActivityFeed::new(self.session())
+            .mark_read(message_id)
+            .await?)
     }
 
     async fn mark_all_activity_read(&self, now_ms: i64) -> Result<()> {
-        Ok(ActivityFeed::new(self.session()).mark_all_read(now_ms).await?)
+        Ok(ActivityFeed::new(self.session())
+            .mark_all_read(now_ms)
+            .await?)
     }
 
     async fn app_consumption_horizon(&self) -> Result<AppConsumptionHorizon> {
@@ -1540,7 +1556,9 @@ impl Remote for Graph {
     }
 
     async fn save_chat_setting(&self, change: ChatSettingChange) -> Result<ChatSettingsDocument> {
-        Ok(ChatSettingsClient::new(self.session()).write(change).await?)
+        Ok(ChatSettingsClient::new(self.session())
+            .write(change)
+            .await?)
     }
 
     async fn set_chat_notifications(

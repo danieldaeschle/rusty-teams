@@ -256,7 +256,10 @@ pub fn shared_with_me() -> String {
 }
 
 pub fn site(site_id: &str) -> String {
-    format!("{GRAPH}/v1.0/sites/{}?$select=id,displayName,webUrl", segment(site_id))
+    format!(
+        "{GRAPH}/v1.0/sites/{}?$select=id,displayName,webUrl",
+        segment(site_id)
+    )
 }
 
 pub fn shared_drive_item(share_id: &str) -> String {

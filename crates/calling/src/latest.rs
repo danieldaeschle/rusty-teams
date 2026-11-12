@@ -14,7 +14,14 @@ pub struct Latest<T> {
 
 impl<T> Default for Latest<T> {
     fn default() -> Self {
-        Latest { slot: Mutex::new(Slot { newest: None, closed: false, dropped: 0 }), wake: Condvar::new() }
+        Latest {
+            slot: Mutex::new(Slot {
+                newest: None,
+                closed: false,
+                dropped: 0,
+            }),
+            wake: Condvar::new(),
+        }
     }
 }
 

@@ -242,7 +242,12 @@ impl Graph {
         }
     }
 
-    async fn search_users(&self, query: &str, with_alias: bool, scope: &Scope) -> Result<Vec<User>> {
+    async fn search_users(
+        &self,
+        query: &str,
+        with_alias: bool,
+        scope: &Scope,
+    ) -> Result<Vec<User>> {
         let mut request = Request::get(urls::people_search(query, PEOPLE_PAGE_SIZE, with_alias));
         request
             .headers

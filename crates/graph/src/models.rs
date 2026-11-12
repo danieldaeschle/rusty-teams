@@ -30,7 +30,9 @@ pub struct Member {
 
 impl Member {
     pub fn is_owner(&self) -> bool {
-        self.roles.iter().any(|role| role.eq_ignore_ascii_case("owner"))
+        self.roles
+            .iter()
+            .any(|role| role.eq_ignore_ascii_case("owner"))
     }
 
     pub fn name(&self) -> &str {

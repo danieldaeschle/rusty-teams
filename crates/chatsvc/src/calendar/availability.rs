@@ -92,16 +92,25 @@ impl<T: CardTransport> Calendar<T> {
         end: DateTime<Utc>,
     ) -> Result<Vec<PersonSchedule>> {
         let url = schedule_url();
-        let mut request = Request::with_body(Method::Post, &url, schedule_request_body(emails, start, end));
-        request
-            .headers
-            .push(("Prefer".to_owned(), format!("outlook.timezone=\"{TIME_ZONE}\"")));
+        let mut request = Request::with_body(
+            Method::Post,
+            &url,
+            schedule_request_body(emails, start, end),
+        );
+        request.headers.push((
+            "Prefer".to_owned(),
+            format!("outlook.timezone=\"{TIME_ZONE}\""),
+        ));
         let answer = self
             .transport
             .send(request, Scope::graph(CALENDARS_SCOPE))
             .await?;
         if !answer.is_success() {
-            return Err(Error::Session(session::Error::api(answer.status, &url, answer.body)));
+            return Err(Error::Session(session::Error::api(
+                answer.status,
+                &url,
+                answer.body,
+            )));
         }
         Ok(parse_schedules(&answer.body))
     }
@@ -117,7 +126,11 @@ mod tests {
     #[test]
     fn the_request_asks_in_utc() {
         let start = Utc.with_ymd_and_hms(2026, 11, 20, 8, 0, 0).unwrap();
-        let body = schedule_request_body(&["mara@example.com".to_owned()], start, start + chrono::Duration::hours(10));
+        let body = schedule_request_body(
+            &["mara@example.com".to_owned()],
+            start,
+            start + chrono::Duration::hours(10),
+        );
         assert_eq!(body["startTime"]["dateTime"], "2026-11-20T08:00:00");
         assert_eq!(body["endTime"]["timeZone"], "UTC");
         assert_eq!(body["schedules"][0], "mara@example.com");
@@ -134,7 +147,10 @@ mod tests {
         ]});
         let schedules = parse_schedules(&body);
         assert_eq!(schedules[0].busy.len(), 1);
-        assert_eq!(schedules[0].busy[0].start, Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap());
+        assert_eq!(
+            schedules[0].busy[0].start,
+            Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap()
+        );
         assert_eq!(schedules[1].error.as_deref(), Some("not found"));
     }
 }

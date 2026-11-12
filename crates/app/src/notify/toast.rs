@@ -176,7 +176,8 @@ fn highlighted_preview(text: &str, mention: bool) -> AnyElement {
         .text_size(px(PREVIEW_SIZE))
         .line_height(px(18.))
         .text_color(theme::text())
-        .line_clamp(PREVIEW_MAX_LINES).text_ellipsis()
+        .line_clamp(PREVIEW_MAX_LINES)
+        .text_ellipsis()
         .child(styled)
         .into_any_element()
 }
@@ -485,7 +486,10 @@ impl Render for ToastView {
         let id = self.id;
         let (model, preview_on) = {
             let center = self.center.read(cx);
-            (center.model(id).cloned(), center.settings().account.show_preview)
+            (
+                center.model(id).cloned(),
+                center.settings().account.show_preview,
+            )
         };
         let Some(model) = model else {
             return div().size_full().bg(theme::popup()).into_any_element();

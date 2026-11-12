@@ -12,10 +12,10 @@ use store::{
     ChannelLayoutRecord, ChannelRecord, ChannelTabRecord, Store, TeamLayoutRecord, TeamRecord,
 };
 use teams_core::{
-    Availability, BoxFuture, ChannelPrivacy, ChatFolder, ChatSection, ChatSectionSettings, ChatsPage, CoreEvent,
-    DeltaPage, Error, FolderChange, FolderKind, FolderSource, MentionCandidate, MentionInput,
-    MentionTarget, NOTES_CHAT_ID, PersonSource, Remote, RemotePage, Result, SyncConfig, SyncEngine,
-    substrate_search,
+    Availability, BoxFuture, ChannelPrivacy, ChatFolder, ChatSection, ChatSectionSettings,
+    ChatsPage, CoreEvent, DeltaPage, Error, FolderChange, FolderKind, FolderSource,
+    MentionCandidate, MentionInput, MentionTarget, NOTES_CHAT_ID, PersonSource, Remote, RemotePage,
+    Result, SyncConfig, SyncEngine, substrate_search,
 };
 
 const ME: &str = "user-me";
@@ -552,10 +552,15 @@ impl Remote for Handle {
         bytes: &[u8],
         filename: &str,
     ) -> Result<chatsvc::ams::AmsImage> {
-        self.record(format!("ams upload {conversation_id} {filename} {}", bytes.len()));
+        self.record(format!(
+            "ams upload {conversation_id} {filename} {}",
+            bytes.len()
+        ));
         Ok(chatsvc::ams::AmsImage {
             object_id: "0-ams".to_owned(),
-            url: "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-ams/views/imgpsh_fullsize".to_owned(),
+            url:
+                "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-ams/views/imgpsh_fullsize"
+                    .to_owned(),
         })
     }
 
@@ -956,7 +961,9 @@ impl Remote for Handle {
         root_id: &str,
         followed: bool,
     ) -> Result<Option<String>> {
-        self.record(format!("follow {user_id} {channel_id} {root_id} {followed}"));
+        self.record(format!(
+            "follow {user_id} {channel_id} {root_id} {followed}"
+        ));
         Ok(None)
     }
 
@@ -1680,7 +1687,8 @@ async fn failing_channel_listing_is_reported_not_fatal() {
     );
     let sent: Vec<CoreEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
     assert!(
-        sent.iter().any(|event| matches!(event, CoreEvent::Error { .. })),
+        sent.iter()
+            .any(|event| matches!(event, CoreEvent::Error { .. })),
         "{sent:?}"
     );
     assert!(sent.contains(&CoreEvent::SidebarChanged), "{sent:?}");
@@ -2172,7 +2180,14 @@ async fn an_announcement_posts_through_graph_then_adds_the_banner_card() {
         background: teams_core::BannerBackground::LocalImage(path.to_string_lossy().into_owned()),
     };
     let record = engine
-        .post_announcement(CHANNEL, "<p>hi</p>", Some("Topic"), &[], &MessageExtras::default(), &banner)
+        .post_announcement(
+            CHANNEL,
+            "<p>hi</p>",
+            Some("Topic"),
+            &[],
+            &MessageExtras::default(),
+            &banner,
+        )
         .await
         .unwrap();
     let calls: Vec<String> = fake
@@ -2189,7 +2204,8 @@ async fn an_announcement_posts_through_graph_then_adds_the_banner_card() {
     assert_eq!(
         shown.map(|banner| banner.background),
         Some(teams_core::BannerBackground::Image(
-            "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-ams/views/imgpsh_fullsize".to_owned()
+            "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-ams/views/imgpsh_fullsize"
+                .to_owned()
         ))
     );
 }
@@ -2204,10 +2220,24 @@ async fn a_refused_banner_card_still_keeps_the_post() {
         background: teams_core::BannerBackground::Color("rose".to_owned()),
     };
     let posted = engine
-        .post_announcement(CHANNEL, "<p>hi</p>", None, &[], &MessageExtras::default(), &banner)
+        .post_announcement(
+            CHANNEL,
+            "<p>hi</p>",
+            None,
+            &[],
+            &MessageExtras::default(),
+            &banner,
+        )
         .await;
-    assert!(matches!(posted, Err(teams_core::Error::PostedWithoutBanner)));
-    let tries = fake.calls().iter().filter(|call| call.starts_with("cards ")).count();
+    assert!(matches!(
+        posted,
+        Err(teams_core::Error::PostedWithoutBanner)
+    ));
+    let tries = fake
+        .calls()
+        .iter()
+        .filter(|call| call.starts_with("cards "))
+        .count();
     assert_eq!(tries, 3);
     let cached = engine.store().messages(CHANNEL, None, 10).unwrap();
     assert!(cached.iter().any(|record| record.message_id == "m9001"));
@@ -2964,7 +2994,12 @@ async fn a_card_line_survives_the_graph_chat_refresh() {
     fake.set_chat_messages(vec![card]);
     engine.fetch_newer(CHAT).await.unwrap();
     let line = |engine: &SyncEngine<Handle>| {
-        engine.sidebar().unwrap().chats.remove(0).last_message_preview
+        engine
+            .sidebar()
+            .unwrap()
+            .chats
+            .remove(0)
+            .last_message_preview
     };
     assert_eq!(line(&engine).as_deref(), Some("Ada edited Engine Notes"));
     *fake.chats.lock().unwrap() = vec![chat_with_preview(CHAT, 5, "html", body, false)];
@@ -4631,8 +4666,14 @@ async fn meeting_chats_without_horizons_mark_own_messages_sent() {
     let fake = Arc::new(Fake::default());
     let engine = receipt_engine(&fake, vec![meeting_chat()]).await;
     engine.refresh_receipts(CHAT).await.unwrap();
-    assert_eq!(engine.receipt_state(CHAT, "m0001"), teams_core::ReceiptState::Sent);
-    assert_eq!(engine.receipt_state(CHAT, "m0002"), teams_core::ReceiptState::Unknown);
+    assert_eq!(
+        engine.receipt_state(CHAT, "m0001"),
+        teams_core::ReceiptState::Sent
+    );
+    assert_eq!(
+        engine.receipt_state(CHAT, "m0002"),
+        teams_core::ReceiptState::Unknown
+    );
 }
 
 #[tokio::test]
@@ -4642,7 +4683,9 @@ async fn meeting_chats_take_their_system_events_from_chatsvc() {
         message_id: "activity-1".into(),
         created_at: base(),
         initiator_id: Some(ME.into()),
-        kind: chatsvc::ThreadActivityKind::TopicUpdated { topic: "Tree service".into() },
+        kind: chatsvc::ThreadActivityKind::TopicUpdated {
+            topic: "Tree service".into(),
+        },
     }];
     let engine = receipt_engine(&fake, vec![meeting_chat()]).await;
     let records = engine.open_conversation(CHAT).unwrap();
@@ -4651,7 +4694,10 @@ async fn meeting_chats_take_their_system_events_from_chatsvc() {
         .find(|record| record.message_id == "activity-1")
         .and_then(teams_core::roster_event::roster_event)
         .expect("meeting event stored");
-    assert_eq!(event.change, teams_core::roster_event::RosterChange::MeetingNamed);
+    assert_eq!(
+        event.change,
+        teams_core::roster_event::RosterChange::MeetingNamed
+    );
     assert_eq!(records.len(), 4);
 }
 
@@ -5370,7 +5416,10 @@ async fn activity_feed_is_stored_and_marked_read_like_teams() {
         },
     };
     engine.refresh_sidebar().await.unwrap();
-    assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| event == CoreEvent::ActivityChanged));
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| event == CoreEvent::ActivityChanged)
+    );
     let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
     assert!(stored.counts_for_bell(&stored.items[0]));
 
@@ -5380,7 +5429,10 @@ async fn activity_feed_is_stored_and_marked_read_like_teams() {
     assert!(stored.is_read(&stored.items[0]));
     engine.refresh_sidebar().await.unwrap();
     let stored = teams_core::stored_activity_feed(engine.store()).unwrap();
-    assert!(stored.is_read(&stored.items[0]), "a fetch from before the PUT keeps the local mark");
+    assert!(
+        stored.is_read(&stored.items[0]),
+        "a fetch from before the PUT keeps the local mark"
+    );
 
     stored_feed_unread(&fake, &engine).await;
     engine.mark_all_activity_read().await.unwrap();
@@ -5856,13 +5908,23 @@ async fn marking_an_own_note_unread_sets_the_chatsvc_bookmark_and_reading_clears
         .filter(|call| call.starts_with("read bookmark "))
         .collect();
     assert_eq!(bookmarks.len(), 2, "{calls:?}");
-    let marked = bookmarks[0].strip_prefix("read bookmark 48:notes ").unwrap();
+    let marked = bookmarks[0]
+        .strip_prefix("read bookmark 48:notes ")
+        .unwrap();
     let fields: Vec<&str> = marked.split(';').collect();
     assert_eq!(fields[0], (arrived_ms - 1).to_string());
     assert_eq!(fields[2], "m0001");
-    let cleared = bookmarks[1].strip_prefix("read bookmark 48:notes ").unwrap();
-    assert!(cleared.starts_with("0;") && cleared.ends_with(";0"), "{cleared}");
-    assert!(!calls.iter().any(|call| call.starts_with("mark_unread")), "{calls:?}");
+    let cleared = bookmarks[1]
+        .strip_prefix("read bookmark 48:notes ")
+        .unwrap();
+    assert!(
+        cleared.starts_with("0;") && cleared.ends_with(";0"),
+        "{cleared}"
+    );
+    assert!(
+        !calls.iter().any(|call| call.starts_with("mark_unread")),
+        "{calls:?}"
+    );
 }
 
 #[tokio::test]
@@ -6066,7 +6128,10 @@ async fn create_channel_sends_the_team_thread_and_own_mailbox_then_refreshes() {
         calls[0],
         format!("create 19:general@thread.tacv2 alpha Planning 'Roadmap' Private {ME}@tenant-1")
     );
-    assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| event == CoreEvent::SidebarChanged));
+    assert!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .any(|event| event == CoreEvent::SidebarChanged)
+    );
     assert!(
         engine
             .create_channel("alpha", "   ", "", ChannelPrivacy::Standard)
@@ -6092,7 +6157,11 @@ async fn edit_channel_sends_the_trimmed_name_and_keeps_an_unloaded_description()
         calls[0],
         "edit 19:general@thread.tacv2 19:secret@thread.tacv2 None 'Renamed' None"
     );
-    let renamed = engine.store().channel("19:secret@thread.tacv2").unwrap().unwrap();
+    let renamed = engine
+        .store()
+        .channel("19:secret@thread.tacv2")
+        .unwrap()
+        .unwrap();
     assert_eq!(renamed.name, "Renamed");
     assert!(
         engine

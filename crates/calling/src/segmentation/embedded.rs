@@ -17,7 +17,9 @@ pub fn onnxruntime_path() -> Option<PathBuf> {
     }
     remove_older(&path, &name);
     let mut library = Vec::new();
-    flate2::read::DeflateDecoder::new(COMPRESSED).read_to_end(&mut library).ok()?;
+    flate2::read::DeflateDecoder::new(COMPRESSED)
+        .read_to_end(&mut library)
+        .ok()?;
     let partial = path.with_extension("partial");
     std::fs::write(&partial, &library).ok()?;
     std::fs::rename(&partial, &path).ok()?;
@@ -25,7 +27,9 @@ pub fn onnxruntime_path() -> Option<PathBuf> {
 }
 
 fn remove_older(path: &std::path::Path, current: &str) {
-    let Some(directory) = path.parent() else { return };
+    let Some(directory) = path.parent() else {
+        return;
+    };
     for entry in std::fs::read_dir(directory).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.starts_with("onnxruntime-") && name.ends_with(".dll") && name != current {
@@ -35,5 +39,7 @@ fn remove_older(path: &std::path::Path, current: &str) {
 }
 
 fn fingerprint(bytes: &[u8]) -> u32 {
-    bytes.iter().fold(0x811c_9dc5u32, |hash, &byte| (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193))
+    bytes.iter().fold(0x811c_9dc5u32, |hash, &byte| {
+        (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+    })
 }

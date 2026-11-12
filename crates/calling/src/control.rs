@@ -4,28 +4,28 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::background::BackgroundChoice;
-use crate::effects::CameraEffects;
 use crate::breakout::BreakoutMove;
+use crate::camera::CameraDevice;
 use crate::captions::{CaptionEntry, CaptionState};
-use crate::recording::{RecordingKind, StopScope};
 use crate::devices::{DeviceChoice, DeviceLists};
 use crate::diagnostics::{CallDiagnostics, StatsSample};
+use crate::effects::CameraEffects;
 use crate::error::{Error, Result};
 use crate::health::CallHealth;
 use crate::hold::HoldState;
-use crate::mic_processing::MicSettings;
 use crate::meeting_options::{MeetingOptions, OptionWrite};
+use crate::mic_processing::MicSettings;
 use crate::mute::MuteCommand;
 use crate::organizer::{MeetingCapability, Modality};
 use crate::reaction::Reaction;
+use crate::recording::{RecordingKind, StopScope};
 use crate::roster::{MeetingRole, RosterEntry};
-use crate::camera::CameraDevice;
 use crate::screen::ShareSource;
 use crate::signaling::{Callee, MeetingTarget};
-use crate::transfer::Replacement;
 use crate::state::CallState;
-use crate::video_layout::VideoWant;
+use crate::transfer::Replacement;
 use crate::video_frame::{VideoHub, VideoKey, VideoPicture};
+use crate::video_layout::VideoWant;
 use crate::whiteboard::ContentShare;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,21 +45,48 @@ pub enum CallCommand {
     SetShareStandout(bool),
     RefreshShareSources,
     SetHand(bool),
-    LowerHand { mri: String },
+    LowerHand {
+        mri: String,
+    },
     LowerAllHands,
-    Admit { mri: String },
+    Admit {
+        mri: String,
+    },
     AdmitAll,
-    Deny { mri: String },
-    MuteParticipant { mri: String },
+    Deny {
+        mri: String,
+    },
+    MuteParticipant {
+        mri: String,
+    },
     MuteAll,
-    Spotlight { mri: String },
-    StopSpotlight { mri: String },
-    RemoveParticipant { mri: String },
+    Spotlight {
+        mri: String,
+    },
+    StopSpotlight {
+        mri: String,
+    },
+    RemoveParticipant {
+        mri: String,
+    },
     SetLock(bool),
-    SetRole { mri: String, role: MeetingRole },
-    SetAttendeeModality { mri: String, modality: Modality, allowed: bool },
-    SetAttendeeRestrictions { mic_off: bool, camera_off: bool },
-    Invite { callees: Vec<Callee>, group_thread: Option<String> },
+    SetRole {
+        mri: String,
+        role: MeetingRole,
+    },
+    SetAttendeeModality {
+        mri: String,
+        modality: Modality,
+        allowed: bool,
+    },
+    SetAttendeeRestrictions {
+        mic_off: bool,
+        camera_off: bool,
+    },
+    Invite {
+        callees: Vec<Callee>,
+        group_thread: Option<String>,
+    },
     LoadMeetingOptions,
     SaveMeetingOptions(Vec<OptionWrite>),
     SetCaptions(bool),
@@ -68,13 +95,23 @@ pub enum CallCommand {
     SetVideoWants(Vec<VideoWant>),
     SetCameraEffects(CameraEffects),
     SendReaction(Reaction),
-    StartRecording { kind: RecordingKind, title: String },
-    StopRecording { scope: StopScope },
+    StartRecording {
+        kind: RecordingKind,
+        title: String,
+    },
+    StopRecording {
+        scope: StopScope,
+    },
     SetCaptionLanguage(String),
     ConsentToRecording,
     Hold(bool),
-    Transfer { target: Callee, replaces: Option<Replacement> },
-    OpenWhiteboard { title: String },
+    Transfer {
+        target: Callee,
+        replaces: Option<Replacement>,
+    },
+    OpenWhiteboard {
+        title: String,
+    },
     Hangup,
     EndMeeting,
 }
@@ -89,18 +126,29 @@ pub enum Progress {
 pub enum CallUpdate {
     State(CallState),
     Muted(bool),
-    Levels { local: f32, remote: f32 },
+    Levels {
+        local: f32,
+        remote: f32,
+    },
     Devices(DeviceLists),
-    Selected { input: DeviceChoice, output: DeviceChoice },
+    Selected {
+        input: DeviceChoice,
+        output: DeviceChoice,
+    },
     ListenOnly(bool),
-    Stats { inbound_packets: u64, outbound_packets: u64 },
+    Stats {
+        inbound_packets: u64,
+        outbound_packets: u64,
+    },
     Sample(StatsSample),
     Diagnostics(Box<CallDiagnostics>),
     Progress(Progress),
     Roster(Vec<RosterEntry>),
     Speakers(Vec<String>),
     Lobby(bool),
-    OwnIdentity { mri: String },
+    OwnIdentity {
+        mri: String,
+    },
     VideoReady,
     VideoStopped(VideoKey),
     ScreenShare(Option<String>),
@@ -108,10 +156,16 @@ pub enum CallUpdate {
     Cameras(Vec<CameraDevice>),
     LocalShare(Option<String>),
     ShareSources(Vec<ShareSource>),
-    ShareThumbnail { source: ShareSource, picture: Arc<VideoPicture> },
+    ShareThumbnail {
+        source: ShareSource,
+        picture: Arc<VideoPicture>,
+    },
     ShareSound(bool),
     OwnHand(Option<u64>),
-    Reaction { mri: String, reaction: Reaction },
+    Reaction {
+        mri: String,
+        reaction: Reaction,
+    },
     Captions(CaptionState),
     Caption(CaptionEntry),
     BlurTiming(f32),
@@ -126,13 +180,20 @@ pub enum CallUpdate {
     Whiteboard(Option<ContentShare>),
     WhiteboardUrl(String),
     BreakoutMove(BreakoutMove),
-    BreakoutRoom { main: MeetingTarget },
+    BreakoutRoom {
+        main: MeetingTarget,
+    },
     ReplacementLink(Replacement),
-    TransferResult { succeeded: bool },
+    TransferResult {
+        succeeded: bool,
+    },
     Capability(MeetingCapability),
     MeetingOptions(std::result::Result<MeetingOptions, String>),
     MeetingOptionsSaved(std::result::Result<MeetingOptions, String>),
-    Organizer { action: String, outcome: std::result::Result<u16, String> },
+    Organizer {
+        action: String,
+        outcome: std::result::Result<u16, String>,
+    },
     MeetingChat(String),
     MeetingTenant(String),
     Notice(String),
@@ -199,7 +260,9 @@ impl CallControl {
 
     /// Runs a setup step; a hangup while it is pending cancels it, other commands wait for the call loop.
     pub async fn until_hangup<T>(&mut self, step: impl Future<Output = T>) -> Result<T> {
-        let CallControl { commands, deferred, .. } = self;
+        let CallControl {
+            commands, deferred, ..
+        } = self;
         let hangup = async {
             loop {
                 match commands.recv().await {
@@ -222,11 +285,17 @@ mod tests {
     #[tokio::test]
     async fn hangup_cancels_a_pending_step_and_keeps_other_commands() {
         let (handle, mut control) = call_channel();
-        handle.commands.send(CallCommand::Mute(MuteCommand::Mute)).unwrap();
+        handle
+            .commands
+            .send(CallCommand::Mute(MuteCommand::Mute))
+            .unwrap();
         handle.commands.send(CallCommand::Hangup).unwrap();
         let outcome = control.until_hangup(std::future::pending::<()>()).await;
         assert!(matches!(outcome, Err(Error::Cancelled)));
-        assert_eq!(control.recv().await, Some(CallCommand::Mute(MuteCommand::Mute)));
+        assert_eq!(
+            control.recv().await,
+            Some(CallCommand::Mute(MuteCommand::Mute))
+        );
     }
 
     #[tokio::test]

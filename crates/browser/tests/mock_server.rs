@@ -71,8 +71,16 @@ async fn ensure_running_starts_headless_with_one_url_and_opens_the_second_tab() 
     assert!(launches[0].headless);
     assert_eq!(launches[0].start_urls, [TEAMS]);
     assert_eq!(harness.mock.urls(), [TEAMS, OUTLOOK]);
-    assert_eq!(std::fs::read_to_string(&harness.mode_file).unwrap(), "headless");
-    assert!(harness.mock.requests().contains(&"PUT /json/new".to_owned()));
+    assert_eq!(
+        std::fs::read_to_string(&harness.mode_file).unwrap(),
+        "headless"
+    );
+    assert!(
+        harness
+            .mock
+            .requests()
+            .contains(&"PUT /json/new".to_owned())
+    );
 }
 
 #[tokio::test]
@@ -109,7 +117,16 @@ async fn login_window_restarts_visible_and_headless_goes_back() {
     assert_eq!(harness.mock.urls(), [TEAMS]);
     let status = harness.browser.status().await.unwrap();
     assert_eq!(status.mode, Mode::Visible);
-    assert!(!harness.launcher.requests.lock().unwrap().last().unwrap().headless);
+    assert!(
+        !harness
+            .launcher
+            .requests
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .headless
+    );
 
     // Calling login_window() again while already visible must not restart Chrome.
     harness.browser.login_window().await.unwrap();
@@ -145,7 +162,10 @@ async fn watchdog_ignores_brief_login_redirect_within_grace() {
         ..fast_watchdog()
     };
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), config);
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
 
     // Brief silent SSO redirect clears before login_grace elapses.
     harness.mock.set_urls(&[TEAMS, LOGIN]);
@@ -156,7 +176,10 @@ async fn watchdog_ignores_brief_login_redirect_within_grace() {
 
     // Sustained login page past login_grace fires LoginRequired.
     harness.mock.set_urls(&[LOGIN]);
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::LoginRequired);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::LoginRequired
+    );
 }
 
 #[tokio::test]
@@ -173,13 +196,28 @@ async fn watchdog_reports_start_death_and_restart() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), fast_watchdog());
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
 
     harness.mock.kill().await;
     assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Died);
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Restarted);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Restarted
+    );
     assert!(harness.browser.is_running().await);
-    assert!(harness.launcher.requests.lock().unwrap().last().unwrap().headless);
+    assert!(
+        harness
+            .launcher
+            .requests
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .headless
+    );
 }
 
 #[tokio::test]
@@ -187,7 +225,10 @@ async fn watchdog_retries_with_backoff_until_launch_works() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), fast_watchdog());
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
 
     *harness.launcher.fail.lock().unwrap() = true;
     harness.mock.kill().await;
@@ -209,7 +250,10 @@ async fn watchdog_retries_with_backoff_until_launch_works() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     *harness.launcher.fail.lock().unwrap() = false;
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Restarted);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Restarted
+    );
 }
 
 #[tokio::test]
@@ -217,17 +261,26 @@ async fn watchdog_announces_login_once_per_occurrence() {
     let harness = harness().await;
     harness.mock.start(&[TEAMS, OUTLOOK]).await;
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), fast_watchdog());
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
 
     harness.mock.set_urls(&[LOGIN, OUTLOOK]);
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::LoginRequired);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::LoginRequired
+    );
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(watchdog.events.try_recv().is_err());
 
     harness.mock.set_urls(&[TEAMS, OUTLOOK]);
     tokio::time::sleep(Duration::from_millis(200)).await;
     harness.mock.set_urls(&[LOGIN]);
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::LoginRequired);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::LoginRequired
+    );
 }
 
 #[tokio::test]
@@ -235,7 +288,10 @@ async fn watchdog_does_not_restart_after_an_explicit_stop() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), fast_watchdog());
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
 
     harness.browser.stop().await.unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -248,14 +304,26 @@ async fn watchdog_ignores_the_gap_during_a_login_window_restart() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), fast_watchdog());
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
 
     harness.browser.login_window().await.unwrap();
     tokio::time::sleep(Duration::from_millis(300)).await;
     while let Ok(event) = watchdog.events.try_recv() {
         assert_ne!(event, BrowserEvent::Died);
     }
-    assert!(!harness.launcher.requests.lock().unwrap().iter().skip(1).any(|request| request.headless));
+    assert!(
+        !harness
+            .launcher
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .skip(1)
+            .any(|request| request.headless)
+    );
 }
 
 #[tokio::test]
@@ -263,7 +331,12 @@ async fn parked_tabs_are_the_app_tab_not_missing_and_not_login() {
     let harness = harness().await;
     harness.mock.start(&[PARKED_TEAMS, PARKED_OUTLOOK]).await;
     let status = harness.browser.status().await.unwrap();
-    assert!(status.tabs.iter().all(|tab| tab.parked && tab.app.is_some()));
+    assert!(
+        status
+            .tabs
+            .iter()
+            .all(|tab| tab.parked && tab.app.is_some())
+    );
     assert_eq!(status.login_state, LoginState::NotRequired);
     harness.browser.ensure_running().await.unwrap();
     assert_eq!(harness.mock.urls(), [PARKED_TEAMS, PARKED_OUTLOOK]);
@@ -275,7 +348,12 @@ async fn wake_navigates_the_parked_app_tab_to_its_start_url() {
     harness.mock.start(&[PARKED_TEAMS, PARKED_OUTLOOK]).await;
     harness.browser.wake(App::Teams).await.unwrap();
     assert_eq!(harness.mock.urls(), [TEAMS, PARKED_OUTLOOK]);
-    assert!(harness.mock.requests().contains(&"CDP Page.navigate".to_owned()));
+    assert!(
+        harness
+            .mock
+            .requests()
+            .contains(&"CDP Page.navigate".to_owned())
+    );
     harness.browser.wake(App::Outlook).await.unwrap();
     assert_eq!(harness.mock.urls(), [TEAMS, OUTLOOK]);
     let status = harness.browser.status().await.unwrap();
@@ -334,14 +412,23 @@ async fn dedupe_never_closes_login_or_foreign_tabs() {
 async fn watchdog_waits_after_died_and_adopts_a_chrome_that_came_up_meanwhile() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
-    let config = WatchdogConfig { died_wait: Duration::from_millis(400), ..fast_watchdog() };
+    let config = WatchdogConfig {
+        died_wait: Duration::from_millis(400),
+        ..fast_watchdog()
+    };
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), config);
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
 
     harness.mock.kill().await;
     assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Died);
     harness.mock.start(&[TEAMS, OUTLOOK]).await;
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Restarted);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Restarted
+    );
     assert_eq!(harness.launcher.requests.lock().unwrap().len(), 1);
 }
 
@@ -363,7 +450,10 @@ async fn watchdog_leaves_a_responsive_renderer_alone() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), fast_watchdog());
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(watchdog.events.try_recv().is_err());
     assert_eq!(harness.launcher.requests.lock().unwrap().len(), 1);
@@ -374,11 +464,17 @@ async fn watchdog_restarts_a_hung_renderer_with_a_graceful_close() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), fast_watchdog());
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
 
     harness.mock.stop_answering(false);
     assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Hung);
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Restarted);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Restarted
+    );
     assert_eq!(harness.launcher.requests.lock().unwrap().len(), 2);
     assert_eq!(*harness.launcher.kills.lock().unwrap(), 0);
     assert_eq!(harness.browser.probe_renderer().await, RendererState::Ok);
@@ -389,11 +485,17 @@ async fn hung_stop_falls_back_to_kill_when_close_is_ignored() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
     let mut watchdog = Watchdog::spawn(harness.browser.clone(), fast_watchdog());
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Started);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Started
+    );
 
     harness.mock.stop_answering(true);
     assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Hung);
-    assert_eq!(next_event(&mut watchdog.events).await, BrowserEvent::Restarted);
+    assert_eq!(
+        next_event(&mut watchdog.events).await,
+        BrowserEvent::Restarted
+    );
     assert_eq!(*harness.launcher.kills.lock().unwrap(), 1);
     assert_eq!(harness.launcher.requests.lock().unwrap().len(), 2);
 }

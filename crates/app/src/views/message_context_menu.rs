@@ -3,8 +3,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::base::{GlobalState, POPUP_PRIORITY};
-use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -48,7 +48,13 @@ impl OpenContextMenu {
         }
     }
 
-    fn popup(&self, menu: &MessageMenu, close: Close, window: &mut Window, cx: &mut App) -> Entity<PopupMenu> {
+    fn popup(
+        &self,
+        menu: &MessageMenu,
+        close: Close,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<PopupMenu> {
         if let Some((popup, _)) = self.popup.borrow().as_ref() {
             return popup.clone();
         }
@@ -116,9 +122,15 @@ pub fn message_context_menu(
         .quick
         .iter()
         .enumerate()
-        .map(|(index, glyph)| animated_reaction(reaction_button(&menu, glyph, index), index, serial))
+        .map(|(index, glyph)| {
+            animated_reaction(reaction_button(&menu, glyph, index), index, serial)
+        })
         .collect();
-    reactions.push(animated_reaction(picker_button(&menu, cx), menu.quick.len(), serial));
+    reactions.push(animated_reaction(
+        picker_button(&menu, cx),
+        menu.quick.len(),
+        serial,
+    ));
     let viewport_height = f32::from(window.viewport_size().height);
     let cursor_y = f32::from(open.position.y);
     let upside_down = open
@@ -163,17 +175,25 @@ pub fn message_context_menu(
         );
     let (anchor_at, corner) = if upside_down {
         let lowest = viewport_height - WINDOW_MARGIN - BAR_LIFT;
-        (point(open.position.x, px(cursor_y.min(lowest))), Anchor::BottomLeft)
+        (
+            point(open.position.x, px(cursor_y.min(lowest))),
+            Anchor::BottomLeft,
+        )
     } else {
         (
-            point(open.position.x, open.position.y.max(px(BAR_LIFT + WINDOW_MARGIN))),
+            point(
+                open.position.x,
+                open.position.y.max(px(BAR_LIFT + WINDOW_MARGIN)),
+            ),
             Anchor::TopLeft,
         )
     };
     deferred(
         anchored().position(anchor_at).anchor(corner).child(
             div()
-                .id(ElementId::Name(format!("{CONTEXT_MENU_TAG}-{}", open.key).into()))
+                .id(ElementId::Name(
+                    format!("{CONTEXT_MENU_TAG}-{}", open.key).into(),
+                ))
                 .debug_selector(|| CONTEXT_MENU_TAG.into())
                 .relative()
                 .occlude()

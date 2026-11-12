@@ -30,7 +30,10 @@ impl<R: Remote> SyncEngine<R> {
         Ok(document)
     }
 
-    pub async fn save_chat_setting(&self, change: ChatSettingChange) -> Result<ChatSettingsDocument> {
+    pub async fn save_chat_setting(
+        &self,
+        change: ChatSettingChange,
+    ) -> Result<ChatSettingsDocument> {
         let document = self.remote.save_chat_setting(change).await?;
         store_chat_settings(&self.store, &document)?;
         Ok(document)
@@ -83,7 +86,10 @@ mod tests {
     #[test]
     fn the_document_survives_a_restart_in_the_store() {
         let store = Store::open_in_memory().unwrap();
-        assert_eq!(stored_chat_settings(&store), ChatSettingsDocument::default());
+        assert_eq!(
+            stored_chat_settings(&store),
+            ChatSettingsDocument::default()
+        );
         let mut document = ChatSettingsDocument::default();
         document.apply(ChatSettingChange::MessageDensity(MessageDensity::Compact));
         store_chat_settings(&store, &document).unwrap();

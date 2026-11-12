@@ -170,7 +170,10 @@ pub(crate) fn lacks_forward_content(record: &MessageRecord) -> bool {
 pub(crate) fn mark_forwards_unavailable(record: &MessageRecord) -> Option<MessageRecord> {
     let mut stored = attachments(record);
     let mut changed = false;
-    for attachment in stored.iter_mut().filter(|attachment| is_stale_forward(attachment)) {
+    for attachment in stored
+        .iter_mut()
+        .filter(|attachment| is_stale_forward(attachment))
+    {
         attachment.unavailable = true;
         changed = true;
     }
@@ -288,15 +291,11 @@ mod tests {
     #[test]
     fn a_mention_inside_the_forward_does_not_borrow_the_forwarders_mention() {
         let mut record = forwarded_record();
-        record.body_html = format!(
-            r#"<p><at id="0">Bob Sample</at></p>{}"#,
-            record.body_html
-        );
+        record.body_html = format!(r#"<p><at id="0">Bob Sample</at></p>{}"#, record.body_html);
         record.attachments_json = record
             .attachments_json
             .replace("<p>Keep", r#"<p><at id=\\\"0\\\">Cleo Other</at> Keep"#);
-        record.mentions_json =
-            r#"[{"user_id":"user-bob","name":"Bob Sample","id":0}]"#.to_owned();
+        record.mentions_json = r#"[{"user_id":"user-bob","name":"Bob Sample","id":0}]"#.to_owned();
         assert!(forwards(&record)[0].content_html.contains("Cleo Other"));
         let spans = linked_message_spans_with(&record, &|_| None, &no_forward_header);
         let mut mentions = Vec::new();
@@ -304,7 +303,10 @@ mod tests {
         assert_eq!(
             mentions,
             [
-                ("Bob Sample".to_owned(), Some("teams-profile:user-bob".to_owned())),
+                (
+                    "Bob Sample".to_owned(),
+                    Some("teams-profile:user-bob".to_owned())
+                ),
                 ("Cleo Other".to_owned(), None),
             ]
         );

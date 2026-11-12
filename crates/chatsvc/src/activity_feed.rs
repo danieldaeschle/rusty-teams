@@ -179,9 +179,12 @@ pub fn parse_horizons(conversation: &Value) -> ActivityHorizons {
     let bookmark = horizon_parts(properties[BOOKMARK_PROPERTY].as_str());
     ActivityHorizons {
         seen_ms: seen.map_or(0, |(arrival, _)| arrival),
-        bookmark_ms: bookmark.map_or(0, |(arrival, timestamp)| {
-            if arrival == 0 { timestamp } else { arrival }
-        }),
+        bookmark_ms: bookmark.map_or(
+            0,
+            |(arrival, timestamp)| {
+                if arrival == 0 { timestamp } else { arrival }
+            },
+        ),
     }
 }
 
@@ -202,7 +205,10 @@ pub fn parse_page(body: &Value) -> Result<Vec<ActivityItem>> {
 
 fn activity_item(message: &Value) -> Option<ActivityItem> {
     let properties = message.get("properties")?;
-    if properties.get("deletetime").is_some_and(|value| !value.is_null()) {
+    if properties
+        .get("deletetime")
+        .is_some_and(|value| !value.is_null())
+    {
         return None;
     }
     let activity = object_property(properties, "activity")?;
@@ -210,7 +216,12 @@ fn activity_item(message: &Value) -> Option<ActivityItem> {
     let context = activity.get("activityContext");
     let location = context
         .and_then(|context| object_property(context, "location"))
-        .and_then(|location| location.get("Custom").and_then(Value::as_str).map(str::to_owned))
+        .and_then(|location| {
+            location
+                .get("Custom")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
         .unwrap_or_default();
     let message_id = message.get("id").and_then(text_of)?;
     let version_ms = message
@@ -325,8 +336,7 @@ mod tests {
 
     use super::*;
 
-    const BASE: &str =
-        "https://teams.cloud.microsoft/api/chatsvc/emea/v1/users/ME/conversations/48%3Anotifications";
+    const BASE: &str = "https://teams.cloud.microsoft/api/chatsvc/emea/v1/users/ME/conversations/48%3Anotifications";
 
     struct Canned {
         answers: Mutex<VecDeque<(u16, Value)>>,
@@ -419,10 +429,22 @@ mod tests {
             }), "false"),
         ]});
         let items = parse_page(&body).unwrap();
-        assert!(items[0].tap_url.as_deref().unwrap().starts_with("https://teams.microsoft.com/l/entity/"));
-        assert_eq!(items[0].meeting_thread_id.as_deref(), Some("19:meeting_Zm9v@thread.v2"));
+        assert!(
+            items[0]
+                .tap_url
+                .as_deref()
+                .unwrap()
+                .starts_with("https://teams.microsoft.com/l/entity/")
+        );
+        assert_eq!(
+            items[0].meeting_thread_id.as_deref(),
+            Some("19:meeting_Zm9v@thread.v2")
+        );
         assert_eq!(items[1].tap_url, None);
-        assert_eq!(items[1].meeting_thread_id.as_deref(), Some("19:meeting_YmFy@thread.v2"));
+        assert_eq!(
+            items[1].meeting_thread_id.as_deref(),
+            Some("19:meeting_YmFy@thread.v2")
+        );
     }
 
     #[test]
@@ -499,14 +521,20 @@ mod tests {
         ]);
         let feed = ActivityFeed::with_transport(&transport, "emea");
         let snapshot = feed.snapshot().await.unwrap();
-        let ids: Vec<&str> = snapshot.items.iter().map(|item| item.message_id.as_str()).collect();
+        let ids: Vec<&str> = snapshot
+            .items
+            .iter()
+            .map(|item| item.message_id.as_str())
+            .collect();
         assert_eq!(ids, ["b", "a"]);
         assert_eq!(snapshot.horizons.seen_ms, 5);
         let requests = transport.requests.lock().unwrap();
         assert_eq!(requests[0].url, BASE);
         assert_eq!(
             requests[1].url,
-            format!("{BASE}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize=200&startTime=1")
+            format!(
+                "{BASE}/messages?view=msnp24Equivalent|supportsMessageProperties&pageSize=200&startTime=1"
+            )
         );
         assert_eq!(requests[2].url, "https://next");
         assert_eq!(requests.len(), 3);

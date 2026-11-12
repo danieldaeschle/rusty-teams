@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use browser::{Browser, BrowserError, Config, ConfigInputs, LaunchRequest, Launcher, Platform, Timeouts};
+use browser::{
+    Browser, BrowserError, Config, ConfigInputs, LaunchRequest, Launcher, Platform, Timeouts,
+};
 use futures_util::StreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -22,7 +24,10 @@ pub struct MockState {
 }
 
 fn numbered(urls: &[&str]) -> Vec<(String, String)> {
-    urls.iter().enumerate().map(|(index, url)| (format!("P{index}"), (*url).to_owned())).collect()
+    urls.iter()
+        .enumerate()
+        .map(|(index, url)| (format!("P{index}"), (*url).to_owned()))
+        .collect()
 }
 
 pub struct MockChrome {
@@ -92,11 +97,23 @@ impl MockChrome {
     }
 
     pub fn urls(&self) -> Vec<String> {
-        self.state.lock().unwrap().tabs.iter().map(|(_, url)| url.clone()).collect()
+        self.state
+            .lock()
+            .unwrap()
+            .tabs
+            .iter()
+            .map(|(_, url)| url.clone())
+            .collect()
     }
 
     pub fn tab_ids(&self) -> Vec<String> {
-        self.state.lock().unwrap().tabs.iter().map(|(id, _)| id.clone()).collect()
+        self.state
+            .lock()
+            .unwrap()
+            .tabs
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     pub fn set_urls(&self, urls: &[&str]) {
@@ -112,7 +129,12 @@ impl MockChrome {
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<MockState>>, kill: Arc<Notify>, port: u16) {
+async fn handle_connection(
+    mut stream: TcpStream,
+    state: Arc<Mutex<MockState>>,
+    kill: Arc<Notify>,
+    port: u16,
+) {
     let mut peeked = [0u8; 2048];
     let request_line = loop {
         let count = stream.peek(&mut peeked).await.unwrap_or(0);
@@ -131,8 +153,11 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<MockState>>, 
             .and_then(|path| path.strip_prefix("/devtools/page/"))
             .map(str::to_owned);
         let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
-        let Some(Ok(message)) = socket.next().await else { return };
-        let request: serde_json::Value = serde_json::from_str(message.to_text().unwrap_or("{}")).unwrap();
+        let Some(Ok(message)) = socket.next().await else {
+            return;
+        };
+        let request: serde_json::Value =
+            serde_json::from_str(message.to_text().unwrap_or("{}")).unwrap();
         let method = request["method"].as_str().unwrap_or("").to_owned();
         state.lock().unwrap().requests.push(format!("CDP {method}"));
         let result = match (method.as_str(), &page_id) {
@@ -159,7 +184,13 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<MockState>>, 
             }
             ("Page.navigate", Some(id)) => {
                 let url = request["params"]["url"].as_str().unwrap_or("").to_owned();
-                if let Some(tab) = state.lock().unwrap().tabs.iter_mut().find(|(tab_id, _)| tab_id == id) {
+                if let Some(tab) = state
+                    .lock()
+                    .unwrap()
+                    .tabs
+                    .iter_mut()
+                    .find(|(tab_id, _)| tab_id == id)
+                {
                     tab.1 = url;
                 }
                 serde_json::json!({"frameId": "F"})
@@ -167,7 +198,11 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<MockState>>, 
             _ => return,
         };
         let reply = serde_json::json!({"id": request["id"], "result": result});
-        let _ = futures_util::SinkExt::send(&mut socket, tokio_tungstenite::tungstenite::Message::text(reply.to_string())).await;
+        let _ = futures_util::SinkExt::send(
+            &mut socket,
+            tokio_tungstenite::tungstenite::Message::text(reply.to_string()),
+        )
+        .await;
         let _ = socket.next().await;
         return;
     }
@@ -181,8 +216,15 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<MockState>>, 
         raw.extend_from_slice(&buffer[..count]);
     }
     let mut parts = request_line.split_whitespace();
-    let (method, path) = (parts.next().unwrap_or(""), parts.next().unwrap_or("").to_owned());
-    state.lock().unwrap().requests.push(format!("{method} {}", path.split('?').next().unwrap_or("")));
+    let (method, path) = (
+        parts.next().unwrap_or(""),
+        parts.next().unwrap_or("").to_owned(),
+    );
+    state
+        .lock()
+        .unwrap()
+        .requests
+        .push(format!("{method} {}", path.split('?').next().unwrap_or("")));
     let (status, body) = match (method, path.as_str()) {
         ("GET", "/json/version") => (
             200,
@@ -198,7 +240,8 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<MockState>>, 
                 .iter()
                 .map(|(id, url)| format!(r#"{{"id":"{id}","type":"page","url":"{url}"}}"#))
                 .collect();
-            let extra = r#"{"id":"W","type":"service_worker","url":"https://teams.cloud.microsoft/sw.js"}"#;
+            let extra =
+                r#"{"id":"W","type":"service_worker","url":"https://teams.cloud.microsoft/sw.js"}"#;
             (200, format!("[{},{extra}]", pages.join(",")))
         }
         ("PUT", path) if path.starts_with("/json/new?") => {
@@ -207,17 +250,26 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<Mutex<MockState>>, 
             state.opened += 1;
             let id = format!("N{}", state.opened);
             state.tabs.push((id.clone(), url.clone()));
-            (200, format!(r#"{{"id":"{id}","type":"page","url":"{url}"}}"#))
+            (
+                200,
+                format!(r#"{{"id":"{id}","type":"page","url":"{url}"}}"#),
+            )
         }
         ("GET", path) if path.starts_with("/json/close/") => {
             let id = path.trim_start_matches("/json/close/");
-            state.lock().unwrap().tabs.retain(|(tab_id, _)| tab_id != id);
+            state
+                .lock()
+                .unwrap()
+                .tabs
+                .retain(|(tab_id, _)| tab_id != id);
             (200, "Target is closing".to_owned())
         }
         _ => (404, "not found".to_owned()),
     };
-    let response =
-        format!("HTTP/1.1 {status} X\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{body}", body.len());
+    let response = format!(
+        "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{body}",
+        body.len()
+    );
     let _ = stream.write_all(response.as_bytes()).await;
     // like Chrome, keep the connection open until the client hangs up
     let _ = stream.read(&mut buffer).await;
@@ -275,7 +327,13 @@ pub async fn harness() -> Harness {
     };
     let config = Config::resolve(Platform::Linux, mock.port, &inputs).unwrap();
     let mode_file = config.mode_file.clone();
-    let launcher = Arc::new(FakeLauncher { mock: mock.clone(), requests: Mutex::default(), fail: Mutex::new(false), foreign: Mutex::default(), kills: Mutex::default() });
+    let launcher = Arc::new(FakeLauncher {
+        mock: mock.clone(),
+        requests: Mutex::default(),
+        fail: Mutex::new(false),
+        foreign: Mutex::default(),
+        kills: Mutex::default(),
+    });
     let timeouts = Timeouts {
         start: Duration::from_secs(5),
         stop: Duration::from_secs(1),
@@ -286,5 +344,11 @@ pub async fn harness() -> Harness {
         jitter_max: Duration::from_millis(20),
     };
     let browser = Browser::with_launcher(config, launcher.clone(), timeouts);
-    Harness { browser, mock, launcher, mode_file, directory }
+    Harness {
+        browser,
+        mock,
+        launcher,
+        mode_file,
+        directory,
+    }
 }

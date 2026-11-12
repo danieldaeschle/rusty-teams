@@ -22,7 +22,10 @@ pub(crate) fn call_label(method: &str, params: &serde_json::Value) -> String {
     if method != "Runtime.evaluate" {
         return method.to_owned();
     }
-    let expression = params.get("expression").and_then(serde_json::Value::as_str).unwrap_or_default();
+    let expression = params
+        .get("expression")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
     if let Some(start) = expression.find("\"url\":\"https://") {
         let rest = &expression[start + "\"url\":\"https://".len()..];
         let end = rest.find(['"', '?', '\\']).unwrap_or(rest.len());
@@ -47,7 +50,12 @@ impl CallTally {
     pub(crate) fn summary(&mut self) -> String {
         let mut counts: Vec<(String, u32)> = self.counts.drain().collect();
         counts.sort_by(|first, second| second.1.cmp(&first.1).then_with(|| first.0.cmp(&second.0)));
-        counts.iter().take(6).map(|(label, count)| format!("{label} x{count}")).collect::<Vec<_>>().join(", ")
+        counts
+            .iter()
+            .take(6)
+            .map(|(label, count)| format!("{label} x{count}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -76,7 +84,12 @@ pub(crate) struct Sleep<C> {
 
 impl<C> Default for Sleep<C> {
     fn default() -> Self {
-        Sleep { asleep: false, last_use: Instant::now(), loading: HashSet::new(), queued: HashMap::new() }
+        Sleep {
+            asleep: false,
+            last_use: Instant::now(),
+            loading: HashSet::new(),
+            queued: HashMap::new(),
+        }
     }
 }
 
@@ -130,7 +143,10 @@ impl<C> Sleep<C> {
     pub(crate) fn reset(&mut self) -> Vec<C> {
         self.asleep = false;
         self.loading.clear();
-        self.queued.drain().flat_map(|(_, commands)| commands).collect()
+        self.queued
+            .drain()
+            .flat_map(|(_, commands)| commands)
+            .collect()
     }
 }
 
@@ -139,7 +155,10 @@ mod tests {
     use super::*;
 
     fn idle() -> Activity {
-        Activity { all_parked: true, ..Activity::default() }
+        Activity {
+            all_parked: true,
+            ..Activity::default()
+        }
     }
 
     #[test]
@@ -154,14 +173,38 @@ mod tests {
     fn a_running_app_a_login_or_any_user_keeps_them_awake() {
         let sleep: Sleep<u32> = Sleep::default();
         let later = sleep.last_use + SLEEP_AFTER;
-        assert!(!sleep.should_sleep(Activity { all_parked: false, ..idle() }, later));
+        assert!(!sleep.should_sleep(
+            Activity {
+                all_parked: false,
+                ..idle()
+            },
+            later
+        ));
         for blocked in [
-            Activity { login_pending: true, ..idle() },
-            Activity { held: true, ..idle() },
-            Activity { in_flight: true, ..idle() },
-            Activity { dialogs_open: true, ..idle() },
-            Activity { subscribed: true, ..idle() },
-            Activity { restarting: true, ..idle() },
+            Activity {
+                login_pending: true,
+                ..idle()
+            },
+            Activity {
+                held: true,
+                ..idle()
+            },
+            Activity {
+                in_flight: true,
+                ..idle()
+            },
+            Activity {
+                dialogs_open: true,
+                ..idle()
+            },
+            Activity {
+                subscribed: true,
+                ..idle()
+            },
+            Activity {
+                restarting: true,
+                ..idle()
+            },
         ] {
             assert!(!sleep.should_sleep(blocked, later), "{blocked:?}");
         }
@@ -170,10 +213,16 @@ mod tests {
     #[test]
     fn calls_are_named_by_what_they_fetch() {
         let fetch = serde_json::json!({"expression": "(async () => {})({\"requests\":[{\"method\":\"GET\",\"url\":\"https://teams.cloud.microsoft/api/csa/emea/api/v1/x?y=1\"}]})"});
-        assert_eq!(call_label("Runtime.evaluate", &fetch), "teams.cloud.microsoft/api/csa");
+        assert_eq!(
+            call_label("Runtime.evaluate", &fetch),
+            "teams.cloud.microsoft/api/csa"
+        );
         let token = serde_json::json!({"expression": "x; return token;"});
         assert_eq!(call_label("Runtime.evaluate", &token), "token lookup");
-        assert_eq!(call_label("Page.reload", &serde_json::Value::Null), "Page.reload");
+        assert_eq!(
+            call_label("Page.reload", &serde_json::Value::Null),
+            "Page.reload"
+        );
         let mut tally = CallTally::default();
         tally.note("b".into());
         tally.note("a".into());
@@ -185,7 +234,14 @@ mod tests {
     #[test]
     fn the_first_blocker_is_named() {
         assert_eq!(blocker(idle()), None);
-        assert_eq!(blocker(Activity { held: true, dialogs_open: true, ..idle() }), Some("an app is held"));
+        assert_eq!(
+            blocker(Activity {
+                held: true,
+                dialogs_open: true,
+                ..idle()
+            }),
+            Some("an app is held")
+        );
     }
 
     #[test]

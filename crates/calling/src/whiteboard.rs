@@ -25,11 +25,22 @@ fn is_whiteboard(identifier: &str, subject: &str, url: Option<&str>) -> bool {
 
 pub fn content_share(body: &Value) -> Option<ContentShare> {
     let state = find_key(body, "sessionState")?;
-    let text = |key: &str| find_key(body, key).and_then(Value::as_str).unwrap_or_default().to_owned();
-    let url = state["url"].as_str().filter(|url| !url.is_empty()).map(str::to_owned);
+    let text = |key: &str| {
+        find_key(body, key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let url = state["url"]
+        .as_str()
+        .filter(|url| !url.is_empty())
+        .map(str::to_owned);
     let presenter = find_key(body, "presenter").and_then(|presenter| match presenter {
         Value::String(mri) => Some(mri.clone()),
-        other => other["id"].as_str().or_else(|| other["mri"].as_str()).map(str::to_owned),
+        other => other["id"]
+            .as_str()
+            .or_else(|| other["mri"].as_str())
+            .map(str::to_owned),
     });
     let (identifier, subject) = (text("identifier"), text("subject"));
     Some(ContentShare {
@@ -45,7 +56,9 @@ pub(crate) fn encoded(component: &str) -> String {
     component
         .bytes()
         .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
             other => format!("%{other:02X}"),
         })
         .collect()
@@ -61,11 +74,23 @@ pub fn board_url(target: &MeetingTarget, meeting_title: &str) -> String {
     )
 }
 
-pub async fn fetch_board(session: &Session, target: &MeetingTarget, meeting_title: &str) -> Result<String> {
-    let request = Request { method: Method::Get, ..Request::get(board_url(target, meeting_title)) };
-    let response = session.send(request, &Scope::new(SPACES, BOARD_SCOPE)).await?;
+pub async fn fetch_board(
+    session: &Session,
+    target: &MeetingTarget,
+    meeting_title: &str,
+) -> Result<String> {
+    let request = Request {
+        method: Method::Get,
+        ..Request::get(board_url(target, meeting_title))
+    };
+    let response = session
+        .send(request, &Scope::new(SPACES, BOARD_SCOPE))
+        .await?;
     if !response.is_success() {
-        return Err(Error::Signaling(format!("whiteboard answered HTTP {}", response.status)));
+        return Err(Error::Signaling(format!(
+            "whiteboard answered HTTP {}",
+            response.status
+        )));
     }
     response.body["url"]
         .as_str()
@@ -94,7 +119,11 @@ mod tests {
 
     #[test]
     fn a_board_url_marks_the_share_as_a_whiteboard() {
-        let parsed = content_share(&share("https://app.whiteboard.microsoft.com/me/whiteboards/x?encodedShareLink=1", "Meeting")).unwrap();
+        let parsed = content_share(&share(
+            "https://app.whiteboard.microsoft.com/me/whiteboards/x?encodedShareLink=1",
+            "Meeting",
+        ))
+        .unwrap();
         assert!(parsed.whiteboard);
         assert_eq!(parsed.presenter.as_deref(), Some("8:orgid:ana"));
         assert_eq!(parsed.session_id, "s-1");
@@ -103,8 +132,16 @@ mod tests {
 
     #[test]
     fn the_name_marks_a_whiteboard_when_the_url_does_not() {
-        assert!(content_share(&share("https://example.com/board", "Microsoft Whiteboard")).unwrap().whiteboard);
-        assert!(!content_share(&share("https://example.com/deck", "Quarterly slides")).unwrap().whiteboard);
+        assert!(
+            content_share(&share("https://example.com/board", "Microsoft Whiteboard"))
+                .unwrap()
+                .whiteboard
+        );
+        assert!(
+            !content_share(&share("https://example.com/deck", "Quarterly slides"))
+                .unwrap()
+                .whiteboard
+        );
     }
 
     #[test]
@@ -119,9 +156,16 @@ mod tests {
 
     #[test]
     fn the_board_request_names_the_meeting() {
-        let target = MeetingTarget { thread_id: "19:meeting_x@thread.v2".into(), tenant_id: "t-1".into(), organizer_id: "o-1".into(), meeting_data: None };
+        let target = MeetingTarget {
+            thread_id: "19:meeting_x@thread.v2".into(),
+            tenant_id: "t-1".into(),
+            organizer_id: "o-1".into(),
+            meeting_data: None,
+        };
         let url = board_url(&target, "Q3 plan");
-        assert!(url.starts_with("https://teams.cloud.microsoft/api/mt/emea/beta/meetings/fluidboard?"));
+        assert!(
+            url.starts_with("https://teams.cloud.microsoft/api/mt/emea/beta/meetings/fluidboard?")
+        );
         assert!(url.contains("threadId=19%3Ameeting_x%40thread.v2"));
         assert!(url.contains("messageId=0&organizerId=o-1&tenantId=t-1&meetingTitle=Q3%20plan"));
     }

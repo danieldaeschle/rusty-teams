@@ -54,7 +54,9 @@ fn known_prefix(guid: u128) -> Option<u32> {
 /// The Windows echo canceller stays: it has the exact speaker signal; AEC3 after it removes the rest before AGC2 lifts it.
 pub fn wanted_state(guid: u128) -> Option<bool> {
     match known_prefix(guid)? {
-        NOISE_SUPPRESSION | DEEP_NOISE_SUPPRESSION | GAIN_CONTROL | RANGE_COMPRESSION => Some(false),
+        NOISE_SUPPRESSION | DEEP_NOISE_SUPPRESSION | GAIN_CONTROL | RANGE_COMPRESSION => {
+            Some(false)
+        }
         BEAMFORMING => Some(true),
         ECHO_CANCELLATION => None,
         _ => None,
@@ -81,18 +83,46 @@ mod tests {
         assert_eq!(wanted_state(guid(BEAMFORMING)), Some(true));
         assert_eq!(wanted_state(guid(ECHO_CANCELLATION)), None);
         assert_eq!(wanted_state(0x1234), None);
-        let echo = MicEffect { id: guid(ECHO_CANCELLATION), enabled: true, can_set: true };
+        let echo = MicEffect {
+            id: guid(ECHO_CANCELLATION),
+            enabled: true,
+            can_set: true,
+        };
         assert!(echo.change().is_none());
-        let deep_noise = MicEffect { id: guid(DEEP_NOISE_SUPPRESSION), enabled: true, can_set: true };
+        let deep_noise = MicEffect {
+            id: guid(DEEP_NOISE_SUPPRESSION),
+            enabled: true,
+            can_set: true,
+        };
         assert_eq!(deep_noise.change(), Some(false));
-        assert_eq!(MicEffect { can_set: false, ..deep_noise }.change(), None);
-        assert_eq!(MicEffect { enabled: false, ..deep_noise }.change(), None);
+        assert_eq!(
+            MicEffect {
+                can_set: false,
+                ..deep_noise
+            }
+            .change(),
+            None
+        );
+        assert_eq!(
+            MicEffect {
+                enabled: false,
+                ..deep_noise
+            }
+            .change(),
+            None
+        );
     }
 
     #[test]
     fn known_effect_guids_get_their_names() {
-        assert_eq!(effect_name(0x6f64adbe_8211_11e2_8c70_2c27d7f001fa), "acoustic echo cancellation");
-        assert_eq!(effect_name(0x6f64add0_8211_11e2_8c70_2c27d7f001fa), "deep noise suppression");
+        assert_eq!(
+            effect_name(0x6f64adbe_8211_11e2_8c70_2c27d7f001fa),
+            "acoustic echo cancellation"
+        );
+        assert_eq!(
+            effect_name(0x6f64add0_8211_11e2_8c70_2c27d7f001fa),
+            "deep noise suppression"
+        );
         assert_eq!(effect_name(0x1234), "00000000000000000000000000001234");
     }
 }

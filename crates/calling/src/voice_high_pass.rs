@@ -36,7 +36,9 @@ impl Biquad {
     }
 
     fn process(&mut self, input: f32) -> f32 {
-        let output = self.b0 * input + self.b1 * self.x1 + self.b2 * self.x2 - self.a1 * self.y1 - self.a2 * self.y2;
+        let output = self.b0 * input + self.b1 * self.x1 + self.b2 * self.x2
+            - self.a1 * self.y1
+            - self.a2 * self.y2;
         self.x2 = self.x1;
         self.x1 = input;
         self.y2 = self.y1;
@@ -52,13 +54,21 @@ pub struct VoiceHighPass {
 
 impl VoiceHighPass {
     pub fn new() -> VoiceHighPass {
-        VoiceHighPass { sections: BUTTERWORTH_FOURTH_ORDER_Q.map(|quality| Biquad::high_pass(CUTOFF_HZ, quality)) }
+        VoiceHighPass {
+            sections: BUTTERWORTH_FOURTH_ORDER_Q
+                .map(|quality| Biquad::high_pass(CUTOFF_HZ, quality)),
+        }
     }
 
     pub fn process(&mut self, frame: &mut [i16]) {
         for sample in frame {
-            let filtered = self.sections.iter_mut().fold(f32::from(*sample), |value, section| section.process(value));
-            *sample = filtered.round().clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
+            let filtered = self
+                .sections
+                .iter_mut()
+                .fold(f32::from(*sample), |value, section| section.process(value));
+            *sample = filtered
+                .round()
+                .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
         }
     }
 }
@@ -83,8 +93,14 @@ mod tests {
             let mut output = input.clone();
             filter.process(&mut output);
             if frame_index >= 100 {
-                input_energy += input.iter().map(|sample| f64::from(*sample).powi(2)).sum::<f64>();
-                output_energy += output.iter().map(|sample| f64::from(*sample).powi(2)).sum::<f64>();
+                input_energy += input
+                    .iter()
+                    .map(|sample| f64::from(*sample).powi(2))
+                    .sum::<f64>();
+                output_energy += output
+                    .iter()
+                    .map(|sample| f64::from(*sample).powi(2))
+                    .sum::<f64>();
             }
         }
         (10.0 * (output_energy / input_energy).log10()) as f32
@@ -94,7 +110,11 @@ mod tests {
     fn speech_band_passes_and_rumble_is_cut() {
         assert!(gain_db(1000.0).abs() < 0.2, "1 kHz {}", gain_db(1000.0));
         assert!(gain_db(200.0) > -1.0, "200 Hz {}", gain_db(200.0));
-        assert!((gain_db(CUTOFF_HZ) + 3.0).abs() < 0.5, "cutoff {}", gain_db(CUTOFF_HZ));
+        assert!(
+            (gain_db(CUTOFF_HZ) + 3.0).abs() < 0.5,
+            "cutoff {}",
+            gain_db(CUTOFF_HZ)
+        );
         assert!(gain_db(60.0) < -20.0, "60 Hz {}", gain_db(60.0));
     }
 }

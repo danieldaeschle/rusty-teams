@@ -328,7 +328,9 @@ impl<R: Remote> SyncEngine<R> {
         for record in records.iter().filter(|record| record.keeps_stored_preview) {
             let stored = self.store.chat(&record.id)?;
             if stored.is_some_and(|chat| chat.last_message_preview.is_none()) {
-                let recent = self.store.messages(&record.id, None, KEPT_PREVIEW_MESSAGES)?;
+                let recent = self
+                    .store
+                    .messages(&record.id, None, KEPT_PREVIEW_MESSAGES)?;
                 self.update_chat_preview(&recent)?;
             }
         }

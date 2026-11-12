@@ -27,7 +27,9 @@ fn notice_for(
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .unwrap_or(partner_name);
-    Some(AbsenceNotice { name: name.to_owned() })
+    Some(AbsenceNotice {
+        name: name.to_owned(),
+    })
 }
 
 impl AppState {
@@ -58,7 +60,8 @@ impl AppState {
     }
 
     pub fn dismiss_absence_notice(&mut self, conversation_id: &str, cx: &mut Context<Self>) {
-        self.dismissed_absence_notices.insert(conversation_id.to_owned());
+        self.dismissed_absence_notices
+            .insert(conversation_id.to_owned());
         cx.notify();
     }
 }
@@ -70,9 +73,20 @@ mod tests {
     #[test]
     fn out_of_office_shows_the_notice_until_it_is_closed() {
         let notice = notice_for(false, Some(""), Some("Lea Schneider"), "Lea").unwrap();
-        assert_eq!(notice.text(), "Lea Schneider is out of office and may not respond");
-        assert_eq!(notice_for(true, Some(""), Some("Lea Schneider"), "Lea"), None);
+        assert_eq!(
+            notice.text(),
+            "Lea Schneider is out of office and may not respond"
+        );
+        assert_eq!(
+            notice_for(true, Some(""), Some("Lea Schneider"), "Lea"),
+            None
+        );
         assert_eq!(notice_for(false, None, Some("Lea Schneider"), "Lea"), None);
-        assert_eq!(notice_for(false, Some("Back Monday"), Some(" "), "Lea").unwrap().name, "Lea");
+        assert_eq!(
+            notice_for(false, Some("Back Monday"), Some(" "), "Lea")
+                .unwrap()
+                .name,
+            "Lea"
+        );
     }
 }

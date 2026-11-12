@@ -5,8 +5,8 @@ use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     AcceleratorKeyPressedEventHandler, AddScriptToExecuteOnDocumentCreatedCompletedHandler,
     CreateCoreWebView2ControllerCompletedHandler, LaunchingExternalUriSchemeEventHandler,
-    NewWindowRequestedEventHandler, PermissionRequestedEventHandler, WebMessageReceivedEventHandler,
-    WebResourceRequestedEventHandler, take_pwstr,
+    NewWindowRequestedEventHandler, PermissionRequestedEventHandler,
+    WebMessageReceivedEventHandler, WebResourceRequestedEventHandler, take_pwstr,
 };
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
@@ -431,11 +431,14 @@ fn allow_teams_media(webview: &ICoreWebView2) -> windows::core::Result<()> {
 }
 
 fn is_media_origin(origin: &str) -> bool {
-    MEDIA_ORIGINS.iter().any(|allowed| origin.starts_with(allowed))
+    MEDIA_ORIGINS
+        .iter()
+        .any(|allowed| origin.starts_with(allowed))
 }
 
 fn shadow_calls(webview: &ICoreWebView2) -> windows::core::Result<()> {
-    let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(|_, _| Ok(())));
+    let handler =
+        AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(|_, _| Ok(())));
     unsafe {
         webview.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(CALL_SHADOW_SCRIPT), &handler)
     }

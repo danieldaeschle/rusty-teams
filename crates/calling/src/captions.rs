@@ -45,12 +45,18 @@ pub fn parse_caption_message(payload: &[u8]) -> Vec<CaptionEntry> {
 }
 
 fn entry_from(item: &Value) -> Option<CaptionEntry> {
-    let text = item["text"].as_str().or_else(|| item["rawText"].as_str())?.trim();
+    let text = item["text"]
+        .as_str()
+        .or_else(|| item["rawText"].as_str())?
+        .trim();
     if text.is_empty() {
         return None;
     }
     let user_id = item["userId"].as_str().unwrap_or_default().to_owned();
-    let id = item["utteranceId"].as_str().or_else(|| item["id"].as_str()).map_or_else(|| user_id.clone(), str::to_owned);
+    let id = item["utteranceId"]
+        .as_str()
+        .or_else(|| item["id"].as_str())
+        .map_or_else(|| user_id.clone(), str::to_owned);
     Some(CaptionEntry {
         id,
         user_id,
@@ -72,8 +78,19 @@ pub fn recorder_features() -> Value {
     })
 }
 
-pub fn add_bot_body(from: Value, thread_id: &str, call_id: &str, organizer_name: &str, callbacks: &CallbackLinks, threadless: bool) -> Value {
-    let group_chat = if threadless { Value::Null } else { json!({"threadId": thread_id, "messageId": null}) };
+pub fn add_bot_body(
+    from: Value,
+    thread_id: &str,
+    call_id: &str,
+    organizer_name: &str,
+    callbacks: &CallbackLinks,
+    threadless: bool,
+) -> Value {
+    let group_chat = if threadless {
+        Value::Null
+    } else {
+        json!({"threadId": thread_id, "messageId": null})
+    };
     json!({
         "disableUnmute": false,
         "participants": {
@@ -120,7 +137,12 @@ impl BotAction {
 }
 
 /// The skype token is added inside the page, so the body travels without it.
-pub fn command_body(action: BotAction, own_mri: &str, participant_leg_id: &str, timestamp: &str) -> Value {
+pub fn command_body(
+    action: BotAction,
+    own_mri: &str,
+    participant_leg_id: &str,
+    timestamp: &str,
+) -> Value {
     json!({
         "timestamp": timestamp,
         "participantMri": own_mri,
@@ -146,7 +168,12 @@ pub const SPOKEN_LANGUAGES: [(&str, &str); 12] = [
     ("pl-PL", "Polish"),
 ];
 
-pub fn language_body(own_mri: &str, participant_leg_id: &str, timestamp: &str, language_tag: &str) -> Value {
+pub fn language_body(
+    own_mri: &str,
+    participant_leg_id: &str,
+    timestamp: &str,
+    language_tag: &str,
+) -> Value {
     json!({
         "timestamp": timestamp,
         "participantMri": own_mri,
@@ -213,12 +240,24 @@ impl CaptionFlow {
         self.next_for(bot, |bot| bot.active)
     }
 
-    pub fn next_for(&mut self, bot: Option<&CaptionBot>, is_active: fn(&CaptionBot) -> bool) -> CaptionStep {
+    pub fn next_for(
+        &mut self,
+        bot: Option<&CaptionBot>,
+        is_active: fn(&CaptionBot) -> bool,
+    ) -> CaptionStep {
         if !self.wanted {
-            return if std::mem::take(&mut self.started) { CaptionStep::Stop } else { CaptionStep::Wait };
+            return if std::mem::take(&mut self.started) {
+                CaptionStep::Stop
+            } else {
+                CaptionStep::Wait
+            };
         }
         let Some(bot) = bot else {
-            return if std::mem::replace(&mut self.bot_requested, true) { CaptionStep::Wait } else { CaptionStep::AddBot };
+            return if std::mem::replace(&mut self.bot_requested, true) {
+                CaptionStep::Wait
+            } else {
+                CaptionStep::AddBot
+            };
         };
         if bot.command_url.is_some() && !std::mem::replace(&mut self.started, true) {
             return CaptionStep::Start;
@@ -235,7 +274,13 @@ mod tests {
     use super::*;
 
     fn bot(command_url: bool, active: bool) -> CaptionBot {
-        CaptionBot { mri: RECORDING_BOT_MRI.into(), command_url: command_url.then(|| "https://x/v2/oncommand/1".into()), active, recording: false, audio_only: false }
+        CaptionBot {
+            mri: RECORDING_BOT_MRI.into(),
+            command_url: command_url.then(|| "https://x/v2/oncommand/1".into()),
+            active,
+            recording: false,
+            audio_only: false,
+        }
     }
 
     #[test]
@@ -247,7 +292,16 @@ mod tests {
         ]});
         let entries = parse_caption_message(message.to_string().as_bytes());
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0], CaptionEntry { id: "u1".into(), user_id: "8:orgid:ana".into(), display_name: "Ana".into(), text: "Hello there".into(), is_final: false });
+        assert_eq!(
+            entries[0],
+            CaptionEntry {
+                id: "u1".into(),
+                user_id: "8:orgid:ana".into(),
+                display_name: "Ana".into(),
+                text: "Hello there".into(),
+                is_final: false
+            }
+        );
         assert_eq!(entries[1].id, "u3");
         assert!(entries[1].is_final);
         assert_eq!(entries[1].display_name, "");
@@ -256,7 +310,10 @@ mod tests {
     #[test]
     fn text_tracks_count_and_other_messages_and_bad_json_do_not() {
         let tracks = json!({"textTracks": [{"id": "t", "text": "from a track", "userId": "x", "isFinal": true}]});
-        assert_eq!(parse_caption_message(tracks.to_string().as_bytes()).len(), 1);
+        assert_eq!(
+            parse_caption_message(tracks.to_string().as_bytes()).len(),
+            1
+        );
         assert!(parse_caption_message(br#"{"events": [{"type": "x"}]}"#).is_empty());
         assert!(parse_caption_message(b"not json").is_empty());
         assert!(parse_caption_message(&[]).is_empty());
@@ -265,10 +322,27 @@ mod tests {
     #[test]
     fn the_bot_invitation_carries_the_meeting_and_a_token_placeholder() {
         let callbacks = CallbackLinks::new("https://trouter.example/v4/f/x/", "call-1");
-        let body = add_bot_body(json!({"id": "8:orgid:me"}), "19:meeting_x@thread.v2", "call-1", "Me", &callbacks, false);
-        let direct = add_bot_body(json!({"id": "8:orgid:me"}), "19:a_b@unq.gbl.spaces", "call-1", "Me", &callbacks, true);
+        let body = add_bot_body(
+            json!({"id": "8:orgid:me"}),
+            "19:meeting_x@thread.v2",
+            "call-1",
+            "Me",
+            &callbacks,
+            false,
+        );
+        let direct = add_bot_body(
+            json!({"id": "8:orgid:me"}),
+            "19:a_b@unq.gbl.spaces",
+            "call-1",
+            "Me",
+            &callbacks,
+            true,
+        );
         assert_eq!(direct["groupChat"], Value::Null);
-        assert_eq!(direct["participantInvitationData"]["botData"]["threadId"], "19:a_b@unq.gbl.spaces");
+        assert_eq!(
+            direct["participantInvitationData"]["botData"]["threadId"],
+            "19:a_b@unq.gbl.spaces"
+        );
         let bot_data = &body["participantInvitationData"]["botData"];
         assert_eq!(body["participants"]["to"][0]["id"], RECORDING_BOT_MRI);
         assert_eq!(bot_data["mode"], "RecordingAndTranscription");
@@ -276,13 +350,28 @@ mod tests {
         assert_eq!(bot_data["callId"], "call-1");
         assert_eq!(bot_data["initiatorUserToken"], INITIATOR_TOKEN_PLACEHOLDER);
         assert_eq!(body["groupChat"]["threadId"], "19:meeting_x@thread.v2");
-        assert!(body["links"]["addParticipantFailure"].as_str().unwrap().contains("/conversation/addParticipantFailure/"));
+        assert!(
+            body["links"]["addParticipantFailure"]
+                .as_str()
+                .unwrap()
+                .contains("/conversation/addParticipantFailure/")
+        );
     }
 
     #[test]
     fn start_and_stop_commands_differ_only_in_the_action() {
-        let start = command_body(BotAction::Start, "8:orgid:me", "leg-1", "2026-10-10T08:44:12.705Z");
-        let stop = command_body(BotAction::Stop, "8:orgid:me", "leg-1", "2026-10-10T08:44:12.705Z");
+        let start = command_body(
+            BotAction::Start,
+            "8:orgid:me",
+            "leg-1",
+            "2026-10-10T08:44:12.705Z",
+        );
+        let stop = command_body(
+            BotAction::Stop,
+            "8:orgid:me",
+            "leg-1",
+            "2026-10-10T08:44:12.705Z",
+        );
         assert_eq!(start["action"], "start");
         assert_eq!(stop["action"], "stop");
         assert_eq!(start["mode"], "transcription");
@@ -298,14 +387,21 @@ mod tests {
         assert_eq!(body["action"], "setLanguage");
         assert_eq!(body["mode"], "transcription");
         assert_eq!(body["processingModes"], json!(["closedCaptions"]));
-        assert_eq!(body["actionParameters"], json!({"spokenLanguage": "de-de", "type": "setLanguage"}));
+        assert_eq!(
+            body["actionParameters"],
+            json!({"spokenLanguage": "de-de", "type": "setLanguage"})
+        );
         assert_eq!(body["participantLegId"], "leg-1");
         assert!(body.get("participantSkypeToken").is_none());
     }
 
     #[test]
     fn every_listed_language_is_a_region_tag_with_a_label() {
-        assert!(SPOKEN_LANGUAGES.iter().all(|(tag, label)| tag.len() == 5 && tag.contains('-') && !label.is_empty()));
+        assert!(
+            SPOKEN_LANGUAGES
+                .iter()
+                .all(|(tag, label)| tag.len() == 5 && tag.contains('-') && !label.is_empty())
+        );
         assert!(SPOKEN_LANGUAGES.iter().any(|(tag, _)| *tag == "en-US"));
     }
 
@@ -319,8 +415,14 @@ mod tests {
 
     #[test]
     fn the_endpoint_metadata_switches_the_caption_preference() {
-        assert_eq!(endpoint_metadata(true)["transcriptionPrefs"]["closedCaptions"], true);
-        assert_eq!(endpoint_metadata(false)["transcriptionPrefs"]["closedCaptions"], false);
+        assert_eq!(
+            endpoint_metadata(true)["transcriptionPrefs"]["closedCaptions"],
+            true
+        );
+        assert_eq!(
+            endpoint_metadata(false)["transcriptionPrefs"]["closedCaptions"],
+            false
+        );
         assert_eq!(endpoint_metadata(true)["holographicCapabilities"], 3);
     }
 

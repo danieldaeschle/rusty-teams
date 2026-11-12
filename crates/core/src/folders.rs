@@ -9,8 +9,7 @@ use chatsvc::settings::{
 use chatsvc::{
     ChannelEdit, ChannelNotificationLevel, ChannelNotifications, ChannelSettings, ChannelTarget,
     ChannelVisibility, ChatSection, ChatSectionSettings, ExistingChannel, Mailbox, NewChannel,
-    Pins, TeamAdmin, UserSettings,
-    pins::SessionTransport,
+    Pins, TeamAdmin, UserSettings, pins::SessionTransport,
 };
 use chrono::Utc;
 use serde_json::Value;

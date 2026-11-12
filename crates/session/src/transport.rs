@@ -61,8 +61,12 @@ impl Transport for CdpTransport {
     fn open(&self, app: App, with_events: bool) -> BoxFuture<'_, Result<Option<OpenedTab>>> {
         Box::pin(async move {
             let targets = list_targets(&self.endpoint).await?;
-            let Some(websocket_url) = find_app_tab(&targets, app).and_then(|target| target.websocket_url.clone()) else {
-                if wants_outlook_tab(&targets, app) && !self.outlook_requested.swap(true, Ordering::SeqCst) {
+            let Some(websocket_url) =
+                find_app_tab(&targets, app).and_then(|target| target.websocket_url.clone())
+            else {
+                if wants_outlook_tab(&targets, app)
+                    && !self.outlook_requested.swap(true, Ordering::SeqCst)
+                {
                     new_tab(&self.endpoint, App::Outlook.start_url()).await?;
                 }
                 return Ok(None);
@@ -78,11 +82,16 @@ impl Transport for CdpTransport {
                 return Ok(());
             };
             let parked = app.is_park_url(&target.url);
-            let (control, _) = open(target.websocket_url.as_deref().unwrap_or_default(), false).await?;
+            let (control, _) =
+                open(target.websocket_url.as_deref().unwrap_or_default(), false).await?;
             if parked {
-                control.call("Page.navigate", json!({"url": app.start_url()})).await?;
+                control
+                    .call("Page.navigate", json!({"url": app.start_url()}))
+                    .await?;
             } else {
-                control.call("Page.reload", json!({"ignoreCache": false})).await?;
+                control
+                    .call("Page.reload", json!({"ignoreCache": false}))
+                    .await?;
             }
             Ok(())
         })
@@ -93,7 +102,9 @@ impl Transport for CdpTransport {
             let targets = list_targets(&self.endpoint).await?;
             Ok(Diagnosis {
                 login_pending: has_login_tab(&targets),
-                app_tab_open: App::ALL.iter().any(|&app| find_app_tab(&targets, app).is_some()),
+                app_tab_open: App::ALL
+                    .iter()
+                    .any(|&app| find_app_tab(&targets, app).is_some()),
             })
         })
     }
@@ -105,7 +116,11 @@ mod tests {
     use crate::app::Target;
 
     fn page(url: &str) -> Target {
-        Target { kind: "page".to_owned(), url: url.to_owned(), websocket_url: Some("ws://tab".to_owned()) }
+        Target {
+            kind: "page".to_owned(),
+            url: url.to_owned(),
+            websocket_url: Some("ws://tab".to_owned()),
+        }
     }
 
     #[test]

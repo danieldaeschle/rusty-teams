@@ -67,7 +67,11 @@ fn declared_size(image: &ImageRef) -> Option<(u32, u32)> {
     image.width.zip(image.height)
 }
 
-fn image_size(image: &ImageRef, directory: &Directory, sent_preview: Option<&LocalImage>) -> (f32, f32) {
+fn image_size(
+    image: &ImageRef,
+    directory: &Directory,
+    sent_preview: Option<&LocalImage>,
+) -> (f32, f32) {
     let loaded = directory
         .image(&image.url)
         .and_then(|entry| entry.size)
@@ -80,7 +84,11 @@ fn image_size(image: &ImageRef, directory: &Directory, sent_preview: Option<&Loc
     fit_image_within(declared_size(image).or(loaded), max_height)
 }
 
-fn sent_preview<'a>(images: &[ImageRef], position: usize, sent_previews: &'a [LocalImage]) -> Option<&'a LocalImage> {
+fn sent_preview<'a>(
+    images: &[ImageRef],
+    position: usize,
+    sent_previews: &'a [LocalImage],
+) -> Option<&'a LocalImage> {
     if external_image_url(&images[position].url).is_some() {
         return None;
     }
@@ -149,7 +157,9 @@ fn image_view(
                 .rounded(px(IMAGE_RADIUS))
                 .object_fit(ObjectFit::Cover)
                 .when_some(sent_preview.cloned(), |remote, sent| {
-                    remote.with_loading(move || local_image(&sent, image_id.clone()).into_any_element())
+                    remote.with_loading(move || {
+                        local_image(&sent, image_id.clone()).into_any_element()
+                    })
                 }),
         )
         .on_click({
@@ -274,9 +284,11 @@ fn save_button(
 }
 
 fn file_preview(card: &FileCard, id: &str, directory: &Directory) -> Option<Stateful<Div>> {
-    let image = card
-        .preview()
-        .and_then(|preview| directory.image(&preview.url).map(|entry| entry.path.clone()));
+    let image = card.preview().and_then(|preview| {
+        directory
+            .image(&preview.url)
+            .map(|entry| entry.path.clone())
+    });
     if image.is_none() && card.kind != FileKind::Video {
         return None;
     }
@@ -288,9 +300,14 @@ fn file_preview(card: &FileCard, id: &str, directory: &Directory) -> Option<Stat
         .overflow_hidden()
         .bg(theme::code_surface());
     let frame = match image {
-        Some(path) if card.kind.is_document() && card.kind != FileKind::PowerPoint => frame
-            .bg(theme::white())
-            .child(img(bounded(path)).w_full().h(px(FILE_CARD_WIDTH * PORTRAIT_PAGE_RATIO)).object_fit(ObjectFit::Cover)),
+        Some(path) if card.kind.is_document() && card.kind != FileKind::PowerPoint => {
+            frame.bg(theme::white()).child(
+                img(bounded(path))
+                    .w_full()
+                    .h(px(FILE_CARD_WIDTH * PORTRAIT_PAGE_RATIO))
+                    .object_fit(ObjectFit::Cover),
+            )
+        }
         Some(path) => frame.child(img(bounded(path)).size_full().object_fit(match card.kind {
             FileKind::Video | FileKind::PowerPoint => ObjectFit::Cover,
             _ => ObjectFit::Contain,
@@ -561,8 +578,8 @@ mod tests {
         IMAGE_FALLBACK, Placement, file_subtitle, fit_image, fit_image_within, local_image_index,
         placement, placements, sent_preview,
     };
-    use crate::rows::LocalImage;
     use crate::render::{Block, TableCell};
+    use crate::rows::LocalImage;
     use teams_core::{FileCard, FileKind, ImageRef};
 
     fn image_ref(url: &str) -> ImageRef {
@@ -585,9 +602,13 @@ mod tests {
         let images = [image_ref("hosted-a"), image_ref(gif), image_ref("hosted-b")];
         let previews: Vec<LocalImage> = [(1, 1), (2, 2)]
             .into_iter()
-            .map(|size| LocalImage { image: std::sync::Arc::new(gpui_kit::Image::empty()), size: Some(size) })
+            .map(|size| LocalImage {
+                image: std::sync::Arc::new(gpui_kit::Image::empty()),
+                size: Some(size),
+            })
             .collect();
-        let size_at = |position| sent_preview(&images, position, &previews).and_then(|preview| preview.size);
+        let size_at =
+            |position| sent_preview(&images, position, &previews).and_then(|preview| preview.size);
         assert_eq!(size_at(0), Some((1, 1)));
         assert_eq!(size_at(1), None);
         assert_eq!(size_at(2), Some((2, 2)));

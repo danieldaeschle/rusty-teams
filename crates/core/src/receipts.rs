@@ -242,7 +242,9 @@ impl<R: Remote> SyncEngine<R> {
         self.store.set_read_horizons(conversation_id, &horizons)?;
         locked(&self.receipts.read_from_store).insert(conversation_id.to_owned());
         let chat = self.store.chat(conversation_id)?;
-        let is_meeting = chat.as_ref().is_some_and(|chat| chat.kind == MEETING_CHAT_KIND);
+        let is_meeting = chat
+            .as_ref()
+            .is_some_and(|chat| chat.kind == MEETING_CHAT_KIND);
         let members = chat.map(|chat| chat.members).unwrap_or_default();
         let fresh = build(&my_user_id, &horizons, &members)
             .or_else(|| is_meeting.then(|| sent_only(&my_user_id)));

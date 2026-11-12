@@ -66,7 +66,8 @@ pub struct CalendarView {
 impl CalendarView {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         let observation = cx.observe(&state, |_, _, cx| cx.notify());
-        let agent_observation = crate::agent_api::handle(cx).map(|api| cx.observe(&api, |_, _, cx| cx.notify()));
+        let agent_observation =
+            crate::agent_api::handle(cx).map(|api| cx.observe(&api, |_, _, cx| cx.notify()));
         CalendarView {
             state,
             scroll: ScrollHandle::new(),

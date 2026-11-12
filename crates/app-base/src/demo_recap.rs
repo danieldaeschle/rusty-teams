@@ -9,13 +9,37 @@ const SHORT_EXPIRY_DAYS: i64 = 5;
 const LONG_EXPIRY_DAYS: i64 = 58;
 
 const LINES: [(&str, f64, &str); 7] = [
-    ("Jonas Ortega", 4.0, "Morning everyone. Quick round, then we are done in ten."),
-    ("Priya Nair", 21.0, "Yesterday I finished the export flow. Today I pick up the retry logic."),
-    ("Mara Lindqvist", 49.0, "I am blocked on the staging certificate. Can someone ping IT?"),
-    ("Jonas Ortega", 63.0, "I will ping them right after this. Anything else on the release?"),
-    ("Tobias Klein", 88.0, "The release notes are drafted, I need a second pair of eyes."),
+    (
+        "Jonas Ortega",
+        4.0,
+        "Morning everyone. Quick round, then we are done in ten.",
+    ),
+    (
+        "Priya Nair",
+        21.0,
+        "Yesterday I finished the export flow. Today I pick up the retry logic.",
+    ),
+    (
+        "Mara Lindqvist",
+        49.0,
+        "I am blocked on the staging certificate. Can someone ping IT?",
+    ),
+    (
+        "Jonas Ortega",
+        63.0,
+        "I will ping them right after this. Anything else on the release?",
+    ),
+    (
+        "Tobias Klein",
+        88.0,
+        "The release notes are drafted, I need a second pair of eyes.",
+    ),
     ("Priya Nair", 104.0, "I can review them before lunch."),
-    ("Jonas Ortega", 121.0, "Great. Thanks all, see you tomorrow."),
+    (
+        "Jonas Ortega",
+        121.0,
+        "Great. Thanks all, see you tomorrow.",
+    ),
 ];
 
 pub fn occurrences(conversation_id: &str, now: DateTime<Utc>) -> Vec<Occurrence> {
@@ -28,9 +52,7 @@ pub fn occurrences(conversation_id: &str, now: DateTime<Utc>) -> Vec<Occurrence>
             message_id: format!("demo-recap-{days_ago}"),
             started_at: Some(now - Duration::days(days_ago) - Duration::hours(1)),
             recording_url: format!("{DEMO_RECORDING_URL}-{days_ago}.mp4"),
-            recording_name: Some(format!(
-                "Daily standup-{days_ago}-Meeting Recording.mp4"
-            )),
+            recording_name: Some(format!("Daily standup-{days_ago}-Meeting Recording.mp4")),
             duration_seconds: Some(920 + days_ago as u64 * 65),
             organizer_id: Some(ORGANIZER_ID.to_owned()),
             audio_only: false,

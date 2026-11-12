@@ -123,7 +123,11 @@ pub fn set_enabled(name: &str, enabled: bool) -> io::Result<()> {
         }
     } else {
         match unsafe {
-            RegDeleteKeyValueW(HKEY_CURRENT_USER, PCWSTR(key.as_ptr()), PCWSTR(value.as_ptr()))
+            RegDeleteKeyValueW(
+                HKEY_CURRENT_USER,
+                PCWSTR(key.as_ptr()),
+                PCWSTR(value.as_ptr()),
+            )
         } {
             ERROR_FILE_NOT_FOUND => return Ok(()),
             status => status,
@@ -167,7 +171,10 @@ mod tests {
     #[test]
     fn the_start_command_quotes_the_path_and_marks_the_autostart() {
         let command = launch_command(Path::new("/opt/rusty teams/teams"));
-        assert_eq!(command, format!("\"/opt/rusty teams/teams\" {AUTOSTART_FLAG}"));
+        assert_eq!(
+            command,
+            format!("\"/opt/rusty teams/teams\" {AUTOSTART_FLAG}")
+        );
         let entry = desktop_entry("Rusty Teams", Path::new("/opt/teams"));
         assert!(entry.starts_with("[Desktop Entry]\n"));
         assert!(entry.contains(&format!("Exec=\"/opt/teams\" {AUTOSTART_FLAG}\n")));
@@ -176,7 +183,10 @@ mod tests {
 
     #[test]
     fn only_the_autostart_flag_marks_a_background_start() {
-        assert!(launched_by_autostart(["--demo".into(), AUTOSTART_FLAG.into()]));
+        assert!(launched_by_autostart([
+            "--demo".into(),
+            AUTOSTART_FLAG.into()
+        ]));
         assert!(!launched_by_autostart(["--demo".to_owned()]));
     }
 }

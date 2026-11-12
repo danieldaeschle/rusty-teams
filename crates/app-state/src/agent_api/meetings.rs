@@ -7,7 +7,10 @@ use super::handle;
 use crate::app_state::AppHandle;
 use crate::notice::NoticeAction;
 
-pub fn unannounced<'a>(announced: &HashSet<String>, pending: &'a [MeetingProposal]) -> Vec<&'a MeetingProposal> {
+pub fn unannounced<'a>(
+    announced: &HashSet<String>,
+    pending: &'a [MeetingProposal],
+) -> Vec<&'a MeetingProposal> {
     pending
         .iter()
         .filter(|proposal| !announced.contains(&proposal.id))
@@ -41,7 +44,8 @@ pub fn discard_meeting(proposal_id: &str, cx: &mut App) {
         return;
     };
     api.update(cx, |api, cx| {
-        api.hub.resolve_meeting(proposal_id, MeetingOutcome::Discarded, None);
+        api.hub
+            .resolve_meeting(proposal_id, MeetingOutcome::Discarded, None);
         cx.notify();
     });
 }
@@ -60,7 +64,13 @@ pub fn create_meeting(proposal_id: &str, cx: &mut App) {
     api.update(cx, |_, cx| cx.notify());
     if !hub.policy().can_organize_meetings() {
         hub.resolve_meeting(&proposal.id, MeetingOutcome::Discarded, None);
-        raise(format!("Organizing meetings is off - {} was not created", proposal.draft.subject), cx);
+        raise(
+            format!(
+                "Organizing meetings is off - {} was not created",
+                proposal.draft.subject
+            ),
+            cx,
+        );
         return;
     }
     if demo {
@@ -69,18 +79,18 @@ pub fn create_meeting(proposal_id: &str, cx: &mut App) {
     }
     let draft = proposal.draft.clone();
     let receiver = crate::runtime::spawn(async move { source.create_meeting(draft).await });
-    cx.spawn(async move |cx| {
-        match receiver.await {
-            Ok(Ok(created)) => hub.resolve_meeting(&proposal.id, MeetingOutcome::Created, created.join_url),
-            outcome => {
-                let reason = match outcome {
-                    Ok(Err(error)) => error.to_string(),
-                    _ => "cancelled".to_owned(),
-                };
-                hub.resolve_meeting(&proposal.id, MeetingOutcome::Failed, None);
-                let text = format!("Could not create {}: {reason}", proposal.draft.subject);
-                cx.update(|cx| raise(text, cx));
-            }
+    cx.spawn(async move |cx| match receiver.await {
+        Ok(Ok(created)) => {
+            hub.resolve_meeting(&proposal.id, MeetingOutcome::Created, created.join_url)
+        }
+        outcome => {
+            let reason = match outcome {
+                Ok(Err(error)) => error.to_string(),
+                _ => "cancelled".to_owned(),
+            };
+            hub.resolve_meeting(&proposal.id, MeetingOutcome::Failed, None);
+            let text = format!("Could not create {}: {reason}", proposal.draft.subject);
+            cx.update(|cx| raise(text, cx));
         }
     })
     .detach();
@@ -88,7 +98,10 @@ pub fn create_meeting(proposal_id: &str, cx: &mut App) {
 
 fn raise(text: String, cx: &mut App) {
     if let Some(handle) = cx.try_global::<AppHandle>() {
-        handle.0.clone().update(cx, |state, cx| state.raise_notice(text, None, cx));
+        handle
+            .0
+            .clone()
+            .update(cx, |state, cx| state.raise_notice(text, None, cx));
     }
 }
 
@@ -121,7 +134,10 @@ mod tests {
     fn only_new_meeting_proposals_are_announced() {
         let pending = [proposal("a"), proposal("b")];
         let announced = HashSet::from(["a".to_owned()]);
-        let fresh: Vec<&str> = unannounced(&announced, &pending).iter().map(|proposal| proposal.id.as_str()).collect();
+        let fresh: Vec<&str> = unannounced(&announced, &pending)
+            .iter()
+            .map(|proposal| proposal.id.as_str())
+            .collect();
         assert_eq!(fresh, ["b"]);
     }
 }

@@ -153,7 +153,12 @@ impl Roster {
                 }
                 continue;
             }
-            let member = member_from(mri, participant, version, known.map(|index| &self.members[index]));
+            let member = member_from(
+                mri,
+                participant,
+                version,
+                known.map(|index| &self.members[index]),
+            );
             match known {
                 Some(index) => self.members[index] = member,
                 None => self.members.push(member),
@@ -166,8 +171,12 @@ impl Roster {
     pub fn apply_snapshot(&mut self, snapshot: &Value) -> bool {
         let before = self.clone();
         self.apply(snapshot);
-        if let (Some(sequence), Some(listed)) = (snapshot["sequenceNumber"].as_u64(), snapshot["participants"].as_object()) {
-            self.members.retain(|member| listed.contains_key(&member.mri) || member.version > sequence);
+        if let (Some(sequence), Some(listed)) = (
+            snapshot["sequenceNumber"].as_u64(),
+            snapshot["participants"].as_object(),
+        ) {
+            self.members
+                .retain(|member| listed.contains_key(&member.mri) || member.version > sequence);
         }
         *self != before
     }
@@ -175,20 +184,32 @@ impl Roster {
     pub fn transfer_replacement(&self, own_mri: &str) -> Option<Replacement> {
         self.members
             .iter()
-            .filter(|member| member.mri != own_mri && !member.mri.starts_with(BOT_PREFIX) && !member.in_lobby)
+            .filter(|member| {
+                member.mri != own_mri && !member.mri.starts_with(BOT_PREFIX) && !member.in_lobby
+            })
             .find_map(|member| member.replacement.clone())
     }
 
     pub fn hand_of(&self, mri: &str) -> Option<&RaisedHand> {
-        self.members.iter().find(|member| member.mri == mri)?.hand.as_ref()
+        self.members
+            .iter()
+            .find(|member| member.mri == mri)?
+            .hand
+            .as_ref()
     }
 
     pub fn spotlight_of(&self, mri: &str) -> Option<&Spotlight> {
-        self.members.iter().find(|member| member.mri == mri)?.spotlight.as_ref()
+        self.members
+            .iter()
+            .find(|member| member.mri == mri)?
+            .spotlight
+            .as_ref()
     }
 
     pub fn caption_bot(&self) -> Option<&CaptionBot> {
-        self.members.iter().find_map(|member| member.captions.as_ref())
+        self.members
+            .iter()
+            .find_map(|member| member.captions.as_ref())
     }
 
     pub fn name_of(&self, user_id: &str) -> Option<&str> {
@@ -201,16 +222,25 @@ impl Roster {
     }
 
     pub fn is_organizer(&self, mri: &str) -> bool {
-        self.members.iter().any(|member| member.mri == mri && member.organizer)
+        self.members
+            .iter()
+            .any(|member| member.mri == mri && member.organizer)
     }
 
     /// Teams web admits everyone by listing them: the server's `admitAll` leaves anonymous guests waiting.
     pub fn lobby_mris(&self) -> Vec<String> {
-        self.members.iter().filter(|member| member.in_lobby).map(|member| member.mri.clone()).collect()
+        self.members
+            .iter()
+            .filter(|member| member.in_lobby)
+            .map(|member| member.mri.clone())
+            .collect()
     }
 
     pub fn is_in_lobby(&self, mri: &str) -> Option<bool> {
-        self.members.iter().find(|member| member.mri == mri).map(|member| member.in_lobby)
+        self.members
+            .iter()
+            .find(|member| member.mri == mri)
+            .map(|member| member.in_lobby)
     }
 
     pub fn stream_summaries(&self, mri: &str) -> Vec<String> {
@@ -222,7 +252,10 @@ impl Roster {
     }
 
     pub fn screen_source_of(&self, mri: &str) -> Option<u32> {
-        self.members.iter().find(|member| member.mri == mri)?.screen_source
+        self.members
+            .iter()
+            .find(|member| member.mri == mri)?
+            .screen_source
     }
 
     pub fn video_candidates(&self, own_mri: &str) -> Vec<(String, u32)> {
@@ -243,7 +276,12 @@ impl Roster {
     pub fn mris_for_sources(&self, sources: &[u32]) -> Vec<String> {
         self.members
             .iter()
-            .filter(|member| member.audio_sources.iter().any(|source| sources.contains(source)))
+            .filter(|member| {
+                member
+                    .audio_sources
+                    .iter()
+                    .any(|source| sources.contains(source))
+            })
             .map(|member| member.mri.clone())
             .collect()
     }
@@ -277,15 +315,24 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
         .as_object()
         .map(|endpoints| endpoints.values().collect())
         .unwrap_or_default();
-    let in_call: Vec<&&Value> = endpoints.iter().filter(|endpoint| endpoint.get("call").is_some()).collect();
-    let in_lobby = in_call.is_empty() && endpoints.iter().any(|endpoint| endpoint.get("lobby").is_some());
+    let in_call: Vec<&&Value> = endpoints
+        .iter()
+        .filter(|endpoint| endpoint.get("call").is_some())
+        .collect();
+    let in_lobby = in_call.is_empty()
+        && endpoints
+            .iter()
+            .any(|endpoint| endpoint.get("lobby").is_some());
     let muted = !in_call.is_empty() && in_call.iter().all(|endpoint| endpoint_muted(endpoint));
     let audio_sources = in_call
         .iter()
         .flat_map(|endpoint| audio_streams(endpoint))
         .filter_map(|stream| source_id(&stream["sourceId"]))
         .collect();
-    let role = ROLE_KEYS.iter().filter_map(|key| participant[*key].as_str()).find_map(MeetingRole::parse);
+    let role = ROLE_KEYS
+        .iter()
+        .filter_map(|key| participant[*key].as_str())
+        .find_map(MeetingRole::parse);
     Member {
         mri: mri.to_owned(),
         display_name,
@@ -305,14 +352,23 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
             camera_blocked: published_state(participant, &endpoints, CAMERA_BLOCKED),
             camera_released: published_state(participant, &endpoints, CAMERA_RELEASED),
         },
-        captions: mri.starts_with(BOT_PREFIX).then(|| caption_bot(mri, &endpoints)).flatten(),
-        replacement: in_call.iter().copied().chain(&endpoints).find_map(|endpoint| leg_replacement(endpoint)),
+        captions: mri
+            .starts_with(BOT_PREFIX)
+            .then(|| caption_bot(mri, &endpoints))
+            .flatten(),
+        replacement: in_call
+            .iter()
+            .copied()
+            .chain(&endpoints)
+            .find_map(|endpoint| leg_replacement(endpoint)),
         version,
     }
 }
 
 fn leg_replacement(endpoint: &Value) -> Option<Replacement> {
-    let link = endpoint["callLinks"]["replacement"].as_str().filter(|link| !link.is_empty())?;
+    let link = endpoint["callLinks"]["replacement"]
+        .as_str()
+        .filter(|link| !link.is_empty())?;
     Some(Replacement {
         link: link.to_owned(),
         participant_id: endpoint["participantId"].as_str().map(str::to_owned),
@@ -320,16 +376,43 @@ fn leg_replacement(endpoint: &Value) -> Option<Replacement> {
 }
 
 fn caption_bot(mri: &str, endpoints: &[&Value]) -> Option<CaptionBot> {
-    let metadata: Vec<&Value> = endpoints.iter().map(|endpoint| &endpoint["endpointMetadata"]).filter(|metadata| metadata.is_object()).collect();
-    let command_url = metadata.iter().find_map(|metadata| metadata["commandUrl"].as_str()).map(str::to_owned);
-    let known = command_url.is_some() || metadata.iter().any(|metadata| metadata["processingModes"].is_object());
-    let active = metadata.iter().any(|metadata| metadata["processingModes"]["closedCaptions"]["state"].as_str() == Some("Active"));
-    let recording = metadata.iter().any(|metadata| metadata["processingModes"]["recording"]["state"].as_str() == Some("Active"));
-    let audio_only = metadata.iter().any(|metadata| metadata["processingModes"]["recording"]["properties"]["recordVideo"].as_str() == Some("False"));
-    known.then(|| CaptionBot { mri: mri.to_owned(), command_url, active, recording, audio_only })
+    let metadata: Vec<&Value> = endpoints
+        .iter()
+        .map(|endpoint| &endpoint["endpointMetadata"])
+        .filter(|metadata| metadata.is_object())
+        .collect();
+    let command_url = metadata
+        .iter()
+        .find_map(|metadata| metadata["commandUrl"].as_str())
+        .map(str::to_owned);
+    let known = command_url.is_some()
+        || metadata
+            .iter()
+            .any(|metadata| metadata["processingModes"].is_object());
+    let active = metadata.iter().any(|metadata| {
+        metadata["processingModes"]["closedCaptions"]["state"].as_str() == Some("Active")
+    });
+    let recording = metadata.iter().any(|metadata| {
+        metadata["processingModes"]["recording"]["state"].as_str() == Some("Active")
+    });
+    let audio_only = metadata.iter().any(|metadata| {
+        metadata["processingModes"]["recording"]["properties"]["recordVideo"].as_str()
+            == Some("False")
+    });
+    known.then(|| CaptionBot {
+        mri: mri.to_owned(),
+        command_url,
+        active,
+        recording,
+        audio_only,
+    })
 }
 
-fn published_state(participant: &Value, endpoints: &[&Value], state_type: &str) -> Option<PublishedState> {
+fn published_state(
+    participant: &Value,
+    endpoints: &[&Value],
+    state_type: &str,
+) -> Option<PublishedState> {
     std::iter::once(participant)
         .chain(endpoints.iter().copied())
         .flat_map(|holder| holder["publishedStates"].as_array().into_iter().flatten())
@@ -340,14 +423,22 @@ fn published_state(participant: &Value, endpoints: &[&Value], state_type: &str) 
                 Value::Null => return None,
                 other => other.to_string(),
             };
-            Some(PublishedState { state_id, rank: state["typeRank"].as_u64().unwrap_or(u64::MAX) })
+            Some(PublishedState {
+                state_id,
+                rank: state["typeRank"].as_u64().unwrap_or(u64::MAX),
+            })
         })
 }
 
 fn stream_summaries(in_call: &[&&Value]) -> Vec<String> {
     in_call
         .iter()
-        .flat_map(|endpoint| endpoint["call"]["mediaStreams"].as_array().into_iter().flatten())
+        .flat_map(|endpoint| {
+            endpoint["call"]["mediaStreams"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
         .map(|stream| {
             format!(
                 "{} source {} {} request {}",
@@ -363,9 +454,18 @@ fn stream_summaries(in_call: &[&&Value]) -> Vec<String> {
 fn sending_source(in_call: &[&&Value], stream_type: &str) -> Option<u32> {
     in_call
         .iter()
-        .flat_map(|endpoint| endpoint["call"]["mediaStreams"].as_array().into_iter().flatten())
+        .flat_map(|endpoint| {
+            endpoint["call"]["mediaStreams"]
+                .as_array()
+                .into_iter()
+                .flatten()
+        })
         .filter(|stream| stream["type"].as_str() == Some(stream_type))
-        .filter(|stream| stream["direction"].as_str().is_some_and(|direction| SENDING_DIRECTIONS.contains(&direction)))
+        .filter(|stream| {
+            stream["direction"]
+                .as_str()
+                .is_some_and(|direction| SENDING_DIRECTIONS.contains(&direction))
+        })
         .find_map(|stream| source_id(&stream["sourceId"]))
 }
 
@@ -394,9 +494,15 @@ mod tests {
     #[test]
     fn a_direct_call_lists_both_people_until_the_mixer_reports() {
         let mut roster = Roster::default();
-        assert!(roster.apply(&direct_roster(&[("8:orgid:me", "Me"), ("8:orgid:bea", "Bea")])));
+        assert!(roster.apply(&direct_roster(&[
+            ("8:orgid:me", "Me"),
+            ("8:orgid:bea", "Bea")
+        ])));
         assert_eq!(roster.members().len(), 2);
-        assert!(!roster.apply(&direct_roster(&[("8:orgid:me", "Me"), ("8:orgid:bea", "Bea")])));
+        assert!(!roster.apply(&direct_roster(&[
+            ("8:orgid:me", "Me"),
+            ("8:orgid:bea", "Bea")
+        ])));
     }
 
     use serde_json::json;
@@ -428,8 +534,15 @@ mod tests {
             "8:orgid:b": participant("Bo", 1, "active", true, 301),
         }))));
         assert_eq!(roster.members().len(), 2);
-        assert!(roster.members().iter().any(|member| member.display_name == "Bo" && member.muted));
-        assert!(roster.apply(&delta(json!({"8:orgid:b": participant("Bo", 2, "inactive", true, 301)}))));
+        assert!(
+            roster
+                .members()
+                .iter()
+                .any(|member| member.display_name == "Bo" && member.muted)
+        );
+        assert!(roster.apply(&delta(
+            json!({"8:orgid:b": participant("Bo", 2, "inactive", true, 301)})
+        )));
         assert_eq!(roster.members().len(), 1);
         assert_eq!(roster.members()[0].mri, "8:orgid:a");
     }
@@ -437,8 +550,12 @@ mod tests {
     #[test]
     fn older_versions_are_ignored() {
         let mut roster = Roster::default();
-        roster.apply(&delta(json!({"8:orgid:a": participant("Ana", 5, "active", false, 201)})));
-        let changed = roster.apply(&delta(json!({"8:orgid:a": participant("Old", 4, "active", true, 201)})));
+        roster.apply(&delta(
+            json!({"8:orgid:a": participant("Ana", 5, "active", false, 201)}),
+        ));
+        let changed = roster.apply(&delta(
+            json!({"8:orgid:a": participant("Old", 4, "active", true, 201)}),
+        ));
         assert!(!changed);
         assert_eq!(roster.members()[0].display_name, "Ana");
         assert!(!roster.members()[0].muted);
@@ -469,7 +586,9 @@ mod tests {
             "endpoints": {"ep": {"lobby": {"mediaStreams": []}}},
         }})));
         assert_eq!(roster.is_in_lobby("8:orgid:me"), Some(true));
-        roster.apply(&delta(json!({"8:orgid:me": participant("Me", 2, "active", true, 201)})));
+        roster.apply(&delta(
+            json!({"8:orgid:me": participant("Me", 2, "active", true, 201)}),
+        ));
         assert_eq!(roster.is_in_lobby("8:orgid:me"), Some(false));
         assert_eq!(roster.is_in_lobby("8:orgid:nobody"), None);
     }
@@ -485,13 +604,20 @@ mod tests {
         })));
         let mut waiting_mris = roster.lobby_mris();
         waiting_mris.sort();
-        assert_eq!(waiting_mris, vec!["8:teamsvisitor:one".to_owned(), "8:teamsvisitor:two".to_owned()]);
+        assert_eq!(
+            waiting_mris,
+            vec![
+                "8:teamsvisitor:one".to_owned(),
+                "8:teamsvisitor:two".to_owned()
+            ]
+        );
     }
 
     #[test]
     fn lobby_counts_come_from_participant_counts() {
         let mut roster = Roster::default();
-        roster.apply(&json!({"participantCounts": {"lobbyParticipants": 3, "totalParticipants": 5}}));
+        roster
+            .apply(&json!({"participantCounts": {"lobbyParticipants": 3, "totalParticipants": 5}}));
         assert_eq!(roster.lobby_count, 3);
     }
 
@@ -502,12 +628,17 @@ mod tests {
             "8:orgid:a": participant("Ana", 1, "active", false, 201),
             "8:orgid:b": participant("Bo", 1, "active", false, 301),
         })));
-        assert_eq!(roster.mris_for_sources(&[301]), vec!["8:orgid:b".to_owned()]);
+        assert_eq!(
+            roster.mris_for_sources(&[301]),
+            vec!["8:orgid:b".to_owned()]
+        );
         assert!(roster.mris_for_sources(&[999]).is_empty());
     }
 
     fn sending(mut person: Value, video: Option<u32>, screen: Option<u32>) -> Value {
-        let streams = person["endpoints"]["ep"]["call"]["mediaStreams"].as_array_mut().unwrap();
+        let streams = person["endpoints"]["ep"]["call"]["mediaStreams"]
+            .as_array_mut()
+            .unwrap();
         streams.clear();
         streams.push(json!({"type": "audio", "label": "main-audio", "sourceId": 201, "direction": "sendrecv"}));
         streams.push(json!({"type": "video", "label": "main-video", "sourceId": video.unwrap_or(202), "direction": if video.is_some() { "sendonly" } else { "inactive" }}));
@@ -524,13 +655,37 @@ mod tests {
             "8:orgid:b": sending(participant("Bo", 1, "active", false, 401), None, None),
             "8:orgid:c": sending(participant("Cy", 1, "active", false, 501), None, Some(512)),
         })));
-        assert_eq!(roster.video_candidates("8:orgid:me"), vec![("8:orgid:a".to_owned(), 302)]);
-        assert_eq!(roster.screen_share("8:orgid:me"), Some(("8:orgid:c".to_owned(), 512)));
+        assert_eq!(
+            roster.video_candidates("8:orgid:me"),
+            vec![("8:orgid:a".to_owned(), 302)]
+        );
+        assert_eq!(
+            roster.screen_share("8:orgid:me"),
+            Some(("8:orgid:c".to_owned(), 512))
+        );
         assert_eq!(roster.screen_share("8:orgid:c"), None);
         let entries = roster.entries();
-        assert!(entries.iter().find(|entry| entry.display_name == "Ana").unwrap().has_video);
-        assert!(!entries.iter().find(|entry| entry.display_name == "Bo").unwrap().has_video);
-        assert!(entries.iter().find(|entry| entry.display_name == "Cy").unwrap().sharing);
+        assert!(
+            entries
+                .iter()
+                .find(|entry| entry.display_name == "Ana")
+                .unwrap()
+                .has_video
+        );
+        assert!(
+            !entries
+                .iter()
+                .find(|entry| entry.display_name == "Bo")
+                .unwrap()
+                .has_video
+        );
+        assert!(
+            entries
+                .iter()
+                .find(|entry| entry.display_name == "Cy")
+                .unwrap()
+                .sharing
+        );
     }
 
     fn with_hand(mut person: Value, state_id: &str, rank: u64) -> Value {
@@ -549,18 +704,35 @@ mod tests {
             "8:orgid:b": with_hand(participant("Bo", 1, "active", false, 301), "s-2", 1),
             "8:orgid:c": participant("Cy", 1, "active", false, 401),
         })));
-        assert_eq!(roster.hand_of("8:orgid:a"), Some(&RaisedHand { state_id: "s-1".into(), rank: 2 }));
+        assert_eq!(
+            roster.hand_of("8:orgid:a"),
+            Some(&RaisedHand {
+                state_id: "s-1".into(),
+                rank: 2
+            })
+        );
         assert_eq!(roster.hand_of("8:orgid:b").map(|hand| hand.rank), Some(1));
         assert_eq!(roster.hand_of("8:orgid:c"), None);
         let entries = roster.entries();
-        assert!(entries.iter().find(|entry| entry.display_name == "Bo").unwrap().hand.is_some());
+        assert!(
+            entries
+                .iter()
+                .find(|entry| entry.display_name == "Bo")
+                .unwrap()
+                .hand
+                .is_some()
+        );
     }
 
     #[test]
     fn lowering_removes_the_key_and_the_hand() {
         let mut roster = Roster::default();
-        roster.apply(&delta(json!({"8:orgid:a": with_hand(participant("Ana", 1, "active", false, 201), "s-1", 1)})));
-        assert!(roster.apply(&delta(json!({"8:orgid:a": participant("Ana", 2, "active", false, 201)}))));
+        roster.apply(&delta(
+            json!({"8:orgid:a": with_hand(participant("Ana", 1, "active", false, 201), "s-1", 1)}),
+        ));
+        assert!(roster.apply(&delta(
+            json!({"8:orgid:a": participant("Ana", 2, "active", false, 201)})
+        )));
         assert_eq!(roster.hand_of("8:orgid:a"), None);
     }
 
@@ -568,15 +740,24 @@ mod tests {
     fn endpoint_level_published_states_count_too() {
         let mut roster = Roster::default();
         let mut person = participant("Ana", 1, "active", false, 201);
-        person["endpoints"]["ep"]["publishedStates"] = json!([{"stateType": "raiseHands", "stateId": 7, "typeRank": 3}]);
+        person["endpoints"]["ep"]["publishedStates"] =
+            json!([{"stateType": "raiseHands", "stateId": 7, "typeRank": 3}]);
         roster.apply(&delta(json!({"8:orgid:a": person})));
-        assert_eq!(roster.hand_of("8:orgid:a"), Some(&RaisedHand { state_id: "7".into(), rank: 3 }));
+        assert_eq!(
+            roster.hand_of("8:orgid:a"),
+            Some(&RaisedHand {
+                state_id: "7".into(),
+                rank: 3
+            })
+        );
     }
 
     #[test]
     fn missing_name_keeps_the_known_one() {
         let mut roster = Roster::default();
-        roster.apply(&delta(json!({"8:orgid:a": participant("Ana", 1, "active", false, 201)})));
+        roster.apply(&delta(
+            json!({"8:orgid:a": participant("Ana", 1, "active", false, 201)}),
+        ));
         roster.apply(&delta(json!({"8:orgid:a": {"version": 2, "state": "active", "endpoints": {"ep": {"call": {}}}}})));
         assert_eq!(roster.members()[0].display_name, "Ana");
     }
@@ -596,12 +777,24 @@ mod tests {
         body["participantCounts"] = json!({"lobbyParticipants": 2});
         roster.apply(&body);
         assert_eq!(roster.lobby_count, 2);
-        let waiting: Vec<String> = roster.entries().into_iter().filter(|entry| entry.in_lobby).map(|entry| entry.display_name).collect();
-        assert_eq!(waiting, vec!["Gast Eins".to_owned(), "Gast Zwei".to_owned()]);
+        let waiting: Vec<String> = roster
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.in_lobby)
+            .map(|entry| entry.display_name)
+            .collect();
+        assert_eq!(
+            waiting,
+            vec!["Gast Eins".to_owned(), "Gast Zwei".to_owned()]
+        );
         assert!(roster.video_candidates("8:orgid:me").is_empty());
-        roster.apply(&delta(json!({"8:orgid:g1": participant("Gast Eins", 2, "active", true, 301)})));
+        roster.apply(&delta(
+            json!({"8:orgid:g1": participant("Gast Eins", 2, "active", true, 301)}),
+        ));
         assert_eq!(roster.is_in_lobby("8:orgid:g1"), Some(false));
-        roster.apply(&delta(json!({"8:orgid:g2": participant("Gast Zwei", 2, "inactive", true, 401)})));
+        roster.apply(&delta(
+            json!({"8:orgid:g2": participant("Gast Zwei", 2, "inactive", true, 401)}),
+        ));
         assert_eq!(roster.is_in_lobby("8:orgid:g2"), None);
     }
 
@@ -617,11 +810,27 @@ mod tests {
             "8:orgid:a": with_spotlight(participant("Ana", 1, "active", false, 201), "sp-1", 1),
             "8:orgid:b": participant("Bo", 1, "active", false, 301),
         })));
-        assert_eq!(roster.spotlight_of("8:orgid:a"), Some(&Spotlight { state_id: "sp-1".into(), rank: 1 }));
+        assert_eq!(
+            roster.spotlight_of("8:orgid:a"),
+            Some(&Spotlight {
+                state_id: "sp-1".into(),
+                rank: 1
+            })
+        );
         assert_eq!(roster.spotlight_of("8:orgid:b"), None);
         assert_eq!(roster.hand_of("8:orgid:a"), None);
-        assert!(roster.entries().iter().find(|entry| entry.display_name == "Ana").unwrap().spotlight.is_some());
-        roster.apply(&delta(json!({"8:orgid:a": participant("Ana", 2, "active", false, 201)})));
+        assert!(
+            roster
+                .entries()
+                .iter()
+                .find(|entry| entry.display_name == "Ana")
+                .unwrap()
+                .spotlight
+                .is_some()
+        );
+        roster.apply(&delta(
+            json!({"8:orgid:a": participant("Ana", 2, "active", false, 201)}),
+        ));
         assert_eq!(roster.spotlight_of("8:orgid:a"), None);
     }
 
@@ -635,7 +844,9 @@ mod tests {
         presenter["role"] = json!("admin");
         let mut co_organizer = participant("Bo", 1, "active", false, 401);
         co_organizer["meetingRole"] = json!("coorganizer");
-        roster.apply(&delta(json!({"8:orgid:me": host, "8:orgid:a": presenter, "8:orgid:b": co_organizer})));
+        roster.apply(&delta(
+            json!({"8:orgid:me": host, "8:orgid:a": presenter, "8:orgid:b": co_organizer}),
+        ));
         assert!(roster.is_organizer("8:orgid:me"));
         assert!(!roster.is_organizer("8:orgid:a"));
         assert!(roster.is_organizer("8:orgid:b"));
@@ -652,12 +863,28 @@ mod tests {
             {"stateType": "attendeeAudioRestricted", "stateId": "s-1", "typeRank": 1},
             {"stateType": "attendeeVideoUnrestricted", "stateId": "s-2", "typeRank": 2},
         ]);
-        roster.apply(&delta(json!({"8:orgid:a": presenter, "8:orgid:b": limited})));
+        roster.apply(&delta(
+            json!({"8:orgid:a": presenter, "8:orgid:b": limited}),
+        ));
         let entries = roster.entries();
         assert_eq!(entries[0].role, Some(MeetingRole::Presenter));
         assert_eq!(entries[1].role, Some(MeetingRole::Attendee));
-        assert_eq!(entries[1].limits.mic_blocked.as_ref().map(|state| state.state_id.as_str()), Some("s-1"));
-        assert_eq!(entries[1].limits.camera_released.as_ref().map(|state| state.state_id.as_str()), Some("s-2"));
+        assert_eq!(
+            entries[1]
+                .limits
+                .mic_blocked
+                .as_ref()
+                .map(|state| state.state_id.as_str()),
+            Some("s-1")
+        );
+        assert_eq!(
+            entries[1]
+                .limits
+                .camera_released
+                .as_ref()
+                .map(|state| state.state_id.as_str()),
+            Some("s-2")
+        );
         assert_eq!(entries[1].limits.camera_blocked, None);
         assert_eq!(entries[0].limits, AttendeeLimits::default());
     }
@@ -675,16 +902,25 @@ mod tests {
     #[test]
     fn the_caption_bot_is_found_by_its_command_url_and_state() {
         let mut roster = Roster::default();
-        roster.apply(&delta(json!({"8:orgid:a": participant("Ana", 1, "active", false, 201)})));
+        roster.apply(&delta(
+            json!({"8:orgid:a": participant("Ana", 1, "active", false, 201)}),
+        ));
         assert_eq!(roster.caption_bot(), None);
         roster.apply(&delta(json!({"28:bot": recorder_bot(1, false)})));
         let bot = roster.caption_bot().unwrap();
         assert_eq!(bot.mri, "28:bot");
-        assert!(bot.command_url.as_deref().unwrap().ends_with("/v2/oncommand/1"));
+        assert!(
+            bot.command_url
+                .as_deref()
+                .unwrap()
+                .ends_with("/v2/oncommand/1")
+        );
         assert!(!bot.active);
         roster.apply(&delta(json!({"28:bot": recorder_bot(2, true)})));
         assert!(roster.caption_bot().unwrap().active);
-        roster.apply(&delta(json!({"28:bot": {"version": 3, "state": "inactive"}})));
+        roster.apply(&delta(
+            json!({"28:bot": {"version": 3, "state": "inactive"}}),
+        ));
         assert_eq!(roster.caption_bot(), None);
     }
 
@@ -707,11 +943,25 @@ mod tests {
         let answer: Value = serde_json::from_str(JOIN_ANSWER).unwrap();
         let mut roster = Roster::default();
         assert!(roster.apply_snapshot(&answer["roster"]));
-        let mut names: Vec<String> = roster.entries().into_iter().map(|entry| entry.display_name).collect();
+        let mut names: Vec<String> = roster
+            .entries()
+            .into_iter()
+            .map(|entry| entry.display_name)
+            .collect();
         names.sort();
-        assert_eq!(names, ["Organizer", "Test Guest 1", "Test Guest 2", "Test Guest 3"]);
-        assert_eq!(roster.video_candidates("8:orgid:00000000-0000-0000-0000-00000000000a").len(), 3);
-        let own_delta = delta(json!({"8:orgid:00000000-0000-0000-0000-00000000000a": participant("Organizer", 10, "active", true, 840)}));
+        assert_eq!(
+            names,
+            ["Organizer", "Test Guest 1", "Test Guest 2", "Test Guest 3"]
+        );
+        assert_eq!(
+            roster
+                .video_candidates("8:orgid:00000000-0000-0000-0000-00000000000a")
+                .len(),
+            3
+        );
+        let own_delta = delta(
+            json!({"8:orgid:00000000-0000-0000-0000-00000000000a": participant("Organizer", 10, "active", true, 840)}),
+        );
         roster.apply(&own_delta);
         assert_eq!(roster.members().len(), 4);
     }
@@ -725,7 +975,11 @@ mod tests {
         })));
         let snapshot = json!({"type": "Delta", "sequenceNumber": 9, "participants": {"8:orgid:a": participant("Ana", 4, "active", false, 401)}});
         assert!(roster.apply_snapshot(&snapshot));
-        let mut mris: Vec<&str> = roster.members().iter().map(|member| member.mri.as_str()).collect();
+        let mut mris: Vec<&str> = roster
+            .members()
+            .iter()
+            .map(|member| member.mri.as_str())
+            .collect();
         mris.sort();
         assert_eq!(mris, ["8:orgid:a", "8:orgid:new"]);
     }
@@ -733,7 +987,9 @@ mod tests {
     #[test]
     fn caption_speakers_resolve_by_mri_or_object_id() {
         let mut roster = Roster::default();
-        roster.apply(&delta(json!({"8:orgid:abc-123": participant("Ana", 1, "active", false, 201)})));
+        roster.apply(&delta(
+            json!({"8:orgid:abc-123": participant("Ana", 1, "active", false, 201)}),
+        ));
         assert_eq!(roster.name_of("8:orgid:abc-123"), Some("Ana"));
         assert_eq!(roster.name_of("abc-123"), Some("Ana"));
         assert_eq!(roster.name_of("zzz"), None);
@@ -742,11 +998,13 @@ mod tests {
     #[test]
     fn the_transfer_replacement_is_the_other_persons_call_leg() {
         let mut roster = Roster::default();
-        let leg = |participant_id: &str, link: &str| json!({
-            "version": 1,
-            "state": "active",
-            "endpoints": {"ep": {"participantId": participant_id, "callLinks": {"replacement": link}, "call": {}}},
-        });
+        let leg = |participant_id: &str, link: &str| {
+            json!({
+                "version": 1,
+                "state": "active",
+                "endpoints": {"ep": {"participantId": participant_id, "callLinks": {"replacement": link}, "call": {}}},
+            })
+        };
         roster.apply(&delta(json!({
             "8:orgid:me": leg("leg-me", "https://cc/me/replacement"),
             "28:bot": leg("leg-bot", "https://cc/bot/replacement"),
@@ -754,11 +1012,21 @@ mod tests {
         })));
         assert_eq!(
             roster.transfer_replacement("8:orgid:me"),
-            Some(Replacement { link: "https://cc/ana/replacement".into(), participant_id: Some("leg-ana".into()) })
+            Some(Replacement {
+                link: "https://cc/ana/replacement".into(),
+                participant_id: Some("leg-ana".into())
+            })
         );
-        assert_eq!(roster.transfer_replacement("8:orgid:ana").map(|replacement| replacement.participant_id), Some(Some("leg-me".into())));
+        assert_eq!(
+            roster
+                .transfer_replacement("8:orgid:ana")
+                .map(|replacement| replacement.participant_id),
+            Some(Some("leg-me".into()))
+        );
         let mut without_links = Roster::default();
-        without_links.apply(&delta(json!({"8:orgid:ana": participant("Ana", 1, "active", false, 10)})));
+        without_links.apply(&delta(
+            json!({"8:orgid:ana": participant("Ana", 1, "active", false, 10)}),
+        ));
         assert_eq!(without_links.transfer_replacement("8:orgid:me"), None);
     }
 }

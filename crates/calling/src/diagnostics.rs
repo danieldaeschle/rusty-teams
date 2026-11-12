@@ -85,12 +85,19 @@ pub fn summarize_sdp(at_ms: u128, role: &str, text: &str) -> Option<SdpSummary> 
                 direction: media.direction().unwrap_or("sendrecv").to_owned(),
                 codecs,
                 payload_count: media.formats.len(),
-                ssrc_count: media.values("ssrc").filter(|value| value.contains(" cname:")).count(),
+                ssrc_count: media
+                    .values("ssrc")
+                    .filter(|value| value.contains(" cname:"))
+                    .count(),
                 rejected: media.port == "0",
             }
         })
         .collect();
-    Some(SdpSummary { at_ms, role: role.to_owned(), lines })
+    Some(SdpSummary {
+        at_ms,
+        role: role.to_owned(),
+        lines,
+    })
 }
 
 #[cfg(test)]
@@ -116,7 +123,11 @@ m=video 0 UDP/TLS/RTP/SAVPF 96 97\r\na=mid:1\r\na=inactive\r\na=rtpmap:96 H264/9
         assert_eq!(summary.lines[1].codecs, ["H264"]);
         assert!(summary.lines[1].rejected);
         let rendered = format!("{summary:?}");
-        assert!(!rendered.contains("203.0.113.9") && !rendered.contains("secretsecret") && !rendered.contains("abcd"));
+        assert!(
+            !rendered.contains("203.0.113.9")
+                && !rendered.contains("secretsecret")
+                && !rendered.contains("abcd")
+        );
     }
 
     #[test]

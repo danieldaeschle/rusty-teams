@@ -55,7 +55,11 @@ pub enum Mode {
 
 impl Mode {
     pub(crate) fn from_mode_file(content: &str) -> Mode {
-        if content.trim() == "headless" { Mode::Headless } else { Mode::Visible }
+        if content.trim() == "headless" {
+            Mode::Headless
+        } else {
+            Mode::Visible
+        }
     }
 
     pub(crate) fn file_content(self) -> &'static str {
@@ -100,7 +104,8 @@ struct RawTarget {
 }
 
 pub(crate) fn parse_version(body: &[u8]) -> Result<VersionInfo, BrowserError> {
-    serde_json::from_slice(body).map_err(|error| BrowserError::Parse(format!("/json/version: {error}")))
+    serde_json::from_slice(body)
+        .map_err(|error| BrowserError::Parse(format!("/json/version: {error}")))
 }
 
 pub(crate) fn parse_tabs(body: &[u8]) -> Result<Vec<Tab>, BrowserError> {
@@ -119,18 +124,33 @@ fn https_host(url: &str) -> Option<String> {
 }
 
 fn tab_from_url(id: String, url: &str) -> Tab {
-    let host = Url::parse(url).ok().and_then(|parsed| parsed.host_str().map(str::to_owned));
+    let host = Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned));
     let secure = https_host(url);
     let app = secure
         .as_deref()
         .and_then(|host| APPS.into_iter().find(|app| app.hosts().contains(&host)));
-    let login = secure.as_deref().is_some_and(|host| LOGIN_HOSTS.contains(&host));
-    let parked = app.is_some_and(|app| Url::parse(url).is_ok_and(|parsed| parsed.path() == app.park_path()));
-    Tab { id, app, host, login, parked }
+    let login = secure
+        .as_deref()
+        .is_some_and(|host| LOGIN_HOSTS.contains(&host));
+    let parked =
+        app.is_some_and(|app| Url::parse(url).is_ok_and(|parsed| parsed.path() == app.park_path()));
+    Tab {
+        id,
+        app,
+        host,
+        login,
+        parked,
+    }
 }
 
 pub(crate) fn login_state(tabs: &[Tab]) -> LoginState {
-    if tabs.iter().any(|tab| tab.login) { LoginState::Required } else { LoginState::NotRequired }
+    if tabs.iter().any(|tab| tab.login) {
+        LoginState::Required
+    } else {
+        LoginState::NotRequired
+    }
 }
 
 pub(crate) fn app_tab(tabs: &[Tab], app: App) -> Option<&Tab> {
@@ -152,9 +172,13 @@ pub(crate) fn duplicate_app_tab_ids(tabs: &[Tab], attached: &HashSet<String>) ->
     for app in APPS {
         let mut candidates: Vec<&Tab> = tabs.iter().filter(|tab| tab.app == Some(app)).collect();
         candidates.sort_by_key(|tab| (!attached.contains(&tab.id), tab.parked));
-        let Some((keep, rest)) = candidates.split_first() else { continue };
+        let Some((keep, rest)) = candidates.split_first() else {
+            continue;
+        };
         duplicates.extend(
-            rest.iter().filter(|tab| !attached.contains(&tab.id) && tab.id != keep.id).map(|tab| tab.id.clone()),
+            rest.iter()
+                .filter(|tab| !attached.contains(&tab.id) && tab.id != keep.id)
+                .map(|tab| tab.id.clone()),
         );
     }
     duplicates
@@ -199,7 +223,8 @@ mod tests {
 
     #[test]
     fn login_live_counts() {
-        let tabs = parse_tabs(br#"[{"id":"L","type":"page","url":"https://login.live.com/"}]"#).unwrap();
+        let tabs =
+            parse_tabs(br#"[{"id":"L","type":"page","url":"https://login.live.com/"}]"#).unwrap();
         assert_eq!(login_state(&tabs), LoginState::Required);
     }
 
@@ -217,8 +242,13 @@ mod tests {
 
     #[test]
     fn legacy_teams_host_is_teams() {
-        let tabs = parse_tabs(br#"[{"id":"T","type":"page","url":"https://teams.microsoft.com/v2/"}]"#).unwrap();
-        assert_eq!(app_tab(&tabs, App::Teams).map(|tab| tab.id.as_str()), Some("T"));
+        let tabs =
+            parse_tabs(br#"[{"id":"T","type":"page","url":"https://teams.microsoft.com/v2/"}]"#)
+                .unwrap();
+        assert_eq!(
+            app_tab(&tabs, App::Teams).map(|tab| tab.id.as_str()),
+            Some("T")
+        );
         assert!(app_tab(&tabs, App::Outlook).is_none());
     }
 
@@ -243,7 +273,10 @@ mod tests {
         assert!(!tabs[3].parked && tabs[3].app.is_none());
         assert!(tabs[..2].iter().all(|tab| !tab.login));
         assert_eq!(login_state(&tabs[..2]), LoginState::NotRequired);
-        assert_eq!(app_tab(&tabs[..1], App::Teams).map(|tab| tab.id.as_str()), Some("T"));
+        assert_eq!(
+            app_tab(&tabs[..1], App::Teams).map(|tab| tab.id.as_str()),
+            Some("T")
+        );
     }
 
     #[test]
@@ -275,7 +308,10 @@ mod tests {
     fn reads_attached_ids() {
         let result = serde_json::json!({"targetInfos":[
             {"targetId":"a","attached":true},{"targetId":"b","attached":false},{"targetId":"c"}]});
-        assert_eq!(attached_target_ids(&result), HashSet::from(["a".to_owned()]));
+        assert_eq!(
+            attached_target_ids(&result),
+            HashSet::from(["a".to_owned()])
+        );
         assert!(attached_target_ids(&serde_json::json!({})).is_empty());
     }
 

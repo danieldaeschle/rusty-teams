@@ -16,9 +16,11 @@ fn compiled(pattern: &str) -> Regex {
     Regex::new(pattern).expect("scrub pattern compiles")
 }
 
-static URL: LazyLock<Regex> = LazyLock::new(|| compiled(r#"(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>)\]]+"#));
+static URL: LazyLock<Regex> =
+    LazyLock::new(|| compiled(r#"(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>)\]]+"#));
 static JWT: LazyLock<Regex> = LazyLock::new(|| compiled(r"\beyJ[\w-]+\.[\w-]+\.[\w-]*"));
-static COOKIE: LazyLock<Regex> = LazyLock::new(|| compiled(r"(?i)\b(set-cookie|cookie)\s*[:=][^\n]*"));
+static COOKIE: LazyLock<Regex> =
+    LazyLock::new(|| compiled(r"(?i)\b(set-cookie|cookie)\s*[:=][^\n]*"));
 static BEARER: LazyLock<Regex> = LazyLock::new(|| compiled(r"(?i)\b(bearer|basic)\s+[\w\-.~+/=]+"));
 static CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
     compiled(
@@ -27,13 +29,19 @@ static CREDENTIAL: LazyLock<Regex> = LazyLock::new(|| {
 });
 static ICE_CREDENTIAL: LazyLock<Regex> =
     LazyLock::new(|| compiled(r"(?i)\b(ice-ufrag|ice-pwd|ufrag|pwd)\b[:=\s]+\S+"));
-static FINGERPRINT: LazyLock<Regex> = LazyLock::new(|| compiled(r"(?i)\b(?:[0-9a-f]{2}:){15,}[0-9a-f]{2}\b"));
-static THREAD: LazyLock<Regex> = LazyLock::new(|| compiled(r#"\b19:[^\s,;"'<>()]+@[A-Za-z0-9.\-]+"#));
-static ENCODED_THREAD: LazyLock<Regex> = LazyLock::new(|| compiled(r"(?i)\b19%3a\S+?%40[A-Za-z0-9.\-]+"));
+static FINGERPRINT: LazyLock<Regex> =
+    LazyLock::new(|| compiled(r"(?i)\b(?:[0-9a-f]{2}:){15,}[0-9a-f]{2}\b"));
+static THREAD: LazyLock<Regex> =
+    LazyLock::new(|| compiled(r#"\b19:[^\s,;"'<>()]+@[A-Za-z0-9.\-]+"#));
+static ENCODED_THREAD: LazyLock<Regex> =
+    LazyLock::new(|| compiled(r"(?i)\b19%3a\S+?%40[A-Za-z0-9.\-]+"));
 static MRI: LazyLock<Regex> = LazyLock::new(|| {
-    compiled(r#"\b(?:8:(?:orgid|live|acs|teamsvisitor|spo|gid):[A-Za-z0-9_.+\-=]+|28:[A-Za-z0-9_.\-]{8,}|4:\+?\d{5,})"#)
+    compiled(
+        r#"\b(?:8:(?:orgid|live|acs|teamsvisitor|spo|gid):[A-Za-z0-9_.+\-=]+|28:[A-Za-z0-9_.\-]{8,}|4:\+?\d{5,})"#,
+    )
 });
-static EMAIL: LazyLock<Regex> = LazyLock::new(|| compiled(r"[A-Za-z0-9._%+'\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+"));
+static EMAIL: LazyLock<Regex> =
+    LazyLock::new(|| compiled(r"[A-Za-z0-9._%+'\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+"));
 static UUID: LazyLock<Regex> = LazyLock::new(|| {
     compiled(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b")
 });
@@ -78,7 +86,10 @@ impl Scrubber {
     }
 
     pub fn register_self(&mut self, mri: &str, display_name: &str, email: &str) {
-        for key in [mri, email].into_iter().filter(|key| !key.trim().is_empty()) {
+        for key in [mri, email]
+            .into_iter()
+            .filter(|key| !key.trim().is_empty())
+        {
             self.alias(key, SELF_PLACEHOLDER);
         }
         self.add_name(display_name, SELF_PLACEHOLDER);
@@ -113,7 +124,8 @@ impl Scrubber {
     fn alias(&mut self, key: &str, placeholder: &str) {
         let normalized = normalize(key);
         if let Some(user_id) = normalized.strip_prefix(ORGID_PREFIX) {
-            self.people.insert(user_id.to_owned(), placeholder.to_owned());
+            self.people
+                .insert(user_id.to_owned(), placeholder.to_owned());
         }
         self.people.insert(normalized, placeholder.to_owned());
     }
@@ -123,10 +135,16 @@ impl Scrubber {
             return;
         }
         let full_name = name.trim();
-        let parts: Vec<&str> =
-            full_name.split(|character: char| !character.is_alphanumeric()).filter(|part| !part.is_empty()).collect();
+        let parts: Vec<&str> = full_name
+            .split(|character: char| !character.is_alphanumeric())
+            .filter(|part| !part.is_empty())
+            .collect();
         if full_name.chars().count() > 1 {
-            self.push_name(full_name, placeholder, parts.len() == 1 && is_common_word(full_name));
+            self.push_name(
+                full_name,
+                placeholder,
+                parts.len() == 1 && is_common_word(full_name),
+            );
         }
         for part in parts.into_iter().filter(|part| is_name_part(part)) {
             self.push_name(part, placeholder, is_common_word(part));
@@ -135,7 +153,11 @@ impl Scrubber {
 
     /// `exact_case`: a dictionary word only counts as the name in the name's own spelling ("Mark", not "mark").
     fn push_name(&mut self, name: &str, placeholder: &str, exact_case: bool) {
-        if self.names.iter().any(|known| known.name.eq_ignore_ascii_case(name)) {
+        if self
+            .names
+            .iter()
+            .any(|known| known.name.eq_ignore_ascii_case(name))
+        {
             return;
         }
         self.names.push(NameMatch {
@@ -146,19 +168,35 @@ impl Scrubber {
     }
 
     pub fn scrub(&mut self, text: &str) -> String {
-        let mut text = URL.replace_all(text, |captures: &Captures| scrub_url(&captures[0])).into_owned();
+        let mut text = URL
+            .replace_all(text, |captures: &Captures| scrub_url(&captures[0]))
+            .into_owned();
         text = JWT.replace_all(&text, REMOVED).into_owned();
         text = COOKIE.replace_all(&text, "$1: [removed]").into_owned();
         text = BEARER.replace_all(&text, "$1 [removed]").into_owned();
         text = CREDENTIAL.replace_all(&text, "$1 [removed]").into_owned();
-        text = ICE_CREDENTIAL.replace_all(&text, "$1 [removed]").into_owned();
+        text = ICE_CREDENTIAL
+            .replace_all(&text, "$1 [removed]")
+            .into_owned();
         text = FINGERPRINT.replace_all(&text, "[fingerprint]").into_owned();
-        text = THREAD.replace_all(&text, |captures: &Captures| self.meeting(&captures[0])).into_owned();
-        text = ENCODED_THREAD.replace_all(&text, |captures: &Captures| self.meeting(&captures[0])).into_owned();
-        text = MRI.replace_all(&text, |captures: &Captures| self.person(&captures[0])).into_owned();
-        text = EMAIL.replace_all(&text, |captures: &Captures| self.person(&captures[0])).into_owned();
-        text = PHONE.replace_all(&text, |captures: &Captures| self.person(&captures[0])).into_owned();
-        text = UUID.replace_all(&text, |captures: &Captures| self.identifier(&captures[0])).into_owned();
+        text = THREAD
+            .replace_all(&text, |captures: &Captures| self.meeting(&captures[0]))
+            .into_owned();
+        text = ENCODED_THREAD
+            .replace_all(&text, |captures: &Captures| self.meeting(&captures[0]))
+            .into_owned();
+        text = MRI
+            .replace_all(&text, |captures: &Captures| self.person(&captures[0]))
+            .into_owned();
+        text = EMAIL
+            .replace_all(&text, |captures: &Captures| self.person(&captures[0]))
+            .into_owned();
+        text = PHONE
+            .replace_all(&text, |captures: &Captures| self.person(&captures[0]))
+            .into_owned();
+        text = UUID
+            .replace_all(&text, |captures: &Captures| self.identifier(&captures[0]))
+            .into_owned();
         text = IPV6.replace_all(&text, "[ip]").into_owned();
         text = IPV4.replace_all(&text, "[ip]").into_owned();
         text = self.replace_names(&text);
@@ -167,7 +205,10 @@ impl Scrubber {
 
     fn meeting(&mut self, key: &str) -> String {
         let next = self.meetings.len() + 1;
-        self.meetings.entry(normalize(key)).or_insert_with(|| format!("meeting-{next}")).clone()
+        self.meetings
+            .entry(normalize(key))
+            .or_insert_with(|| format!("meeting-{next}"))
+            .clone()
     }
 
     fn identifier(&mut self, key: &str) -> String {
@@ -176,7 +217,10 @@ impl Scrubber {
             return found.clone();
         }
         let next = self.identifiers.len() + 1;
-        self.identifiers.entry(normalized).or_insert_with(|| format!("id-{next}")).clone()
+        self.identifiers
+            .entry(normalized)
+            .or_insert_with(|| format!("id-{next}"))
+            .clone()
     }
 
     fn replace_names(&self, text: &str) -> String {
@@ -187,7 +231,13 @@ impl Scrubber {
         ordered.sort_by_key(|entry| std::cmp::Reverse(entry.name.chars().count()));
         let alternatives: Vec<String> = ordered
             .iter()
-            .map(|entry| if entry.exact_case { escape(&entry.name) } else { format!("(?i:{})", escape(&entry.name)) })
+            .map(|entry| {
+                if entry.exact_case {
+                    escape(&entry.name)
+                } else {
+                    format!("(?i:{})", escape(&entry.name))
+                }
+            })
             .collect();
         let pattern = format!(r"\b(?:{})\b", alternatives.join("|"));
         let Ok(names) = Regex::new(&pattern) else {
@@ -233,7 +283,13 @@ pub fn scrub_url(url: &str) -> String {
     };
     let path: Vec<String> = path
         .split('/')
-        .map(|segment| if is_identifier_segment(segment) { "{id}".to_owned() } else { segment.to_owned() })
+        .map(|segment| {
+            if is_identifier_segment(segment) {
+                "{id}".to_owned()
+            } else {
+                segment.to_owned()
+            }
+        })
         .collect();
     let query = if has_query { "?..." } else { "" };
     format!("{scheme}://{host}{}{query}", path.join("/"))
@@ -251,8 +307,15 @@ mod tests {
 
     fn scrubber() -> Scrubber {
         let mut scrubber = Scrubber::new();
-        scrubber.register_self("8:orgid:11111111-2222-3333-4444-555555555555", "Daniel Daeschle", "daniel@example.com");
-        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Mara Lindqvist");
+        scrubber.register_self(
+            "8:orgid:11111111-2222-3333-4444-555555555555",
+            "Daniel Daeschle",
+            "daniel@example.com",
+        );
+        scrubber.register_person(
+            "8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Mara Lindqvist",
+        );
         scrubber
     }
 
@@ -273,9 +336,35 @@ meeting id 12345678-aaaa-bbbb-cccc-1234567890ab at 12:30:45.";
     fn nothing_personal_survives_the_fixture() {
         let scrubbed = scrubber().scrub(FIXTURE);
         for leaked in [
-            "Mara", "Lindqvist", "Daniel", "Daeschle", "daniel@", "example.com", "jonas", "contoso", "+49", "1234567",
-            "aaaaaaaa", "99999999", "11111111", "ZmFrZW", "abc123", "def456", "skypetoken=zzz", "token=abc", "abcdef.ghijkl",
-            "eyJ", "session=abc", "access_token=hunter2", "Xy12", "supersecret", "203.0.113.9", "2001:db8", "AB:CD:EF", "QWxhZGRp", "12345678-aaaa",
+            "Mara",
+            "Lindqvist",
+            "Daniel",
+            "Daeschle",
+            "daniel@",
+            "example.com",
+            "jonas",
+            "contoso",
+            "+49",
+            "1234567",
+            "aaaaaaaa",
+            "99999999",
+            "11111111",
+            "ZmFrZW",
+            "abc123",
+            "def456",
+            "skypetoken=zzz",
+            "token=abc",
+            "abcdef.ghijkl",
+            "eyJ",
+            "session=abc",
+            "access_token=hunter2",
+            "Xy12",
+            "supersecret",
+            "203.0.113.9",
+            "2001:db8",
+            "AB:CD:EF",
+            "QWxhZGRp",
+            "12345678-aaaa",
         ] {
             assert!(!scrubbed.contains(leaked), "{leaked} leaked in: {scrubbed}");
         }
@@ -287,25 +376,40 @@ meeting id 12345678-aaaa-bbbb-cccc-1234567890ab at 12:30:45.";
         let scrubbed = scrubber.scrub("Mara Lindqvist 8:orgid:AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee mara");
         assert_eq!(scrubbed, "person-1 person-1 person-1 person-1");
         assert_eq!(scrubber.scrub("daniel@example.com Daniel"), "self self");
-        assert_eq!(scrubber.scrub("8:orgid:99999999-8888-7777-6666-555555555555"), "person-2");
-        assert_eq!(scrubber.scrub("jonas.ortega@contoso.com 8:orgid:99999999-8888-7777-6666-555555555555"), "person-3 person-2");
+        assert_eq!(
+            scrubber.scrub("8:orgid:99999999-8888-7777-6666-555555555555"),
+            "person-2"
+        );
+        assert_eq!(
+            scrubber.scrub("jonas.ortega@contoso.com 8:orgid:99999999-8888-7777-6666-555555555555"),
+            "person-3 person-2"
+        );
     }
 
     #[test]
     fn threads_become_numbered_meetings() {
         let mut scrubber = Scrubber::new();
-        let scrubbed = scrubber.scrub("19:abc@thread.v2 then 19:def@thread.v2 then 19:abc@thread.v2");
+        let scrubbed =
+            scrubber.scrub("19:abc@thread.v2 then 19:def@thread.v2 then 19:abc@thread.v2");
         assert_eq!(scrubbed, "meeting-1 then meeting-2 then meeting-1");
     }
 
     #[test]
     fn urls_keep_host_and_path_shape() {
         assert_eq!(
-            scrub_url("https://Host.Example.com/v1/users/ME/conversations/19%3Aabc%40thread.v2/messages/1699999999999?x=1"),
+            scrub_url(
+                "https://Host.Example.com/v1/users/ME/conversations/19%3Aabc%40thread.v2/messages/1699999999999?x=1"
+            ),
             "https://host.example.com/v1/users/ME/conversations/{id}/messages/{id}?..."
         );
-        assert_eq!(scrub_url("https://203.0.113.9:3478/turn"), "https://[ip]/turn");
-        assert_eq!(scrub_url("https://user:pass@host.example.com/a"), "https://host.example.com/a");
+        assert_eq!(
+            scrub_url("https://203.0.113.9:3478/turn"),
+            "https://[ip]/turn"
+        );
+        assert_eq!(
+            scrub_url("https://user:pass@host.example.com/a"),
+            "https://host.example.com/a"
+        );
     }
 
     #[test]
@@ -318,10 +422,15 @@ meeting id 12345678-aaaa-bbbb-cccc-1234567890ab at 12:30:45.";
     #[test]
     fn common_words_in_a_name_are_only_replaced_in_the_names_spelling() {
         let mut scrubber = Scrubber::new();
-        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Check Testperson");
+        scrubber.register_person(
+            "8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Check Testperson",
+        );
         scrubber.register_person("8:orgid:99999999-8888-7777-6666-555555555555", "Max Video");
         assert_eq!(
-            scrubber.scrub("check video max bitrate, Check Testperson and Max Video joined, testperson left"),
+            scrubber.scrub(
+                "check video max bitrate, Check Testperson and Max Video joined, testperson left"
+            ),
             "check video max bitrate, person-1 and person-2 joined, person-1 left"
         );
     }
@@ -329,7 +438,10 @@ meeting id 12345678-aaaa-bbbb-cccc-1234567890ab at 12:30:45.";
     #[test]
     fn name_parts_match_only_whole_words() {
         let mut scrubber = Scrubber::new();
-        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Quilla Brandtmoor");
+        scrubber.register_person(
+            "8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Quilla Brandtmoor",
+        );
         assert_eq!(
             scrubber.scrub("Quillay quilla Brandtmoorish BRANDTMOOR"),
             "Quillay person-1 Brandtmoorish person-1"
@@ -339,8 +451,14 @@ meeting id 12345678-aaaa-bbbb-cccc-1234567890ab at 12:30:45.";
     #[test]
     fn short_and_numeric_name_parts_are_ignored() {
         let mut scrubber = Scrubber::new();
-        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Yu Zentrel 2024");
-        assert_eq!(scrubber.scrub("yu 2024 Zentrel Yu Zentrel 2024"), "yu 2024 person-1 person-1");
+        scrubber.register_person(
+            "8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Yu Zentrel 2024",
+        );
+        assert_eq!(
+            scrubber.scrub("yu 2024 Zentrel Yu Zentrel 2024"),
+            "yu 2024 person-1 person-1"
+        );
     }
 
     #[test]
@@ -353,14 +471,23 @@ meeting id 12345678-aaaa-bbbb-cccc-1234567890ab at 12:30:45.";
     #[test]
     fn a_given_name_that_is_a_word_is_still_replaced_when_capitalized() {
         let mut scrubber = Scrubber::new();
-        scrubber.register_person("8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Mark Zentrel");
-        assert_eq!(scrubber.scrub("Mark joined, mark the stream"), "person-1 joined, mark the stream");
+        scrubber.register_person(
+            "8:orgid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Mark Zentrel",
+        );
+        assert_eq!(
+            scrubber.scrub("Mark joined, mark the stream"),
+            "person-1 joined, mark the stream"
+        );
     }
 
     #[test]
     fn the_echo_bot_is_named_not_numbered() {
         let mut scrubber = Scrubber::new();
         scrubber.register_person(calling::signaling::ECHO_BOT_MRI, "Teams echo");
-        assert_eq!(scrubber.scrub(&format!("{} Teams echo", calling::signaling::ECHO_BOT_MRI)), "echo-bot echo-bot");
+        assert_eq!(
+            scrubber.scrub(&format!("{} Teams echo", calling::signaling::ECHO_BOT_MRI)),
+            "echo-bot echo-bot"
+        );
     }
 }

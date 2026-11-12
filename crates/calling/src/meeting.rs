@@ -27,9 +27,10 @@ impl LiveMeeting {
     }
 
     pub fn target(&self) -> Option<MeetingTarget> {
-        let meeting_data = self.meeting_code.as_ref().map(|code| {
-            serde_json::json!({"meetingCode": code, "passcode": self.passcode})
-        });
+        let meeting_data = self
+            .meeting_code
+            .as_ref()
+            .map(|code| serde_json::json!({"meetingCode": code, "passcode": self.passcode}));
         Some(MeetingTarget {
             thread_id: self.thread_id.clone(),
             tenant_id: self.tenant_id.clone()?,
@@ -49,11 +50,18 @@ fn as_object(value: &Value) -> Option<Value> {
 
 fn expiration_seconds(value: &Value) -> Option<i64> {
     let raw = value.as_i64().or_else(|| value.as_str()?.parse().ok())?;
-    Some(if raw >= MILLISECOND_EPOCH_FLOOR { raw / 1000 } else { raw })
+    Some(if raw >= MILLISECOND_EPOCH_FLOOR {
+        raw / 1000
+    } else {
+        raw
+    })
 }
 
 fn property_text(value: &Value, key: &str) -> Option<String> {
-    value[key].as_str().filter(|text| !text.is_empty()).map(str::to_owned)
+    value[key]
+        .as_str()
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
 }
 
 fn thread_properties(body: &Value) -> Value {
@@ -102,7 +110,11 @@ pub async fn fetch_live_meeting(session: &Session, thread_id: &str) -> Result<Op
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs() as i64);
-    Ok(live_meeting(thread_id, &thread_properties(&response.body), now))
+    Ok(live_meeting(
+        thread_id,
+        &thread_properties(&response.body),
+        now,
+    ))
 }
 
 #[cfg(test)]
@@ -128,7 +140,8 @@ mod tests {
 
     #[test]
     fn an_active_unexpired_state_is_a_running_meeting() {
-        let properties = json!({"awareness_conversationLiveState:0": live_state("Active", NOW + 600)});
+        let properties =
+            json!({"awareness_conversationLiveState:0": live_state("Active", NOW + 600)});
         let meeting = live_meeting("19:m@thread.v2", &properties, NOW).unwrap();
         assert_eq!(meeting.organizer_id.as_deref(), Some("org-1"));
         assert_eq!(meeting.conversation_url.as_deref(), Some("https://conv/1"));
@@ -150,7 +163,8 @@ mod tests {
 
     #[test]
     fn a_known_meeting_stops_running_when_it_expires() {
-        let properties = json!({"awareness_conversationLiveState:0": live_state("Active", NOW + 600)});
+        let properties =
+            json!({"awareness_conversationLiveState:0": live_state("Active", NOW + 600)});
         let meeting = live_meeting("t", &properties, NOW).unwrap();
         assert!(meeting.is_running(NOW + 599));
         assert!(!meeting.is_running(NOW + 600));
@@ -167,9 +181,11 @@ mod tests {
 
     #[test]
     fn expiration_in_milliseconds_is_understood() {
-        let properties = json!({"awareness_conversationLiveState": live_state("Active", (NOW + 600) * 1000)});
+        let properties =
+            json!({"awareness_conversationLiveState": live_state("Active", (NOW + 600) * 1000)});
         assert!(live_meeting("t", &properties, NOW).is_some());
-        let past = json!({"awareness_conversationLiveState": live_state("Active", (NOW - 600) * 1000)});
+        let past =
+            json!({"awareness_conversationLiveState": live_state("Active", (NOW - 600) * 1000)});
         assert!(live_meeting("t", &past, NOW).is_none());
     }
 

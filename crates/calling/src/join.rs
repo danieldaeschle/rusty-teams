@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
-use crate::signaling::{MeetingTarget, Participant, chat_thread_id, endpoint_state, subscribe_request};
+use crate::signaling::{
+    MeetingTarget, Participant, chat_thread_id, endpoint_state, subscribe_request,
+};
 use crate::trouter_events::CallbackLinks;
 
 const RESURRECT: &str = "resurrect";
@@ -67,7 +69,12 @@ mod tests {
         assert_eq!(body["meetingPreferences"]["shouldResurrect"], "resurrect");
         let links = body["conversationRequest"]["links"].as_object().unwrap();
         assert!(links.contains_key("conversationUpdate") && links.contains_key("conversationEnd"));
-        assert!(body["conversationRequest"]["roster"]["rosterUpdate"].as_str().unwrap().contains("call-1"));
+        assert!(
+            body["conversationRequest"]["roster"]["rosterUpdate"]
+                .as_str()
+                .unwrap()
+                .contains("call-1")
+        );
         assert!(body.get("callInvitation").is_none());
     }
 
@@ -91,7 +98,12 @@ mod tests {
             "tenantId": "tenant-2",
             "meetingInfo": {"organizerId": "organizer-1"},
         });
-        assert_eq!(target_from_answer(&body, &meeting_data()).unwrap().tenant_id, "tenant-2");
+        assert_eq!(
+            target_from_answer(&body, &meeting_data())
+                .unwrap()
+                .tenant_id,
+            "tenant-2"
+        );
     }
 
     #[test]

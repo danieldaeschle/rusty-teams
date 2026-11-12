@@ -4,8 +4,8 @@ use store::{
     ChannelRecord, ChatRecord, MemberRecord, MessageImportance, MessageRecord, TeamRecord,
 };
 
-use crate::announcement::ANNOUNCEMENT_BANNER_TYPE;
 use crate::adaptive_card::card_content_text;
+use crate::announcement::ANNOUNCEMENT_BANNER_TYPE;
 use crate::call_event::CallEvent;
 use crate::forwarded::FORWARDED_CONTENT_TYPE;
 use crate::links::EMPTY_LINKS;
@@ -243,16 +243,13 @@ pub(crate) fn attachment_info(attachment: &Attachment) -> AttachmentInfo {
             .filter(|_| attachment.content_type.as_deref() == Some("messageReference"))
             .and_then(quote_info),
         id: attachment.id.clone(),
-        content: attachment
-            .content
-            .clone()
-            .filter(|_| {
-                is_card
-                    || matches!(
-                        attachment.content_type.as_deref(),
-                        Some("messageReference" | FORWARDED_CONTENT_TYPE | ANNOUNCEMENT_BANNER_TYPE)
-                    )
-            }),
+        content: attachment.content.clone().filter(|_| {
+            is_card
+                || matches!(
+                    attachment.content_type.as_deref(),
+                    Some("messageReference" | FORWARDED_CONTENT_TYPE | ANNOUNCEMENT_BANNER_TYPE)
+                )
+        }),
         unavailable: false,
         teams_app_id: attachment.teams_app_id.clone(),
     }

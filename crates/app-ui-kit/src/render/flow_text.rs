@@ -6,8 +6,8 @@ use gpui_kit::base::{TextSelection, TextSelectionRegistration, TextSelectionRun,
 use gpui_kit::*;
 
 use super::blocks::CODE_PADDING;
-use super::selectable::{HIT_SLOP, PILL_INSET_Y, PILL_OUTSET, Participant, Pill, TIME_ROOM};
 use super::hooks::open_profile_link;
+use super::selectable::{HIT_SLOP, PILL_INSET_Y, PILL_OUTSET, Participant, Pill, TIME_ROOM};
 
 const WRAP_TOLERANCE: f32 = 0.5;
 
@@ -723,9 +723,13 @@ impl Element for FlowText {
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
                 let over_link = hover_hitbox.is_hovered(window)
                     && hover_layouts.iter().any(|(layout, start)| {
-                        layout.index_for_position(event.position).is_ok_and(|index| {
-                            hover_links.iter().any(|(range, _)| range.contains(&(start + index)))
-                        })
+                        layout
+                            .index_for_position(event.position)
+                            .is_ok_and(|index| {
+                                hover_links
+                                    .iter()
+                                    .any(|(range, _)| range.contains(&(start + index)))
+                            })
                     });
                 if phase.bubble() && over_link != hovered_link {
                     window.refresh();

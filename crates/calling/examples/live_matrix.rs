@@ -6,16 +6,16 @@ use calling::meeting::fetch_live_meeting;
 use calling::relay::ic3_scope;
 use calling::signaling::{CHATSVC_REGION, fetch_self};
 use calling::{
-    CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig, MeetingOptions, MeetingRole, MeetingTarget, Modality,
-    MuteCommand, Reaction, RecordingKind, RosterEntry, ShareKind, ShareSource, StopScope, TileDetail, VideoKey, VideoWant,
+    CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig,
+    MeetingOptions, MeetingRole, MeetingTarget, Modality, MuteCommand, Reaction, RecordingKind,
+    RosterEntry, ShareKind, ShareSource, StopScope, TileDetail, VideoKey, VideoWant,
 };
 use chatsvc::InstanceNames;
 use chatsvc::recap::Recap;
 use serde_json::{Value, json};
-use session::{DEFAULT_ENDPOINT, Method, Request, Scope, Session, SPACES};
+use session::{DEFAULT_ENDPOINT, Method, Request, SPACES, Scope, Session};
 
-const CREATE_URL: &str =
-    "https://teams.cloud.microsoft/api/mt/emea/beta/me/calendarEvents/privateMeeting/schedulingService/create";
+const CREATE_URL: &str = "https://teams.cloud.microsoft/api/mt/emea/beta/me/calendarEvents/privateMeeting/schedulingService/create";
 const SUBJECT: &str = "Native client test";
 const REPORT_EVERY: Duration = Duration::from_secs(2);
 const THREAD_PROPERTY_RETRIES: usize = 8;
@@ -30,7 +30,12 @@ struct Arguments {
 }
 
 fn arguments() -> Arguments {
-    let mut parsed = Arguments { link_out: None, thread_out: None, recap_thread: None, join_thread: None };
+    let mut parsed = Arguments {
+        link_out: None,
+        thread_out: None,
+        recap_thread: None,
+        join_thread: None,
+    };
     let mut input = std::env::args().skip(1);
     while let Some(flag) = input.next() {
         match flag.as_str() {
@@ -55,7 +60,9 @@ fn main() {
             unsafe { std::env::set_var(name, value) };
         }
     }
-    tokio::runtime::Runtime::new().expect("runtime").block_on(run());
+    tokio::runtime::Runtime::new()
+        .expect("runtime")
+        .block_on(run());
 }
 
 fn as_object(value: &Value) -> Option<Value> {
@@ -70,13 +77,18 @@ fn encoded(value: &str) -> String {
     value
         .bytes()
         .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
             other => format!("%{other:02X}"),
         })
         .collect()
 }
 
-async fn tenant_and_organizer(session: &Session, thread_id: &str) -> (Option<String>, Option<String>) {
+async fn tenant_and_organizer(
+    session: &Session,
+    thread_id: &str,
+) -> (Option<String>, Option<String>) {
     let url = format!(
         "https://teams.cloud.microsoft/api/chatsvc/{CHATSVC_REGION}/v1/users/ME/conversations/{}?view=msnp24Equivalent",
         encoded(thread_id)
@@ -86,18 +98,32 @@ async fn tenant_and_organizer(session: &Session, thread_id: &str) -> (Option<Str
     };
     let properties = &response.body["properties"];
     let meeting = as_object(&properties["meeting"]);
-    let text = |value: &Value| value.as_str().filter(|text| !text.is_empty()).map(str::to_owned);
+    let text = |value: &Value| {
+        value
+            .as_str()
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+    };
     let tenant = meeting
         .as_ref()
         .and_then(|meeting| text(&meeting["tenantId"]))
         .or_else(|| text(&properties["addedByTenantId"]));
-    (tenant, meeting.as_ref().and_then(|meeting| text(&meeting["organizerId"])))
+    (
+        tenant,
+        meeting
+            .as_ref()
+            .and_then(|meeting| text(&meeting["organizerId"])),
+    )
 }
 
 fn find_text<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
     match value {
         Value::Object(map) => map.iter().find_map(|(key, inner)| {
-            let direct = keys.iter().any(|wanted| key.eq_ignore_ascii_case(wanted)).then(|| inner.as_str().filter(|text| !text.is_empty())).flatten();
+            let direct = keys
+                .iter()
+                .any(|wanted| key.eq_ignore_ascii_case(wanted))
+                .then(|| inner.as_str().filter(|text| !text.is_empty()))
+                .flatten();
             direct.or_else(|| find_text(inner, keys))
         }),
         Value::Array(items) => items.iter().find_map(|item| find_text(item, keys)),
@@ -143,7 +169,9 @@ fn options_json(options: &MeetingOptions) -> Value {
 }
 
 fn reaction_named(name: &str) -> Option<Reaction> {
-    Reaction::ALL.into_iter().find(|reaction| format!("{reaction:?}").eq_ignore_ascii_case(name))
+    Reaction::ALL
+        .into_iter()
+        .find(|reaction| format!("{reaction:?}").eq_ignore_ascii_case(name))
 }
 
 #[derive(Default)]
@@ -167,7 +195,14 @@ impl Matrix {
         self.roster
             .iter()
             .find(|entry| entry.display_name.eq_ignore_ascii_case(name))
-            .or_else(|| self.roster.iter().find(|entry| entry.display_name.to_lowercase().contains(&name.to_lowercase())))
+            .or_else(|| {
+                self.roster.iter().find(|entry| {
+                    entry
+                        .display_name
+                        .to_lowercase()
+                        .contains(&name.to_lowercase())
+                })
+            })
             .map(|entry| entry.mri.clone())
     }
 
@@ -189,43 +224,88 @@ impl Matrix {
         let person = |matrix: &Matrix, name: &str| {
             let found = matrix.mri_of(name);
             if found.is_none() {
-                emit(json!({"event": "error", "command": verb, "reason": "no such person in the roster"}));
+                emit(
+                    json!({"event": "error", "command": verb, "reason": "no such person in the roster"}),
+                );
             }
             found
         };
         let on = |text: &str| matches!(text, "on" | "true" | "yes");
-        let split_last = |text: &str| text.rsplit_once(' ').map(|(head, tail)| (head.trim().to_owned(), tail.trim().to_owned()));
+        let split_last = |text: &str| {
+            text.rsplit_once(' ')
+                .map(|(head, tail)| (head.trim().to_owned(), tail.trim().to_owned()))
+        };
         match verb {
-            "admit" => person(self, rest).map(|mri| vec![CallCommand::Admit { mri }]).unwrap_or_default(),
-            "deny" => person(self, rest).map(|mri| vec![CallCommand::Deny { mri }]).unwrap_or_default(),
+            "admit" => person(self, rest)
+                .map(|mri| vec![CallCommand::Admit { mri }])
+                .unwrap_or_default(),
+            "deny" => person(self, rest)
+                .map(|mri| vec![CallCommand::Deny { mri }])
+                .unwrap_or_default(),
             "admit-all" => vec![CallCommand::AdmitAll],
-            "mute" => person(self, rest).map(|mri| vec![CallCommand::MuteParticipant { mri }]).unwrap_or_default(),
+            "mute" => person(self, rest)
+                .map(|mri| vec![CallCommand::MuteParticipant { mri }])
+                .unwrap_or_default(),
             "mute-all" => vec![CallCommand::MuteAll],
-            "spotlight" => person(self, rest).map(|mri| vec![CallCommand::Spotlight { mri }]).unwrap_or_default(),
-            "unspotlight" => person(self, rest).map(|mri| vec![CallCommand::StopSpotlight { mri }]).unwrap_or_default(),
-            "remove" => person(self, rest).map(|mri| vec![CallCommand::RemoveParticipant { mri }]).unwrap_or_default(),
-            "lower" => person(self, rest).map(|mri| vec![CallCommand::LowerHand { mri }]).unwrap_or_default(),
+            "spotlight" => person(self, rest)
+                .map(|mri| vec![CallCommand::Spotlight { mri }])
+                .unwrap_or_default(),
+            "unspotlight" => person(self, rest)
+                .map(|mri| vec![CallCommand::StopSpotlight { mri }])
+                .unwrap_or_default(),
+            "remove" => person(self, rest)
+                .map(|mri| vec![CallCommand::RemoveParticipant { mri }])
+                .unwrap_or_default(),
+            "lower" => person(self, rest)
+                .map(|mri| vec![CallCommand::LowerHand { mri }])
+                .unwrap_or_default(),
             "lower-all" => vec![CallCommand::LowerAllHands],
             "role" => {
-                let Some((name, role)) = split_last(rest) else { return Vec::new() };
-                let role = if role == "presenter" { MeetingRole::Presenter } else { MeetingRole::Attendee };
-                person(self, &name).map(|mri| vec![CallCommand::SetRole { mri, role }]).unwrap_or_default()
+                let Some((name, role)) = split_last(rest) else {
+                    return Vec::new();
+                };
+                let role = if role == "presenter" {
+                    MeetingRole::Presenter
+                } else {
+                    MeetingRole::Attendee
+                };
+                person(self, &name)
+                    .map(|mri| vec![CallCommand::SetRole { mri, role }])
+                    .unwrap_or_default()
             }
             "allow-mic" | "allow-camera" | "block-mic" | "block-camera" => {
-                let modality = if verb.ends_with("mic") { Modality::Mic } else { Modality::Camera };
+                let modality = if verb.ends_with("mic") {
+                    Modality::Mic
+                } else {
+                    Modality::Camera
+                };
                 let allowed = verb.starts_with("allow");
-                person(self, rest).map(|mri| vec![CallCommand::SetAttendeeModality { mri, modality, allowed }]).unwrap_or_default()
+                person(self, rest)
+                    .map(|mri| {
+                        vec![CallCommand::SetAttendeeModality {
+                            mri,
+                            modality,
+                            allowed,
+                        }]
+                    })
+                    .unwrap_or_default()
             }
             "restrict" => {
                 let mic_off = rest.contains("mic");
                 let camera_off = rest.contains("camera");
-                vec![CallCommand::SetAttendeeRestrictions { mic_off, camera_off }]
+                vec![CallCommand::SetAttendeeRestrictions {
+                    mic_off,
+                    camera_off,
+                }]
             }
             "lock" => vec![CallCommand::SetLock(on(rest))],
             "options" => vec![CallCommand::LoadMeetingOptions],
             "option" => {
-                let (Some(current), Some((name, value))) = (self.options.clone(), split_last(rest)) else {
-                    emit(json!({"event": "error", "command": verb, "reason": "load options first"}));
+                let (Some(current), Some((name, value))) = (self.options.clone(), split_last(rest))
+                else {
+                    emit(
+                        json!({"event": "error", "command": verb, "reason": "load options first"}),
+                    );
                     return Vec::new();
                 };
                 let mut edited = current.clone();
@@ -241,7 +321,9 @@ impl Matrix {
                 vec![CallCommand::SaveMeetingOptions(current.changes(&edited))]
             }
             "options-restore" => match (&self.options, &self.original_options) {
-                (Some(current), Some(original)) => vec![CallCommand::SaveMeetingOptions(current.changes(original))],
+                (Some(current), Some(original)) => {
+                    vec![CallCommand::SaveMeetingOptions(current.changes(original))]
+                }
                 _ => Vec::new(),
             },
             "captions" => vec![CallCommand::SetCaptions(on(rest))],
@@ -252,7 +334,10 @@ impl Matrix {
                     "transcript" => RecordingKind::TranscriptOnly,
                     _ => RecordingKind::Video,
                 };
-                vec![CallCommand::StartRecording { kind, title: SUBJECT.to_owned() }]
+                vec![CallCommand::StartRecording {
+                    kind,
+                    title: SUBJECT.to_owned(),
+                }]
             }
             "stop" => {
                 let scope = match rest {
@@ -263,19 +348,36 @@ impl Matrix {
                 vec![CallCommand::StopRecording { scope }]
             }
             "camera" => vec![CallCommand::SetCamera(on(rest))],
-            "share" if on(rest) => vec![CallCommand::StartShare(ShareSource { id: 0, kind: ShareKind::Screen, title: String::new() })],
+            "share" if on(rest) => vec![CallCommand::StartShare(ShareSource {
+                id: 0,
+                kind: ShareKind::Screen,
+                title: String::new(),
+            })],
             "share" => vec![CallCommand::StopShare],
-            "self-mute" => vec![CallCommand::Mute(if on(rest) { MuteCommand::Mute } else { MuteCommand::Unmute })],
+            "self-mute" => vec![CallCommand::Mute(if on(rest) {
+                MuteCommand::Mute
+            } else {
+                MuteCommand::Unmute
+            })],
             "hand" => vec![CallCommand::SetHand(on(rest))],
-            "react" => reaction_named(rest).map(|reaction| vec![CallCommand::SendReaction(reaction)]).unwrap_or_default(),
+            "react" => reaction_named(rest)
+                .map(|reaction| vec![CallCommand::SendReaction(reaction)])
+                .unwrap_or_default(),
             "incoming" => vec![CallCommand::SetIncomingVideo(on(rest))],
             "wants" => {
                 let wants = rest
                     .split(',')
                     .filter_map(|item| {
                         let (detail, name) = item.trim().split_once(':')?;
-                        let detail = if detail == "stage" { TileDetail::Stage } else { TileDetail::Small };
-                        Some(VideoWant { mri: self.mri_of(name)?, detail })
+                        let detail = if detail == "stage" {
+                            TileDetail::Stage
+                        } else {
+                            TileDetail::Small
+                        };
+                        Some(VideoWant {
+                            mri: self.mri_of(name)?,
+                            detail,
+                        })
                     })
                     .collect();
                 vec![CallCommand::SetVideoWants(wants)]
@@ -300,13 +402,30 @@ impl Matrix {
     async fn send_chat(&self, text: &str) {
         let url = format!("{GRAPH_CHATS}/{}/messages", encoded(&self.thread_id));
         let body = json!({"body": {"contentType": "text", "content": text}});
-        let outcome = self.session.request(Method::Post, &url, &Scope::graph("Chat.ReadWrite"), Some(body)).await;
-        emit(json!({"event": "chat_sent", "status": outcome.as_ref().map(|answer| answer.status).ok(), "error": outcome.err().map(|error| error.to_string().chars().take(160).collect::<String>())}));
+        let outcome = self
+            .session
+            .request(
+                Method::Post,
+                &url,
+                &Scope::graph("Chat.ReadWrite"),
+                Some(body),
+            )
+            .await;
+        emit(
+            json!({"event": "chat_sent", "status": outcome.as_ref().map(|answer| answer.status).ok(), "error": outcome.err().map(|error| error.to_string().chars().take(160).collect::<String>())}),
+        );
     }
 
     async fn read_chat(&self) {
-        let url = format!("{GRAPH_CHATS}/{}/messages?$top=20", encoded(&self.thread_id));
-        match self.session.request(Method::Get, &url, &Scope::graph("Chat.ReadWrite"), None).await {
+        let url = format!(
+            "{GRAPH_CHATS}/{}/messages?$top=20",
+            encoded(&self.thread_id)
+        );
+        match self
+            .session
+            .request(Method::Get, &url, &Scope::graph("Chat.ReadWrite"), None)
+            .await
+        {
             Ok(answer) => {
                 let messages: Vec<Value> = answer.body["value"]
                     .as_array()
@@ -321,7 +440,9 @@ impl Matrix {
                     .collect();
                 emit(json!({"event": "chat_read", "status": answer.status, "messages": messages}));
             }
-            Err(error) => emit(json!({"event": "chat_read", "error": error.to_string().chars().take(160).collect::<String>()})),
+            Err(error) => emit(
+                json!({"event": "chat_read", "error": error.to_string().chars().take(160).collect::<String>()}),
+            ),
         }
     }
 }
@@ -347,7 +468,9 @@ async fn recap(session: &Session, thread_id: &str) {
                     "transcript": details.transcript_id.is_some(),
                 }));
                 let deleted = recap.delete_recording(&details).await;
-                emit(json!({"event": "recap_deleted", "ok": deleted.is_ok(), "error": deleted.err().map(|error| format!("{error:?}"))}));
+                emit(
+                    json!({"event": "recap_deleted", "ok": deleted.is_ok(), "error": deleted.err().map(|error| format!("{error:?}"))}),
+                );
             }
             Err(error) => emit(json!({"event": "recap_recording", "error": format!("{error:?}")})),
         }
@@ -368,14 +491,30 @@ async fn run() {
 
     let late_joiner = arguments.join_thread.is_some();
     let (thread_id, created_body) = match &arguments.join_thread {
-        Some(path) => (std::fs::read_to_string(path).expect("thread file").trim().to_owned(), Value::Null),
+        Some(path) => (
+            std::fs::read_to_string(path)
+                .expect("thread file")
+                .trim()
+                .to_owned(),
+            Value::Null,
+        ),
         None => {
             let body = json!({"meetingType": "MeetNow", "isStreamEnabled": false, "subject": SUBJECT, "unhideChatThread": true});
             let created = session
-                .request(Method::Post, CREATE_URL, &Scope::new(SPACES, "user_impersonation"), Some(body))
+                .request(
+                    Method::Post,
+                    CREATE_URL,
+                    &Scope::new(SPACES, "user_impersonation"),
+                    Some(body),
+                )
                 .await
                 .expect("create meeting");
-            let thread_id = created.body.pointer("/value/groupContext/threadId").and_then(Value::as_str).expect("meeting thread").to_owned();
+            let thread_id = created
+                .body
+                .pointer("/value/groupContext/threadId")
+                .and_then(Value::as_str)
+                .expect("meeting thread")
+                .to_owned();
             emit(json!({"event": "created", "status": created.status}));
             (thread_id, created.body)
         }
@@ -398,13 +537,19 @@ async fn run() {
         organizer_id: organizer_id.unwrap_or_else(|| me.object_id.clone()),
         meeting_data: None,
     };
-    let join_link = find_text(&created_body, &["joinUrl", "meetingJoinUrl", "joinWebUrl"]).map_or_else(
-        || {
-            let context = json!({"Tid": target.tenant_id, "Oid": target.organizer_id}).to_string();
-            format!("https://teams.microsoft.com/l/meetup-join/{}/0?context={}", encoded(&thread_id), encoded(&context))
-        },
-        str::to_owned,
-    );
+    let join_link = find_text(&created_body, &["joinUrl", "meetingJoinUrl", "joinWebUrl"])
+        .map_or_else(
+            || {
+                let context =
+                    json!({"Tid": target.tenant_id, "Oid": target.organizer_id}).to_string();
+                format!(
+                    "https://teams.microsoft.com/l/meetup-join/{}/0?context={}",
+                    encoded(&thread_id),
+                    encoded(&context)
+                )
+            },
+            str::to_owned,
+        );
     if let Some(path) = &arguments.link_out {
         std::fs::write(path, &join_link).expect("link file");
     }
@@ -426,7 +571,9 @@ async fn run() {
         },
         ..EngineConfig::default()
     };
-    let (engine, _events) = CallEngine::start(session.clone(), poll_session, config).await.expect("engine");
+    let (engine, _events) = CallEngine::start(session.clone(), poll_session, config)
+        .await
+        .expect("engine");
     let mut handle = engine.start_call(CallSpec::Meeting(target));
     emit(json!({"event": "joining", "after_ms": started.elapsed().as_millis()}));
 
@@ -439,7 +586,14 @@ async fn run() {
         }
     });
 
-    let mut matrix = Matrix { session: session.clone(), thread_id: thread_id.clone(), own_mri: None, roster: Vec::new(), options: None, original_options: None };
+    let mut matrix = Matrix {
+        session: session.clone(),
+        thread_id: thread_id.clone(),
+        own_mri: None,
+        roster: Vec::new(),
+        options: None,
+        original_options: None,
+    };
     let mut window = Window::default();
     let mut last_roster = Value::Null;
     let mut last_health = Value::Null;
@@ -562,6 +716,8 @@ async fn run() {
         }
         tokio::time::sleep(REPORT_EVERY).await;
     }
-    emit(json!({"event": "live_state_gone", "gone": gone, "after_s": gone_started.elapsed().as_secs()}));
+    emit(
+        json!({"event": "live_state_gone", "gone": gone, "after_s": gone_started.elapsed().as_secs()}),
+    );
     engine.stop().await;
 }

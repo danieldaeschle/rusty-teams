@@ -128,7 +128,11 @@ impl Modality {
     }
 }
 
-pub fn modality_allowed(modality: Modality, capability: MeetingCapability, limits: &AttendeeLimits) -> bool {
+pub fn modality_allowed(
+    modality: Modality,
+    capability: MeetingCapability,
+    limits: &AttendeeLimits,
+) -> bool {
     let (blocked, released) = modality.states(limits);
     if blocked.is_some() {
         return false;
@@ -136,7 +140,12 @@ pub fn modality_allowed(modality: Modality, capability: MeetingCapability, limit
     !modality.attendees_off(capability) || released.is_some()
 }
 
-pub fn modality_steps(modality: Modality, allowed: bool, capability: MeetingCapability, limits: &AttendeeLimits) -> Vec<StateStep> {
+pub fn modality_steps(
+    modality: Modality,
+    allowed: bool,
+    capability: MeetingCapability,
+    limits: &AttendeeLimits,
+) -> Vec<StateStep> {
     let (blocked, released) = modality.states(limits);
     let attendees_off = modality.attendees_off(capability);
     let mut steps = Vec::new();
@@ -170,7 +179,12 @@ impl Target<'_> {
     }
 }
 
-pub fn admit_body(from: Value, target: Target<'_>, callbacks: &CallbackLinks, cause_id: &str) -> Value {
+pub fn admit_body(
+    from: Value,
+    target: Target<'_>,
+    callbacks: &CallbackLinks,
+    cause_id: &str,
+) -> Value {
     json!({
         "participants": {"from": from, "to": [target.wire()]},
         "links": {
@@ -181,7 +195,11 @@ pub fn admit_body(from: Value, target: Target<'_>, callbacks: &CallbackLinks, ca
     })
 }
 
-pub fn remove_participant_body(from: Value, target: Target<'_>, callbacks: &CallbackLinks) -> Value {
+pub fn remove_participant_body(
+    from: Value,
+    target: Target<'_>,
+    callbacks: &CallbackLinks,
+) -> Value {
     json!({
         "participants": {"from": from, "to": [target.wire()]},
         "links": {
@@ -238,7 +256,12 @@ pub fn role_body(from: Value, mri: &str, role: MeetingRole) -> Value {
     })
 }
 
-pub fn attendee_state_body(from: Value, state_type: &str, sequence_number: u32, mri: &str) -> Value {
+pub fn attendee_state_body(
+    from: Value,
+    state_type: &str,
+    sequence_number: u32,
+    mri: &str,
+) -> Value {
     json!({
         "from": from,
         "publishedState": {
@@ -263,7 +286,11 @@ pub fn group_chat_for(thread_id: &str, meeting: bool) -> Value {
 }
 
 pub fn add_link_name(has_thread: bool) -> &'static str {
-    if has_thread { "addParticipantAndModality" } else { "addParticipant" }
+    if has_thread {
+        "addParticipantAndModality"
+    } else {
+        "addParticipant"
+    }
 }
 
 pub fn add_participants_body(
@@ -288,7 +315,9 @@ pub fn add_participants_body(
         })
         .collect();
     let invitation_data = match meeting {
-        Some(meeting) => json!({"invitationData": {"meetingInfo": {"organizerId": meeting.organizer_id, "tenantId": meeting.tenant_id}}}),
+        Some(meeting) => {
+            json!({"invitationData": {"meetingInfo": {"organizerId": meeting.organizer_id, "tenantId": meeting.tenant_id}}})
+        }
         None => json!({}),
     };
     json!({
@@ -318,16 +347,32 @@ mod tests {
     }
 
     fn ana() -> Target<'static> {
-        Target { mri: "8:orgid:ana", display_name: "Ana" }
+        Target {
+            mri: "8:orgid:ana",
+            display_name: "Ana",
+        }
     }
 
     #[test]
     fn admitting_one_names_the_person_and_both_callbacks() {
         let body = admit_body(from(), ana(), &callbacks(), "cause-1");
         assert_eq!(body["participants"]["from"]["id"], "8:orgid:me");
-        assert_eq!(body["participants"]["to"], json!([{"id": "8:orgid:ana", "displayName": "Ana"}]));
-        assert!(body["links"]["admitSuccess"].as_str().unwrap().contains("/conversation/admitParticipantSuccess/"));
-        assert!(body["links"]["admitFailure"].as_str().unwrap().contains("/conversation/admitParticipantFailure/"));
+        assert_eq!(
+            body["participants"]["to"],
+            json!([{"id": "8:orgid:ana", "displayName": "Ana"}])
+        );
+        assert!(
+            body["links"]["admitSuccess"]
+                .as_str()
+                .unwrap()
+                .contains("/conversation/admitParticipantSuccess/")
+        );
+        assert!(
+            body["links"]["admitFailure"]
+                .as_str()
+                .unwrap()
+                .contains("/conversation/admitParticipantFailure/")
+        );
         assert_eq!(body["debugContent"]["causeId"], "cause-1");
     }
 
@@ -335,8 +380,18 @@ mod tests {
     fn denying_and_removing_use_the_remove_body() {
         let body = remove_participant_body(from(), ana(), &callbacks());
         assert_eq!(body["participants"]["to"][0]["id"], "8:orgid:ana");
-        assert!(body["links"]["removeParticipantSuccess"].as_str().unwrap().contains("/conversation/removeParticipantSuccess/"));
-        assert!(body["links"]["removeParticipantFailure"].as_str().unwrap().contains("/conversation/removeParticipantFailure/"));
+        assert!(
+            body["links"]["removeParticipantSuccess"]
+                .as_str()
+                .unwrap()
+                .contains("/conversation/removeParticipantSuccess/")
+        );
+        assert!(
+            body["links"]["removeParticipantFailure"]
+                .as_str()
+                .unwrap()
+                .contains("/conversation/removeParticipantFailure/")
+        );
     }
 
     #[test]
@@ -345,7 +400,8 @@ mod tests {
         assert_eq!(one["scope"], "specified");
         assert_eq!(one["muteParticipants"], json!([{"id": "8:orgid:ana"}]));
         assert_eq!(one["mediaTypes"], json!(["audio"]));
-        let everyone = mute_everyone_body(from(), &["8:orgid:ana".to_owned(), "8:orgid:bo".to_owned()]);
+        let everyone =
+            mute_everyone_body(from(), &["8:orgid:ana".to_owned(), "8:orgid:bo".to_owned()]);
         assert_eq!(everyone["scope"], "specified");
         assert_eq!(everyone["muteParticipants"].as_array().unwrap().len(), 2);
     }
@@ -364,11 +420,18 @@ mod tests {
     }
 
     fn capability(mic_off: bool, camera_off: bool) -> MeetingCapability {
-        MeetingCapability { attendee_mic_off: mic_off, attendee_camera_off: camera_off, ..MeetingCapability::default() }
+        MeetingCapability {
+            attendee_mic_off: mic_off,
+            attendee_camera_off: camera_off,
+            ..MeetingCapability::default()
+        }
     }
 
     fn limits_with(mic_blocked: bool, mic_released: bool) -> AttendeeLimits {
-        let state = |id: &str| crate::roster::PublishedState { state_id: id.to_owned(), rank: 1 };
+        let state = |id: &str| crate::roster::PublishedState {
+            state_id: id.to_owned(),
+            rank: 1,
+        };
         AttendeeLimits {
             mic_blocked: mic_blocked.then(|| state("blocked-1")),
             mic_released: mic_released.then(|| state("released-1")),
@@ -382,21 +445,33 @@ mod tests {
         assert_eq!(body["meetingSettings"], json!({"lockMeeting": true}));
         assert_eq!(body["sequenceNumber"], 1);
         assert_eq!(body["from"]["id"], "8:orgid:me");
-        assert_eq!(lock_body(from(), false, 2)["meetingSettings"]["lockMeeting"], false);
+        assert_eq!(
+            lock_body(from(), false, 2)["meetingSettings"]["lockMeeting"],
+            false
+        );
     }
 
     #[test]
     fn a_role_change_targets_one_person_with_the_wire_role() {
         let body = role_body(from(), "8:orgid:ana", MeetingRole::Presenter);
         assert_eq!(body["scope"], "specified");
-        assert_eq!(body["to"], json!([{"id": "8:orgid:ana", "meetingRole": "presenter"}]));
-        assert_eq!(role_body(from(), "8:orgid:ana", MeetingRole::Attendee)["to"][0]["meetingRole"], "attendee");
+        assert_eq!(
+            body["to"],
+            json!([{"id": "8:orgid:ana", "meetingRole": "presenter"}])
+        );
+        assert_eq!(
+            role_body(from(), "8:orgid:ana", MeetingRole::Attendee)["to"][0]["meetingRole"],
+            "attendee"
+        );
     }
 
     #[test]
     fn restricting_one_attendee_publishes_a_user_state_for_that_person() {
         let body = attendee_state_body(from(), "attendeeAudioRestricted", 7, "8:orgid:ana");
-        assert_eq!(body["publishedState"]["stateType"], "attendeeAudioRestricted");
+        assert_eq!(
+            body["publishedState"]["stateType"],
+            "attendeeAudioRestricted"
+        );
         assert_eq!(body["publishedState"]["level"], "user");
         assert_eq!(body["publishedState"]["sequenceNumber"], 7);
         assert_eq!(body["scope"], "specified");
@@ -405,25 +480,80 @@ mod tests {
 
     #[test]
     fn inviting_into_a_meeting_names_the_organizer_and_asks_for_the_presenter_role() {
-        let meeting = MeetingTarget { thread_id: "19:meeting_x@thread.v2".into(), tenant_id: "tenant-1".into(), organizer_id: "organizer-1".into(), meeting_data: None };
-        let invitees = [Invitee { callee: Callee { mri: "8:orgid:ana".into(), display_name: "Ana".into() }, participant_id: "p-1".into() }];
-        let body = add_participants_body(from(), &invitees, group_chat_for(&meeting.thread_id, true), Some(&meeting), &callbacks());
+        let meeting = MeetingTarget {
+            thread_id: "19:meeting_x@thread.v2".into(),
+            tenant_id: "tenant-1".into(),
+            organizer_id: "organizer-1".into(),
+            meeting_data: None,
+        };
+        let invitees = [Invitee {
+            callee: Callee {
+                mri: "8:orgid:ana".into(),
+                display_name: "Ana".into(),
+            },
+            participant_id: "p-1".into(),
+        }];
+        let body = add_participants_body(
+            from(),
+            &invitees,
+            group_chat_for(&meeting.thread_id, true),
+            Some(&meeting),
+            &callbacks(),
+        );
         assert_eq!(body["participants"]["to"][0]["id"], "8:orgid:ana");
         assert_eq!(body["participants"]["to"][0]["participantId"], "p-1");
-        assert_eq!(body["participants"]["to"][0]["invitationPreferences"]["requestedMeetingRoles"], json!(["presenter"]));
-        assert_eq!(body["participantInvitationData"]["invitationData"]["meetingInfo"], json!({"organizerId": "organizer-1", "tenantId": "tenant-1"}));
-        assert_eq!(body["groupChat"], json!({"threadId": "19:meeting_x@thread.v2", "messageId": "0"}));
-        assert!(body["links"]["addParticipantSuccess"].as_str().unwrap().contains("/conversation/addParticipantSuccess/"));
-        assert!(body["links"]["addParticipantFailure"].as_str().unwrap().contains("/conversation/addParticipantFailure/"));
+        assert_eq!(
+            body["participants"]["to"][0]["invitationPreferences"]["requestedMeetingRoles"],
+            json!(["presenter"])
+        );
+        assert_eq!(
+            body["participantInvitationData"]["invitationData"]["meetingInfo"],
+            json!({"organizerId": "organizer-1", "tenantId": "tenant-1"})
+        );
+        assert_eq!(
+            body["groupChat"],
+            json!({"threadId": "19:meeting_x@thread.v2", "messageId": "0"})
+        );
+        assert!(
+            body["links"]["addParticipantSuccess"]
+                .as_str()
+                .unwrap()
+                .contains("/conversation/addParticipantSuccess/")
+        );
+        assert!(
+            body["links"]["addParticipantFailure"]
+                .as_str()
+                .unwrap()
+                .contains("/conversation/addParticipantFailure/")
+        );
     }
 
     #[test]
     fn inviting_into_a_group_call_has_no_meeting_data_and_a_null_message() {
-        let invitees = [Invitee { callee: Callee { mri: "8:orgid:bo".into(), display_name: "Bo".into() }, participant_id: "p-2".into() }];
-        let body = add_participants_body(from(), &invitees, group_chat_for("19:group@thread.v2", false), None, &callbacks());
+        let invitees = [Invitee {
+            callee: Callee {
+                mri: "8:orgid:bo".into(),
+                display_name: "Bo".into(),
+            },
+            participant_id: "p-2".into(),
+        }];
+        let body = add_participants_body(
+            from(),
+            &invitees,
+            group_chat_for("19:group@thread.v2", false),
+            None,
+            &callbacks(),
+        );
         assert_eq!(body["participantInvitationData"], json!({}));
-        assert!(body["participants"]["to"][0].get("invitationPreferences").is_none());
-        assert_eq!(body["groupChat"], json!({"threadId": "19:group@thread.v2", "messageId": null}));
+        assert!(
+            body["participants"]["to"][0]
+                .get("invitationPreferences")
+                .is_none()
+        );
+        assert_eq!(
+            body["groupChat"],
+            json!({"threadId": "19:group@thread.v2", "messageId": null})
+        );
         assert_eq!(add_link_name(true), "addParticipantAndModality");
         assert_eq!(add_link_name(false), "addParticipant");
     }
@@ -441,7 +571,15 @@ mod tests {
         let mut state = MeetingCapability::default();
         let update = json!({"meetingDetails": {"meetingCapability": {"lockMeeting": true, "attendeeRestrictions": "DisableAudio,DisableVideo"}}});
         assert!(state.apply(&update));
-        assert_eq!(state, MeetingCapability { locked: true, attendee_mic_off: true, attendee_camera_off: true, ..MeetingCapability::default() });
+        assert_eq!(
+            state,
+            MeetingCapability {
+                locked: true,
+                attendee_mic_off: true,
+                attendee_camera_off: true,
+                ..MeetingCapability::default()
+            }
+        );
         assert!(!state.apply(&update));
         assert!(!state.apply(&json!({"other": 1})));
         assert!(state.apply(&json!({"meetingCapability": {"lockMeeting": false, "attendeeRestrictions": "UnRestricted"}})));
@@ -451,17 +589,31 @@ mod tests {
     #[test]
     fn the_capability_reads_the_recording_and_transcription_rights() {
         let mut state = MeetingCapability::default();
-        assert_eq!(state.recorder_option, RecorderOption::OrganizersAndPresenters);
-        assert_eq!((state.allow_cloud_recording, state.allow_transcription), (None, None));
+        assert_eq!(
+            state.recorder_option,
+            RecorderOption::OrganizersAndPresenters
+        );
+        assert_eq!(
+            (state.allow_cloud_recording, state.allow_transcription),
+            (None, None)
+        );
         let update = json!({"meetingDetails": {"meetingCapability": {"recorderOption": "OrganizerAndCoOrganizersOnly", "allowCloudRecording": false, "allowTranscription": true}}});
         assert!(state.apply(&update));
         assert_eq!(state.recorder_option, RecorderOption::OrganizersOnly);
-        assert_eq!((state.allow_cloud_recording, state.allow_transcription), (Some(false), Some(true)));
+        assert_eq!(
+            (state.allow_cloud_recording, state.allow_transcription),
+            (Some(false), Some(true))
+        );
         assert!(state.apply(&json!({"meetingCapability": {"recorderOption": "None"}})));
         assert_eq!(state.recorder_option, RecorderOption::Nobody);
         assert_eq!(state.allow_cloud_recording, Some(false));
-        assert!(state.apply(&json!({"meetingCapability": {"recorderOption": "OrganizersAndPresentersOnly"}})));
-        assert_eq!(state.recorder_option, RecorderOption::OrganizersAndPresenters);
+        assert!(state.apply(
+            &json!({"meetingCapability": {"recorderOption": "OrganizersAndPresentersOnly"}})
+        ));
+        assert_eq!(
+            state.recorder_option,
+            RecorderOption::OrganizersAndPresenters
+        );
     }
 
     #[test]
@@ -474,30 +626,72 @@ mod tests {
     #[test]
     fn a_mic_is_allowed_unless_blocked_or_the_meeting_blocks_everyone() {
         let none = AttendeeLimits::default();
-        assert!(modality_allowed(Modality::Mic, capability(false, false), &none));
-        assert!(!modality_allowed(Modality::Mic, capability(true, false), &none));
-        assert!(modality_allowed(Modality::Mic, capability(true, false), &limits_with(false, true)));
-        assert!(!modality_allowed(Modality::Mic, capability(false, false), &limits_with(true, false)));
-        assert!(modality_allowed(Modality::Camera, capability(true, false), &none));
+        assert!(modality_allowed(
+            Modality::Mic,
+            capability(false, false),
+            &none
+        ));
+        assert!(!modality_allowed(
+            Modality::Mic,
+            capability(true, false),
+            &none
+        ));
+        assert!(modality_allowed(
+            Modality::Mic,
+            capability(true, false),
+            &limits_with(false, true)
+        ));
+        assert!(!modality_allowed(
+            Modality::Mic,
+            capability(false, false),
+            &limits_with(true, false)
+        ));
+        assert!(modality_allowed(
+            Modality::Camera,
+            capability(true, false),
+            &none
+        ));
     }
 
     #[test]
     fn disabling_one_mic_publishes_a_restriction_or_drops_the_release() {
         let open = capability(false, false);
-        assert_eq!(modality_steps(Modality::Mic, false, open, &AttendeeLimits::default()), vec![StateStep::Publish("attendeeAudioRestricted")]);
+        assert_eq!(
+            modality_steps(Modality::Mic, false, open, &AttendeeLimits::default()),
+            vec![StateStep::Publish("attendeeAudioRestricted")]
+        );
         let closed = capability(true, false);
-        assert_eq!(modality_steps(Modality::Mic, false, closed, &limits_with(false, true)), vec![StateStep::Remove("released-1".into())]);
-        assert!(modality_steps(Modality::Mic, false, closed, &AttendeeLimits::default()).is_empty());
+        assert_eq!(
+            modality_steps(Modality::Mic, false, closed, &limits_with(false, true)),
+            vec![StateStep::Remove("released-1".into())]
+        );
+        assert!(
+            modality_steps(Modality::Mic, false, closed, &AttendeeLimits::default()).is_empty()
+        );
         assert!(modality_steps(Modality::Mic, false, open, &limits_with(true, false)).is_empty());
     }
 
     #[test]
     fn allowing_one_mic_removes_the_restriction_or_publishes_a_release() {
         let open = capability(false, false);
-        assert_eq!(modality_steps(Modality::Mic, true, open, &limits_with(true, false)), vec![StateStep::Remove("blocked-1".into())]);
+        assert_eq!(
+            modality_steps(Modality::Mic, true, open, &limits_with(true, false)),
+            vec![StateStep::Remove("blocked-1".into())]
+        );
         let closed = capability(true, false);
-        assert_eq!(modality_steps(Modality::Mic, true, closed, &AttendeeLimits::default()), vec![StateStep::Publish("attendeeModalitiesUnrestricted")]);
-        assert_eq!(modality_steps(Modality::Camera, true, capability(false, true), &AttendeeLimits::default()), vec![StateStep::Publish("attendeeVideoUnrestricted")]);
+        assert_eq!(
+            modality_steps(Modality::Mic, true, closed, &AttendeeLimits::default()),
+            vec![StateStep::Publish("attendeeModalitiesUnrestricted")]
+        );
+        assert_eq!(
+            modality_steps(
+                Modality::Camera,
+                true,
+                capability(false, true),
+                &AttendeeLimits::default()
+            ),
+            vec![StateStep::Publish("attendeeVideoUnrestricted")]
+        );
         assert!(modality_steps(Modality::Mic, true, open, &AttendeeLimits::default()).is_empty());
     }
 }

@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use chrono::{Local, Offset as _};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,

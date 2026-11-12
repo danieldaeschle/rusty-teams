@@ -11,12 +11,17 @@ pub struct Replacement {
 
 impl Replacement {
     pub fn of_call(link: impl Into<String>) -> Self {
-        Replacement { link: link.into(), participant_id: None }
+        Replacement {
+            link: link.into(),
+            participant_id: None,
+        }
     }
 
     fn details(&self) -> Value {
         match &self.participant_id {
-            Some(participant_id) => json!({"replaces": self.link, "replacementTargetParticipantId": participant_id}),
+            Some(participant_id) => {
+                json!({"replaces": self.link, "replacementTargetParticipantId": participant_id})
+            }
             None => json!({"replaces": self.link}),
         }
     }
@@ -40,7 +45,11 @@ fn transferor(from: &Participant) -> Value {
     })
 }
 
-pub fn transfer_body(from: &Participant, target: TransferTarget<'_>, callbacks: &CallbackLinks) -> Value {
+pub fn transfer_body(
+    from: &Participant,
+    target: TransferTarget<'_>,
+    callbacks: &CallbackLinks,
+) -> Value {
     let replacement = target.replaces.map(Replacement::details);
     json!({
         "callTransfer": {
@@ -97,36 +106,84 @@ mod tests {
 
     #[test]
     fn a_blind_transfer_names_the_target_and_the_transferor() {
-        let body = transfer_body(&me(), TransferTarget { mri: "8:orgid:ana", replaces: None }, &callbacks());
+        let body = transfer_body(
+            &me(),
+            TransferTarget {
+                mri: "8:orgid:ana",
+                replaces: None,
+            },
+            &callbacks(),
+        );
         let transfer = &body["callTransfer"];
         assert_eq!(transfer["target"], json!({"id": "8:orgid:ana"}));
-        assert_eq!(transfer["transferor"]["details"], json!({"id": "8:orgid:me", "endpointId": "ep-1", "participantId": "part-1", "languageId": "en-gb"}));
+        assert_eq!(
+            transfer["transferor"]["details"],
+            json!({"id": "8:orgid:me", "endpointId": "ep-1", "participantId": "part-1", "languageId": "en-gb"})
+        );
         assert!(transfer["transferor"]["authorizationToken"].is_null());
         assert!(transfer["replacementDetails"].is_null());
-        assert!(transfer["links"]["transferAcceptance"].as_str().unwrap().contains("/call/transferAcceptance/"));
-        assert!(transfer["links"]["transferCompletion"].as_str().unwrap().contains("/call/transferCompletion/"));
+        assert!(
+            transfer["links"]["transferAcceptance"]
+                .as_str()
+                .unwrap()
+                .contains("/call/transferAcceptance/")
+        );
+        assert!(
+            transfer["links"]["transferCompletion"]
+                .as_str()
+                .unwrap()
+                .contains("/call/transferCompletion/")
+        );
         assert_eq!(transfer["disableForwardingAndUnanswered"], false);
     }
 
     #[test]
     fn a_consulted_transfer_replaces_the_consulted_persons_leg() {
-        let leg = Replacement { link: "https://cc.skype.com/leg/replacement".into(), participant_id: Some("leg-7".into()) };
-        let body = transfer_body(&me(), TransferTarget { mri: "8:orgid:ana", replaces: Some(&leg) }, &callbacks());
+        let leg = Replacement {
+            link: "https://cc.skype.com/leg/replacement".into(),
+            participant_id: Some("leg-7".into()),
+        };
+        let body = transfer_body(
+            &me(),
+            TransferTarget {
+                mri: "8:orgid:ana",
+                replaces: Some(&leg),
+            },
+            &callbacks(),
+        );
         assert_eq!(
             body["callTransfer"]["replacementDetails"],
             json!({"replaces": "https://cc.skype.com/leg/replacement", "replacementTargetParticipantId": "leg-7"})
         );
         let whole_call = Replacement::of_call("https://cc.skype.com/replacement");
-        let body = transfer_body(&me(), TransferTarget { mri: "8:orgid:ana", replaces: Some(&whole_call) }, &callbacks());
-        assert_eq!(body["callTransfer"]["replacementDetails"], json!({"replaces": "https://cc.skype.com/replacement"}));
+        let body = transfer_body(
+            &me(),
+            TransferTarget {
+                mri: "8:orgid:ana",
+                replaces: Some(&whole_call),
+            },
+            &callbacks(),
+        );
+        assert_eq!(
+            body["callTransfer"]["replacementDetails"],
+            json!({"replaces": "https://cc.skype.com/replacement"})
+        );
     }
 
     #[test]
     fn the_completion_callback_tells_success_from_failure() {
-        let done = completion(&json!({"transferCompletion": {"code": 0, "subCode": 0, "resultCategories": ["Success"]}}));
+        let done = completion(
+            &json!({"transferCompletion": {"code": 0, "subCode": 0, "resultCategories": ["Success"]}}),
+        );
         assert!(done.succeeded());
         let failed = completion(&json!({"transferCompletion": {"code": 603, "subCode": 10603}}));
-        assert_eq!(failed, TransferEvent::Completed { code: 603, sub_code: 10603 });
+        assert_eq!(
+            failed,
+            TransferEvent::Completed {
+                code: 603,
+                sub_code: 10603
+            }
+        );
         assert!(!failed.succeeded());
         assert!(!TransferEvent::Accepted.succeeded());
     }

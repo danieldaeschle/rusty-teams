@@ -23,9 +23,15 @@ const BIT_MASK: &str = "BitMask";
 
 pub const BYPASS_CHOICES: [(&str, &str); 6] = [
     ("Everyone", "Everyone"),
-    ("EveryoneInSameAndFederatedCompany", "People in my org and trusted orgs"),
+    (
+        "EveryoneInSameAndFederatedCompany",
+        "People in my org and trusted orgs",
+    ),
     ("EveryoneInCompany", "People in my org"),
-    ("EveryoneInCompanyExcludingGuests", "People in my org, no guests"),
+    (
+        "EveryoneInCompanyExcludingGuests",
+        "People in my org, no guests",
+    ),
     ("InvitedUsers", "People I invite"),
     ("OrganizerOnly", "Only me"),
 ];
@@ -61,7 +67,11 @@ pub struct OptionWrite {
 
 impl OptionWrite {
     pub fn restrictions(mic_off: bool, camera_off: bool) -> OptionWrite {
-        OptionWrite { name: RESTRICTIONS, kind: BIT_MASK, value: json!(restrictions_value(mic_off, camera_off)) }
+        OptionWrite {
+            name: RESTRICTIONS,
+            kind: BIT_MASK,
+            value: json!(restrictions_value(mic_off, camera_off)),
+        }
     }
 
     fn body(&self) -> Value {
@@ -72,9 +82,20 @@ impl OptionWrite {
 impl MeetingOptions {
     pub fn from_response(body: &Value) -> Option<MeetingOptions> {
         let options = body["options"].as_array()?;
-        let current = |name: &str| options.iter().find(|option| option["name"].as_str() == Some(name)).map(|option| &option["currentValue"]);
+        let current = |name: &str| {
+            options
+                .iter()
+                .find(|option| option["name"].as_str() == Some(name))
+                .map(|option| &option["currentValue"])
+        };
         let text = |name: &str| current(name).and_then(Value::as_str).map(str::to_owned);
-        let flag = |name: &str| current(name).and_then(|value| value.as_bool().or_else(|| value.as_str().map(|text| text.eq_ignore_ascii_case("true"))));
+        let flag = |name: &str| {
+            current(name).and_then(|value| {
+                value
+                    .as_bool()
+                    .or_else(|| value.as_str().map(|text| text.eq_ignore_ascii_case("true")))
+            })
+        };
         let restrictions = text(RESTRICTIONS).unwrap_or_default();
         let record_mode = text(AUTO_RECORD).unwrap_or_else(|| RECORD_OFF.to_owned());
         Some(MeetingOptions {
@@ -93,21 +114,42 @@ impl MeetingOptions {
         let mut writes = Vec::new();
         let mut list = |name: &'static str, before: &str, after: &str| {
             if before != after {
-                writes.push(OptionWrite { name, kind: LIST, value: json!(after) });
+                writes.push(OptionWrite {
+                    name,
+                    kind: LIST,
+                    value: json!(after),
+                });
             }
         };
         list(AUTO_ADMITTED, &self.bypass_lobby, &edited.bypass_lobby);
         list(PRESENTER, &self.presenters, &edited.presenters);
         list(MEETING_CHAT, &self.meeting_chat, &edited.meeting_chat);
         if self.record_automatically != edited.record_automatically {
-            let mode = if edited.record_automatically { RECORD_ON } else { RECORD_OFF };
-            writes.push(OptionWrite { name: AUTO_RECORD, kind: LIST, value: json!(mode) });
+            let mode = if edited.record_automatically {
+                RECORD_ON
+            } else {
+                RECORD_OFF
+            };
+            writes.push(OptionWrite {
+                name: AUTO_RECORD,
+                kind: LIST,
+                value: json!(mode),
+            });
         }
         if self.reactions != edited.reactions {
-            writes.push(OptionWrite { name: REACTIONS, kind: BOOLEAN, value: json!(edited.reactions) });
+            writes.push(OptionWrite {
+                name: REACTIONS,
+                kind: BOOLEAN,
+                value: json!(edited.reactions),
+            });
         }
-        if (self.attendee_mic, self.attendee_camera) != (edited.attendee_mic, edited.attendee_camera) {
-            writes.push(OptionWrite::restrictions(!edited.attendee_mic, !edited.attendee_camera));
+        if (self.attendee_mic, self.attendee_camera)
+            != (edited.attendee_mic, edited.attendee_camera)
+        {
+            writes.push(OptionWrite::restrictions(
+                !edited.attendee_mic,
+                !edited.attendee_camera,
+            ));
         }
         writes
     }
@@ -122,22 +164,36 @@ impl MeetingOptions {
 }
 
 fn coordinates(target: &MeetingTarget) -> String {
-    format!("{}/{}/{}", encoded(&target.tenant_id), encoded(&target.organizer_id), encoded(&target.thread_id))
+    format!(
+        "{}/{}/{}",
+        encoded(&target.tenant_id),
+        encoded(&target.organizer_id),
+        encoded(&target.thread_id)
+    )
 }
 
 pub fn read_url(target: &MeetingTarget) -> String {
-    format!("{READ_HOST}/api/mt/{CHATSVC_REGION}//beta/meetings/v1/options/{}/0?monarch=true", coordinates(target))
+    format!(
+        "{READ_HOST}/api/mt/{CHATSVC_REGION}//beta/meetings/v1/options/{}/0?monarch=true",
+        coordinates(target)
+    )
 }
 
 pub fn write_url(target: &MeetingTarget) -> String {
-    format!("{LIVE_HOST}/api/mt/{CHATSVC_REGION}/beta/meetings/v1/options/{}/0/0?monarch=true", coordinates(target))
+    format!(
+        "{LIVE_HOST}/api/mt/{CHATSVC_REGION}/beta/meetings/v1/options/{}/0/0?monarch=true",
+        coordinates(target)
+    )
 }
 
 fn with_headers(mut request: Request, caller: &str) -> Request {
     request.headers.extend([
         ("X-Ms-Migration".to_owned(), "True".to_owned()),
         ("x-ms-client-caller".to_owned(), caller.to_owned()),
-        ("X-MS-Request-Id".to_owned(), uuid::Uuid::new_v4().to_string()),
+        (
+            "X-MS-Request-Id".to_owned(),
+            uuid::Uuid::new_v4().to_string(),
+        ),
     ]);
     request
 }
@@ -149,20 +205,34 @@ fn scope() -> Scope {
 pub async fn fetch(session: &Session, target: &MeetingTarget) -> Result<MeetingOptions> {
     let request = with_headers(Request::get(read_url(target)), "meeting-options-dialog");
     let response = session.send(request, &scope()).await?;
-    MeetingOptions::from_response(&response.body).ok_or_else(|| Error::Signaling("meeting options answer without the expected options".into()))
+    MeetingOptions::from_response(&response.body).ok_or_else(|| {
+        Error::Signaling("meeting options answer without the expected options".into())
+    })
 }
 
 pub fn write_failed(body: &Value) -> bool {
     body["success"].as_bool() == Some(false)
-        || body["options"].as_array().is_some_and(|options| options.iter().any(|option| option["success"].as_bool() == Some(false)))
+        || body["options"].as_array().is_some_and(|options| {
+            options
+                .iter()
+                .any(|option| option["success"].as_bool() == Some(false))
+        })
 }
 
 pub async fn write(session: &Session, target: &MeetingTarget, change: &OptionWrite) -> Result<()> {
-    let mut request = with_headers(Request::with_body(Method::Post, write_url(target), change.body()), "meeting-options-dialog");
-    request.headers.push(("x-ms-test-user".to_owned(), "False".to_owned()));
+    let mut request = with_headers(
+        Request::with_body(Method::Post, write_url(target), change.body()),
+        "meeting-options-dialog",
+    );
+    request
+        .headers
+        .push(("x-ms-test-user".to_owned(), "False".to_owned()));
     let response = session.send(request, &scope()).await?;
     if write_failed(&response.body) {
-        return Err(Error::Signaling(format!("the service refused {}", change.name)));
+        return Err(Error::Signaling(format!(
+            "the service refused {}",
+            change.name
+        )));
     }
     Ok(())
 }
@@ -236,26 +306,49 @@ mod tests {
         };
         let writes = before.changes(&edited);
         let names: Vec<&str> = writes.iter().map(|write| write.name).collect();
-        assert_eq!(names, ["AutoAdmittedUsers", "AllowMeetingChat", "AutoRecordAndTranscribeMode", "AllowTeamsMeetingReactions", "AttendeeRestrictions"]);
+        assert_eq!(
+            names,
+            [
+                "AutoAdmittedUsers",
+                "AllowMeetingChat",
+                "AutoRecordAndTranscribeMode",
+                "AllowTeamsMeetingReactions",
+                "AttendeeRestrictions"
+            ]
+        );
         assert_eq!(writes[2].value, json!("AutoRecordingAndTranscription"));
         assert_eq!(writes[4].value, json!("DisableVideo"));
     }
 
     #[test]
     fn a_write_sends_one_option_in_the_captured_shape() {
-        let write = OptionWrite { name: "AllowMeetingChat", kind: "List", value: json!("Disabled") };
+        let write = OptionWrite {
+            name: "AllowMeetingChat",
+            kind: "List",
+            value: json!("Disabled"),
+        };
         assert_eq!(
             write.body(),
             json!({"options": [{"name": "AllowMeetingChat", "type": "List", "currentValue": "Disabled", "isRecommended": null}]})
         );
-        assert_eq!(OptionWrite::restrictions(true, true).body()["options"][0]["currentValue"], "DisableAudio,DisableVideo");
-        assert_eq!(OptionWrite::restrictions(false, false).value, json!("UnRestricted"));
+        assert_eq!(
+            OptionWrite::restrictions(true, true).body()["options"][0]["currentValue"],
+            "DisableAudio,DisableVideo"
+        );
+        assert_eq!(
+            OptionWrite::restrictions(false, false).value,
+            json!("UnRestricted")
+        );
     }
 
     #[test]
     fn a_refused_write_is_told_apart_from_an_accepted_one() {
-        assert!(!write_failed(&json!({"success": true, "options": [{"success": true}]})));
+        assert!(!write_failed(
+            &json!({"success": true, "options": [{"success": true}]})
+        ));
         assert!(write_failed(&json!({"success": false})));
-        assert!(write_failed(&json!({"success": true, "options": [{"success": false}]})));
+        assert!(write_failed(
+            &json!({"success": true, "options": [{"success": false}]})
+        ));
     }
 }

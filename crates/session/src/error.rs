@@ -48,8 +48,15 @@ mod tests {
 
     #[test]
     fn api_error_uses_graph_message() {
-        let error = Error::api(403, "https://graph.microsoft.com/v1.0/me", json!({"error": {"message": "Forbidden"}}));
-        assert_eq!(error.to_string(), "HTTP 403: Forbidden (https://graph.microsoft.com/v1.0/me)");
+        let error = Error::api(
+            403,
+            "https://graph.microsoft.com/v1.0/me",
+            json!({"error": {"message": "Forbidden"}}),
+        );
+        assert_eq!(
+            error.to_string(),
+            "HTTP 403: Forbidden (https://graph.microsoft.com/v1.0/me)"
+        );
     }
 
     #[test]

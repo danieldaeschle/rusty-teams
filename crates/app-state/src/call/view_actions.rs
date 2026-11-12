@@ -3,11 +3,11 @@ use std::time::{Duration, Instant};
 use calling::CallCommand;
 use gpui_kit::*;
 
-use super::caption_style::{CaptionPosition, CaptionSize};
-use super::{gallery_page, measured_stage, video_wants};
 use super::bubbles::{BUBBLE_SHOWN, ChatBubble, push_bubble};
+use super::caption_style::{CaptionPosition, CaptionSize};
 use super::fullscreen::{FullscreenState, HINT_SHOWN};
 use super::view_settings::{CallLayout, ViewSettings};
+use super::{gallery_page, measured_stage, video_wants};
 use crate::app_state::{AppEvent, AppState};
 
 const CHROME_TOUCH_THROTTLE: Duration = Duration::from_millis(250);
@@ -102,7 +102,9 @@ impl AppState {
         };
         let wants = video_wants(&call.model, measured_stage(call));
         if wants != call.sent_wants {
-            let _ = call.commands.send(CallCommand::SetVideoWants(wants.clone()));
+            let _ = call
+                .commands
+                .send(CallCommand::SetVideoWants(wants.clone()));
             call.sent_wants = wants;
         }
     }

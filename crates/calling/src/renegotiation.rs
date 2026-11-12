@@ -43,7 +43,11 @@ impl MediaNegotiator {
     }
 
     pub fn answered_incoming(&mut self, from_mixer: bool) {
-        self.path = if from_mixer { MediaPath::Mixer } else { MediaPath::Direct };
+        self.path = if from_mixer {
+            MediaPath::Mixer
+        } else {
+            MediaPath::Direct
+        };
     }
 
     pub fn on_acceptance(&mut self, from_mixer: bool, one_to_one_layout: bool) -> MediaAction {
@@ -54,7 +58,11 @@ impl MediaNegotiator {
                 MediaAction::ApplyAnswerThenEscalate
             }
             (MediaPath::Pending, _) => {
-                self.path = if from_mixer { MediaPath::Mixer } else { MediaPath::Direct };
+                self.path = if from_mixer {
+                    MediaPath::Mixer
+                } else {
+                    MediaPath::Direct
+                };
                 MediaAction::ApplyAnswer
             }
             (MediaPath::Direct, true) if !self.own_offer_pending => {
@@ -181,8 +189,14 @@ mod tests {
         let mut negotiator = MediaNegotiator::default();
         negotiator.on_acceptance(false, true);
         assert!(negotiator.begin_same_peer_offer());
-        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::RejectGlare);
-        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::AnswerOnNewPeer);
+        assert_eq!(
+            negotiator.on_renegotiation(false, false),
+            MediaAction::RejectGlare
+        );
+        assert_eq!(
+            negotiator.on_renegotiation(true, true),
+            MediaAction::AnswerOnNewPeer
+        );
         assert_eq!(negotiator.path(), MediaPath::Mixer);
         assert!(negotiator.begin_conference_upgrade());
         assert!(!negotiator.begin_conference_upgrade());
@@ -192,7 +206,10 @@ mod tests {
     fn a_failed_server_escalation_goes_back_to_the_direct_path() {
         let mut negotiator = MediaNegotiator::default();
         negotiator.on_acceptance(false, true);
-        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::AnswerOnNewPeer);
+        assert_eq!(
+            negotiator.on_renegotiation(true, true),
+            MediaAction::AnswerOnNewPeer
+        );
         assert_eq!(negotiator.path(), MediaPath::Mixer);
         negotiator.server_escalation_failed();
         assert_eq!(negotiator.path(), MediaPath::Direct);
@@ -201,15 +218,27 @@ mod tests {
     #[test]
     fn a_remote_same_peer_offer_is_answered_while_our_escalation_runs() {
         let mut negotiator = MediaNegotiator::default();
-        assert_eq!(negotiator.on_acceptance(true, true), MediaAction::ApplyAnswerThenEscalate);
-        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::AnswerOnSamePeer);
-        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::RejectGlare);
+        assert_eq!(
+            negotiator.on_acceptance(true, true),
+            MediaAction::ApplyAnswerThenEscalate
+        );
+        assert_eq!(
+            negotiator.on_renegotiation(false, false),
+            MediaAction::AnswerOnSamePeer
+        );
+        assert_eq!(
+            negotiator.on_renegotiation(true, true),
+            MediaAction::RejectGlare
+        );
     }
 
     #[test]
     fn a_rejection_clears_the_pending_offer() {
         let mut negotiator = MediaNegotiator::default();
-        assert_eq!(negotiator.on_acceptance(true, true), MediaAction::ApplyAnswerThenEscalate);
+        assert_eq!(
+            negotiator.on_acceptance(true, true),
+            MediaAction::ApplyAnswerThenEscalate
+        );
         assert_eq!(negotiator.on_rejection(), RejectedOffer::NewPeer);
         assert_eq!(negotiator.on_media_answer(), MediaAction::Ignore);
         assert!(negotiator.begin_same_peer_offer());
@@ -276,7 +305,10 @@ mod tests {
         let mut negotiator = MediaNegotiator::default();
         negotiator.answered_incoming(false);
         assert_eq!(negotiator.path(), MediaPath::Direct);
-        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::AnswerOnNewPeer);
+        assert_eq!(
+            negotiator.on_renegotiation(true, true),
+            MediaAction::AnswerOnNewPeer
+        );
         assert_eq!(negotiator.path(), MediaPath::Mixer);
     }
 
@@ -284,8 +316,14 @@ mod tests {
     fn a_plain_renegotiation_stays_on_the_same_peer() {
         let mut negotiator = MediaNegotiator::default();
         negotiator.answered_incoming(true);
-        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::AnswerOnSamePeer);
-        assert_eq!(negotiator.on_renegotiation(true, false), MediaAction::AnswerOnNewPeer);
+        assert_eq!(
+            negotiator.on_renegotiation(false, false),
+            MediaAction::AnswerOnSamePeer
+        );
+        assert_eq!(
+            negotiator.on_renegotiation(true, false),
+            MediaAction::AnswerOnNewPeer
+        );
         assert_eq!(negotiator.path(), MediaPath::Mixer);
     }
 
@@ -295,12 +333,18 @@ mod tests {
         negotiator.on_acceptance(false, false);
         assert!(negotiator.begin_same_peer_offer());
         assert!(!negotiator.begin_same_peer_offer());
-        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::RejectGlare);
+        assert_eq!(
+            negotiator.on_renegotiation(false, false),
+            MediaAction::RejectGlare
+        );
         assert_eq!(negotiator.on_media_answer(), MediaAction::ApplyOnSamePeer);
         assert_eq!(negotiator.on_media_answer(), MediaAction::Ignore);
         assert!(negotiator.begin_same_peer_offer());
         negotiator.same_peer_offer_failed();
-        assert_eq!(negotiator.on_renegotiation(false, false), MediaAction::AnswerOnSamePeer);
+        assert_eq!(
+            negotiator.on_renegotiation(false, false),
+            MediaAction::AnswerOnSamePeer
+        );
     }
 
     #[test]
@@ -313,6 +357,9 @@ mod tests {
             MediaAction::RejectGlare
         );
         negotiator.escalation_failed();
-        assert_eq!(negotiator.on_renegotiation(true, true), MediaAction::AnswerOnNewPeer);
+        assert_eq!(
+            negotiator.on_renegotiation(true, true),
+            MediaAction::AnswerOnNewPeer
+        );
     }
 }

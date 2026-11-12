@@ -5,15 +5,15 @@ use calling::meeting::fetch_live_meeting;
 use calling::relay::ic3_scope;
 use calling::signaling::{CHATSVC_REGION, fetch_self};
 use calling::{
-    BackgroundCache, BackgroundChoice, CallCommand, CallEngine, CallSpec, CallState, CallUpdate, CaptionState, EngineConfig, MeetingTarget, MuteCommand, Reaction, RecordingKind, ShareKind,
+    BackgroundCache, BackgroundChoice, CallCommand, CallEngine, CallSpec, CallState, CallUpdate,
+    CaptionState, EngineConfig, MeetingTarget, MuteCommand, Reaction, RecordingKind, ShareKind,
     ShareSource, StopScope,
 };
 use chatsvc::InstanceNames;
 use serde_json::{Value, json};
-use session::{DEFAULT_ENDPOINT, Method, Request, Scope, Session, SPACES};
+use session::{DEFAULT_ENDPOINT, Method, Request, SPACES, Scope, Session};
 
-const CREATE_URL: &str =
-    "https://teams.cloud.microsoft/api/mt/emea/beta/me/calendarEvents/privateMeeting/schedulingService/create";
+const CREATE_URL: &str = "https://teams.cloud.microsoft/api/mt/emea/beta/me/calendarEvents/privateMeeting/schedulingService/create";
 const SUBJECT: &str = "Native client test";
 const CONNECT_LIMIT: Duration = Duration::from_secs(45);
 const LIVE_STATE_LIMIT: Duration = Duration::from_secs(30);
@@ -87,7 +87,12 @@ fn arguments() -> Arguments {
             }
             "--record" => parsed.record = true,
             "--audio-only" => parsed.audio_only = true,
-            "--record-for" => parsed.record_for = input.next().and_then(|value| value.parse().ok()).map_or(RECORD_HOLD, Duration::from_secs),
+            "--record-for" => {
+                parsed.record_for = input
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                    .map_or(RECORD_HOLD, Duration::from_secs)
+            }
             "--unmute" => parsed.unmute = true,
             "--whiteboard-state" => parsed.whiteboard_state = true,
             "--resolve-by-id" => parsed.resolve_by_id = true,
@@ -95,8 +100,20 @@ fn arguments() -> Arguments {
                 parsed.background = true;
                 parsed.camera = true;
             }
-            "--stop-media-after" => parsed.stop_media_after = input.next().and_then(|value| value.parse().ok()).map(Duration::from_secs),
-            "--hold" => parsed.hold = Duration::from_secs(input.next().and_then(|value| value.parse().ok()).unwrap_or(10)),
+            "--stop-media-after" => {
+                parsed.stop_media_after = input
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                    .map(Duration::from_secs)
+            }
+            "--hold" => {
+                parsed.hold = Duration::from_secs(
+                    input
+                        .next()
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or(10),
+                )
+            }
             "--thread-out" => parsed.thread_out = input.next().map(PathBuf::from),
             "--wait-file" => parsed.wait_file = input.next().map(PathBuf::from),
             _ => {}
@@ -113,7 +130,10 @@ fn as_object(value: &Value) -> Option<Value> {
     }
 }
 
-async fn tenant_and_organizer(session: &Session, thread_id: &str) -> (Option<String>, Option<String>) {
+async fn tenant_and_organizer(
+    session: &Session,
+    thread_id: &str,
+) -> (Option<String>, Option<String>) {
     let url = format!(
         "https://teams.cloud.microsoft/api/chatsvc/{CHATSVC_REGION}/v1/users/ME/conversations/{}?view=msnp24Equivalent",
         thread_id.replace(':', "%3A").replace('@', "%40")
@@ -123,12 +143,22 @@ async fn tenant_and_organizer(session: &Session, thread_id: &str) -> (Option<Str
     };
     let properties = &response.body["properties"];
     let meeting = as_object(&properties["meeting"]);
-    let text = |value: &Value| value.as_str().filter(|text| !text.is_empty()).map(str::to_owned);
+    let text = |value: &Value| {
+        value
+            .as_str()
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+    };
     let tenant = meeting
         .as_ref()
         .and_then(|meeting| text(&meeting["tenantId"]))
         .or_else(|| text(&properties["addedByTenantId"]));
-    (tenant, meeting.as_ref().and_then(|meeting| text(&meeting["organizerId"])))
+    (
+        tenant,
+        meeting
+            .as_ref()
+            .and_then(|meeting| text(&meeting["organizerId"])),
+    )
 }
 
 fn main() {
@@ -137,14 +167,20 @@ fn main() {
         // SAFETY: nothing else runs yet; the runtime below starts after this.
         unsafe { std::env::set_var(VIDEO_ENV, "pattern") };
     }
-    tokio::runtime::Runtime::new().expect("runtime").block_on(run());
+    tokio::runtime::Runtime::new()
+        .expect("runtime")
+        .block_on(run());
 }
 
 fn http_status(reason: &str) -> String {
     reason
         .split("HTTP ")
         .nth(1)
-        .map(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>())
+        .map(|rest| {
+            rest.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+        })
         .filter(|digits| !digits.is_empty())
         .map_or_else(|| "no status".to_owned(), |digits| format!("HTTP {digits}"))
 }
@@ -173,13 +209,20 @@ struct Features {
 
 impl Features {
     fn pending(&self, arguments: &Arguments) -> bool {
-        if self.deadline.is_none_or(|deadline| Instant::now() >= deadline) {
+        if self
+            .deadline
+            .is_none_or(|deadline| Instant::now() >= deadline)
+        {
             return false;
         }
         (arguments.spotlight_self && !self.spotlight_cleared)
             || (arguments.captions && !self.captions_stopped)
             || (arguments.record && !self.recording_done)
-            || (arguments.whiteboard_state && self.whiteboard_wait_until.is_none_or(|until| Instant::now() < until) && !self.whiteboard_share_seen)
+            || (arguments.whiteboard_state
+                && self
+                    .whiteboard_wait_until
+                    .is_none_or(|until| Instant::now() < until)
+                && !self.whiteboard_share_seen)
     }
 }
 
@@ -191,17 +234,33 @@ async fn run() {
     let me = fetch_self(&session).await.expect("own identity");
 
     let started = Instant::now();
-    let reused = std::env::args().skip_while(|argument| argument != "--thread").nth(1);
+    let reused = std::env::args()
+        .skip_while(|argument| argument != "--thread")
+        .nth(1);
     let (thread_id, created_meeting) = match reused {
         Some(thread_id) => (thread_id, None),
         None => {
             let body = json!({"meetingType": "MeetNow", "isStreamEnabled": false, "subject": SUBJECT, "unhideChatThread": true});
             let created = session
-                .request(Method::Post, CREATE_URL, &Scope::new(SPACES, "user_impersonation"), Some(body))
+                .request(
+                    Method::Post,
+                    CREATE_URL,
+                    &Scope::new(SPACES, "user_impersonation"),
+                    Some(body),
+                )
                 .await
                 .expect("create meeting");
-            println!("# create MeetNow: HTTP {} after {:?}", created.status, started.elapsed());
-            let thread_id = created.body.pointer("/value/groupContext/threadId").and_then(Value::as_str).expect("meeting thread").to_owned();
+            println!(
+                "# create MeetNow: HTTP {} after {:?}",
+                created.status,
+                started.elapsed()
+            );
+            let thread_id = created
+                .body
+                .pointer("/value/groupContext/threadId")
+                .and_then(Value::as_str)
+                .expect("meeting thread")
+                .to_owned();
             (thread_id, Some(created.body))
         }
     };
@@ -240,7 +299,9 @@ async fn run() {
         },
         ..EngineConfig::default()
     };
-    let (engine, _events) = CallEngine::start(session.clone(), poll_session, config).await.expect("engine");
+    let (engine, _events) = CallEngine::start(session.clone(), poll_session, config)
+        .await
+        .expect("engine");
     println!("# engine ready after {:?}", started.elapsed());
     if arguments.resolve_by_id
         && let Some(created) = &created_meeting
@@ -265,7 +326,12 @@ async fn run() {
     let mut sharing_local_level: f32 = 0.0;
     let mut sharing = false;
     let mut features = Features::default();
-    let deadline = Instant::now() + CONNECT_LIMIT + LIVE_STATE_LIMIT + WAIT_FILE_LIMIT + arguments.hold + END_LIMIT;
+    let deadline = Instant::now()
+        + CONNECT_LIMIT
+        + LIVE_STATE_LIMIT
+        + WAIT_FILE_LIMIT
+        + arguments.hold
+        + END_LIMIT;
     let mut tick = tokio::time::interval(POLL);
     while ended.is_none() && Instant::now() < deadline {
         tokio::select! {
@@ -492,21 +558,44 @@ async fn run() {
         );
     }
     if arguments.spotlight_self {
-        println!("# spotlight self: shown {}, cleared {}", features.spotlight_seen, features.spotlight_cleared);
+        println!(
+            "# spotlight self: shown {}, cleared {}",
+            features.spotlight_seen, features.spotlight_cleared
+        );
     }
     if arguments.captions {
-        println!("# captions: became active {}, caption events {}", features.captions_active, features.caption_events);
+        println!(
+            "# captions: became active {}, caption events {}",
+            features.captions_active, features.caption_events
+        );
     }
     if arguments.blur || arguments.background {
-        let average = if features.blur_reports == 0 { 0. } else { features.blur_total_ms / features.blur_reports as f64 };
-        let label = if arguments.background { "background image" } else { "blur" };
-        println!("# {label}: average processing {average:.1} ms over {} report(s)", features.blur_reports);
+        let average = if features.blur_reports == 0 {
+            0.
+        } else {
+            features.blur_total_ms / features.blur_reports as f64
+        };
+        let label = if arguments.background {
+            "background image"
+        } else {
+            "blur"
+        };
+        println!(
+            "# {label}: average processing {average:.1} ms over {} report(s)",
+            features.blur_reports
+        );
     }
     if arguments.record {
-        println!("# recording: seen on {}, seen off {}", features.recording_seen_on, features.recording_seen_off);
+        println!(
+            "# recording: seen on {}, seen off {}",
+            features.recording_seen_on, features.recording_seen_off
+        );
     }
     if arguments.whiteboard_state {
-        println!("# whiteboard: board url fetched {}, share update parsed {}", features.whiteboard_url_seen, features.whiteboard_share_seen);
+        println!(
+            "# whiteboard: board url fetched {}, share update parsed {}",
+            features.whiteboard_url_seen, features.whiteboard_share_seen
+        );
     }
     let gone_started = Instant::now();
     let mut gone_after = None;
@@ -531,15 +620,25 @@ async fn background_image(session: &Session) -> Option<PathBuf> {
             return None;
         }
     };
-    println!("# background image list downloaded: {} entries", catalog.len());
+    println!(
+        "# background image list downloaded: {} entries",
+        catalog.len()
+    );
     let first = catalog.first()?;
     match cache.ensure_thumbnail(session, first).await {
-        Ok(path) => println!("# first thumbnail cached: {} bytes", std::fs::metadata(&path).map_or(0, |meta| meta.len())),
+        Ok(path) => println!(
+            "# first thumbnail cached: {} bytes",
+            std::fs::metadata(&path).map_or(0, |meta| meta.len())
+        ),
         Err(error) => println!("# first thumbnail failed: {error}"),
     }
     match cache.ensure_image(session, first).await {
         Ok(path) => {
-            println!("# first image {} cached: {} bytes", first.id, std::fs::metadata(&path).map_or(0, |meta| meta.len()));
+            println!(
+                "# first image {} cached: {} bytes",
+                first.id,
+                std::fs::metadata(&path).map_or(0, |meta| meta.len())
+            );
             Some(path)
         }
         Err(error) => {
@@ -553,7 +652,9 @@ fn urlencoding_component(value: &str) -> String {
     value
         .bytes()
         .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (byte as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
             other => format!("%{other:02X}"),
         })
         .collect()
@@ -580,9 +681,14 @@ fn find_text<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
 }
 
 async fn check_resolve_by_id(engine: &CallEngine, created: &Value, thread_id: &str) {
-    let code = find_text(created, &["joinMeetingId", "meetingCode"]).map(|code| code.replace(' ', ""));
+    let code =
+        find_text(created, &["joinMeetingId", "meetingCode"]).map(|code| code.replace(' ', ""));
     let passcode = find_text(created, &["passcode"]);
-    println!("# resolve by id: meeting id found {}, passcode found {}", code.is_some(), passcode.is_some());
+    println!(
+        "# resolve by id: meeting id found {}, passcode found {}",
+        code.is_some(),
+        passcode.is_some()
+    );
     let Some(code) = code else {
         return;
     };
@@ -597,6 +703,9 @@ async fn check_resolve_by_id(engine: &CallEngine, created: &Value, thread_id: &s
             target.thread_id == thread_id,
             !target.tenant_id.is_empty() && !target.organizer_id.is_empty()
         ),
-        Err(error) => println!("# resolve by id: failed: {}", error.to_string().chars().take(160).collect::<String>()),
+        Err(error) => println!(
+            "# resolve by id: failed: {}",
+            error.to_string().chars().take(160).collect::<String>()
+        ),
     }
 }

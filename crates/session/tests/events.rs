@@ -39,28 +39,46 @@ async fn serve(mut stream: TcpStream, port: u16, evaluate_value: Value, calls: C
         while let Some(Ok(Message::Text(text))) = websocket.next().await {
             let call: Value = serde_json::from_str(text.as_str()).unwrap();
             let method = call["method"].as_str().unwrap().to_owned();
-            calls.lock().unwrap().push((method.clone(), call["params"].clone()));
+            calls
+                .lock()
+                .unwrap()
+                .push((method.clone(), call["params"].clone()));
             let result = match method.as_str() {
-                "Runtime.evaluate" => json!({"result": {"type": "object", "value": evaluate_value}}),
+                "Runtime.evaluate" => {
+                    json!({"result": {"type": "object", "value": evaluate_value}})
+                }
                 "Page.addScriptToEvaluateOnNewDocument" => json!({"identifier": "7"}),
                 "Runtime.disable" => {
-                    websocket.send(Message::text(json!({"id": call["id"], "error": {"message": "nope"}}).to_string())).await.unwrap();
+                    websocket
+                        .send(Message::text(
+                            json!({"id": call["id"], "error": {"message": "nope"}}).to_string(),
+                        ))
+                        .await
+                        .unwrap();
                     continue;
                 }
                 _ => json!({}),
             };
             websocket
-                .send(Message::text(json!({"id": call["id"], "result": result}).to_string()))
+                .send(Message::text(
+                    json!({"id": call["id"], "result": result}).to_string(),
+                ))
                 .await
                 .unwrap();
             if method == "Runtime.addBinding" {
                 let name = call["params"]["name"].clone();
                 for payload in ["first", "second"] {
                     let event = json!({"method": "Runtime.bindingCalled", "params": {"name": name, "payload": payload, "executionContextId": 1}});
-                    websocket.send(Message::text(event.to_string())).await.unwrap();
+                    websocket
+                        .send(Message::text(event.to_string()))
+                        .await
+                        .unwrap();
                 }
                 let navigation = json!({"method": "Page.frameNavigated", "params": {"frame": {"url": "https://teams.cloud.microsoft/"}}});
-                websocket.send(Message::text(navigation.to_string())).await.unwrap();
+                websocket
+                    .send(Message::text(navigation.to_string()))
+                    .await
+                    .unwrap();
             }
         }
         return;
@@ -69,7 +87,10 @@ async fn serve(mut stream: TcpStream, port: u16, evaluate_value: Value, calls: C
     let _ = stream.read(&mut discard).await.unwrap();
     let targets = json!([{"type": "page", "url": "https://teams.cloud.microsoft/v2/", "webSocketDebuggerUrl": format!("ws://127.0.0.1:{port}/devtools/page/0")}]);
     let body = targets.to_string();
-    let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
     stream.write_all(response.as_bytes()).await.unwrap();
 }
 
@@ -83,11 +104,23 @@ async fn binding_calls_arrive_as_events_in_order() {
 
     let first = events.recv().await.unwrap();
     assert_eq!(first.binding_payload("sink"), Some("first"));
-    assert_eq!(events.recv().await.unwrap().binding_payload("sink"), Some("second"));
+    assert_eq!(
+        events.recv().await.unwrap().binding_payload("sink"),
+        Some("second")
+    );
     assert_eq!(events.recv().await.unwrap().method, "Page.frameNavigated");
 
-    let methods: Vec<String> = tab.calls.lock().unwrap().iter().map(|(method, _)| method.clone()).collect();
-    assert_eq!(methods, ["Runtime.enable", "Page.enable", "Runtime.addBinding"]);
+    let methods: Vec<String> = tab
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(method, _)| method.clone())
+        .collect();
+    assert_eq!(
+        methods,
+        ["Runtime.enable", "Page.enable", "Runtime.addBinding"]
+    );
 }
 
 #[tokio::test]
@@ -110,7 +143,10 @@ async fn concurrent_calls_get_their_own_answers_and_errors_are_typed() {
     let session = Session::connect(&tab.endpoint).await.unwrap();
     let (control, _events) = session.subscribe(App::Teams).await.unwrap();
     let (identifier, failure) = tokio::join!(
-        control.call("Page.addScriptToEvaluateOnNewDocument", json!({"source": ""})),
+        control.call(
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({"source": ""})
+        ),
         control.call("Runtime.disable", json!({})),
     );
     assert_eq!(identifier.unwrap()["identifier"], "7");
@@ -140,7 +176,13 @@ async fn run_with_token_splices_body_after_the_token_lookup() {
     let session = Session::connect(&tab.endpoint).await.unwrap();
     let scope = Scope::new("https://ic3.teams.office.com", "Teams.AccessAsUser.All");
     let answer = session
-        .run_with_token(App::Teams, &scope, "return {ok: !!token};", &json!({"host": "h"}), true)
+        .run_with_token(
+            App::Teams,
+            &scope,
+            "return {ok: !!token};",
+            &json!({"host": "h"}),
+            true,
+        )
         .await
         .unwrap();
     assert_eq!(answer["ok"], true);

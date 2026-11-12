@@ -172,61 +172,59 @@ mod frames {
     use crate::app_state::{AppHandle, AppState, Mode, Selection};
     use crate::call::{ActiveCall, CallModel, ConsultCall};
     use crate::demo;
+    use crate::render::{CODE_BLOCK_TAG, CODE_LINE_TAG};
     use crate::settings::select_selector;
     use crate::settings::{item_selector, label, label_selector, metrics};
     use crate::settings_section::SettingsSection;
     use crate::user_activity::UserInput;
+    use crate::views::activity_panel::ACTIVITY_PROPOSALS_TAG;
     use crate::views::call_transcript::TranscriptPanel;
     use crate::views::call_view::CHAT_PANEL_TAG;
+    use crate::views::call_window::CALL_WINDOW_TAG;
     use crate::views::composer::delivery::{
-        COMPOSER_IMPORTANCE_LABEL_TAG, COMPOSER_URGENT_BANNER_TAG,
-        DELIVERY_MENU_TAG,
+        COMPOSER_IMPORTANCE_LABEL_TAG, COMPOSER_URGENT_BANNER_TAG, DELIVERY_MENU_TAG,
     };
     use crate::views::composer::plus_menu::{COMPOSER_PLUS_TAG, PlusAction};
     use crate::views::composer::{
-        COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG, COMPOSER_FORMAT_DIVIDER_TAG,
-        COMPOSER_ACTIONS_TAG, COMPOSER_FORMAT_TAG, COMPOSER_INPUT_TAG, COMPOSER_SEND_TAG, COMPOSER_STACKED_ACTIONS_TAG,
-        POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG, POST_AUDIENCE_TAG, POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG, POST_CARD_SEND_TAG,
-        POST_CARD_SUBJECT_TAG,
+        COMPOSER_ACTIONS_TAG, COMPOSER_BOX_TAG, COMPOSER_FORMAT_BAR_TAG,
+        COMPOSER_FORMAT_DIVIDER_TAG, COMPOSER_FORMAT_TAG, COMPOSER_INPUT_TAG, COMPOSER_SEND_TAG,
+        COMPOSER_STACKED_ACTIONS_TAG, POST_ANNOUNCEMENT_TAG, POST_ANNOUNCEMENT_TOGGLE_TAG,
+        POST_AUDIENCE_TAG, POST_CARD_DIVIDER_TAG, POST_CARD_FOOTER_TAG, POST_CARD_HEADER_TAG,
+        POST_CARD_SEND_TAG, POST_CARD_SUBJECT_TAG,
     };
-    use crate::views::call_window::CALL_WINDOW_TAG;
     use crate::views::conversation::{
         CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
         CHANNEL_DETAILS_TAG,
     };
-    use crate::render::{CODE_BLOCK_TAG, CODE_LINE_TAG};
     use crate::views::conversation::{
         FEED_EDGE_TAG, FORWARD_FOOTER_BAR_TAG, FORWARD_FOOTER_COUNT_TAG, FORWARD_FOOTER_NEXT_TAG,
         FORWARD_FOOTER_TAG, HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG,
-    };
-    use crate::views::group_name::{GROUP_NAME_BUTTON, GROUP_NAME_FORM};
-    use crate::views::post_card::{
-        POST_AVATAR_TAG, POST_BODY_TAG, POST_CARD_TAG, POST_FOOTER_AVATAR_TAG,
     };
     use crate::views::find_panel::{
         FIND_DIVIDER_TAG, FIND_INPUT_TAG, FIND_PANEL_TAG, FIND_RESULTS_TAG,
     };
     use crate::views::forward_dialog::{FORWARD_CARD_TAG, FORWARD_PREVIEW_TAG};
+    use crate::views::group_name::{GROUP_NAME_BUTTON, GROUP_NAME_FORM};
     use crate::views::message_row::{
         BUBBLE_TAGS, IMPORTANCE_LABEL_TAG, bubble_padding_y, select_box_selector,
     };
     use crate::views::pin_banner::{BANNER_INSET, PIN_BANNER_TAG};
-    use crate::views::activity_panel::ACTIVITY_PROPOSALS_TAG;
+    use crate::views::post_card::{
+        POST_AVATAR_TAG, POST_BODY_TAG, POST_CARD_TAG, POST_FOOTER_AVATAR_TAG,
+    };
     use crate::views::proposal_card::{PROPOSAL_BUTTONS, PROPOSAL_CARD, PROPOSAL_THUMBNAILS};
     use crate::views::reaction_proposal_pill::REACTION_PILL;
     use crate::views::recap_tab::RECAP_REGION;
-    use crate::views::shell::{
-        AppShell, Startup, bind_keys, install_globals,
-    };
+    use crate::views::shell::{AppShell, Startup, bind_keys, install_globals};
     use crate::views::shortcuts::{
-        ClearChatFilters, FilterMutedChats, FindInChat, OpenActivity, OpenAgents, OpenCallsTab,
-        OpenCalendar, OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenSaved,
+        ClearChatFilters, FilterMutedChats, FindInChat, OpenActivity, OpenAgents, OpenCalendar,
+        OpenCallsTab, OpenChannelsTab, OpenChatFilter, OpenChatsTab, OpenSaved,
     };
     use crate::views::sidebar::SIDEBAR_SCROLL_DIVIDER;
-    use crate::views::sidebar::chat_row_selector;
     use crate::views::sidebar::chat_filter_bar::{
         FILTER_EMPTY_TAG, FILTER_INPUT_TAG, FILTER_PILLS_TAG, FILTER_TAG,
     };
+    use crate::views::sidebar::chat_row_selector;
     use crate::views::status_menu::{OWN_AVATAR_DISC, TITLE_AVATAR_SIZE};
     use crate::views::widgets::{
         COUNT_BADGE, RAIL_BADGE, badge_ink_centre, badge_pill, badge_selector, badge_text_origin,
@@ -1047,9 +1045,12 @@ mod frames {
                         .find(|(path, _)| *path == wanted)
                         .map(|(_, bounds)| *bounds)
                 };
-                let first_island = bounds_of("shell/islands/sidebar").or_else(|| bounds_of(CALENDAR));
-                if let (Some(rail), Some(island)) = (bounds_of("shell/islands/rail"), first_island) {
-                    let gap = f32::from(island.origin.x) - f32::from(rail.origin.x + rail.size.width);
+                let first_island =
+                    bounds_of("shell/islands/sidebar").or_else(|| bounds_of(CALENDAR));
+                if let (Some(rail), Some(island)) = (bounds_of("shell/islands/rail"), first_island)
+                {
+                    let gap =
+                        f32::from(island.origin.x) - f32::from(rail.origin.x + rail.size.width);
                     if gap.abs() > 0.5 {
                         found.push((
                             "shell/islands/rail:gap".to_owned(),
@@ -1169,20 +1170,38 @@ mod frames {
         visual.simulate_resize(size(px(760.), px(700.)));
         collect(&mut visual, Some(COMPOSER_STACKED_ACTIONS_TAG));
         let bounds_of = |visual: &mut VisualTestContext, path: &'static str| {
-            visual.debug_bounds(path).unwrap_or_else(|| panic!("{path} missing"))
+            visual
+                .debug_bounds(path)
+                .unwrap_or_else(|| panic!("{path} missing"))
         };
         let card = bounds_of(&mut visual, COMPOSER_BOX_TAG);
         let input = bounds_of(&mut visual, COMPOSER_INPUT_TAG);
         let stacked = bounds_of(&mut visual, COMPOSER_STACKED_ACTIONS_TAG);
         let send = bounds_of(&mut visual, COMPOSER_SEND_TAG);
-        assert!(input.bottom() <= stacked.top(), "actions {} not below input {}", describe(stacked), describe(input));
-        assert!(contains(card, stacked) && contains(stacked, send), "send {} outside {}", describe(send), describe(stacked));
+        assert!(
+            input.bottom() <= stacked.top(),
+            "actions {} not below input {}",
+            describe(stacked),
+            describe(input)
+        );
+        assert!(
+            contains(card, stacked) && contains(stacked, send),
+            "send {} outside {}",
+            describe(send),
+            describe(stacked)
+        );
         let side = f32::from(card.right() - send.right());
         let bottom = f32::from(card.bottom() - send.bottom());
-        assert!((side - bottom).abs() < TOLERANCE, "send insets: side {side}, bottom {bottom}");
+        assert!(
+            (side - bottom).abs() < TOLERANCE,
+            "send insets: side {side}, bottom {bottom}"
+        );
         visual.simulate_resize(size(px(1280.), px(800.)));
         collect(&mut visual, Some(COMPOSER_SEND_TAG));
-        assert!(visual.debug_bounds(COMPOSER_STACKED_ACTIONS_TAG).is_none(), "wide composer stacked");
+        assert!(
+            visual.debug_bounds(COMPOSER_STACKED_ACTIONS_TAG).is_none(),
+            "wide composer stacked"
+        );
     }
 
     const TITLE_SEARCH: &str = "shell/title-bar/search";
@@ -1279,7 +1298,9 @@ mod frames {
             let bubbles: Vec<(usize, Bounds<Pixels>)> = BUBBLE_TAGS
                 .iter()
                 .enumerate()
-                .filter_map(|(index, tag)| call_visual.debug_bounds(tag).map(|bounds| (index, bounds)))
+                .filter_map(|(index, tag)| {
+                    call_visual.debug_bounds(tag).map(|bounds| (index, bounds))
+                })
                 .collect();
             assert!(!bubbles.is_empty(), "no bubbles rendered in the call chat");
             let found: Vec<String> = bubbles
@@ -1345,7 +1366,10 @@ mod frames {
                     mentions_json: "[]".to_owned(),
                     ..Default::default()
                 };
-                state.store.upsert_messages(&[record]).expect("store message");
+                state
+                    .store
+                    .upsert_messages(&[record])
+                    .expect("store message");
                 state.apply(
                     crate::backend::BackendEvent::Core(teams_core::CoreEvent::MessagesChanged {
                         conversation_id: GAP_CHAT.to_owned(),
@@ -1378,7 +1402,9 @@ mod frames {
                     .filter_map(move |(index, gap)| {
                         let expected = resting.iter().find(|(known, _)| *known == index)?.1;
                         ((gap - expected).abs() > TOLERANCE).then(|| {
-                            format!("frame {frame}: gap above bubble {index} is {gap}, was {expected}")
+                            format!(
+                                "frame {frame}: gap above bubble {index} is {gap}, was {expected}"
+                            )
                         })
                     })
             })
@@ -1511,7 +1537,10 @@ mod frames {
 
     // Not a platform assertion: on macOS the camera effects worker schedules onto
     // the deterministic test scheduler while this dialog is open.
-    #[cfg_attr(target_os = "macos", ignore = "camera effects thread trips the test scheduler")]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "camera effects thread trips the test scheduler"
+    )]
     #[gpui_kit::test]
     fn settings_dialog_keeps_its_inset_at_every_size(cx: &mut TestAppContext) {
         check_settings_dialog(cx, &SETTINGS_SECTIONS);
@@ -1711,7 +1740,10 @@ mod frames {
             .expect("group name button rendered");
         visual.simulate_click(button.center(), Default::default());
         collect(&mut visual, Some(GROUP_NAME_FORM));
-        assert!(visual.debug_bounds(GROUP_NAME_FORM).is_some(), "group name form open");
+        assert!(
+            visual.debug_bounds(GROUP_NAME_FORM).is_some(),
+            "group name form open"
+        );
         visual.simulate_keystrokes("backspace x space y enter");
         visual.run_until_parked();
         let title = visual.update(|_, cx| {
@@ -2340,8 +2372,13 @@ mod frames {
         let toggle = visual
             .debug_bounds(POST_ANNOUNCEMENT_TOGGLE_TAG)
             .expect("announcement toggle in the format bar");
-        let format_bar = visual.debug_bounds(COMPOSER_FORMAT_BAR_TAG).expect("format bar");
-        assert!(format_bar.contains(&toggle.center()), "toggle outside the format bar");
+        let format_bar = visual
+            .debug_bounds(COMPOSER_FORMAT_BAR_TAG)
+            .expect("format bar");
+        assert!(
+            format_bar.contains(&toggle.center()),
+            "toggle outside the format bar"
+        );
         visual.simulate_click(toggle.center(), Default::default());
         collect(&mut visual, Some(POST_ANNOUNCEMENT_TAG));
         let mut bounds_of = |path: &'static str| {
@@ -2357,10 +2394,16 @@ mod frames {
         let gap = f32::from(subject.top() - banner.bottom());
         assert!(gap >= 6., "subheading {gap} px under the banner");
         let audience = bounds_of(POST_AUDIENCE_TAG);
-        assert!(audience.bottom() <= card.top(), "audience hint not above the card");
+        assert!(
+            audience.bottom() <= card.top(),
+            "audience hint not above the card"
+        );
         let left = f32::from(banner.left() - card.left());
         let right = f32::from(card.right() - banner.right());
-        assert!((left - right).abs() < TOLERANCE, "banner insets: left {left}, right {right}");
+        assert!(
+            (left - right).abs() < TOLERANCE,
+            "banner insets: left {left}, right {right}"
+        );
     }
 
     #[gpui_kit::test]
@@ -2378,8 +2421,14 @@ mod frames {
         let side = f32::from(avatar.left() - card.left());
         let checks = [
             ("body left", f32::from(body.left() - avatar.left())),
-            ("footer avatar left", f32::from(footer_avatar.left() - avatar.left())),
-            ("body right inset", f32::from(card.right() - body.right()) - side),
+            (
+                "footer avatar left",
+                f32::from(footer_avatar.left() - avatar.left()),
+            ),
+            (
+                "body right inset",
+                f32::from(card.right() - body.right()) - side,
+            ),
         ];
         for (name, gap) in checks {
             assert!(

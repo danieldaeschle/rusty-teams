@@ -26,14 +26,25 @@ fn time(value: &Value) -> Option<DateTime<Utc>> {
 }
 
 fn recent_file(item: &Value) -> Option<CloudFile> {
-    let remote = item.get("remoteItem").filter(|remote| remote.is_object()).unwrap_or(item);
+    let remote = item
+        .get("remoteItem")
+        .filter(|remote| remote.is_object())
+        .unwrap_or(item);
     item.get("file")?;
     let opened = |source: &Value| time(&source["fileSystemInfo"]["lastAccessedDateTime"]);
     Some(CloudFile {
         name: item["name"].as_str()?.to_owned(),
-        size: item["size"].as_u64().or_else(|| remote["size"].as_u64()).unwrap_or(0),
-        web_url: item["webUrl"].as_str().or_else(|| remote["webUrl"].as_str())?.to_owned(),
-        drive_id: remote["parentReference"]["driveId"].as_str().map(str::to_owned),
+        size: item["size"]
+            .as_u64()
+            .or_else(|| remote["size"].as_u64())
+            .unwrap_or(0),
+        web_url: item["webUrl"]
+            .as_str()
+            .or_else(|| remote["webUrl"].as_str())?
+            .to_owned(),
+        drive_id: remote["parentReference"]["driveId"]
+            .as_str()
+            .map(str::to_owned),
         item_id: remote["id"].as_str().map(str::to_owned),
         last_opened: opened(remote).or_else(|| opened(item)),
     })
@@ -65,7 +76,10 @@ impl From<&DriveEntry> for CloudFile {
 }
 
 fn user_name(value: &Value) -> Option<String> {
-    value["user"]["displayName"].as_str().filter(|name| !name.is_empty()).map(str::to_owned)
+    value["user"]["displayName"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
 }
 
 /// A file someone shared, as a picker row: `modified_at` holds the share date, `modified_by` who shared it.
@@ -76,17 +90,27 @@ fn shared_entry(item: &Value) -> Option<DriveEntry> {
         drive_id: remote["parentReference"]["driveId"].as_str()?.to_owned(),
         id: remote["id"].as_str()?.to_owned(),
         name: item["name"].as_str()?.to_owned(),
-        web_url: item["webUrl"].as_str().or_else(|| remote["webUrl"].as_str())?.to_owned(),
+        web_url: item["webUrl"]
+            .as_str()
+            .or_else(|| remote["webUrl"].as_str())?
+            .to_owned(),
         size: remote["size"].as_u64().unwrap_or(0),
         modified_at: time(&shared["sharedDateTime"]),
         modified_by: user_name(&shared["sharedBy"]).or_else(|| user_name(&shared["owner"])),
-        child_count: remote.get("folder").map(|folder| folder["childCount"].as_u64().unwrap_or(0)),
+        child_count: remote
+            .get("folder")
+            .map(|folder| folder["childCount"].as_u64().unwrap_or(0)),
         download_url: None,
     })
 }
 
 pub fn parse_shared(body: &Value) -> Vec<DriveEntry> {
-    let mut shared: Vec<DriveEntry> = body["value"].as_array().into_iter().flatten().filter_map(shared_entry).collect();
+    let mut shared: Vec<DriveEntry> = body["value"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(shared_entry)
+        .collect();
     shared.sort_by(|first, second| second.modified_at.cmp(&first.modified_at));
     shared.truncate(SHARED_SHOWN);
     shared
@@ -99,8 +123,12 @@ pub fn parse_recent_owners(body: &Value) -> Vec<(String, String)> {
         .into_iter()
         .flatten()
         .filter_map(|item| {
-            let remote = item.get("remoteItem").filter(|remote| remote.is_object()).unwrap_or(item);
-            let owner = user_name(&remote["shared"]["owner"]).or_else(|| user_name(&remote["createdBy"]))?;
+            let remote = item
+                .get("remoteItem")
+                .filter(|remote| remote.is_object())
+                .unwrap_or(item);
+            let owner = user_name(&remote["shared"]["owner"])
+                .or_else(|| user_name(&remote["createdBy"]))?;
             Some((remote["id"].as_str()?.to_owned(), owner))
         })
         .collect()
@@ -110,9 +138,17 @@ pub fn parse_recent_owners(body: &Value) -> Vec<(String, String)> {
 pub fn recent_site_ids(body: &Value, limit: usize) -> Vec<String> {
     let mut sites: Vec<String> = Vec::new();
     for item in body["value"].as_array().into_iter().flatten() {
-        let remote = item.get("remoteItem").filter(|remote| remote.is_object()).unwrap_or(item);
-        let web_url = remote["webUrl"].as_str().or_else(|| item["webUrl"].as_str()).unwrap_or_default();
-        let site = remote["parentReference"]["siteId"].as_str().or_else(|| remote["sharepointIds"]["siteId"].as_str());
+        let remote = item
+            .get("remoteItem")
+            .filter(|remote| remote.is_object())
+            .unwrap_or(item);
+        let web_url = remote["webUrl"]
+            .as_str()
+            .or_else(|| item["webUrl"].as_str())
+            .unwrap_or_default();
+        let site = remote["parentReference"]["siteId"]
+            .as_str()
+            .or_else(|| remote["sharepointIds"]["siteId"].as_str());
         if let Some(site) = site
             && !web_url.contains("/personal/")
             && !sites.iter().any(|known| known == site)
@@ -138,24 +174,38 @@ impl Graph {
         Ok(self.recent_files_with_owners(top).await?.0)
     }
 
-    pub async fn recent_files_with_owners(&self, top: usize) -> Result<(Vec<CloudFile>, Vec<(String, String)>)> {
-        let body = self.get(&urls::recent_drive_items(top), &Scope::graph(FILES_SCOPE)).await?;
+    pub async fn recent_files_with_owners(
+        &self,
+        top: usize,
+    ) -> Result<(Vec<CloudFile>, Vec<(String, String)>)> {
+        let body = self
+            .get(&urls::recent_drive_items(top), &Scope::graph(FILES_SCOPE))
+            .await?;
         Ok((parse_recent_files(&body), parse_recent_owners(&body)))
     }
 
     pub async fn shared_with_me(&self) -> Result<Vec<DriveEntry>> {
-        Ok(parse_shared(&self.get(&urls::shared_with_me(), &Scope::graph(FILES_SCOPE)).await?))
+        Ok(parse_shared(
+            &self
+                .get(&urls::shared_with_me(), &Scope::graph(FILES_SCOPE))
+                .await?,
+        ))
     }
 
     pub async fn quick_access_sites(&self) -> Result<Vec<QuickSite>> {
         let scope = Scope::graph(FILES_SCOPE);
-        let recent = self.get(&urls::recent_drive_items(RECENT_FOR_SITES), &scope).await?;
+        let recent = self
+            .get(&urls::recent_drive_items(RECENT_FOR_SITES), &scope)
+            .await?;
         let mut sites = Vec::new();
         for site_id in recent_site_ids(&recent, QUICK_ACCESS_SITES) {
             if let Ok(site) = self.get(&urls::site(&site_id), &scope).await
                 && let Some(name) = site["displayName"].as_str()
             {
-                sites.push(QuickSite { id: site_id, name: name.to_owned() });
+                sites.push(QuickSite {
+                    id: site_id,
+                    name: name.to_owned(),
+                });
             }
         }
         Ok(sites)
@@ -165,8 +215,13 @@ impl Graph {
     pub async fn drive_root(&self, site_id: Option<&str>) -> Result<DriveFolder> {
         let url = site_id.map_or_else(urls::my_drive, urls::site_drive);
         let drive = self.get(&url, &Scope::graph(FILES_SCOPE)).await?;
-        let drive_id = drive["id"].as_str().ok_or_else(|| Error::Decode("a drive without an id".into()))?;
-        Ok(DriveFolder { drive_id: drive_id.to_owned(), item_id: ROOT_ITEM.to_owned() })
+        let drive_id = drive["id"]
+            .as_str()
+            .ok_or_else(|| Error::Decode("a drive without an id".into()))?;
+        Ok(DriveFolder {
+            drive_id: drive_id.to_owned(),
+            item_id: ROOT_ITEM.to_owned(),
+        })
     }
 
     /// The reference a message needs to carry `file`: its drive item, found by id or else by its link.
@@ -204,8 +259,14 @@ mod tests {
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].item_id.as_deref(), Some("item-1"));
         assert_eq!(files[0].drive_id.as_deref(), Some("drive-1"));
-        assert_eq!(files[0].last_opened.unwrap().to_rfc3339(), "2026-11-09T12:00:00+00:00");
-        assert_eq!((files[1].item_id.as_deref(), files[1].size), (Some("item-2"), 0));
+        assert_eq!(
+            files[0].last_opened.unwrap().to_rfc3339(),
+            "2026-11-09T12:00:00+00:00"
+        );
+        assert_eq!(
+            (files[1].item_id.as_deref(), files[1].size),
+            (Some("item-2"), 0)
+        );
         assert!(files[1].last_opened.is_none());
     }
 
@@ -234,7 +295,10 @@ mod tests {
             {"name": "c", "remoteItem": {"id": "3", "webUrl": "https://t.sharepoint.com/sites/dev/c", "parentReference": {"siteId": "dev"}}},
             {"name": "d", "remoteItem": {"id": "4", "webUrl": "https://t.sharepoint.com/sites/ops/d", "sharepointIds": {"siteId": "ops"}}}
         ]});
-        assert_eq!(parse_recent_owners(&recent), vec![("1".to_owned(), "Cara".to_owned())]);
+        assert_eq!(
+            parse_recent_owners(&recent),
+            vec![("1".to_owned(), "Cara".to_owned())]
+        );
         assert_eq!(recent_site_ids(&recent, 8), ["dev", "ops"]);
         assert_eq!(recent_site_ids(&recent, 1), ["dev"]);
     }

@@ -625,7 +625,10 @@ mod tests {
     #[test]
     fn keycap_sequences_cover_the_base_the_selector_and_the_keycap() {
         let text = "\u{1f522} 4\u{fe0f}\u{20e3} After #\u{20e3} x\u{20e3}";
-        let found: Vec<&str> = keycap_ranges(text).into_iter().map(|range| &text[range]).collect();
+        let found: Vec<&str> = keycap_ranges(text)
+            .into_iter()
+            .map(|range| &text[range])
+            .collect();
         assert_eq!(found, ["4\u{fe0f}\u{20e3}", "#\u{20e3}"]);
     }
 

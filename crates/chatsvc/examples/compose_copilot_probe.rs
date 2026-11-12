@@ -27,7 +27,10 @@ async fn main() {
         .await
         .expect("organization");
     let rewrite = ComposeRewrite {
-        tenant_id: organization.body["value"][0]["id"].as_str().expect("tenant id").to_owned(),
+        tenant_id: organization.body["value"][0]["id"]
+            .as_str()
+            .expect("tenant id")
+            .to_owned(),
         thread_id: "48:notes".to_owned(),
         user_html: DRAFT.to_owned(),
         action,

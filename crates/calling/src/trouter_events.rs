@@ -37,8 +37,13 @@ fn find_key_within<'a>(value: &'a Value, key: &str, depth: usize) -> Option<&'a 
         return None;
     }
     match value {
-        Value::Object(map) => map.get(key).or_else(|| map.values().find_map(|child| find_key_within(child, key, depth + 1))),
-        Value::Array(items) => items.iter().find_map(|item| find_key_within(item, key, depth + 1)),
+        Value::Object(map) => map.get(key).or_else(|| {
+            map.values()
+                .find_map(|child| find_key_within(child, key, depth + 1))
+        }),
+        Value::Array(items) => items
+            .iter()
+            .find_map(|item| find_key_within(item, key, depth + 1)),
         _ => None,
     }
 }
@@ -56,7 +61,8 @@ pub fn decode_body(callback: &TrouterCallback) -> Result<Value> {
     if text.trim().is_empty() {
         return Ok(Value::Null);
     }
-    serde_json::from_str(&text).map_err(|error| Error::Callback(format!("body is not JSON: {error}")))
+    serde_json::from_str(&text)
+        .map_err(|error| Error::Callback(format!("body is not JSON: {error}")))
 }
 
 fn inflate(body: &str) -> Result<String> {
@@ -219,7 +225,9 @@ pub fn classify(path: &str, body: Value) -> Result<(String, CallEvent)> {
 }
 
 pub fn callback_call_id(path: &str) -> Option<String> {
-    split_callback_path(path).ok().map(|(call_id, _, _)| call_id)
+    split_callback_path(path)
+        .ok()
+        .map(|(call_id, _, _)| call_id)
 }
 
 pub fn is_acceptance_callback(path: &str) -> bool {
@@ -232,15 +240,25 @@ fn split_callback_path(path: &str) -> Result<(String, String, String)> {
         .ok_or_else(|| Error::Callback(format!("not a call callback: {path}")))?;
     let parts: Vec<&str> = rest.trim_end_matches('/').split('/').collect();
     let [call_id, _tag, scope, event] = parts.as_slice() else {
-        return Err(Error::Callback(format!("unexpected callback path shape ({} parts)", parts.len())));
+        return Err(Error::Callback(format!(
+            "unexpected callback path shape ({} parts)",
+            parts.len()
+        )));
     };
-    Ok(((*call_id).to_owned(), (*scope).to_owned(), (*event).to_owned()))
+    Ok((
+        (*call_id).to_owned(),
+        (*scope).to_owned(),
+        (*event).to_owned(),
+    ))
 }
 
 pub fn callback_tag(path_or_url: &str) -> Option<String> {
     let start = path_or_url.find(CALLBACK_ROOT)?;
     split_callback_path(&path_or_url[start..]).ok()?;
-    path_or_url[start + CALLBACK_ROOT.len()..].split('/').nth(1).map(str::to_owned)
+    path_or_url[start + CALLBACK_ROOT.len()..]
+        .split('/')
+        .nth(1)
+        .map(str::to_owned)
 }
 
 pub fn acknowledgement_links(body: &Value) -> BTreeMap<String, String> {
@@ -274,13 +292,20 @@ fn acceptance(body: &Value) -> Result<Acceptance> {
         keep_alive_seconds: accepted["callKeepAliveInterval"].as_u64(),
         accepted_by: accepted["acceptedBy"]["id"].as_str().map(|mri| AcceptedBy {
             mri: mri.to_owned(),
-            display_name: accepted["acceptedBy"]["displayName"].as_str().unwrap_or_default().to_owned(),
+            display_name: accepted["acceptedBy"]["displayName"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
         }),
     })
 }
 
 fn progress(body: &Value) -> ProgressStatus {
-    match body["callProgress"]["status"].as_str().map(str::to_ascii_lowercase).as_deref() {
+    match body["callProgress"]["status"]
+        .as_str()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("ringing") => ProgressStatus::Ringing,
         Some("forwarded") => ProgressStatus::Forwarded,
         other => ProgressStatus::Other(other.unwrap_or_default().to_owned()),
@@ -295,7 +320,9 @@ fn media_answer(body: &Value) -> Result<MediaAnswer> {
         .to_owned();
     Ok(MediaAnswer {
         sdp,
-        from_mixer: answer["mediaContent"]["fromMixer"].as_bool().unwrap_or(false),
+        from_mixer: answer["mediaContent"]["fromMixer"]
+            .as_bool()
+            .unwrap_or(false),
         no_ring_back: answer["noRingBack"].as_bool().unwrap_or(false),
         links: string_links(&answer["links"]),
     })
@@ -306,7 +333,9 @@ fn media_holder(body: &Value) -> Option<&Value> {
     if body.get("mediaContent").is_some() {
         return Some(body);
     }
-    body.as_object()?.values().find(|value| value.get("mediaContent").is_some())
+    body.as_object()?
+        .values()
+        .find(|value| value.get("mediaContent").is_some())
 }
 
 fn renegotiation(body: &Value) -> Result<Renegotiation> {
@@ -321,7 +350,9 @@ fn renegotiation(body: &Value) -> Result<Renegotiation> {
         sdp,
         new_offer: media["newOffer"].as_bool().unwrap_or(false),
         escalation: media["escalationOccurring"].as_bool().unwrap_or(false)
-            || media["isTwoPartyToMultiPartyEscalation"].as_bool().unwrap_or(false),
+            || media["isTwoPartyToMultiPartyEscalation"]
+                .as_bool()
+                .unwrap_or(false),
         links: string_links(&holder["links"]),
     })
 }
@@ -349,14 +380,18 @@ fn collect_sources(value: &Value, depth: usize, sources: &mut Vec<u32>) {
                 }
             }
         }
-        Value::Array(items) => items.iter().for_each(|item| collect_sources(item, depth + 1, sources)),
+        Value::Array(items) => items
+            .iter()
+            .for_each(|item| collect_sources(item, depth + 1, sources)),
         _ => {}
     }
 }
 
 fn push_ids(value: &Value, sources: &mut Vec<u32>) {
     match value {
-        Value::Number(number) => sources.extend(number.as_u64().and_then(|id| u32::try_from(id).ok())),
+        Value::Number(number) => {
+            sources.extend(number.as_u64().and_then(|id| u32::try_from(id).ok()))
+        }
         Value::Array(items) => items.iter().for_each(|item| push_ids(item, sources)),
         Value::Object(map) => {
             if let Some(id) = map.get("sourceId") {
@@ -405,7 +440,10 @@ impl CallbackLinks {
 
     pub fn link(&self, scope: &str, event: &str) -> String {
         let tag = &uuid::Uuid::new_v4().simple().to_string()[..8];
-        format!("{}{CALLBACK_ROOT}{}/{tag}/{scope}/{event}/", self.base, self.call_id)
+        format!(
+            "{}{CALLBACK_ROOT}{}/{tag}/{scope}/{event}/",
+            self.base, self.call_id
+        )
     }
 
     pub fn conversation(&self, event: &str) -> String {
@@ -463,9 +501,13 @@ mod tests {
 
     #[test]
     fn gzip_base64_bodies_decode_to_json() {
-        let body = r#"{"callEnd":{"code":0,"subCode":0,"phrase":"CallEndReasonLocalUserInitiated"}}"#;
+        let body =
+            r#"{"callEnd":{"code":0,"subCode":0,"phrase":"CallEndReasonLocalUserInitiated"}}"#;
         let decoded = decode_body(&callback("callAgent/c/1/call/end/", body, true)).unwrap();
-        assert_eq!(decoded["callEnd"]["phrase"], "CallEndReasonLocalUserInitiated");
+        assert_eq!(
+            decoded["callEnd"]["phrase"],
+            "CallEndReasonLocalUserInitiated"
+        );
         let plain = decode_body(&callback("callAgent/c/1/call/end/", body, false)).unwrap();
         assert_eq!(plain, decoded);
     }
@@ -476,7 +518,9 @@ mod tests {
             "links": {"acknowledgement": "https://cc/ack", "callLeg": "https://cc/leg"}}});
         let (call_id, event) = classify("callAgent/abc/dbea1786/call/acceptance/", body).unwrap();
         assert_eq!(call_id, "abc");
-        let CallEvent::Acceptance(acceptance) = event else { panic!("not acceptance") };
+        let CallEvent::Acceptance(acceptance) = event else {
+            panic!("not acceptance")
+        };
         assert_eq!(acceptance.sdp, "v=0\r\n");
         assert!(acceptance.from_mixer);
         assert_eq!(acceptance.links["callLeg"], "https://cc/leg");
@@ -484,53 +528,102 @@ mod tests {
 
     #[test]
     fn classifies_the_events_of_the_last_features() {
-        let (_, update) = classify("callAgent/abc/1/conversation/localParticipantUpdate/", json!({"breakoutDetails": {}})).unwrap();
+        let (_, update) = classify(
+            "callAgent/abc/1/conversation/localParticipantUpdate/",
+            json!({"breakoutDetails": {}}),
+        )
+        .unwrap();
         assert!(matches!(update, CallEvent::LocalParticipantUpdate(_)));
-        let (_, replacement) = classify("callAgent/abc/1/call/replacement/", json!({"callNotification": {}})).unwrap();
+        let (_, replacement) = classify(
+            "callAgent/abc/1/call/replacement/",
+            json!({"callNotification": {}}),
+        )
+        .unwrap();
         assert_eq!(replacement.name(), "call/replacement");
-        let (_, share) = classify("callAgent/abc/1/conversation/contentSharingUpdate/", json!({"sessionState": {}})).unwrap();
+        let (_, share) = classify(
+            "callAgent/abc/1/conversation/contentSharingUpdate/",
+            json!({"sessionState": {}}),
+        )
+        .unwrap();
         assert!(matches!(share, CallEvent::ContentShareUpdate(_)));
-        let (_, ended) = classify("callAgent/abc/1/conversation/contentSharingEnd/", Value::Null).unwrap();
+        let (_, ended) = classify(
+            "callAgent/abc/1/conversation/contentSharingEnd/",
+            Value::Null,
+        )
+        .unwrap();
         assert!(matches!(ended, CallEvent::ContentShareEnd(_)));
-        let (_, control) = classify("callAgent/abc/1/call/controlVideoStreaming/", json!({"controlVideoStreaming": {}})).unwrap();
+        let (_, control) = classify(
+            "callAgent/abc/1/call/controlVideoStreaming/",
+            json!({"controlVideoStreaming": {}}),
+        )
+        .unwrap();
         assert_eq!(control.name(), "call/controlVideoStreaming");
-        let (_, accepted) = classify("callAgent/abc/1/call/transferAcceptance/", Value::Null).unwrap();
+        let (_, accepted) =
+            classify("callAgent/abc/1/call/transferAcceptance/", Value::Null).unwrap();
         assert_eq!(accepted, CallEvent::Transfer(TransferEvent::Accepted));
-        let (_, completed) = classify("callAgent/abc/1/call/transferCompletion/", json!({"transferCompletion": {"code": 0}})).unwrap();
+        let (_, completed) = classify(
+            "callAgent/abc/1/call/transferCompletion/",
+            json!({"transferCompletion": {"code": 0}}),
+        )
+        .unwrap();
         assert!(matches!(completed, CallEvent::Transfer(event) if event.succeeded()));
     }
 
     #[test]
     fn classifies_end_and_unknown_events() {
-        let (_, end) = classify("callAgent/abc/1/call/end/", json!({"callEnd": {"code": 0, "subCode": 5, "phrase": "x"}})).unwrap();
-        assert_eq!(end, CallEvent::End(CallEnd { code: 0, sub_code: 5, phrase: "x".into(), accepted_elsewhere_by: None }));
-        let (_, other) = classify("callAgent/abc/1/call/updateMediaDescriptions", Value::Null).unwrap();
+        let (_, end) = classify(
+            "callAgent/abc/1/call/end/",
+            json!({"callEnd": {"code": 0, "subCode": 5, "phrase": "x"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            end,
+            CallEvent::End(CallEnd {
+                code: 0,
+                sub_code: 5,
+                phrase: "x".into(),
+                accepted_elsewhere_by: None
+            })
+        );
+        let (_, other) =
+            classify("callAgent/abc/1/call/updateMediaDescriptions", Value::Null).unwrap();
         assert_eq!(other.name(), "call/updateMediaDescriptions");
         assert!(classify("unifiedPresenceService", Value::Null).is_err());
     }
 
     #[test]
     fn links_live_under_the_socket_url() {
-        let links = CallbackLinks::new("https://pub-ent-euwe-02-f.trouter.teams.microsoft.com:3443/v4/f/abc", "call-1");
+        let links = CallbackLinks::new(
+            "https://pub-ent-euwe-02-f.trouter.teams.microsoft.com:3443/v4/f/abc",
+            "call-1",
+        );
         let link = links.call("acceptance");
-        assert!(link.starts_with("https://pub-ent-euwe-02-f.trouter.teams.microsoft.com:3443/v4/f/abc/callAgent/call-1/"));
+        assert!(link.starts_with(
+            "https://pub-ent-euwe-02-f.trouter.teams.microsoft.com:3443/v4/f/abc/callAgent/call-1/"
+        ));
         assert!(link.ends_with("/call/acceptance/"));
         let acknowledgement = acceptance_acknowledgement(&links);
-        assert!(acknowledgement["callAcceptanceAcknowledgement"]["links"]["mediaRenegotiation"]
-            .as_str()
-            .unwrap()
-            .ends_with("/call/mediaRenegotiation/"));
+        assert!(
+            acknowledgement["callAcceptanceAcknowledgement"]["links"]["mediaRenegotiation"]
+                .as_str()
+                .unwrap()
+                .ends_with("/call/mediaRenegotiation/")
+        );
     }
     #[test]
     fn progress_reports_ringing_and_forwarding() {
-        let ringing = json!({"callProgress": {"sender": "x", "status": "ringing", "phrase": "ringing"}});
+        let ringing =
+            json!({"callProgress": {"sender": "x", "status": "ringing", "phrase": "ringing"}});
         let (_, event) = classify("callAgent/abc/1/call/progress/", ringing).unwrap();
         assert_eq!(event, CallEvent::Progress(ProgressStatus::Ringing));
         let forwarded = json!({"callProgress": {"status": "forwarded"}});
         let (_, event) = classify("callAgent/abc/1/call/progress/", forwarded).unwrap();
         assert_eq!(event, CallEvent::Progress(ProgressStatus::Forwarded));
         let (_, other) = classify("callAgent/abc/1/call/progress/", json!({})).unwrap();
-        assert_eq!(other, CallEvent::Progress(ProgressStatus::Other(String::new())));
+        assert_eq!(
+            other,
+            CallEvent::Progress(ProgressStatus::Other(String::new()))
+        );
     }
 
     #[test]
@@ -538,7 +631,9 @@ mod tests {
         let body = json!({"mediaAnswer": {"sender": "x", "mediaContent": {"blob": "v=0\r\n"},
             "links": {"mediaAcknowledgement": "https://cc/ack"}}});
         let (_, event) = classify("callAgent/abc/1/call/mediaAnswer/", body).unwrap();
-        let CallEvent::MediaAnswer(answer) = event else { panic!("not a media answer") };
+        let CallEvent::MediaAnswer(answer) = event else {
+            panic!("not a media answer")
+        };
         assert_eq!(answer.sdp, "v=0\r\n");
         assert_eq!(answer.links["mediaAcknowledgement"], "https://cc/ack");
         assert!(classify("callAgent/abc/1/call/mediaAnswer/", json!({})).is_err());
@@ -549,22 +644,34 @@ mod tests {
         let nested = json!({"mediaNegotiation": {"mediaContent": {"blob": "v=0\r\n", "newOffer": true,
             "escalationOccurring": true}, "links": {"mediaAnswer": "https://cc/answer"}}});
         let (_, event) = classify("callAgent/abc/1/call/mediaRenegotiation/", nested).unwrap();
-        let CallEvent::MediaRenegotiation(renegotiation) = event else { panic!("not a renegotiation") };
+        let CallEvent::MediaRenegotiation(renegotiation) = event else {
+            panic!("not a renegotiation")
+        };
         assert!(renegotiation.new_offer && renegotiation.escalation);
         assert_eq!(renegotiation.links["mediaAnswer"], "https://cc/answer");
-        let flat = json!({"mediaContent": {"blob": "v=0\r\n", "isTwoPartyToMultiPartyEscalation": true}});
+        let flat =
+            json!({"mediaContent": {"blob": "v=0\r\n", "isTwoPartyToMultiPartyEscalation": true}});
         let (_, event) = classify("callAgent/abc/1/call/mediaRenegotiation/", flat).unwrap();
-        let CallEvent::MediaRenegotiation(renegotiation) = event else { panic!("not a renegotiation") };
+        let CallEvent::MediaRenegotiation(renegotiation) = event else {
+            panic!("not a renegotiation")
+        };
         assert!(!renegotiation.new_offer && renegotiation.escalation);
         assert!(classify("callAgent/abc/1/call/mediaRenegotiation/", json!({"x": 1})).is_err());
     }
 
     #[test]
     fn speaker_sources_come_from_known_list_keys() {
-        assert_eq!(speaker_sources(&json!({"csrcInfo": {"csrcs": [201, 205, 201]}})), vec![201, 205]);
-        assert_eq!(speaker_sources(&json!({"dominantSpeakers": [{"sourceId": 7}]})), vec![7]);
+        assert_eq!(
+            speaker_sources(&json!({"csrcInfo": {"csrcs": [201, 205, 201]}})),
+            vec![201, 205]
+        );
+        assert_eq!(
+            speaker_sources(&json!({"dominantSpeakers": [{"sourceId": 7}]})),
+            vec![7]
+        );
         assert!(speaker_sources(&json!({"other": [1, 2]})).is_empty());
-        let (_, event) = classify("callAgent/abc/1/call/csrcInfo/", json!({"sources": [3]})).unwrap();
+        let (_, event) =
+            classify("callAgent/abc/1/call/csrcInfo/", json!({"sources": [3]})).unwrap();
         assert_eq!(event, CallEvent::Speakers(vec![3]));
     }
 
@@ -573,7 +680,9 @@ mod tests {
         let body = json!({"callEnd": {"code": 450, "subCode": 0, "phrase": "x",
             "acceptedElsewhereBy": {"id": "8:orgid:1", "displayName": "Daniel"}}});
         let (_, event) = classify("callAgent/abc/1/call/end/", body).unwrap();
-        let CallEvent::End(end) = event else { panic!("not an end") };
+        let CallEvent::End(end) = event else {
+            panic!("not an end")
+        };
         assert_eq!(end.kind(), EndKind::AnsweredElsewhere);
         assert_eq!(end.accepted_elsewhere_by.as_deref(), Some("Daniel"));
     }
@@ -583,8 +692,16 @@ mod tests {
         let body = json!({"callAcceptance": {"acceptedBy": {"id": "8:orgid:bea", "displayName": "Bea", "endpointId": "e"},
             "mediaContent": {"blob": "v=0\r\n", "fromMixer": false}}});
         let (_, event) = classify("callAgent/abc/1/call/acceptance/", body).unwrap();
-        let CallEvent::Acceptance(acceptance) = event else { panic!("not acceptance") };
-        assert_eq!(acceptance.accepted_by, Some(AcceptedBy { mri: "8:orgid:bea".into(), display_name: "Bea".into() }));
+        let CallEvent::Acceptance(acceptance) = event else {
+            panic!("not acceptance")
+        };
+        assert_eq!(
+            acceptance.accepted_by,
+            Some(AcceptedBy {
+                mri: "8:orgid:bea".into(),
+                display_name: "Bea".into()
+            })
+        );
     }
 
     #[test]
@@ -592,14 +709,19 @@ mod tests {
         let body = json!({"callAcceptance": {"controllerName": "lobby", "callKeepAliveInterval": 2700,
             "mediaContent": {"blob": "v=0\r\n"}}});
         let (_, event) = classify("callAgent/abc/1/call/acceptance/", body).unwrap();
-        let CallEvent::Acceptance(acceptance) = event else { panic!("not acceptance") };
+        let CallEvent::Acceptance(acceptance) = event else {
+            panic!("not acceptance")
+        };
         assert!(acceptance.in_lobby());
         assert_eq!(acceptance.keep_alive_seconds, Some(2700));
     }
 
     #[test]
     fn call_ids_come_from_the_path_alone() {
-        assert_eq!(callback_call_id("callAgent/abc/1/call/end/").as_deref(), Some("abc"));
+        assert_eq!(
+            callback_call_id("callAgent/abc/1/call/end/").as_deref(),
+            Some("abc")
+        );
         assert_eq!(callback_call_id("unifiedPresenceService"), None);
         assert_eq!(callback_call_id(""), None);
     }
@@ -610,7 +732,10 @@ mod tests {
         let url = links.call("mediaAnswer");
         let tag = callback_tag(&url).unwrap();
         assert_eq!(tag.len(), 8);
-        assert_eq!(callback_tag(&format!("callAgent/abc/{tag}/call/mediaAnswer/")), Some(tag));
+        assert_eq!(
+            callback_tag(&format!("callAgent/abc/{tag}/call/mediaAnswer/")),
+            Some(tag)
+        );
         assert_eq!(callback_tag("unifiedPresenceService"), None);
     }
 
@@ -618,9 +743,15 @@ mod tests {
     fn a_media_answer_says_whether_the_mixer_sent_it() {
         let body = json!({"mediaAnswer": {"mediaContent": {"blob": "v=0\r\n", "fromMixer": true}, "links": {}}});
         let (_, event) = classify("callAgent/abc/1/call/mediaAnswer/", body).unwrap();
-        let CallEvent::MediaAnswer(answer) = event else { panic!("not a media answer") };
+        let CallEvent::MediaAnswer(answer) = event else {
+            panic!("not a media answer")
+        };
         assert!(answer.from_mixer);
-        let (_, retarget) = classify("callAgent/abc/1/call/retargetCompletion/", json!({"retargetCompleted": {"code": 0}})).unwrap();
+        let (_, retarget) = classify(
+            "callAgent/abc/1/call/retargetCompletion/",
+            json!({"retargetCompleted": {"code": 0}}),
+        )
+        .unwrap();
         assert!(matches!(retarget, CallEvent::RetargetCompletion(_)));
     }
 
@@ -628,7 +759,9 @@ mod tests {
     fn only_the_acceptance_callback_gets_the_acknowledgement() {
         assert!(is_acceptance_callback("callAgent/abc/1/call/acceptance/"));
         assert!(!is_acceptance_callback("callAgent/abc/1/call/mediaAnswer/"));
-        assert!(!is_acceptance_callback("callAgent/abc/1/conversation/rosterUpdate/"));
+        assert!(!is_acceptance_callback(
+            "callAgent/abc/1/conversation/rosterUpdate/"
+        ));
         assert!(!is_acceptance_callback("unifiedPresenceService"));
     }
 }

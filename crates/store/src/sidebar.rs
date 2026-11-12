@@ -208,7 +208,12 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4)",
             )?;
             for (channel_id, counts) in mentions.iter().filter(|(_, counts)| !counts.is_empty()) {
-                insert.execute(params![channel_id, counts.personal, counts.channel, counts.team])?;
+                insert.execute(params![
+                    channel_id,
+                    counts.personal,
+                    counts.channel,
+                    counts.team
+                ])?;
             }
         }
         Ok(transaction.commit()?)

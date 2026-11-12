@@ -19,7 +19,8 @@ use crate::hub::{
     AgentHub, FreeWritingAsk, NewProposal, NewReactionProposal, ProposalImage, ProposalMention,
 };
 use crate::meetings::{
-    CreateMeetingParams, FindAvailabilityParams, MEETINGS_DISABLED, availability_request, meeting_draft,
+    CreateMeetingParams, FindAvailabilityParams, MEETINGS_DISABLED, availability_request,
+    meeting_draft,
 };
 use crate::policy::{AgentPolicy, ConversationKind};
 use crate::source::{
@@ -28,8 +29,7 @@ use crate::source::{
 
 const NOT_ALLOWED: &str =
     "conversation not found or not allowed (allow it in rusty-teams Settings > MCP)";
-const WRITE_DISABLED: &str =
-    "writing is turned off (enable it in rusty-teams Settings > MCP)";
+const WRITE_DISABLED: &str = "writing is turned off (enable it in rusty-teams Settings > MCP)";
 const MIN_FREE_WRITING_MINUTES: u32 = 5;
 const MAX_FREE_WRITING_MINUTES: u32 = 480;
 const MAX_FREE_WRITING_REASON: usize = 200;
@@ -691,7 +691,7 @@ impl TeamsTools {
 
     #[tool(
         annotations(read_only_hint = false, destructive_hint = false),
-        description = "Write a message in a conversation. When the user wants to review (rusty-teams Settings > MCP > Review before sending, on by default) it becomes a draft card: the user can send, edit or discard it, and the result has state \"pending\". Otherwise rusty-teams sends it right away and the result has state \"sending\". To mention someone pass mentions:[{user_id,name}] (user ids are in read_messages sender_id and mentions), with each name written as @Name in text and in text order; a full @Display Name that matches exactly one conversation member is mentioned automatically, anything else stays plain text and is listed in not_mentioned. Optional images (up to 4, png, jpeg, gif or webp, 4 MB each). Only one message per conversation is pending, a new one replaces the old one. To keep following the conversation and answer on your own, pass ask_free_writing {minutes, reason}: the user can allow a time window, and until then write_message and add_reaction in this conversation go out without review (result free_until). Returns proposal_id and state. Use wait_for_event (proposal_resolved) to learn what happened; outcome sent means it is queued for delivery, edited also means images too large to send inline were moved into the composer to upload as files.",
+        description = "Write a message in a conversation. When the user wants to review (rusty-teams Settings > MCP > Review before sending, on by default) it becomes a draft card: the user can send, edit or discard it, and the result has state \"pending\". Otherwise rusty-teams sends it right away and the result has state \"sending\". To mention someone pass mentions:[{user_id,name}] (user ids are in read_messages sender_id and mentions), with each name written as @Name in text and in text order; a full @Display Name that matches exactly one conversation member is mentioned automatically, anything else stays plain text and is listed in not_mentioned. Optional images (up to 4, png, jpeg, gif or webp, 4 MB each). Only one message per conversation is pending, a new one replaces the old one. To keep following the conversation and answer on your own, pass ask_free_writing {minutes, reason}: the user can allow a time window, and until then write_message and add_reaction in this conversation go out without review (result free_until). Returns proposal_id and state. Use wait_for_event (proposal_resolved) to learn what happened; outcome sent means it is queued for delivery, edited also means images too large to send inline were moved into the composer to upload as files."
     )]
     async fn write_message(
         &self,
@@ -745,13 +745,21 @@ impl TeamsTools {
         let (reply_to_message_id, agent, session_id) =
             (params.reply_to_message_id, params.agent, params.session_id);
         let direct = !self.hub.needs_review(&conversation_id);
-        let free_writing_ask = params
-            .ask_free_writing
-            .filter(|_| !direct)
-            .map(|ask| FreeWritingAsk {
-                minutes: ask.minutes.clamp(MIN_FREE_WRITING_MINUTES, MAX_FREE_WRITING_MINUTES),
-                reason: ask.reason.trim().chars().take(MAX_FREE_WRITING_REASON).collect(),
-            });
+        let free_writing_ask =
+            params
+                .ask_free_writing
+                .filter(|_| !direct)
+                .map(|ask| FreeWritingAsk {
+                    minutes: ask
+                        .minutes
+                        .clamp(MIN_FREE_WRITING_MINUTES, MAX_FREE_WRITING_MINUTES),
+                    reason: ask
+                        .reason
+                        .trim()
+                        .chars()
+                        .take(MAX_FREE_WRITING_REASON)
+                        .collect(),
+                });
         let text = text.to_owned();
         let (proposal, not_mentioned) = tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -788,7 +796,8 @@ impl TeamsTools {
         })
         .await
         .map_err(failure)??;
-        let mut result = json!({ "proposal_id": proposal.id, "state": write_state(proposal.direct) });
+        let mut result =
+            json!({ "proposal_id": proposal.id, "state": write_state(proposal.direct) });
         if let Some(grant) = self.hub.free_writing(&proposal.conversation_id) {
             result["free_until"] = json!(timestamp(grant.until));
         }
@@ -800,7 +809,7 @@ impl TeamsTools {
 
     #[tool(
         annotations(read_only_hint = false, destructive_hint = false),
-        description = "Add an emoji reaction to one message. When the user wants to review, it shows as a small \"Accept / Discard\" note under the message and the result has state \"pending\"; otherwise rusty-teams adds it right away (state \"sending\"). Several reactions to different messages can be pending, and they do not replace a pending write_message. Returns proposal_id and state. Use wait_for_event (reaction_resolved) to learn what happened.",
+        description = "Add an emoji reaction to one message. When the user wants to review, it shows as a small \"Accept / Discard\" note under the message and the result has state \"pending\"; otherwise rusty-teams adds it right away (state \"sending\"). Several reactions to different messages can be pending, and they do not replace a pending write_message. Returns proposal_id and state. Use wait_for_event (reaction_resolved) to learn what happened."
     )]
     async fn add_reaction(
         &self,
@@ -934,7 +943,11 @@ impl TeamsTools {
             return Err(MEETINGS_DISABLED.to_owned());
         }
         let (emails, start, end) = availability_request(&params)?;
-        let people = self.source.availability(emails, start, end).await.map_err(failure)?;
+        let people = self
+            .source
+            .availability(emails, start, end)
+            .await
+            .map_err(failure)?;
         Ok(render(json!({ "people": people })))
     }
 
@@ -951,15 +964,24 @@ impl TeamsTools {
         }
         ensure_short(&[
             ("agent", params.agent.as_deref().unwrap_or_default()),
-            ("session_id", params.session_id.as_deref().unwrap_or_default()),
+            (
+                "session_id",
+                params.session_id.as_deref().unwrap_or_default(),
+            ),
         ])?;
         let draft = meeting_draft(&params, Utc::now())?;
         if self.hub.policy().review {
-            let proposal = self.hub.propose_meeting(draft, params.agent, params.session_id)?;
-            return Ok(render(json!({ "state": "pending", "proposal_id": proposal.id })));
+            let proposal = self
+                .hub
+                .propose_meeting(draft, params.agent, params.session_id)?;
+            return Ok(render(
+                json!({ "state": "pending", "proposal_id": proposal.id }),
+            ));
         }
         let created = self.source.create_meeting(draft).await.map_err(failure)?;
-        Ok(render(json!({ "state": "created", "join_url": created.join_url })))
+        Ok(render(
+            json!({ "state": "created", "join_url": created.join_url }),
+        ))
     }
 
     #[tool(

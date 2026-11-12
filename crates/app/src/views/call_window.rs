@@ -3,13 +3,13 @@ use gpui_kit::component::{TitleBar, elevation, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::actions::ToggleCallMute;
 use super::call_end_view::render_call_end;
 use super::call_pop_out::zoom_listener;
 use super::call_stage::render_stage_overlay;
 use super::call_view::render_call_view;
 use super::conversation::ConversationView;
 use super::prejoin_view::PrejoinView;
-use super::actions::ToggleCallMute;
 use super::shortcuts::{
     HangUpCall, OpenLobbyList, PushToTalk, ToggleCallCamera, ToggleCallFullscreen, ToggleCallHand,
     ToggleCallShare, ZoomShareIn, ZoomShareOut, ZoomShareReset,
@@ -31,7 +31,12 @@ pub fn call_window_title(state: &AppState) -> String {
         .call
         .as_ref()
         .map(|call| call.model.title.clone())
-        .or_else(|| state.prejoin.as_ref().map(|pending| pending.join.title.clone()))
+        .or_else(|| {
+            state
+                .prejoin
+                .as_ref()
+                .map(|pending| pending.join.title.clone())
+        })
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| FALLBACK_TITLE.to_owned())
 }
@@ -75,7 +80,12 @@ impl CallWindowView {
         }
     }
 
-    fn sync_call_chat(&mut self, thread: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+    fn sync_call_chat(
+        &mut self,
+        thread: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match (thread, &self.call_chat) {
             (Some(wanted), Some((open, _))) if &wanted == open => {}
             (Some(wanted), _) => {
@@ -133,7 +143,11 @@ impl CallWindowView {
                     .h_full()
                     .gap(px(12.))
                     .items_center()
-                    .child(img(app_icon_image(app_icon)).size(px(APP_ICON_SIZE)).flex_none())
+                    .child(
+                        img(app_icon_image(app_icon))
+                            .size(px(APP_ICON_SIZE))
+                            .flex_none(),
+                    )
                     .child(
                         div()
                             .min_w_0()
@@ -182,8 +196,14 @@ impl Render for CallWindowView {
         let fullscreen = state.call_fullscreen();
         let open_dialogs = [
             state.transfer_picker.is_some(),
-            state.call.as_ref().is_some_and(|call| call.options_dialog.is_some()),
-            state.call.as_ref().is_some_and(|call| call.model.consent_required),
+            state
+                .call
+                .as_ref()
+                .is_some_and(|call| call.options_dialog.is_some()),
+            state
+                .call
+                .as_ref()
+                .is_some_and(|call| call.model.consent_required),
         ]
         .into_iter()
         .filter(|open| *open)
@@ -195,7 +215,11 @@ impl Render for CallWindowView {
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone().into());
         let stage = render_call_view(&self.app, state, chat_panel, fullscreen, stage_width)
             .or_else(|| render_call_end(&self.app, state))
-            .or_else(|| self.prejoin.clone().map(|prejoin| prejoin.into_any_element()));
+            .or_else(|| {
+                self.prejoin
+                    .clone()
+                    .map(|prejoin| prejoin.into_any_element())
+            });
         let stage_overlay = render_stage_overlay(&self.app, state);
         elevation::set_app_modal_layers(window, open_dialogs, cx);
         self.sync_fullscreen(fullscreen, window);
@@ -212,14 +236,35 @@ impl Render for CallWindowView {
             .bg(theme::background())
             .text_color(theme::text())
             .text_size(px(14.))
-            .on_action(call_action::<ToggleCallMute>(&self.app, AppState::toggle_call_mute))
-            .on_action(call_action::<PushToTalk>(&self.app, AppState::press_push_to_talk))
+            .on_action(call_action::<ToggleCallMute>(
+                &self.app,
+                AppState::toggle_call_mute,
+            ))
+            .on_action(call_action::<PushToTalk>(
+                &self.app,
+                AppState::press_push_to_talk,
+            ))
             .on_action(call_action::<HangUpCall>(&self.app, AppState::leave_call))
-            .on_action(call_action::<ToggleCallCamera>(&self.app, AppState::toggle_call_camera))
-            .on_action(call_action::<ToggleCallShare>(&self.app, AppState::toggle_call_share))
-            .on_action(call_action::<ToggleCallHand>(&self.app, AppState::toggle_call_hand))
-            .on_action(call_action::<OpenLobbyList>(&self.app, AppState::open_call_lobby_list))
-            .on_action(call_action::<ToggleCallFullscreen>(&self.app, AppState::toggle_call_fullscreen))
+            .on_action(call_action::<ToggleCallCamera>(
+                &self.app,
+                AppState::toggle_call_camera,
+            ))
+            .on_action(call_action::<ToggleCallShare>(
+                &self.app,
+                AppState::toggle_call_share,
+            ))
+            .on_action(call_action::<ToggleCallHand>(
+                &self.app,
+                AppState::toggle_call_hand,
+            ))
+            .on_action(call_action::<OpenLobbyList>(
+                &self.app,
+                AppState::open_call_lobby_list,
+            ))
+            .on_action(call_action::<ToggleCallFullscreen>(
+                &self.app,
+                AppState::toggle_call_fullscreen,
+            ))
             .on_action(zoom_listener::<ZoomShareIn>(&self.app, ZoomStep::In))
             .on_action(zoom_listener::<ZoomShareOut>(&self.app, ZoomStep::Out))
             .on_action(zoom_listener::<ZoomShareReset>(&self.app, ZoomStep::Reset))

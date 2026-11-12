@@ -29,7 +29,9 @@ impl<T> Load<T> {
 }
 
 pub fn shows_recording(details: &Load<RecordingDetails>) -> bool {
-    !details.ready().is_some_and(|details| details.transcript_only)
+    !details
+        .ready()
+        .is_some_and(|details| details.transcript_only)
 }
 
 pub fn expiry_label(days: i64) -> String {
@@ -66,11 +68,7 @@ pub fn span_label(seconds: u64) -> String {
     }
 }
 
-pub fn occurrence_label(
-    occurrence: &Occurrence,
-    today: NaiveDate,
-    offset: FixedOffset,
-) -> String {
+pub fn occurrence_label(occurrence: &Occurrence, today: NaiveDate, offset: FixedOffset) -> String {
     occurrence.started_at.map_or_else(
         || occurrence.recording_name.clone().unwrap_or_default(),
         |started_at| {
@@ -227,7 +225,11 @@ mod tests {
 
     #[test]
     fn search_matches_text_and_speaker_ignoring_case() {
-        let turns = [turn("Alex", "Ship it"), turn("Sam", "Later"), turn("Sam", "SHIP?")];
+        let turns = [
+            turn("Alex", "Ship it"),
+            turn("Sam", "Later"),
+            turn("Sam", "SHIP?"),
+        ];
         assert_eq!(matching_turns(&turns, ""), vec![0, 1, 2]);
         assert_eq!(matching_turns(&turns, " ship "), vec![0, 2]);
         assert_eq!(matching_turns(&turns, "sam"), vec![1, 2]);
@@ -258,6 +260,9 @@ mod tests {
             save_name(&named, "vtt"),
             "Weekly sync-20260302-Meeting Recording.vtt"
         );
-        assert_eq!(save_name(&occurrence(None), "docx"), "Meeting recording.docx");
+        assert_eq!(
+            save_name(&occurrence(None), "docx"),
+            "Meeting recording.docx"
+        );
     }
 }

@@ -7,7 +7,9 @@ use store::MessageRecord;
 
 use crate::adaptive_card::{AdaptiveCard, card_content_text};
 use crate::external_image::{external_image_url, is_giphy_url};
-use crate::forwarded::{ForwardHeader, ForwardInfo, forwarded_texts, inline_forwards, no_forward_header};
+use crate::forwarded::{
+    ForwardHeader, ForwardInfo, forwarded_texts, inline_forwards, no_forward_header,
+};
 use crate::markdown::escape_html;
 use crate::mentions::MentionInput;
 use crate::spans::{Span, html_to_spans};
@@ -56,7 +58,10 @@ pub enum FileKind {
 
 impl FileKind {
     pub fn is_document(self) -> bool {
-        matches!(self, FileKind::Word | FileKind::Excel | FileKind::PowerPoint | FileKind::Pdf)
+        matches!(
+            self,
+            FileKind::Word | FileKind::Excel | FileKind::PowerPoint | FileKind::Pdf
+        )
     }
 
     pub fn from_name(name: &str) -> FileKind {
@@ -174,7 +179,9 @@ impl AttachmentInfo {
             .as_deref()
             .and_then(|content| serde_json::from_str::<serde_json::Value>(content).ok())
             .and_then(|content| content.get("componentUrl")?.as_str().map(str::to_owned));
-        from_content.or_else(|| self.url.clone()).filter(|url| !url.is_empty())
+        from_content
+            .or_else(|| self.url.clone())
+            .filter(|url| !url.is_empty())
     }
 }
 
@@ -297,7 +304,11 @@ pub fn images(record: &MessageRecord) -> Vec<ImageRef> {
     if record.deleted {
         return Vec::new();
     }
-    let fragment = Html::parse_fragment(&inline_forwards(record, record.body_html.clone(), &no_forward_header));
+    let fragment = Html::parse_fragment(&inline_forwards(
+        record,
+        record.body_html.clone(),
+        &no_forward_header,
+    ));
     let mut found: Vec<ImageRef> = Vec::new();
     for element in fragment
         .root_element()
@@ -454,7 +465,10 @@ pub fn files(record: &MessageRecord) -> Vec<FileCard> {
             Some(FileCard {
                 open_url: attachment.loop_component_url()?,
                 kind: FileKind::Loop,
-                name: attachment.name.clone().unwrap_or_else(|| LOOP_CARD_NAME.to_owned()),
+                name: attachment
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| LOOP_CARD_NAME.to_owned()),
                 content_type: attachment.content_type.clone(),
                 size: None,
             })
@@ -466,7 +480,10 @@ pub fn files(record: &MessageRecord) -> Vec<FileCard> {
 pub fn copy_text(record: &MessageRecord) -> String {
     let mut text = String::new();
     push_plain(&mut text, &message_spans(record));
-    for extra_text in forwarded_texts(record).into_iter().chain(card_texts(record)) {
+    for extra_text in forwarded_texts(record)
+        .into_iter()
+        .chain(card_texts(record))
+    {
         text.push('\n');
         text.push_str(&extra_text);
     }
@@ -658,7 +675,11 @@ pub fn linked_message_spans_with(
     forward_header: &dyn Fn(&ForwardInfo) -> ForwardHeader,
 ) -> Vec<Span> {
     let infos = mentions(record);
-    let html = inline_forwards(record, with_inline_quotes(record, quoted_text), forward_header);
+    let html = inline_forwards(
+        record,
+        with_inline_quotes(record, quoted_text),
+        forward_header,
+    );
     let mut spans = html_to_spans(&html);
     merge_split_mentions(&mut spans, &infos);
     link_user_mentions(&mut spans, &infos);
@@ -720,7 +741,10 @@ fn spans_with_mentions(record: &MessageRecord, infos: &[MentionInfo]) -> Vec<Spa
     spans
 }
 
-fn with_inline_quotes(record: &MessageRecord, quoted_text: &dyn Fn(&str) -> Option<String>) -> String {
+fn with_inline_quotes(
+    record: &MessageRecord,
+    quoted_text: &dyn Fn(&str) -> Option<String>,
+) -> String {
     let mut html = record.body_html.clone();
     for attachment in attachments(record) {
         let Some(mut quote) = attachment.quote else {
@@ -760,7 +784,11 @@ pub fn quote_html(quote: &QuoteInfo) -> String {
 fn quote_time(message_id: &str) -> Option<String> {
     let millis = message_id.parse::<i64>().ok()?;
     let time = chrono::DateTime::from_timestamp_millis(millis)?;
-    Some(time.with_timezone(&chrono::Local).format("%d/%m/%Y %H:%M").to_string())
+    Some(
+        time.with_timezone(&chrono::Local)
+            .format("%d/%m/%Y %H:%M")
+            .to_string(),
+    )
 }
 
 pub fn user_mention_inputs(record: &MessageRecord) -> Vec<MentionInput> {
@@ -986,7 +1014,10 @@ mod tests {
             preview: "text".to_owned(),
             sender_name: None,
         });
-        assert!(!without_time.contains("itemprop=\"time\""), "{without_time}");
+        assert!(
+            !without_time.contains("itemprop=\"time\""),
+            "{without_time}"
+        );
     }
 
     #[test]
@@ -1140,13 +1171,24 @@ mod tests {
         };
         let sharepoint = "https://contoso.sharepoint.com/personal/a/Documents/clip.mp4";
         let preview = card("clip.mp4", sharepoint).preview().unwrap();
-        assert!(preview.url.starts_with("https://graph.microsoft.com/v1.0/shares/u!"));
-        assert!(preview.url.ends_with("/driveItem/thumbnails/0/large/content"));
+        assert!(
+            preview
+                .url
+                .starts_with("https://graph.microsoft.com/v1.0/shares/u!")
+        );
+        assert!(
+            preview
+                .url
+                .ends_with("/driveItem/thumbnails/0/large/content")
+        );
         assert!(card("shot.PNG", sharepoint).preview().is_some());
         assert!(card("plan.docx", sharepoint).preview().is_some());
         assert!(card("report.pdf", sharepoint).preview().is_some());
         assert_eq!(card("bundle.zip", sharepoint).preview(), None);
-        assert_eq!(card("clip.mov", "https://example.com/clip.mov").preview(), None);
+        assert_eq!(
+            card("clip.mov", "https://example.com/clip.mov").preview(),
+            None
+        );
     }
 
     #[test]
@@ -1196,7 +1238,11 @@ mod tests {
         let found = files(&record("", json));
         assert_eq!(found.len(), 1);
         assert_eq!(
-            (found[0].name.as_str(), found[0].kind, found[0].open_url.as_str()),
+            (
+                found[0].name.as_str(),
+                found[0].kind,
+                found[0].open_url.as_str()
+            ),
             ("Loop component", FileKind::Loop, "https://x/loop.fluid")
         );
     }

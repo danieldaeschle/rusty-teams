@@ -4,14 +4,17 @@ use std::time::Duration;
 use libwebrtc::native::yuv_helper::{abgr_to_i420, nv12_to_i420};
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 use nokhwa::pixel_format::RgbAFormat;
-use nokhwa::utils::{ApiBackend, CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution};
+use nokhwa::utils::{
+    ApiBackend, CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType,
+    Resolution,
+};
 use nokhwa::{Camera, query};
 use std::sync::atomic::Ordering;
 
 use crate::blur::BlurSettings;
-use crate::effects::EffectsThread;
 use crate::capture::Capture;
 use crate::devices::{DeviceChoice, DeviceEntry};
+use crate::effects::EffectsThread;
 use crate::error::{Error, Result};
 
 const RETRY_PAUSE: Duration = Duration::from_millis(20);
@@ -47,7 +50,9 @@ pub fn list_cameras() -> Vec<CameraDevice> {
 fn camera_index(choice: &DeviceChoice) -> CameraIndex {
     match choice {
         DeviceChoice::SystemDefault => CameraIndex::Index(0),
-        DeviceChoice::Device(key) => key.parse().map_or_else(|_| CameraIndex::String(key.clone()), CameraIndex::Index),
+        DeviceChoice::Device(key) => key
+            .parse()
+            .map_or_else(|_| CameraIndex::String(key.clone()), CameraIndex::Index),
     }
 }
 
@@ -82,7 +87,10 @@ fn is_widescreen(width: u32, height: u32) -> bool {
 }
 
 fn widescreen_tier(format: &CameraFormat) -> u8 {
-    match (is_widescreen(format.width(), format.height()), format.height()) {
+    match (
+        is_widescreen(format.width(), format.height()),
+        format.height(),
+    ) {
         (true, CAPTURE_HEIGHT) => 3,
         (true, height) if height > CAPTURE_HEIGHT => 2,
         (true, _) => 1,
@@ -98,7 +106,8 @@ fn pick_format(formats: &[CameraFormat]) -> Option<CameraFormat> {
         .filter(|format| format.frame_rate() >= CAPTURE_FPS)
         .filter(|format| {
             format.height() <= CAPTURE_HEIGHT
-                || (is_widescreen(format.width(), format.height()) && format.height() <= LARGEST_DOWNSCALED_HEIGHT)
+                || (is_widescreen(format.width(), format.height())
+                    && format.height() <= LARGEST_DOWNSCALED_HEIGHT)
         })
         .max_by_key(|format| {
             (
@@ -119,13 +128,34 @@ fn crop_i420(buffer: &I420Buffer, left: u32, top: u32, width: u32, height: u32) 
     let (source_strides, source_planes) = (buffer.strides(), buffer.data());
     let (target_strides, target_planes) = (cropped.strides(), cropped.data_mut());
     let planes = [
-        (source_planes.0, source_strides.0, target_planes.0, target_strides.0, 1),
-        (source_planes.1, source_strides.1, target_planes.1, target_strides.1, 2),
-        (source_planes.2, source_strides.2, target_planes.2, target_strides.2, 2),
+        (
+            source_planes.0,
+            source_strides.0,
+            target_planes.0,
+            target_strides.0,
+            1,
+        ),
+        (
+            source_planes.1,
+            source_strides.1,
+            target_planes.1,
+            target_strides.1,
+            2,
+        ),
+        (
+            source_planes.2,
+            source_strides.2,
+            target_planes.2,
+            target_strides.2,
+            2,
+        ),
     ];
     for (source, source_stride, target, target_stride, divisor) in planes {
         let (plane_left, plane_top) = ((left / divisor) as usize, (top / divisor) as usize);
-        let (plane_width, plane_height) = (width.div_ceil(divisor) as usize, height.div_ceil(divisor) as usize);
+        let (plane_width, plane_height) = (
+            width.div_ceil(divisor) as usize,
+            height.div_ceil(divisor) as usize,
+        );
         for row in 0..plane_height {
             let from = (plane_top + row) * source_stride as usize + plane_left;
             let to = row * target_stride as usize;
@@ -143,7 +173,13 @@ pub(crate) fn fit_widescreen(mut buffer: I420Buffer) -> I420Buffer {
         (width, even(width * ASPECT_HEIGHT / ASPECT_WIDTH))
     };
     if (crop_width, crop_height) != (width, height) && crop_width >= 2 && crop_height >= 2 {
-        buffer = crop_i420(&buffer, even((width - crop_width) / 2), even((height - crop_height) / 2), crop_width, crop_height);
+        buffer = crop_i420(
+            &buffer,
+            even((width - crop_width) / 2),
+            even((height - crop_height) / 2),
+            crop_width,
+            crop_height,
+        );
     }
     let (width, height) = (buffer.width(), buffer.height());
     if height > CAPTURE_HEIGHT {
@@ -154,10 +190,17 @@ pub(crate) fn fit_widescreen(mut buffer: I420Buffer) -> I420Buffer {
 }
 
 fn open_picked_format(index: CameraIndex) -> std::result::Result<Camera, nokhwa::NokhwaError> {
-    let mut camera = Camera::new(index, RequestedFormat::new::<RgbAFormat>(RequestedFormatType::AbsoluteHighestFrameRate))?;
+    let mut camera = Camera::new(
+        index,
+        RequestedFormat::new::<RgbAFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
+    )?;
     let formats = camera.compatible_camera_formats()?;
-    let format = pick_format(&formats).ok_or_else(|| nokhwa::NokhwaError::GeneralError("no raw camera format at 30 fps".to_owned()))?;
-    camera.set_camera_requset(RequestedFormat::new::<RgbAFormat>(RequestedFormatType::Exact(format)))?;
+    let format = pick_format(&formats).ok_or_else(|| {
+        nokhwa::NokhwaError::GeneralError("no raw camera format at 30 fps".to_owned())
+    })?;
+    camera.set_camera_requset(RequestedFormat::new::<RgbAFormat>(
+        RequestedFormatType::Exact(format),
+    ))?;
     camera.open_stream()?;
     Ok(camera)
 }
@@ -169,13 +212,17 @@ fn open_camera(index: CameraIndex) -> std::result::Result<Camera, nokhwa::Nokhwa
     let wanted = Resolution::new(CAPTURE_WIDTH, CAPTURE_HEIGHT);
     let mut requests: Vec<RequestedFormatType> = DIRECT_FORMATS
         .into_iter()
-        .map(|frame_format| RequestedFormatType::Closest(CameraFormat::new(wanted, frame_format, CAPTURE_FPS)))
+        .map(|frame_format| {
+            RequestedFormatType::Closest(CameraFormat::new(wanted, frame_format, CAPTURE_FPS))
+        })
         .collect();
     requests.push(RequestedFormatType::AbsoluteHighestFrameRate);
     let mut last_error = None;
     for request in requests {
         let format = RequestedFormat::new::<RgbAFormat>(request);
-        match Camera::new(index.clone(), format).and_then(|mut camera| camera.open_stream().map(|()| camera)) {
+        match Camera::new(index.clone(), format)
+            .and_then(|mut camera| camera.open_stream().map(|()| camera))
+        {
             Ok(camera) => return Ok(camera),
             Err(error) => last_error = Some(error),
         }
@@ -192,7 +239,20 @@ pub(crate) fn i420_from_nv12(data: &[u8], width: u32, height: u32) -> Option<I42
     let (stride_y, stride_u, stride_v) = buffer.strides();
     let (plane_y, plane_u, plane_v) = buffer.data_mut();
     let (source_y, source_uv) = data.split_at(luma_len);
-    nv12_to_i420(source_y, width, source_uv, width, plane_y, stride_y, plane_u, stride_u, plane_v, stride_v, width as i32, height as i32);
+    nv12_to_i420(
+        source_y,
+        width,
+        source_uv,
+        width,
+        plane_y,
+        stride_y,
+        plane_u,
+        stride_u,
+        plane_v,
+        stride_v,
+        width as i32,
+        height as i32,
+    );
     Some(buffer)
 }
 
@@ -227,7 +287,12 @@ pub(crate) fn i420_from_yuyv(data: &[u8], width: u32, height: u32) -> Option<I42
     Some(buffer)
 }
 
-fn direct_i420(frame_format: FrameFormat, data: &[u8], width: u32, height: u32) -> Option<I420Buffer> {
+fn direct_i420(
+    frame_format: FrameFormat,
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Option<I420Buffer> {
     match frame_format {
         FrameFormat::NV12 => i420_from_nv12(data, width, height),
         FrameFormat::YUYV => i420_from_yuyv(data, width, height),
@@ -262,18 +327,22 @@ pub fn start_camera(
             if width < 2 || height < 2 || width % 2 != 0 || height % 2 != 0 {
                 continue;
             }
-            let buffer = match direct_i420(frame.source_frame_format(), frame.buffer(), width, height) {
-                Some(buffer) => buffer,
-                None => {
-                    let Ok(decoded) = frame.decode_image::<RgbAFormat>() else {
-                        if !std::mem::replace(&mut warned_undecodable, true) {
-                            eprintln!("calls: camera delivers {} and no decoder is available", frame.source_frame_format());
-                        }
-                        continue;
-                    };
-                    i420_from_rgba(&decoded.into_raw(), width, height)
-                }
-            };
+            let buffer =
+                match direct_i420(frame.source_frame_format(), frame.buffer(), width, height) {
+                    Some(buffer) => buffer,
+                    None => {
+                        let Ok(decoded) = frame.decode_image::<RgbAFormat>() else {
+                            if !std::mem::replace(&mut warned_undecodable, true) {
+                                eprintln!(
+                                    "calls: camera delivers {} and no decoder is available",
+                                    frame.source_frame_format()
+                                );
+                            }
+                            continue;
+                        };
+                        i420_from_rgba(&decoded.into_raw(), width, height)
+                    }
+                };
             effects.submit(fit_widescreen(buffer));
         }
         let _ = camera.stop_stream();
@@ -305,8 +374,14 @@ mod tests {
     #[test]
     fn the_default_camera_comes_first_and_unnamed_ones_are_hidden() {
         let cameras = [
-            CameraDevice { key: "0".into(), name: "Integrated Camera".into() },
-            CameraDevice { key: "1".into(), name: " ".into() },
+            CameraDevice {
+                key: "0".into(),
+                name: "Integrated Camera".into(),
+            },
+            CameraDevice {
+                key: "1".into(),
+                name: " ".into(),
+            },
         ];
         let entries = camera_entries(&cameras);
         assert_eq!(entries.len(), 2);
@@ -345,7 +420,10 @@ mod tests {
             format(640, 480, FrameFormat::YUYV, 30),
             format(1280, 720, FrameFormat::MJPEG, 30),
         ];
-        assert_eq!(pick_format(&formats), Some(format(640, 480, FrameFormat::YUYV, 30)));
+        assert_eq!(
+            pick_format(&formats),
+            Some(format(640, 480, FrameFormat::YUYV, 30))
+        );
     }
 
     #[test]
@@ -356,13 +434,23 @@ mod tests {
             format(1280, 720, FrameFormat::YUYV, 30),
             format(1280, 720, FrameFormat::NV12, 30),
         ];
-        assert_eq!(pick_format(&formats), Some(format(1280, 720, FrameFormat::NV12, 30)));
+        assert_eq!(
+            pick_format(&formats),
+            Some(format(1280, 720, FrameFormat::NV12, 30))
+        );
     }
 
     #[test]
     fn a_widescreen_format_beats_a_4_3_one_of_the_same_height() {
-        let formats = [format(960, 720, FrameFormat::NV12, 30), format(1280, 720, FrameFormat::YUYV, 30), format(640, 480, FrameFormat::NV12, 30)];
-        assert_eq!(pick_format(&formats), Some(format(1280, 720, FrameFormat::YUYV, 30)));
+        let formats = [
+            format(960, 720, FrameFormat::NV12, 30),
+            format(1280, 720, FrameFormat::YUYV, 30),
+            format(640, 480, FrameFormat::NV12, 30),
+        ];
+        assert_eq!(
+            pick_format(&formats),
+            Some(format(1280, 720, FrameFormat::YUYV, 30))
+        );
     }
 
     #[test]
@@ -372,7 +460,10 @@ mod tests {
         let classic = format(960, 720, FrameFormat::NV12, 30);
         assert_eq!(pick_format(&[classic, small, full_hd]), Some(full_hd));
         assert_eq!(pick_format(&[classic, small]), Some(small));
-        assert_eq!(pick_format(&[classic, format(2560, 1440, FrameFormat::NV12, 30)]), Some(classic));
+        assert_eq!(
+            pick_format(&[classic, format(2560, 1440, FrameFormat::NV12, 30)]),
+            Some(classic)
+        );
     }
 
     fn gradient(width: u32, height: u32) -> I420Buffer {
@@ -413,15 +504,27 @@ mod tests {
 
     #[test]
     fn no_usable_format_picks_nothing() {
-        let formats = [format(1280, 720, FrameFormat::MJPEG, 30), format(1280, 720, FrameFormat::YUYV, 15)];
+        let formats = [
+            format(1280, 720, FrameFormat::MJPEG, 30),
+            format(1280, 720, FrameFormat::YUYV, 15),
+        ];
         assert_eq!(pick_format(&formats), None);
         assert_eq!(pick_format(&[]), None);
     }
 
     #[test]
     fn camera_choices_map_to_indices_or_names() {
-        assert!(matches!(camera_index(&DeviceChoice::SystemDefault), CameraIndex::Index(0)));
-        assert!(matches!(camera_index(&DeviceChoice::Device("2".into())), CameraIndex::Index(2)));
-        assert!(matches!(camera_index(&DeviceChoice::Device("video0".into())), CameraIndex::String(_)));
+        assert!(matches!(
+            camera_index(&DeviceChoice::SystemDefault),
+            CameraIndex::Index(0)
+        ));
+        assert!(matches!(
+            camera_index(&DeviceChoice::Device("2".into())),
+            CameraIndex::Index(2)
+        ));
+        assert!(matches!(
+            camera_index(&DeviceChoice::Device("video0".into())),
+            CameraIndex::String(_)
+        ));
     }
 }

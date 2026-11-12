@@ -56,8 +56,14 @@ pub fn chrome_arguments(spec: &ArgumentSpec) -> Vec<String> {
 }
 
 pub fn user_agent(platform: Platform, major: u32) -> String {
-    let system = if platform == Platform::Linux { "X11; Linux x86_64" } else { "Windows NT 10.0; Win64; x64" };
-    format!("Mozilla/5.0 ({system}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36")
+    let system = if platform == Platform::Linux {
+        "X11; Linux x86_64"
+    } else {
+        "Windows NT 10.0; Win64; x64"
+    };
+    format!(
+        "Mozilla/5.0 ({system}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+    )
 }
 
 pub(crate) fn major_from_directory_names<'a>(names: impl Iterator<Item = &'a str>) -> Option<u32> {
@@ -71,9 +77,13 @@ pub(crate) fn major_from_directory_names<'a>(names: impl Iterator<Item = &'a str
 }
 
 pub(crate) fn major_from_version_output(output: &str) -> Option<u32> {
-    output
-        .split_whitespace()
-        .find_map(|word| word.split('.').next()?.parse::<u32>().ok().filter(|_| word.contains('.')))
+    output.split_whitespace().find_map(|word| {
+        word.split('.')
+            .next()?
+            .parse::<u32>()
+            .ok()
+            .filter(|_| word.contains('.'))
+    })
 }
 
 const FALLBACK_MAJOR: u32 = 150;
@@ -85,11 +95,16 @@ fn chrome_major(platform: Platform, executable: &Path) -> u32 {
             .output()
             .ok()
             .and_then(|output| major_from_version_output(&String::from_utf8_lossy(&output.stdout))),
-        _ => executable.parent().and_then(|parent| std::fs::read_dir(parent).ok()).and_then(|entries| {
-            let names: Vec<String> =
-                entries.flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
-            major_from_directory_names(names.iter().map(String::as_str))
-        }),
+        _ => executable
+            .parent()
+            .and_then(|parent| std::fs::read_dir(parent).ok())
+            .and_then(|entries| {
+                let names: Vec<String> = entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect();
+                major_from_directory_names(names.iter().map(String::as_str))
+            }),
     };
     detected.unwrap_or(FALLBACK_MAJOR)
 }
@@ -107,7 +122,10 @@ impl SystemLauncher {
 impl Launcher for SystemLauncher {
     fn spawn(&self, request: &LaunchRequest) -> Result<(), BrowserError> {
         let executable = self.config.chrome_executable()?;
-        let agent = user_agent(self.config.platform, chrome_major(self.config.platform, &executable));
+        let agent = user_agent(
+            self.config.platform,
+            chrome_major(self.config.platform, &executable),
+        );
         let arguments = chrome_arguments(&ArgumentSpec {
             port: self.config.port,
             profile: &self.config.profile,
@@ -116,7 +134,11 @@ impl Launcher for SystemLauncher {
             start_urls: &request.start_urls,
         });
         let mut command = Command::new(&executable);
-        command.args(arguments).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        command
+            .args(arguments)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         if self.config.platform == Platform::Wsl {
             command.current_dir("/mnt/c");
         }
@@ -152,7 +174,13 @@ mod tests {
     use super::*;
 
     fn spec<'a>(headless: bool, urls: &'a [String]) -> ArgumentSpec<'a> {
-        ArgumentSpec { port: 9222, profile: r"C:\p\rusty-teams-chrome", headless, user_agent: "UA", start_urls: urls }
+        ArgumentSpec {
+            port: 9222,
+            profile: r"C:\p\rusty-teams-chrome",
+            headless,
+            user_agent: "UA",
+            start_urls: urls,
+        }
     }
 
     #[test]
@@ -173,14 +201,22 @@ mod tests {
         );
         assert_eq!(&arguments[7..17], HEADLESS_MEMORY_FLAGS);
         assert_eq!(arguments[17], "https://teams.cloud.microsoft/");
-        assert!(!arguments.iter().any(|argument| argument == "--process-per-site"));
+        assert!(
+            !arguments
+                .iter()
+                .any(|argument| argument == "--process-per-site")
+        );
     }
 
     #[test]
     fn visible_arguments_have_no_headless_flags_and_all_urls() {
         let urls = vec!["https://a/".to_owned(), "https://b/".to_owned()];
         let arguments = chrome_arguments(&spec(false, &urls));
-        assert!(!arguments.iter().any(|argument| argument.contains("headless") || argument.contains("user-agent")));
+        assert!(
+            !arguments
+                .iter()
+                .any(|argument| argument.contains("headless") || argument.contains("user-agent"))
+        );
         assert_eq!(&arguments[4..], ["https://a/", "https://b/"]);
     }
 
@@ -193,15 +229,27 @@ mod tests {
 
     #[test]
     fn major_from_version_directories() {
-        let names = ["154.0.8037.98", "153.0.1.2", "Dictionaries", "chrome.exe", "1.2.3"];
+        let names = [
+            "154.0.8037.98",
+            "153.0.1.2",
+            "Dictionaries",
+            "chrome.exe",
+            "1.2.3",
+        ];
         assert_eq!(major_from_directory_names(names.into_iter()), Some(154));
         assert_eq!(major_from_directory_names(["x"].into_iter()), None);
     }
 
     #[test]
     fn major_from_version_text() {
-        assert_eq!(major_from_version_output("Google Chrome 154.0.8037.98 \n"), Some(154));
-        assert_eq!(major_from_version_output("Chromium 131.0.6778.85 snap"), Some(131));
+        assert_eq!(
+            major_from_version_output("Google Chrome 154.0.8037.98 \n"),
+            Some(154)
+        );
+        assert_eq!(
+            major_from_version_output("Chromium 131.0.6778.85 snap"),
+            Some(131)
+        );
         assert_eq!(major_from_version_output("nothing"), None);
     }
 }

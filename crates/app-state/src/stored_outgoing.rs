@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use store::{AttachmentImage, MessageImportance};
 use teams_core::{AnnouncementBanner, Draft, DraftLine, LinkPreview, MentionInput};
 
-use crate::remote_image::{RemoteImage, RemoteKind};
 use crate::outgoing::{InlineImage, Outgoing, OutgoingFile, OutgoingImage, ReplyPreview};
+use crate::remote_image::{RemoteImage, RemoteKind};
 
 const IMAGE_FORMATS: [ImageFormat; 9] = [
     ImageFormat::Png,

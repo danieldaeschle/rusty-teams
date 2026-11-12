@@ -412,7 +412,8 @@ impl<R: Remote> SyncEngine<R> {
                     .filter_map(|reply| message_record(conversation_id, &reply)),
             );
         }
-        self.apply_chat_emotions(conversation_id, &mut records).await;
+        self.apply_chat_emotions(conversation_id, &mut records)
+            .await;
         let mut record = records[0].clone();
         let delta = self.ingest(conversation_id, records)?;
         self.announce_stored_late(conversation_id, &delta);

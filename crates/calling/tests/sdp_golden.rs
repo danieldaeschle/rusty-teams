@@ -1,4 +1,7 @@
-use calling::sdp::{self, OfferPlan, SessionDescription, from_teams_offer, to_browser_answer, to_teams_answer, to_teams_offer};
+use calling::sdp::{
+    self, OfferPlan, SessionDescription, from_teams_offer, to_browser_answer, to_teams_answer,
+    to_teams_offer,
+};
 
 const BROWSER_OFFER: &str = include_str!("fixtures/browser_offer.sdp");
 const TEAMS_OFFER: &str = include_str!("fixtures/teams_offer.sdp");
@@ -25,7 +28,8 @@ fn is_number(token: &str) -> bool {
 }
 
 fn is_address(token: &str) -> bool {
-    let dotted_quad = token.split('.').count() == 4 && token.split('.').all(|part| part == "x" || is_number(part));
+    let dotted_quad = token.split('.').count() == 4
+        && token.split('.').all(|part| part == "x" || is_number(part));
     token == "IP4" || token == "IP6" || dotted_quad || token.matches(':').count() >= 2
 }
 
@@ -36,24 +40,37 @@ fn normalize(line: &str) -> String {
         return "o=<origin>".into();
     }
     if let Some(rest) = line.strip_prefix("a=x-ssrc-range:") {
-        return format!("a=x-ssrc-range:{}", if rest == "1-1" { "1-1" } else { "<range>" });
+        return format!(
+            "a=x-ssrc-range:{}",
+            if rest == "1-1" { "1-1" } else { "<range>" }
+        );
     }
     let masked: Vec<String> = line
         .split(' ')
         .map(|token| {
-            let (prefix, value) = token.split_once(':').filter(|(prefix, _)| prefix.starts_with("a=")).unwrap_or(("", token));
+            let (prefix, value) = token
+                .split_once(':')
+                .filter(|(prefix, _)| prefix.starts_with("a="))
+                .unwrap_or(("", token));
             let value_masked = if prefix.ends_with("cname") || token.starts_with("cname:") {
                 "<C>".to_owned()
             } else if is_address(value) {
                 "<addr>".to_owned()
             } else if is_number(value) && value.len() >= 4 && value != "8100" {
                 "<n>".to_owned()
-            } else if let Some((stream, _)) = value.rsplit_once('-').filter(|(_, number)| is_number(number)) {
+            } else if let Some((stream, _)) = value
+                .rsplit_once('-')
+                .filter(|(_, number)| is_number(number))
+            {
                 format!("{stream}-<n>")
             } else {
                 value.to_owned()
             };
-            if prefix.is_empty() { value_masked } else { format!("{prefix}:{value_masked}") }
+            if prefix.is_empty() {
+                value_masked
+            } else {
+                format!("{prefix}:{value_masked}")
+            }
         })
         .collect();
     masked.join(" ")
@@ -71,7 +88,11 @@ fn sections(description: &SessionDescription) -> Vec<Vec<String>> {
     sections
 }
 
-fn assert_same(actual: Vec<Vec<String>>, expected: Vec<Vec<String>>, skip: impl Fn(usize, &str) -> bool) {
+fn assert_same(
+    actual: Vec<Vec<String>>,
+    expected: Vec<Vec<String>>,
+    skip: impl Fn(usize, &str) -> bool,
+) {
     assert_eq!(actual.len(), expected.len(), "section count");
     for (index, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
         let actual: Vec<&String> = actual.iter().filter(|line| !skip(index, line)).collect();
@@ -105,7 +126,10 @@ fn differs_per_run(index: usize, line: &str) -> bool {
 
 /// The answer only goes into the local libwebrtc, never to Teams; it sizes our Opus encoder (fullband, 40 kbps).
 fn with_local_opus_send_quality(mut expected: Vec<Vec<String>>) -> Vec<Vec<String>> {
-    let opus = expected[1].iter_mut().find(|line| *line == "a=fmtp:111 usedtx=1").expect("captured Opus fmtp");
+    let opus = expected[1]
+        .iter_mut()
+        .find(|line| *line == "a=fmtp:111 usedtx=1")
+        .expect("captured Opus fmtp");
     *opus = "a=fmtp:111 usedtx=1;maxaveragebitrate=40000;maxplaybackrate=48000".into();
     expected
 }
@@ -120,7 +144,11 @@ fn captured_teams_answer_translates_to_the_captured_browser_answer() {
 }
 
 fn kinds(description: &SessionDescription) -> Vec<String> {
-    description.media.iter().map(|media| media.kind.clone()).collect()
+    description
+        .media
+        .iter()
+        .map(|media| media.kind.clone())
+        .collect()
 }
 
 #[test]
@@ -128,17 +156,39 @@ fn captured_teams_offer_translates_to_a_browser_offer() {
     let remote = from_teams_offer(TEAMS_OFFER).unwrap();
     let browser = sdp::parse(&remote.browser_sdp).unwrap();
     assert_eq!(browser.media.len(), 20);
-    let mids: Vec<&str> = browser.media.iter().filter_map(|media| media.mid()).collect();
-    assert_eq!(mids, (0..20).map(|mid| mid.to_string()).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>());
+    let mids: Vec<&str> = browser
+        .media
+        .iter()
+        .filter_map(|media| media.mid())
+        .collect();
+    assert_eq!(
+        mids,
+        (0..20)
+            .map(|mid| mid.to_string())
+            .collect::<Vec<_>>()
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+    );
     let kinds = kinds(&browser);
     assert_eq!(kinds.iter().filter(|kind| *kind == "audio").count(), 1);
     assert_eq!(kinds.iter().filter(|kind| *kind == "video").count(), 18);
     assert_eq!(kinds.last().map(String::as_str), Some("application"));
     assert!(browser.media.iter().all(|media| media.port == "9"));
-    assert!(browser.media[..19].iter().all(|media| media.proto == "UDP/TLS/RTP/SAVPF"));
-    assert!(!remote.browser_sdp.contains("x-ssrc-range") && !remote.browser_sdp.contains("a=label"));
+    assert!(
+        browser.media[..19]
+            .iter()
+            .all(|media| media.proto == "UDP/TLS/RTP/SAVPF")
+    );
+    assert!(
+        !remote.browser_sdp.contains("x-ssrc-range") && !remote.browser_sdp.contains("a=label")
+    );
     assert!(!remote.browser_sdp.contains("10.10.10.10") && !remote.browser_sdp.contains("1234"));
-    assert!(remote.browser_sdp.contains("a=group:BUNDLE 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19"));
+    assert!(
+        remote
+            .browser_sdp
+            .contains("a=group:BUNDLE 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19")
+    );
     assert_eq!(remote.lines.len(), 13);
     assert_eq!(remote.lines[10].browser_mids.len(), 8);
 }
@@ -150,7 +200,9 @@ fn a_teams_offer_survives_the_trip_through_libwebrtc_form_and_back() {
     let actual = sections(&sdp::parse(&back.sdp).unwrap());
     let expected = sections(&sdp::parse(TEAMS_OFFER).unwrap());
     let per_run_ssrcs = |_: usize, line: &str| {
-        is_teams_codec_policy(line) || line.starts_with("a=ssrc:") || line.starts_with("a=x-ssrc-range:")
+        is_teams_codec_policy(line)
+            || line.starts_with("a=ssrc:")
+            || line.starts_with("a=x-ssrc-range:")
     };
     assert_same(actual, expected, per_run_ssrcs);
     assert_eq!(back.lines, remote.lines);

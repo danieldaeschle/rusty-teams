@@ -85,7 +85,11 @@ async fn run(browser: Browser, config: WatchdogConfig, sender: mpsc::Sender<Brow
             backoff = config.initial_backoff;
             if !alive {
                 alive = true;
-                let event = if std::mem::take(&mut died) { BrowserEvent::Restarted } else { BrowserEvent::Started };
+                let event = if std::mem::take(&mut died) {
+                    BrowserEvent::Restarted
+                } else {
+                    BrowserEvent::Started
+                };
                 if sender.send(event).await.is_err() {
                     return;
                 }
