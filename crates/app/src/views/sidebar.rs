@@ -1973,7 +1973,7 @@ fn team_menu(
                         TeamMenuItem::AddChannel => {}
                         TeamMenuItem::Show => state.set_team_shown(&action_id, true, cx),
                         TeamMenuItem::Hide => state.set_team_shown(&action_id, false, cx),
-                        TeamMenuItem::ManageTeam => state.manage_team_in_browser(&action_id, cx),
+                        TeamMenuItem::ManageTeam => state.open_manage_team(&action_id, cx),
                         TeamMenuItem::CopyLink => state.copy_team_link(&action_id, cx),
                     });
                 }),

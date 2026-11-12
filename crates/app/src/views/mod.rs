@@ -79,6 +79,7 @@ pub mod rail;
 pub mod reaction_picker;
 pub mod reaction_pills;
 pub mod recap_tab;
+pub mod manage_team_page;
 pub mod quick_view_pane;
 pub mod scheduled_toolbar;
 pub mod section_dialog;

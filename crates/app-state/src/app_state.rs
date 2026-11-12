@@ -152,6 +152,7 @@ pub struct AppState {
     pub(crate) warm_chats: crate::warm_chats::WarmChats,
     pub local_previews: HashMap<String, LocalPreview>,
     pub quick_view: Option<QuickView>,
+    pub manage_team: Option<crate::manage_team::ManageTeam>,
     pub scheduled: Vec<ScheduledDraft>,
     pub scheduled_polling: bool,
     pub saved: SavedSet,
@@ -311,6 +312,7 @@ impl AppState {
             warm_chats: Default::default(),
             local_previews: HashMap::new(),
             quick_view: None,
+            manage_team: None,
             scheduled: Vec::new(),
             scheduled_polling: false,
             saved: SavedSet::default(),
@@ -982,8 +984,9 @@ impl AppState {
         self.call_end = None;
         let was_drafting = std::mem::take(&mut self.new_chat);
         let left_quick_view = self.quick_view.take().is_some();
+        let left_manage_team = self.manage_team.take().is_some();
         if !was_drafting && self.selection.as_ref() == Some(&selection) {
-            if left_quick_view {
+            if left_quick_view || left_manage_team {
                 cx.emit(AppEvent::Sidebar);
                 cx.notify();
             }

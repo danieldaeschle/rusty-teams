@@ -35,6 +35,7 @@ use super::sidebar::{SidebarEvent, SidebarTab, SidebarView};
 use app_ui_kit::render::hooks::RenderHooks;
 use app_ui_kit::layout::{ISLAND_GAP, SIDEBAR_WIDTH};
 use super::connection_banner::render_connection_banner;
+use super::manage_team_page::ManageTeamPage;
 use super::splash::{self, Phase, Splash, StartupFacts};
 use super::notice_toast::NoticeToasts;
 use super::status_menu::{own_status_button, settings_more_button};
@@ -168,6 +169,7 @@ pub struct AppShell {
     sidebar: Entity<SidebarView>,
     calendar: Entity<CalendarView>,
     quick_pane: Entity<QuickViewPane>,
+    manage_team_page: Entity<ManageTeamPage>,
     calls_page: Entity<CallsPage>,
     shown_quick_view: Option<QuickView>,
     conversation: Entity<ConversationView>,
@@ -254,6 +256,7 @@ impl AppShell {
         let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
         let activity_panel = cx.new(|cx| ActivityPanel::new(state.clone(), activity.clone(), cx));
         let quick_pane = cx.new(|cx| QuickViewPane::new(state.clone(), activity.clone(), cx));
+        let manage_team_page = cx.new(|cx| ManageTeamPage::new(state.clone(), window, cx));
         let calls_page = cx.new(|cx| CallsPage::new(state.clone(), window, cx));
         let agents_panel = crate::agents::runs_handle(cx)
             .map(|runs| cx.new(|cx| crate::agents::AgentsPanel::new(runs, cx)));
@@ -393,6 +396,7 @@ impl AppShell {
             sidebar,
             calendar,
             quick_pane,
+            manage_team_page,
             calls_page,
             shown_quick_view: None,
             conversation,
@@ -913,6 +917,7 @@ impl AppShell {
         calendar_open: bool,
         quick_view_open: bool,
         calls_open: bool,
+        manage_team_open: bool,
     ) -> Div {
         h_flex()
             .debug_selector(|| "shell/islands".into())
@@ -944,6 +949,11 @@ impl AppShell {
                     .into_any_element(),
                 None if calls_open => self
                     .calls_page
+                    .clone()
+                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
+                    .into_any_element(),
+                None if manage_team_open => self
+                    .manage_team_page
                     .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
@@ -1018,6 +1028,7 @@ impl Render for AppShell {
         let state = self.state.read(cx);
         let calendar_open = calendar_tab;
         let quick_view_open = chats_tab && state.quick_view.is_some();
+        let manage_team_open = !calendar_tab && !calls_tab && state.manage_team.is_some();
         let calls_open = calls_tab;
         let show_sidebar = !calendar_open && !calls_open;
         let banner = state.connection_banner_text().filter(|_| !self.splash.is_up()).map(|banner| {
@@ -1232,7 +1243,7 @@ impl Render for AppShell {
                     .size_full()
                     .child(title_bar)
                     .children(banner)
-                    .child(rising_in(self.islands(show_sidebar, calendar_open, quick_view_open, calls_open), &self.splash, cx)),
+                    .child(rising_in(self.islands(show_sidebar, calendar_open, quick_view_open, calls_open, manage_team_open), &self.splash, cx)),
             )
             .children(splash)
             .children(self.image_viewer.clone())

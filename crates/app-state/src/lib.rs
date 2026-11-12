@@ -31,6 +31,7 @@ pub mod gifs;
 pub mod image_view_gallery;
 pub mod importance;
 pub mod local_previews;
+pub mod manage_team;
 pub mod message_actions;
 pub mod notice;
 pub mod notify;

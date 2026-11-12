@@ -245,6 +245,10 @@ pub trait Remote {
         Err(Error::Unsupported("a channel member count"))
     }
 
+    async fn channel_members(&self, _team_id: &str, _channel_id: &str) -> Result<Vec<graph::Member>> {
+        Err(Error::Unsupported("a channel member list"))
+    }
+
     async fn list_children(&self, _folder: &DriveFolder) -> Result<Vec<DriveEntry>> {
         Err(Error::Unsupported("a folder listing"))
     }
@@ -1094,6 +1098,10 @@ impl Remote for Graph {
 
     async fn channel_member_count(&self, team_id: &str, channel_id: &str) -> Result<usize> {
         Ok(Graph::channel_member_count(self, team_id, channel_id).await?)
+    }
+
+    async fn channel_members(&self, team_id: &str, channel_id: &str) -> Result<Vec<graph::Member>> {
+        Ok(Graph::channel_member_list(self, team_id, channel_id).await?)
     }
 
     async fn list_children(&self, folder: &DriveFolder) -> Result<Vec<DriveEntry>> {

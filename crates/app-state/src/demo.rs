@@ -2431,6 +2431,19 @@ fn encode_rgb(width: usize, height: usize, pixel: impl Fn(usize, usize) -> [u8; 
     png
 }
 
+pub fn team_members() -> Vec<crate::manage_team::TeamMember> {
+    std::iter::once((DEMO_USER_ID, DEMO_USER_NAME, DEMO_USER_EMAIL))
+        .chain(PEOPLE_DIRECTORY.iter().map(|(user_id, name, _, email)| (*user_id, *name, *email)))
+        .enumerate()
+        .map(|(index, (user_id, name, email))| crate::manage_team::TeamMember {
+            user_id: Some(user_id.to_owned()),
+            name: name.to_owned(),
+            email: Some(email.to_owned()),
+            owner: index == 1 || index == 3,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

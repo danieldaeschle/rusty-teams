@@ -32,6 +32,14 @@ impl<R: Remote> SyncEngine<R> {
         self.remote.channel_member_count(&team_id, channel_id).await
     }
 
+    pub async fn team_members(&self, team_id: &str) -> Result<Vec<graph::Member>> {
+        let general_channel_id = self
+            .store
+            .team_thread_id(team_id)?
+            .ok_or(Error::Unsupported("a team without its General channel"))?;
+        self.remote.channel_members(team_id, &general_channel_id).await
+    }
+
     pub async fn library_children(&self, folder: &DriveFolder) -> Result<Vec<DriveEntry>> {
         self.remote.list_children(folder).await
     }

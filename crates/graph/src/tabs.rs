@@ -3,6 +3,7 @@ use session::Scope;
 
 use crate::client::Graph;
 use crate::error::Result;
+use crate::models::Member;
 use crate::urls;
 
 const TABS_SCOPE: &str = "TeamsTab.ReadWrite.All";
@@ -39,6 +40,11 @@ impl Graph {
             )
             .await?;
         Ok(members.len())
+    }
+
+    pub async fn channel_member_list(&self, team_id: &str, channel_id: &str) -> Result<Vec<Member>> {
+        self.get_all(&urls::channel_member_list(team_id, channel_id), Scope::graph(MEMBERS_SCOPE))
+            .await
     }
 }
 

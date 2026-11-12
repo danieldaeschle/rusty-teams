@@ -196,6 +196,14 @@ pub fn channel_members(team_id: &str, channel_id: &str) -> String {
     )
 }
 
+pub fn channel_member_list(team_id: &str, channel_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/teams/{}/channels/{}/members?$top=999",
+        segment(team_id),
+        segment(channel_id)
+    )
+}
+
 pub fn channel_tab(team_id: &str, channel_id: &str, tab_id: &str) -> String {
     format!(
         "{GRAPH}/v1.0/teams/{}/channels/{}/tabs/{}",

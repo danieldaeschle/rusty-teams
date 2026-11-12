@@ -319,6 +319,7 @@ mod tests {
             tenant_id: None,
             display_name: None,
             email: None,
+            roles: Vec::new(),
         }
     }
 
