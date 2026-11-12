@@ -77,7 +77,7 @@ fn send_message(state: &Entity<AppState>, entry: ProposalEntry, cx: &mut App) {
         agent_api::hold_for_review(&conversation_id, cx);
         return;
     };
-    let in_channel = state.read(cx).channel_team_id(&conversation_id).is_some();
+    let in_channel = state.read(cx).store.channel(&conversation_id).ok().flatten().is_some();
     let target_message = entry
         .proposal
         .reply_to_message_id
@@ -126,10 +126,12 @@ fn add_reaction(
     let (conversation_id, message_id) = (reaction.conversation_id.clone(), reaction.message_id.clone());
     let Some(engine) = live_engine(state, cx) else {
         agent_api::hold_reaction_for_review(&conversation_id, &message_id, cx);
+        reacting.borrow_mut().remove(&reaction.id);
         return;
     };
     if message(state, &conversation_id, &message_id, cx).is_none() {
         agent_api::resolve_reaction_proposal(&conversation_id, &message_id, &reaction.id, ReactionOutcome::Stale, cx);
+        reacting.borrow_mut().remove(&reaction.id);
         return;
     }
     let reaction_type = api_reaction(&reaction_glyph(&reaction.emoji));
