@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use calling::background::BackgroundPicture;
 use calling::blur::BlurSettings;
-use calling::camera::start_camera;
+use calling::camera::{CameraCaptureStats, start_camera};
 use calling::capture::Capture;
 use calling::video_frame::picture_from_i420;
 use calling::video_pattern::{PatternKind, pattern_frame};
@@ -60,6 +60,8 @@ impl CameraPreview {
         let started = start_camera(
             choice,
             self.blur.clone(),
+            CameraCaptureStats::new(),
+            |_label| {},
             move |buffer| {
                 frames.fetch_add(1, Ordering::Relaxed);
                 if let Some(mut picture) = picture_from_i420(buffer, PREVIEW_MAX_WIDTH) {

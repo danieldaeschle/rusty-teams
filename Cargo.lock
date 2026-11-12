@@ -1221,6 +1221,8 @@ dependencies = [
  "webview",
  "windows 0.62.2",
  "windows-core 0.62.2",
+ "zune-core 0.5.3",
+ "zune-jpeg 0.5.15",
 ]
 
 [[package]]
