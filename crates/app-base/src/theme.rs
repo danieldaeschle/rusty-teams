@@ -22,6 +22,11 @@ const FONT_FILES: [&[u8]; 4] = [
     include_bytes!("../../app/assets/fonts/GoogleSansFlex-Italic.ttf"),
 ];
 
+#[cfg(target_os = "linux")]
+const PLATFORM_FONT_FILES: [&[u8]; 1] = [include_bytes!("../../app/assets/fonts/NotoColorEmoji.ttf")];
+#[cfg(not(target_os = "linux"))]
+const PLATFORM_FONT_FILES: [&[u8]; 0] = [];
+
 const WHITE: u32 = 0xffffff;
 const CLOSE_BUTTON_ICON: u32 = 0xffffff;
 
@@ -36,6 +41,7 @@ fn color_with_alpha(hex: u32) -> Hsla {
 pub fn load_fonts(cx: &mut App) {
     let fonts = FONT_FILES
         .iter()
+        .chain(PLATFORM_FONT_FILES.iter())
         .map(|bytes| Cow::Borrowed(*bytes))
         .collect();
     let _ = cx.text_system().add_fonts(fonts);
