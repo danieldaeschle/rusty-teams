@@ -13,7 +13,8 @@ pub use availability::{BusyTime, PersonSchedule, parse_schedules};
 
 pub use reminders::{Reminder, parse_reminders};
 pub use schedule::{
-    Attendee, CreatedEvent, NewEvent, Repeat, Reply, new_event_body, parse_created_event,
+    Attendee, CreatedEvent, NewEvent, Repeat, Reply, new_event_body, new_event_body_with_join,
+    parse_created_event,
 };
 
 const QUERY_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%SZ";
@@ -39,6 +40,22 @@ pub enum ShowAs {
     WorkingElsewhere,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CalendarSource {
+    #[default]
+    Outlook,
+    Google,
+}
+
+impl CalendarSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            CalendarSource::Outlook => "Outlook",
+            CalendarSource::Google => "Google",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalendarEvent {
     pub object_id: String,
@@ -56,6 +73,49 @@ pub struct CalendarEvent {
     pub response: ResponseType,
     pub show_as: ShowAs,
     pub dial_in: Option<DialIn>,
+    pub source: CalendarSource,
+    pub account_id: Option<String>,
+    pub calendar_id: Option<String>,
+    /// When a merge collapsed duplicates, every contributing source.
+    pub sources: Vec<CalendarSource>,
+}
+
+impl CalendarEvent {
+    pub fn outlook_defaults() -> (CalendarSource, Option<String>, Option<String>, Vec<CalendarSource>) {
+        (
+            CalendarSource::Outlook,
+            None,
+            None,
+            vec![CalendarSource::Outlook],
+        )
+    }
+}
+
+impl Default for CalendarEvent {
+    fn default() -> Self {
+        let (source, account_id, calendar_id, sources) = Self::outlook_defaults();
+        CalendarEvent {
+            object_id: String::new(),
+            subject: String::new(),
+            start: DateTime::<Utc>::UNIX_EPOCH,
+            end: DateTime::<Utc>::UNIX_EPOCH,
+            all_day: false,
+            cancelled: false,
+            online: false,
+            join_url: None,
+            thread_id: None,
+            organizer_name: None,
+            organizer_address: None,
+            ical_uid: None,
+            response: ResponseType::default(),
+            show_as: ShowAs::default(),
+            dial_in: None,
+            source,
+            account_id,
+            calendar_id,
+            sources,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,6 +319,7 @@ fn show_as(entry: &Value) -> ShowAs {
 
 fn parse_event(entry: &Value) -> Option<CalendarEvent> {
     let join_url = text(entry, "skypeTeamsMeetingUrl").or_else(|| text(entry, "joinUrl"));
+    let (source, account_id, calendar_id, sources) = CalendarEvent::outlook_defaults();
     Some(CalendarEvent {
         object_id: text(entry, "objectId").or_else(|| text(entry, "id"))?,
         subject: text(entry, "subject").unwrap_or_default(),
@@ -275,6 +336,10 @@ fn parse_event(entry: &Value) -> Option<CalendarEvent> {
         response: response_type(entry),
         show_as: show_as(entry),
         dial_in: dial_in(entry),
+        source,
+        account_id,
+        calendar_id,
+        sources,
     })
 }
 

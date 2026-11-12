@@ -157,6 +157,31 @@ pub fn new_event_body(event: &NewEvent) -> Value {
     body
 }
 
+/// Outlook insert when the Teams join URL already exists (multi-target create).
+pub fn new_event_body_with_join(event: &NewEvent, join_url: &str) -> Value {
+    let mut details = event.details.clone();
+    if !details.is_empty() {
+        details.push_str("\n\n");
+    }
+    details.push_str(join_url);
+    let mut body = json!({
+        "subject": event.subject,
+        "start": graph_time(event, event.local_start, event.start),
+        "end": graph_time(event, event.local_end, event.end),
+        "attendees": event.attendees.iter().map(|attendee| json!({
+            "type": "required",
+            "emailAddress": {"address": attendee.address, "name": attendee.name},
+        })).collect::<Vec<_>>(),
+        "location": {"displayName": join_url},
+        "body": {"contentType": "text", "content": details},
+        "isOnlineMeeting": false,
+    });
+    if let Some(recurrence) = recurrence(event.repeat, event.local_start) {
+        body["recurrence"] = recurrence;
+    }
+    body
+}
+
 pub fn parse_created_event(body: &Value) -> Option<CreatedEvent> {
     Some(CreatedEvent {
         id: body.get("id")?.as_str()?.to_owned(),
@@ -171,8 +196,12 @@ fn events_url() -> String {
     format!("{GRAPH}/v1.0/me/events")
 }
 
+fn event_item_url(event_id: &str) -> String {
+    format!("{}/{}", events_url(), encode(event_id))
+}
+
 fn reply_url(event_id: &str, reply: Reply) -> String {
-    format!("{}/{}/{}", events_url(), encode(event_id), reply.action())
+    format!("{}/{}", event_item_url(event_id), reply.action())
 }
 
 fn lookup_url(ical_uid: &str) -> String {
@@ -189,8 +218,27 @@ fn api_error(answer: session::ApiResponse, url: &str) -> Error {
 
 impl<T: CardTransport> Calendar<T> {
     pub async fn create_event(&self, event: &NewEvent) -> Result<CreatedEvent> {
+        self.create_event_body(event, new_event_body(event)).await
+    }
+
+    pub async fn create_event_with_join(
+        &self,
+        event: &NewEvent,
+        join_url: &str,
+    ) -> Result<CreatedEvent> {
+        let mut created = self
+            .create_event_body(event, new_event_body_with_join(event, join_url))
+            .await?;
+        if created.join_url.is_none() {
+            created.join_url = Some(join_url.to_owned());
+        }
+        Ok(created)
+    }
+
+    async fn create_event_body(&self, event: &NewEvent, body: Value) -> Result<CreatedEvent> {
+        let _ = event;
         let url = events_url();
-        let request = Request::with_body(Method::Post, &url, new_event_body(event));
+        let request = Request::with_body(Method::Post, &url, body);
         let answer = self
             .transport
             .send(request, Scope::graph(CALENDARS_SCOPE))
@@ -221,6 +269,31 @@ impl<T: CardTransport> Calendar<T> {
             return Ok(());
         }
         Err(api_error(retried, &reply_url(&graph_id, reply)))
+    }
+
+    pub async fn delete_event(&self, event_id: &str, ical_uid: Option<&str>) -> Result<()> {
+        let answer = self.send_delete(event_id).await?;
+        if answer.is_success() {
+            return Ok(());
+        }
+        let Some(ical_uid) = ical_uid.filter(|_| answer.status == NOT_FOUND) else {
+            return Err(api_error(answer, &event_item_url(event_id)));
+        };
+        let graph_id = self.graph_event_id(ical_uid).await?;
+        let retried = self.send_delete(&graph_id).await?;
+        if retried.is_success() {
+            return Ok(());
+        }
+        Err(api_error(retried, &event_item_url(&graph_id)))
+    }
+
+    async fn send_delete(&self, event_id: &str) -> Result<session::ApiResponse> {
+        self.transport
+            .send(
+                Request::delete(event_item_url(event_id)),
+                Scope::graph(CALENDARS_SCOPE),
+            )
+            .await
     }
 
     async fn send_reply(
@@ -330,6 +403,25 @@ mod tests {
             repeat,
             details: String::new(),
         }
+    }
+
+    #[test]
+    fn join_first_body_puts_link_in_location_without_online_meeting() {
+        let body = new_event_body_with_join(
+            &event(Repeat::Never),
+            "https://teams.microsoft.com/l/meetup-join/x",
+        );
+        assert_eq!(body["isOnlineMeeting"], false);
+        assert_eq!(
+            body["location"]["displayName"],
+            "https://teams.microsoft.com/l/meetup-join/x"
+        );
+        assert!(
+            body["body"]["content"]
+                .as_str()
+                .unwrap()
+                .contains("teams.microsoft.com")
+        );
     }
 
     #[test]
@@ -477,6 +569,15 @@ mod tests {
             sent[0].2,
             Some(json!({"comment": "", "sendResponse": false}))
         );
+    }
+
+    #[tokio::test]
+    async fn delete_event_sends_graph_delete() {
+        let calendar = Calendar::with_transport(Scripted::new(vec![(204, Value::Null)]), "emea");
+        calendar.delete_event("AAMk=", None).await.unwrap();
+        let sent = calendar.transport.sent.lock().unwrap();
+        assert_eq!(sent[0].0, Method::Delete);
+        assert_eq!(sent[0].1, "https://graph.microsoft.com/v1.0/me/events/AAMk%3D");
     }
 
     #[tokio::test]
