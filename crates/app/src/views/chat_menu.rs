@@ -8,6 +8,7 @@ use teams_core::{ChatNotificationMode, DesktopNotifications, chat_link, is_notes
 
 use super::chat_pop_out;
 use super::widgets::menu_icon;
+use crate::i18n::tr;
 use crate::app_state::{AppState, chat_title};
 use crate::chat_actions::TITLE_LIMIT;
 use crate::notice::truncated;
@@ -332,10 +333,10 @@ fn confirm_remove_history(
         let state = state.clone();
         let chat_id = chat_id.clone();
         let cancel = Button::new("remove-history-cancel")
-            .label("Cancel")
+            .label(tr("common.cancel"))
             .on_click(|_, window, cx| window.close_dialog(cx));
         let remove = Button::new("remove-history-confirm")
-            .label("Remove")
+            .label(tr("common.remove"))
             .primary()
             .on_click(move |_, window, cx| {
                 state.update(cx, |state, cx| state.remove_chat_history(&chat_id, cx));
@@ -365,10 +366,10 @@ pub(crate) fn confirm_leave(
         let state = state.clone();
         let chat_id = chat_id.clone();
         let cancel = Button::new("leave-cancel")
-            .label("Cancel")
+            .label(tr("common.cancel"))
             .on_click(|_, window, cx| window.close_dialog(cx));
         let leave = Button::new("leave-confirm")
-            .label("Leave")
+            .label(tr("common.leave"))
             .danger()
             .on_click(move |_, window, cx| {
                 state.update(cx, |state, cx| state.leave_chat(&chat_id, cx));

@@ -74,6 +74,7 @@ use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::scroll_edge::edge_divider;
 use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::widgets::{icon, symbol};
+use crate::i18n::tr;
 use crate::agents::{AgentRun, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::backend::Engine;
@@ -3686,7 +3687,7 @@ impl ConversationView {
                     Button::new("retry-new-chat")
                         .ghost()
                         .compact()
-                        .label("Retry")
+                        .label(tr("common.retry"))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.retry(&failed_key, window, cx)
                         })),
@@ -4229,7 +4230,7 @@ impl Render for ConversationView {
                             Button::new("retry-fetch")
                                 .ghost()
                                 .compact()
-                                .label("Retry")
+                                .label(tr("common.retry"))
                                 .on_click(cx.listener(|this, _, _, cx| this.retry_fetch(cx))),
                         )
                     }),

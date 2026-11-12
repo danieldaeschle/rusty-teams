@@ -29,6 +29,7 @@ use super::text::describe;
 use super::toast::{PillView, ToastView};
 use super::urgent_repeat::UrgentRepeats;
 use crate::active_appearance::{self, ActiveAppearance};
+use crate::active_locale::ActiveLocale;
 use crate::activity::ActivityCenter;
 use crate::agent_api::{self, pending::PendingProposal};
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
@@ -110,6 +111,7 @@ pub struct NotificationCenter {
     _subscription: Subscription,
     _activity_observation: Subscription,
     _appearance_observation: Subscription,
+    _locale_observation: Subscription,
     _agent_subscription: Option<Subscription>,
     started_at: DateTime<Utc>,
     known_proposals: HashSet<String>,
@@ -138,6 +140,9 @@ impl NotificationCenter {
         platform::set_window_icon(window, app_icon.png());
         let appearance_observation = cx.observe_global::<ActiveAppearance>(|this, cx| {
             this.apply_app_icon(active_appearance::current(cx).app_icon, cx)
+        });
+        let locale_observation = cx.observe_global::<ActiveLocale>(|this, _| {
+            this.relocalize_tray();
         });
         let subscription = cx.subscribe(&app, |this, _, event: &AppEvent, cx| {
             this.on_app_event(event, cx);
@@ -188,6 +193,7 @@ impl NotificationCenter {
             _subscription: subscription,
             _activity_observation: activity_observation,
             _appearance_observation: appearance_observation,
+            _locale_observation: locale_observation,
             _agent_subscription: agent_subscription,
         };
         cx.spawn(async move |this, cx| {
@@ -1177,6 +1183,12 @@ impl NotificationCenter {
         let _ = self.main_window.update(cx, |_, window, _| {
             platform::set_window_icon(window, icon.png())
         });
+    }
+
+    fn relocalize_tray(&self) {
+        if let Some(tray) = &self.tray {
+            tray.relocalize();
+        }
     }
 
     fn sync_tray(&self) {

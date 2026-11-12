@@ -10,6 +10,7 @@ use gpui_kit::*;
 use super::call_extras::confirm_record_action;
 use super::call_transcript::TranscriptPanel;
 use super::widgets::icon;
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::call::{
     CallModel, CaptionPosition, CaptionSize, RecordBlock, RecordFeature, record_actions,
@@ -236,7 +237,7 @@ pub fn open_captions_settings(app: &Entity<AppState>, window: &mut Window, cx: &
                 DialogFooter::new().child(
                     Button::new("captions-settings-done")
                         .primary()
-                        .label("Done")
+                        .label(tr("common.done"))
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 ),
             )

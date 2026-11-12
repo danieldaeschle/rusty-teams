@@ -1,5 +1,5 @@
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     Sizable as _,
     button::{Button, ButtonVariants as _},
@@ -15,10 +15,10 @@ use gpui_kit::*;
 use super::avatar::person_avatar;
 use super::call_extras::open_invite_picker;
 use super::call_organizer::{pill, tile_menu};
-use super::call_toolbar::tool_face;
-use super::call_view::{BANNER_HEIGHT, CHAT_PANEL_WIDTH, MENU_WIDTH};
-use super::widgets::{Corner, corner_badge, count_badge, icon};
+use super::call_view::{BANNER_HEIGHT, CHAT_PANEL_WIDTH, MENU_WIDTH, round_control};
 use super::scroll_edge::with_top_edge;
+use super::widgets::{Corner, corner_badge, count_badge, icon};
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::call::{
     ActiveCall, CallModel, OptionsDialog, PeopleSections, PersonRow, people_sections,
@@ -46,10 +46,20 @@ fn dark_text() -> Hsla {
 
 pub fn people_button(app: &Entity<AppState>, open: bool, raised_hands: usize) -> Stateful<Div> {
     let app = app.clone();
-    tool_face("call-people", IconName::Users, "People", open)
+    let (background, foreground) = if open {
+        (theme::accent(), theme::on_accent())
+    } else {
+        (theme::surface_raised(), theme::text())
+    };
+    round_control("call-people", IconName::Users, background, foreground)
         .relative()
         .tooltip(move |window, cx| {
-            Tooltip::new(if open { "Close the people list" } else { "Show people" }).build(window, cx)
+            Tooltip::new(if open {
+                "Close the people list"
+            } else {
+                "Show people"
+            })
+            .build(window, cx)
         })
         .when(raised_hands > 0, |button| {
             button.child(
@@ -100,8 +110,9 @@ pub fn lock_banner(app: &Entity<AppState>, model: &CallModel) -> Option<AnyEleme
             .font_weight(FontWeight::SEMIBOLD)
             .child("The meeting is locked. Nobody new can join.")
             .child(
-                pill("call-lock-unlock", "Unlock", false)
-                    .on_click(move |_, _, cx| app.update(cx, |state, cx| state.set_call_lock(false, cx))),
+                pill("call-lock-unlock", "Unlock", false).on_click(move |_, _, cx| {
+                    app.update(cx, |state, cx| state.set_call_lock(false, cx))
+                }),
             )
             .into_any_element(),
     )
@@ -113,8 +124,13 @@ fn people_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> P
         return popup;
     }
     let capability = model.capability;
-    let (mute_app, lock_app, mic_app, camera_app, options_app) =
-        (app.clone(), app.clone(), app.clone(), app.clone(), app.clone());
+    let (mute_app, lock_app, mic_app, camera_app, options_app) = (
+        app.clone(),
+        app.clone(),
+        app.clone(),
+        app.clone(),
+        app.clone(),
+    );
     popup
         .item(
             PopupMenuItem::new("Mute all")
@@ -122,11 +138,19 @@ fn people_menu(popup: PopupMenu, app: &Entity<AppState>, model: &CallModel) -> P
                 .on_click(move |_, _, cx| mute_app.update(cx, |state, cx| state.mute_all_call(cx))),
         )
         .item(
-            PopupMenuItem::new(if capability.locked { "Unlock meeting" } else { "Lock meeting" })
-                .icon(if capability.locked { IconName::LockOpen } else { IconName::Lock })
-                .on_click(move |_, _, cx| {
-                    lock_app.update(cx, |state, cx| state.set_call_lock(!capability.locked, cx))
-                }),
+            PopupMenuItem::new(if capability.locked {
+                "Unlock meeting"
+            } else {
+                "Lock meeting"
+            })
+            .icon(if capability.locked {
+                IconName::LockOpen
+            } else {
+                IconName::Lock
+            })
+            .on_click(move |_, _, cx| {
+                lock_app.update(cx, |state, cx| state.set_call_lock(!capability.locked, cx))
+            }),
         )
         .item(
             PopupMenuItem::new(if capability.attendee_mic_off {
@@ -199,7 +223,7 @@ fn panel_header(app: &Entity<AppState>, model: &CallModel, count: usize) -> Div 
         .when(model.can_invite(), |header| {
             header.child(
                 Button::new("call-people-invite")
-                    .label("Invite")
+                    .label(tr("common.invite"))
                     .icon(IconName::UserPlus)
                     .xsmall()
                     .on_click(move |_, window, cx| open_invite_picker(&invite_app, window, cx)),
@@ -230,7 +254,9 @@ fn panel_header(app: &Entity<AppState>, model: &CallModel, count: usize) -> Div 
                 .hover(|button| button.bg(theme::row_hover()))
                 .tooltip(|window, cx| Tooltip::new("Close the people list").build(window, cx))
                 .child(icon(IconName::Close, 14., theme::text_muted()))
-                .on_click(move |_, _, cx| close_app.update(cx, |state, cx| state.toggle_call_people(cx))),
+                .on_click(move |_, _, cx| {
+                    close_app.update(cx, |state, cx| state.toggle_call_people(cx))
+                }),
         )
 }
 
@@ -293,19 +319,27 @@ fn person_row(
     row: &PersonRow,
 ) -> AnyElement {
     let group = SharedString::from(format!("call-people-{section}-{}", row.mri));
-    let user_id = row
-        .user_id
-        .clone()
-        .or_else(|| {
-            row.own
-                .then(|| state.directory.me.as_ref().map(|me| me.user_id.clone()))
-                .flatten()
-        });
-    let subtitle = if row.ringing { Some("Ringing") } else { row.label };
-    let (more_app, more_model, more_mri, more_name) =
-        (app.clone(), model.clone(), row.mri.clone(), row.name.clone());
+    let user_id = row.user_id.clone().or_else(|| {
+        row.own
+            .then(|| state.directory.me.as_ref().map(|me| me.user_id.clone()))
+            .flatten()
+    });
+    let subtitle = if row.ringing {
+        Some("Ringing")
+    } else {
+        row.label
+    };
+    let (more_app, more_model, more_mri, more_name) = (
+        app.clone(),
+        model.clone(),
+        row.mri.clone(),
+        row.name.clone(),
+    );
     h_flex()
-        .id(SharedString::from(format!("call-people-row-{section}-{}", row.mri)))
+        .id(SharedString::from(format!(
+            "call-people-row-{section}-{}",
+            row.mri
+        )))
         .group(group.clone())
         .w_full()
         .h(px(ROW_HEIGHT))
@@ -314,7 +348,12 @@ fn person_row(
         .gap(px(8.))
         .items_center()
         .hover(|row| row.bg(theme::row_hover()))
-        .child(person_avatar(&state.directory, user_id.as_deref(), &row.name, AVATAR_SIZE))
+        .child(person_avatar(
+            &state.directory,
+            user_id.as_deref(),
+            &row.name,
+            AVATAR_SIZE,
+        ))
         .child(
             v_flex()
                 .flex_1()
@@ -354,16 +393,30 @@ fn person_row(
                             .xsmall()
                             .size(px(MORE_SIZE))
                             .tooltip("More")
-                            .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, _, _| {
-                                tile_menu(popup, &more_app, &more_model, &more_mri, &more_name, false)
-                            }),
+                            .dropdown_menu_with_anchor(
+                                Anchor::TopRight,
+                                move |popup, _, _| {
+                                    tile_menu(
+                                        popup,
+                                        &more_app,
+                                        &more_model,
+                                        &more_mri,
+                                        &more_name,
+                                        false,
+                                    )
+                                },
+                            ),
                         )
                 }),
         )
         .into_any_element()
 }
 
-fn lobby_section(app: &Entity<AppState>, state: &AppState, sections: &PeopleSections) -> Option<Div> {
+fn lobby_section(
+    app: &Entity<AppState>,
+    state: &AppState,
+    sections: &PeopleSections,
+) -> Option<Div> {
     if sections.lobby.is_empty() {
         return None;
     }
@@ -372,24 +425,37 @@ fn lobby_section(app: &Entity<AppState>, state: &AppState, sections: &PeopleSect
         .label("Admit all")
         .ghost()
         .xsmall()
-        .on_click(move |_, _, cx| admit_all_app.update(cx, |state, cx| state.admit_all_call_guests(cx)))
+        .on_click(move |_, _, cx| {
+            admit_all_app.update(cx, |state, cx| state.admit_all_call_guests(cx))
+        })
         .into_any_element();
     Some(
         v_flex()
             .w_full()
-            .child(section_header(format!("Waiting in lobby ({})", sections.lobby.len()), Some(action)))
+            .child(section_header(
+                format!("Waiting in lobby ({})", sections.lobby.len()),
+                Some(action),
+            ))
             .children(sections.lobby.iter().map(|guest| {
                 let (admit_app, deny_app) = (app.clone(), app.clone());
                 let (admit_mri, deny_mri) = (guest.mri.clone(), guest.mri.clone());
                 h_flex()
-                    .id(SharedString::from(format!("call-people-lobby-{}", guest.mri)))
+                    .id(SharedString::from(format!(
+                        "call-people-lobby-{}",
+                        guest.mri
+                    )))
                     .w_full()
                     .h(px(ROW_HEIGHT))
                     .flex_none()
                     .px(px(20.))
                     .gap(px(8.))
                     .items_center()
-                    .child(person_avatar(&state.directory, guest.user_id.as_deref(), &guest.name, AVATAR_SIZE))
+                    .child(person_avatar(
+                        &state.directory,
+                        guest.user_id.as_deref(),
+                        &guest.name,
+                        AVATAR_SIZE,
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -400,27 +466,40 @@ fn lobby_section(app: &Entity<AppState>, state: &AppState, sections: &PeopleSect
                             .child(truncated(&guest.name, NAME_LIMIT)),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("call-people-admit-{}", guest.mri)))
-                            .label("Admit")
-                            .xsmall()
-                            .on_click(move |_, _, cx| {
-                                admit_app.update(cx, |state, cx| state.admit_call_guest(admit_mri.clone(), cx))
-                            }),
+                        Button::new(SharedString::from(format!(
+                            "call-people-admit-{}",
+                            guest.mri
+                        )))
+                        .label(tr("common.admit"))
+                        .xsmall()
+                        .on_click(move |_, _, cx| {
+                            admit_app.update(cx, |state, cx| {
+                                state.admit_call_guest(admit_mri.clone(), cx)
+                            })
+                        }),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("call-people-deny-{}", guest.mri)))
-                            .label("Deny")
-                            .ghost()
-                            .xsmall()
-                            .on_click(move |_, _, cx| {
-                                deny_app.update(cx, |state, cx| state.deny_call_guest(deny_mri.clone(), cx))
-                            }),
+                        Button::new(SharedString::from(format!(
+                            "call-people-deny-{}",
+                            guest.mri
+                        )))
+                        .label(tr("common.deny"))
+                        .ghost()
+                        .xsmall()
+                        .on_click(move |_, _, cx| {
+                            deny_app
+                                .update(cx, |state, cx| state.deny_call_guest(deny_mri.clone(), cx))
+                        }),
                     )
             })),
     )
 }
 
-pub fn people_panel(app: &Entity<AppState>, state: &AppState, call: &ActiveCall) -> Option<AnyElement> {
+pub fn people_panel(
+    app: &Entity<AppState>,
+    state: &AppState,
+    call: &ActiveCall,
+) -> Option<AnyElement> {
     call.people_open.then_some(())?;
     let model = &call.model;
     let sections = people_sections(model);
@@ -441,21 +520,37 @@ pub fn people_panel(app: &Entity<AppState>, state: &AppState, call: &ActiveCall)
         .overflow_y_scrollbar()
         .track_scroll(&call.people_scroll)
         .pb(px(12.))
-        .children(model.can_admit().then(|| lobby_section(app, state, &sections)).flatten())
+        .children(
+            model
+                .can_admit()
+                .then(|| lobby_section(app, state, &sections))
+                .flatten(),
+        )
         .when(!sections.hands.is_empty(), |list| {
-            list.child(section_header(format!("Raised hands ({})", sections.hands.len()), lower_all))
-                .children(
-                    sections
-                        .hands
-                        .iter()
-                        .map(|row| person_row(app, state, model, "hands", row)),
-                )
+            list.child(section_header(
+                format!("Raised hands ({})", sections.hands.len()),
+                lower_all,
+            ))
+            .children(
+                sections
+                    .hands
+                    .iter()
+                    .map(|row| person_row(app, state, model, "hands", row)),
+            )
         })
         .children(sections.groups.iter().map(|group| {
             v_flex()
                 .w_full()
-                .child(section_header(format!("{} ({})", group.title, group.rows.len()), None))
-                .children(group.rows.iter().map(|row| person_row(app, state, model, "group", row)))
+                .child(section_header(
+                    format!("{} ({})", group.title, group.rows.len()),
+                    None,
+                ))
+                .children(
+                    group
+                        .rows
+                        .iter()
+                        .map(|row| person_row(app, state, model, "group", row)),
+                )
         }));
     Some(
         v_flex()
@@ -469,7 +564,11 @@ pub fn people_panel(app: &Entity<AppState>, state: &AppState, call: &ActiveCall)
             .overflow_hidden()
             .bg(theme::surface())
             .child(panel_header(app, model, sections.count))
-            .child(with_top_edge(body, &call.people_scroll, PEOPLE_SCROLL_DIVIDER))
+            .child(with_top_edge(
+                body,
+                &call.people_scroll,
+                PEOPLE_SCROLL_DIVIDER,
+            ))
             .into_any_element(),
     )
 }
@@ -502,13 +601,15 @@ fn choice_dropdown(
             }
             for (wire, label) in choices {
                 let app = app.clone();
-                popup = popup.item(PopupMenuItem::new(*label).checked(*wire == current).on_click(
-                    move |_, _, cx| {
-                        app.update(cx, |state, cx| {
-                            state.edit_meeting_options(|options| edit(options, wire), cx)
-                        })
-                    },
-                ));
+                popup = popup.item(
+                    PopupMenuItem::new(*label)
+                        .checked(*wire == current)
+                        .on_click(move |_, _, cx| {
+                            app.update(cx, |state, cx| {
+                                state.edit_meeting_options(|options| edit(options, wire), cx)
+                            })
+                        }),
+                );
             }
             popup
         })
@@ -551,41 +652,66 @@ fn options_fields(app: &Entity<AppState>, options: &MeetingOptions) -> Div {
         .gap(px(6.))
         .child(option_row(
             "Who can bypass the lobby",
-            choice_dropdown("options-bypass", app, &BYPASS_CHOICES, &options.bypass_lobby, |options, value| {
-                options.bypass_lobby = value.to_owned()
-            }),
+            choice_dropdown(
+                "options-bypass",
+                app,
+                &BYPASS_CHOICES,
+                &options.bypass_lobby,
+                |options, value| options.bypass_lobby = value.to_owned(),
+            ),
         ))
         .child(option_row(
             "Who can present",
-            choice_dropdown("options-present", app, &PRESENTER_CHOICES, &options.presenters, |options, value| {
-                options.presenters = value.to_owned()
-            }),
+            choice_dropdown(
+                "options-present",
+                app,
+                &PRESENTER_CHOICES,
+                &options.presenters,
+                |options, value| options.presenters = value.to_owned(),
+            ),
         ))
         .child(option_row(
             "Allow mic for attendees",
-            switch_field("options-mic", app, options.attendee_mic, |options, on| options.attendee_mic = on),
+            switch_field("options-mic", app, options.attendee_mic, |options, on| {
+                options.attendee_mic = on
+            }),
         ))
         .child(option_row(
             "Allow camera for attendees",
-            switch_field("options-camera", app, options.attendee_camera, |options, on| {
-                options.attendee_camera = on
-            }),
+            switch_field(
+                "options-camera",
+                app,
+                options.attendee_camera,
+                |options, on| options.attendee_camera = on,
+            ),
         ))
         .child(option_row(
             "Meeting chat",
-            choice_dropdown("options-chat", app, &CHAT_CHOICES, &options.meeting_chat, |options, value| {
-                options.meeting_chat = value.to_owned()
-            }),
+            choice_dropdown(
+                "options-chat",
+                app,
+                &CHAT_CHOICES,
+                &options.meeting_chat,
+                |options, value| options.meeting_chat = value.to_owned(),
+            ),
         ))
         .child(option_row(
             "Allow reactions",
-            switch_field("options-reactions", app, options.reactions, |options, on| options.reactions = on),
+            switch_field(
+                "options-reactions",
+                app,
+                options.reactions,
+                |options, on| options.reactions = on,
+            ),
         ))
         .child(option_row(
             "Record automatically",
-            switch_field("options-record", app, options.record_automatically, |options, on| {
-                options.record_automatically = on
-            }),
+            switch_field(
+                "options-record",
+                app,
+                options.record_automatically,
+                |options, on| options.record_automatically = on,
+            ),
         ))
 }
 
@@ -642,7 +768,9 @@ pub fn options_dialog(app: &Entity<AppState>, call: &ActiveCall) -> Option<AnyEl
                     .size_full()
                     .bg(black().opacity(DIALOG_BACKDROP))
                     .occlude()
-                    .on_click(move |_, _, cx| close_app.update(cx, |state, cx| state.close_meeting_options(cx))),
+                    .on_click(move |_, _, cx| {
+                        close_app.update(cx, |state, cx| state.close_meeting_options(cx))
+                    }),
             )
             .child(
                 v_flex()
@@ -669,10 +797,11 @@ pub fn options_dialog(app: &Entity<AppState>, call: &ActiveCall) -> Option<AnyEl
                             .gap(px(8.))
                             .child(
                                 Button::new("options-cancel")
-                                    .label("Cancel")
+                                    .label(tr("common.cancel"))
                                     .ghost()
                                     .on_click(move |_, _, cx| {
-                                        cancel_app.update(cx, |state, cx| state.close_meeting_options(cx))
+                                        cancel_app
+                                            .update(cx, |state, cx| state.close_meeting_options(cx))
                                     }),
                             )
                             .child(save),

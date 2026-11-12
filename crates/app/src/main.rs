@@ -4,12 +4,15 @@
 )]
 
 mod active_appearance;
-mod agent_direct;
+mod active_locale;
+mod i18n;
 pub mod agents;
 pub mod call;
 mod inline_video;
 #[cfg(test)]
 mod layout_guard;
+#[cfg(target_os = "linux")]
+mod linux_browser;
 pub mod notify;
 mod settings;
 mod views;
@@ -122,6 +125,7 @@ fn data_path(name: &str) -> PathBuf {
 fn transport(
     endpoint: Option<&str>,
     database: Option<&std::path::Path>,
+    #[cfg(windows)] sign_in_title: String,
 ) -> Arc<dyn session::Transport> {
     #[cfg(windows)]
     if endpoint.is_none() {
@@ -132,7 +136,7 @@ fn transport(
         inline_video::configure(user_data_folder.clone());
         let transport = webview::start(webview::HostConfig {
             user_data_folder,
-            window_title: format!("{APP_NAME} - Sign in"),
+            window_title: sign_in_title,
             log: |line| app_base::diagnostics::record(line),
         });
         task_dialog::install_host(transport.clone());
@@ -140,6 +144,10 @@ fn transport(
     }
     #[cfg(not(windows))]
     let _ = database;
+    #[cfg(target_os = "linux")]
+    if endpoint.is_none() {
+        return linux_browser::start(session::DEFAULT_ENDPOINT);
+    }
     Arc::new(session::CdpTransport::new(
         endpoint.unwrap_or(session::DEFAULT_ENDPOINT),
     ))
@@ -170,6 +178,8 @@ fn main() {
         data_path(crash_log::CRASH_LOG_FILE),
     );
     diagnostics::install(data_path(diagnostics::DIAGNOSTICS_FILE));
+    #[cfg(target_os = "linux")]
+    app_base::linux_fonts::hide_system_color_emoji();
     let arguments = parse_arguments();
     if !arguments.demo && arguments.database.is_none() {
         let relaunch_value = std::env::var(updater::RELAUNCH_ENV).ok();
@@ -211,8 +221,24 @@ fn main() {
         open_store(&path)
     };
     let store = Arc::new(store);
+    app_base::ui_locale::apply_locale(app_base::ui_locale::effective_locale(app_base::ui_locale::load(
+        &store,
+    )));
+    #[cfg(windows)]
+    let sign_in_title = format!(
+        "{} - {}",
+        app_base::APP_NAME,
+        app_base::ui_locale::tr("auth.sign_in")
+    );
     let user_input = user_activity::UserInput::new();
     let receiver = (!arguments.demo).then(|| {
+        #[cfg(windows)]
+        let transport = transport(
+            arguments.endpoint.as_deref(),
+            arguments.database.as_deref(),
+            sign_in_title.clone(),
+        );
+        #[cfg(not(windows))]
         let transport = transport(arguments.endpoint.as_deref(), arguments.database.as_deref());
         let activity = user_activity::track(user_input.clone());
         backend::start(store.clone(), transport, !arguments.read_only, activity)
@@ -225,80 +251,86 @@ fn main() {
         application = application.with_http_client(Arc::new(http_client));
     }
 
-    application.with_assets(app_base::assets::AppAssets).run(move |cx| {
-        gpui_kit::init(cx);
-        cx.on_app_quit(|_| {
-            updater::exit_after_grace();
-            async {}
-        })
-        .detach();
-        theme::load_fonts(cx);
-        active_appearance::install(&store, cx);
-        theme::apply(cx);
-        bind_keys(cx);
-        let state = cx.new(|_| {
-            let mut state = AppState::new(store, mode);
-            state.start_on_channels = arguments.channels_tab;
-            state
-        });
-        views::shell::install_globals(&state, user_input, cx);
-        agent_api::init(state.read(cx).store.clone(), arguments.demo, cx);
-        agents::install(state.clone(), cx);
-        agent_direct::install(state.clone(), cx);
-        if arguments.demo {
-            demo::start_session(&state, cx);
-        }
-        if let Some(mut receiver) = receiver {
-            let state = state.clone();
-            cx.spawn(async move |cx| {
-                while let Some(event) = receiver.recv().await {
-                    let kind = event.kind();
-                    let started = std::time::Instant::now();
-                    state.update(cx, |state, cx| state.apply(event, cx));
-                    app_base::diagnostics::record_if_slow(&kind, started.elapsed());
+    application
+        .with_assets(app_base::assets::AppAssets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+            cx.on_app_quit(|_| {
+                updater::exit_after_grace();
+                async {}
+            })
+            .detach();
+            theme::load_fonts(cx);
+            active_appearance::install(&store, cx);
+            active_locale::install(&store, cx);
+            theme::apply(cx);
+            bind_keys(cx);
+            let state = cx.new(|_| {
+                let mut state = AppState::new(store, mode);
+                state.start_on_channels = arguments.channels_tab;
+                state
+            });
+            views::shell::install_globals(&state, user_input, cx);
+            agent_api::init(state.read(cx).store.clone(), arguments.demo, cx);
+            agents::install(state.clone(), cx);
+            if arguments.demo {
+                demo::start_session(&state, cx);
+            }
+            if let Some(mut receiver) = receiver {
+                let state = state.clone();
+                cx.spawn(async move |cx| {
+                    while let Some(event) = receiver.recv().await {
+                        let kind = event.kind();
+                        let started = std::time::Instant::now();
+                        #[cfg(target_os = "linux")]
+                        linux_browser::note_backend_event(&event);
+                        state.update(cx, |state, cx| state.apply(event, cx));
+                        app_base::diagnostics::record_if_slow(&kind, started.elapsed());
+                    }
+                })
+                .detach();
+            }
+
+            let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
+            let mut options = TitleBar::window_options();
+            options.window_bounds = Some(WindowBounds::Windowed(bounds));
+            options.window_min_size = Some(size(px(WINDOW_MIN_WIDTH), px(WINDOW_MIN_HEIGHT)));
+            options.app_id = Some(LINUX_APP_ID.to_owned());
+            if let Some(titlebar) = options.titlebar.as_mut() {
+                titlebar.title = Some(APP_NAME.into());
+            }
+            let open_target = arguments.open_target;
+            let startup = Startup {
+                switcher_query: arguments.switcher_query,
+                composer_text: arguments.composer_text,
+                reply_to_last: arguments.reply_to_last,
+                launched_by_autostart: arguments.autostart,
+            };
+            let (main_window, _) = gpui_kit::open_window(options, cx, move |window, cx| {
+                cx.new(|cx| AppShell::new(state, open_target, startup, window, cx))
+            })
+            .expect("failed to open window");
+            let main_window_id = main_window.window_id();
+            cx.on_window_closed(move |cx, closed| {
+                if closed == main_window_id {
+                    cx.quit();
                 }
             })
             .detach();
-        }
-
-        let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
-        let mut options = TitleBar::window_options();
-        options.window_bounds = Some(WindowBounds::Windowed(bounds));
-        options.window_min_size = Some(size(px(WINDOW_MIN_WIDTH), px(WINDOW_MIN_HEIGHT)));
-        options.app_id = Some(LINUX_APP_ID.to_owned());
-        if let Some(titlebar) = options.titlebar.as_mut() {
-            titlebar.title = Some(APP_NAME.into());
-        }
-        let open_target = arguments.open_target;
-        let startup = Startup {
-            switcher_query: arguments.switcher_query,
-            composer_text: arguments.composer_text,
-            reply_to_last: arguments.reply_to_last,
-            launched_by_autostart: arguments.autostart,
-        };
-        let (main_window, _) = gpui_kit::open_window(options, cx, move |window, cx| {
-            cx.new(|cx| AppShell::new(state, open_target, startup, window, cx))
-        })
-        .expect("failed to open window");
-        let main_window_id = main_window.window_id();
-        cx.on_window_closed(move |cx, closed| {
-            if closed == main_window_id {
-                cx.quit();
+            if !arguments.autostart {
+                cx.activate(true);
             }
-        })
-        .detach();
-        if !arguments.autostart {
-            cx.activate(true);
-        }
-        cx.spawn(async move |cx| {
-            loop {
-                app_base::native_dumps::heartbeat();
-                cx.background_executor().timer(HEARTBEAT_INTERVAL).await;
-            }
-        })
-        .detach();
-    });
+            cx.spawn(async move |cx| {
+                loop {
+                    app_base::native_dumps::heartbeat();
+                    cx.background_executor().timer(HEARTBEAT_INTERVAL).await;
+                }
+            })
+            .detach();
+        });
     presence_link::unregister_on_exit(ENDPOINT_UNREGISTER_TIMEOUT);
+    #[cfg(target_os = "linux")]
+    linux_browser::stop();
     #[cfg(windows)]
     updater::exit_now();
 }

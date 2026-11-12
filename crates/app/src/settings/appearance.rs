@@ -4,8 +4,11 @@ use gpui_kit::*;
 
 use super::rows::{Choice, ROW_INSET, caption, control_row, select_with_width, titled};
 use crate::active_appearance;
+use crate::active_locale;
 use crate::app_state::AppState;
 use crate::appearance::{AppIcon, ThemeChoice};
+use crate::i18n::tr;
+use app_base::ui_locale::LocalePreference;
 use crate::theme::{self, Palette};
 use crate::views::title_bar::app_icon_image;
 
@@ -18,18 +21,40 @@ const PREVIEW_RADIUS: f32 = TILE_RADIUS - TILE_PADDING;
 const PREVIEW_ICON_SIZE: f32 = 48.;
 const RADIO_SIZE: f32 = 16.;
 const RADIO_DOT_SIZE: f32 = 8.;
-const COLOR_SCHEME_DETAIL: &str = "The colors to use for Rusty Teams";
-const THEME_TITLE: &str = "Theme";
-const THEME_DETAIL: &str = "The theme to use for Teams";
 const THEME_SELECT_WIDTH: f32 = 240.;
-#[cfg(windows)]
-const APP_ICON_DETAIL: &str =
-    "Shown in the title bar, taskbar and tray. Pinned shortcuts keep the icon of the .exe";
-#[cfg(not(windows))]
-const APP_ICON_DETAIL: &str = "Shown in the title bar, taskbar and tray";
+const LANGUAGE_SELECT_WIDTH: f32 = 240.;
+
+fn language_label(pref: LocalePreference) -> String {
+    match pref {
+        LocalePreference::Auto => tr("settings.appearance.language.follow_system"),
+        LocalePreference::English => tr("settings.appearance.language.english"),
+        LocalePreference::German => tr("settings.appearance.language.german"),
+    }
+}
+fn app_icon_detail() -> String {
+    #[cfg(windows)]
+    {
+        tr("settings.appearance.app_icon_detail_windows")
+    }
+    #[cfg(not(windows))]
+    {
+        tr("settings.appearance.app_icon_detail")
+    }
+}
 
 pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
     let current = active_appearance::current(cx);
+    let locale_pref = active_locale::current_preference(cx);
+    let language_choices = LocalePreference::ALL
+        .into_iter()
+        .map(|pref| {
+            let app = app.clone();
+            Choice::new(language_label(pref), pref == locale_pref, move |cx| {
+                let store = app.read(cx).store.clone();
+                active_locale::set_preference(pref, &store, cx);
+            })
+        })
+        .collect();
     let scheme_tiles = theme::SCHEMES.into_iter().map(|scheme| {
         let app = app.clone();
         tile(
@@ -68,10 +93,22 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
         .collect();
     v_flex()
         .w_full()
-        .child(caption("THEME"))
+        .child(caption(&tr("settings.caption.language")))
         .child(control_row(
-            THEME_TITLE,
-            THEME_DETAIL,
+            &tr("settings.appearance.language.title"),
+            &tr("settings.appearance.language.detail"),
+            select_with_width(
+                "settings-language",
+                language_label(locale_pref),
+                LANGUAGE_SELECT_WIDTH,
+                false,
+                language_choices,
+            ),
+        ))
+        .child(caption(tr("settings.caption.theme")))
+        .child(control_row(
+            tr("settings.appearance.theme"),
+            tr("settings.appearance.theme_detail"),
             select_with_width(
                 "settings-theme",
                 current.theme.label(),
@@ -81,17 +118,21 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             ),
         ))
         .child(choice_group(
-            "Color scheme",
-            COLOR_SCHEME_DETAIL,
+            tr("settings.appearance.color_scheme"),
+            tr("settings.appearance.color_scheme_detail"),
             scheme_tiles,
         ))
-        .child(caption("APP ICON"))
-        .child(choice_group("App icon", APP_ICON_DETAIL, icon_tiles))
+        .child(caption(tr("settings.caption.app_icon")))
+        .child(choice_group(
+            tr("settings.appearance.app_icon"),
+            app_icon_detail(),
+            icon_tiles,
+        ))
 }
 
 fn choice_group(
-    title: &'static str,
-    detail: &'static str,
+    title: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
     tiles: impl Iterator<Item = Stateful<Div>>,
 ) -> Div {
     v_flex()

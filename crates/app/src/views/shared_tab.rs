@@ -16,6 +16,7 @@ use teams_core::{DriveEntry, FileKind};
 
 use super::attachments::file_badge;
 use super::widgets::{icon, menu_icon};
+use crate::i18n::tr;
 use crate::channel_files::{
     LibraryPath, MessageFilter, SharedContent, SharedItem, grouped_items, size_label,
 };
@@ -465,7 +466,7 @@ pub fn render_library(view: LibraryView, run: &SharedRun) -> AnyElement {
                     Button::new("library-retry")
                         .ghost()
                         .compact()
-                        .label("Retry")
+                        .label(tr("common.retry"))
                         .on_click(move |_, window, cx| retry(SharedCommand::Retry, window, cx)),
                 )
                 .into_any_element()

@@ -8,6 +8,7 @@ use gpui_kit::*;
 use teams_core::ChannelPrivacy;
 
 use super::new_meeting_dialog::labeled;
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::team_admin::{can_create_channel, channel_name_problem};
 use crate::theme;
@@ -166,13 +167,13 @@ pub fn open_create_channel_dialog(
         let footer = DialogFooter::new()
             .child(
                 Button::new("create-channel-cancel")
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
             .child(
                 Button::new("create-channel-confirm")
                     .primary()
-                    .label("Create")
+                    .label(tr("common.create"))
                     .disabled(!can_create)
                     .on_click(move |_, window, cx| {
                         if submit_form.update(cx, |form, cx| form.submit(cx)) {

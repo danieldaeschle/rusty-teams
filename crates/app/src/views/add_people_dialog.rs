@@ -9,6 +9,7 @@ use gpui_kit::*;
 use store::MemberRecord;
 
 use super::new_chat::{NewChatDraft, Pick};
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::theme;
 
@@ -242,13 +243,13 @@ pub fn open_add_people(
         let footer = DialogFooter::new()
             .child(
                 Button::new("add-people-cancel")
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
             .child(
                 Button::new("add-people-confirm")
                     .primary()
-                    .label("Add")
+                    .label(tr("common.add"))
                     .disabled(!can_add)
                     .on_click(move |_, window, cx| {
                         submit_form.update(cx, |form, cx| form.submit(window, cx));

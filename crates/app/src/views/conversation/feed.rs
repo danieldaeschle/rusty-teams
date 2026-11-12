@@ -11,6 +11,7 @@ use gpui_kit::component::{
 use gpui_kit::*;
 
 use super::{ConversationView, ViewMode};
+use crate::i18n::tr;
 use crate::notice::short_error;
 use crate::rows::Row;
 use crate::runtime;
@@ -18,7 +19,6 @@ use crate::views::channel_tabs::ChannelPane;
 use crate::views::composer::{Composer, ComposerEvent, ReplyPreview};
 use crate::views::post_card::{PostAction, post_in_channel_card};
 
-const FEED_CARD_TOP: f32 = 12.;
 const REPLY_PLACEHOLDER: &str = "Reply in thread";
 
 pub(super) struct FeedStash {
@@ -31,7 +31,9 @@ pub(super) fn subject_input(
     window: &mut Window,
     cx: &mut Context<ConversationView>,
 ) -> Entity<InputState> {
-    cx.new(|cx| InputState::new(window, cx).placeholder(crate::views::composer::SUBJECT_PLACEHOLDER))
+    cx.new(|cx| {
+        InputState::new(window, cx).placeholder(crate::views::composer::SUBJECT_PLACEHOLDER)
+    })
 }
 
 impl ConversationView {
@@ -161,7 +163,11 @@ impl ConversationView {
         let view = cx.entity().downgrade();
         window.on_next_frame(move |_, cx| {
             view.update(cx, |this, cx| {
-                let index = this.rows.borrow().iter().position(|row| row.key() == root_id);
+                let index = this
+                    .rows
+                    .borrow()
+                    .iter()
+                    .position(|row| row.key() == root_id);
                 if let Some(index) = index {
                     this.scroller
                         .update(cx, |scroller, cx| scroller.reveal_item_bottom(index, cx));
@@ -280,14 +286,13 @@ impl ConversationView {
         if !self.in_feed() || self.pane != ChannelPane::Posts {
             return None;
         }
-        let proposal_card = self
-            .render_proposal_card(cx)
-            .map(|card| div().w_full().pt(px(FEED_CARD_TOP)).child(card));
+        let proposal_card = self.render_proposal_card(cx);
         if !self.new_post_open {
             let view = cx.entity().downgrade();
             let announce_view = view.clone();
             let open: PostAction = Box::new(move |window, cx| {
-                view.update(cx, |this, cx| this.open_new_post(window, cx)).ok();
+                view.update(cx, |this, cx| this.open_new_post(window, cx))
+                    .ok();
             });
             let announce: PostAction = Box::new(move |window, cx| {
                 announce_view
@@ -299,14 +304,9 @@ impl ConversationView {
                     .w_full()
                     .flex_none()
                     .children(proposal_card)
-                    .child(
-                        div()
-                            .w_full()
-                            .flex_none()
-                            .px(px(20.))
-                            .py(px(12.))
-                            .child(post_in_channel_card(&self.app.read(cx).directory, open, announce)),
-                    )
+                    .child(div().w_full().flex_none().px(px(20.)).py(px(12.)).child(
+                        post_in_channel_card(&self.app.read(cx).directory, open, announce),
+                    ))
                     .into_any_element(),
             );
         }
@@ -321,10 +321,10 @@ impl ConversationView {
                     Button::new("cancel-new-post")
                         .ghost()
                         .compact()
-                        .label("Cancel")
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.cancel_new_post(window, cx)
-                        })),
+                        .label(tr("common.cancel"))
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.cancel_new_post(window, cx)),
+                        ),
                 )
         });
         Some(

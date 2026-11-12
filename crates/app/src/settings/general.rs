@@ -12,15 +12,11 @@ use teams_core::{ChatSettingChange, TranslationBehavior};
 use super::account::{UP_ARROW, account_select};
 use super::rows::{Choice, caption, control_row, select, toggle_row};
 use crate::app_state::AppState;
+use crate::i18n::tr;
 use crate::notify::NotificationCenter;
 use crate::theme;
 use crate::views::widgets::icon;
 
-const BEHAVIORS: [(&str, TranslationBehavior); 3] = [
-    ("Ask me before translating", TranslationBehavior::Ask),
-    ("Auto-translate all messages", TranslationBehavior::Auto),
-    ("Never translate", TranslationBehavior::Never),
-];
 const CHIP_HEIGHT: f32 = 24.;
 const DISABLED_OPACITY: f32 = 0.4;
 const LANGUAGE_MENU_HEIGHT: f32 = 320.;
@@ -31,7 +27,7 @@ fn startup_rows(center: &Entity<NotificationCenter>, cx: &App) -> [Stateful<Div>
     [
         toggle_row(
             "settings-auto-start",
-            "Auto-start Teams",
+            tr("settings.general.auto_start"),
             "",
             theme::text_muted(),
             startup.auto_start,
@@ -43,7 +39,7 @@ fn startup_rows(center: &Entity<NotificationCenter>, cx: &App) -> [Stateful<Div>
         }),
         toggle_row(
             "settings-open-in-background",
-            "Open application in background",
+            tr("settings.general.open_in_background"),
             "",
             theme::text_muted(),
             startup.open_in_background,
@@ -64,13 +60,13 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
     let toggle_center = center.clone();
     v_flex()
         .w_full()
-        .child(caption("SYSTEM"))
+        .child(caption(tr("settings.caption.system")))
         .children(startup_rows(center, cx))
         .child(
             toggle_row(
                 "settings-close-to-tray",
-                "On close, keep the application running",
-                "The title bar X hides the window to the tray",
+                tr("settings.general.close_to_tray"),
+                tr("settings.general.close_to_tray_detail"),
                 theme::text_muted(),
                 close_to_tray,
             )
@@ -82,19 +78,19 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
                 })
             }),
         )
-        .child(caption("COMPOSE BOX"))
+        .child(caption(tr("settings.caption.compose_box")))
         .child(account_select(
             app,
             (
                 "settings-up-arrow",
-                "Up arrow key behaviour in compose box",
-                "Choose what happens when you press Up arrow at the beginning of the compose box.",
+                tr("settings.general.up_arrow"),
+                tr("settings.general.up_arrow_detail"),
             ),
             &UP_ARROW,
             app.read(cx).account_chat_settings().up_arrow,
             ChatSettingChange::UpArrow,
         ))
-        .child(caption("TRANSLATION"))
+        .child(caption(tr("settings.caption.translation")))
         .children(translation_rows(app, cx))
 }
 
@@ -102,8 +98,12 @@ fn translation_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
     let state = app.read(cx);
     if state.translation.settings.is_none() {
         return vec![
-            control_row("Translation", "Translation settings not loaded yet", div())
-                .into_any_element(),
+            control_row(
+                tr("settings.general.translation_title"),
+                tr("settings.general.translation_not_loaded"),
+                div(),
+            )
+            .into_any_element(),
         ];
     }
     let translation = &state.translation;
@@ -119,7 +119,19 @@ fn translation_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
             })
         })
         .collect();
-    let behaviors = BEHAVIORS
+    let behavior_options = [
+        (tr("settings.general.behavior_ask"), TranslationBehavior::Ask),
+        (tr("settings.general.behavior_auto"), TranslationBehavior::Auto),
+        (
+            tr("settings.general.behavior_never"),
+            TranslationBehavior::Never,
+        ),
+    ];
+    let behavior_label = behavior_options
+        .iter()
+        .find(|(_, choice)| *choice == behavior)
+        .map_or(String::new(), |(label, _)| label.clone());
+    let behaviors = behavior_options
         .into_iter()
         .map(|(label, choice)| {
             let app = app.clone();
@@ -128,13 +140,9 @@ fn translation_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
             })
         })
         .collect();
-    let behavior_label = BEHAVIORS
-        .iter()
-        .find(|(_, choice)| *choice == behavior)
-        .map_or("", |(label, _)| label);
     vec![
         control_row(
-            "Translate messages into this language",
+            tr("settings.general.translate_into"),
             "Read from your Teams account",
             select(
                 "settings-translation-target",
@@ -145,7 +153,7 @@ fn translation_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
         )
         .into_any_element(),
         control_row(
-            "How to handle messages in other languages",
+            tr("settings.general.behavior_title"),
             "",
             select(
                 "settings-translation-behavior",
@@ -156,7 +164,7 @@ fn translation_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
         )
         .into_any_element(),
         control_row(
-            "Never translate messages in these languages",
+            tr("settings.general.never_translate"),
             "",
             never_chips(app, &target, cx),
         )
@@ -228,7 +236,7 @@ fn add_language_button(choices: Vec<Choice>) -> impl IntoElement {
         .rounded(px(6.))
         .text_size(px(12.))
         .text_color(theme::accent_text())
-        .label("+ Add language")
+        .label(format!("+ {}", tr("common.add")))
         .dropdown_menu(move |menu, _, _| {
             choices.iter().fold(
                 menu.max_h(px(LANGUAGE_MENU_HEIGHT)).scrollable(true),

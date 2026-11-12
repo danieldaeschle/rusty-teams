@@ -154,7 +154,7 @@ pub fn link_dropdown(
         })
 }
 
-pub fn section_header(title: &'static str, trailing: Option<AnyElement>) -> Div {
+pub fn section_header(title: String, trailing: Option<AnyElement>) -> Div {
     h_flex()
         .w_full()
         .items_center()

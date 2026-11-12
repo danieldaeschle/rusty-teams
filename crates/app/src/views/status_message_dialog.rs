@@ -13,6 +13,7 @@ use gpui_kit::*;
 use teams_core::StatusNote;
 
 use super::widgets::symbol;
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::own_status::{NOTE_DURATIONS, NOTE_LIMIT, NoteDuration, clamp_note};
 use crate::theme::{self, ElevatedSurface as _};
@@ -300,7 +301,7 @@ impl Render for StatusMessageDialog {
                             .child(
                                 Button::new("status-message-cancel")
                                     .ghost()
-                                    .label("Cancel")
+                                    .label(tr("common.cancel"))
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(StatusMessageDialogEvent::Close)
                                     })),

@@ -18,6 +18,7 @@ use gpui_kit::*;
 
 use super::shared_tab::{SharedRun, download_label, item_row};
 use super::widgets::icon;
+use crate::i18n::tr;
 use crate::channel_files::SharedItem;
 use crate::downloads::DownloadState;
 use crate::recap::{
@@ -275,7 +276,7 @@ fn failure(reason: String, run: &RecapRun) -> AnyElement {
             Button::new("recap-retry")
                 .ghost()
                 .compact()
-                .label("Retry")
+                .label(tr("common.retry"))
                 .on_click(move |_, window, cx| run(RecapCommand::Retry, window, cx)),
         )
         .into_any_element()

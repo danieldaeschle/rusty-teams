@@ -6,12 +6,30 @@ use crate::activity::{Entry, Kind};
 use crate::app_state::chat_title;
 use crate::sidebar_model::{MUTED_ID, OTHERS_ID, Section, SectionInput, build_sections};
 
-pub const FILTER_PLACEHOLDER: &str = "Filter by person or chat name";
-pub const NO_MATCHES: &str = "We didn't find any matches.";
-pub const CLEAR_FILTERS: &str = "Clear filters";
-pub const CLEAR_FILTER_TEXT: &str = "Clear filter text";
-pub const SHOW_FILTER_TEXT: &str = "Show filter text box";
-pub const CLOSE_FILTER_TEXT: &str = "Close filter text box";
+pub fn filter_placeholder() -> String {
+    app_base::ui_locale::tr("sidebar.filter.placeholder")
+}
+
+pub fn filter_no_matches() -> String {
+    app_base::ui_locale::tr("sidebar.filter.no_matches")
+}
+
+pub fn filter_clear_all() -> String {
+    app_base::ui_locale::tr("sidebar.filter.clear")
+}
+
+pub fn filter_clear_text() -> String {
+    app_base::ui_locale::tr("sidebar.filter.clear_text")
+}
+
+pub fn filter_show_box() -> String {
+    app_base::ui_locale::tr("sidebar.filter.show_box")
+}
+
+pub fn filter_close_box() -> String {
+    app_base::ui_locale::tr("sidebar.filter.close_box")
+}
+
 pub const MORE_FILTERS: &str = "More filters";
 pub const FEWER_FILTERS: &str = "Fewer filters";
 const MEETING_KIND: &str = "meeting";
@@ -33,13 +51,13 @@ impl ChatFilterPill {
     ];
     pub const OVERFLOW: [ChatFilterPill; 2] = [ChatFilterPill::Mentions, ChatFilterPill::Muted];
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            ChatFilterPill::Unread => "Unread",
-            ChatFilterPill::Mentions => "@Mentions",
-            ChatFilterPill::Chats => "Chats",
-            ChatFilterPill::Meetings => "Meeting chats",
-            ChatFilterPill::Muted => "Muted",
+            ChatFilterPill::Unread => app_base::ui_locale::tr("sidebar.pill.unread"),
+            ChatFilterPill::Mentions => app_base::ui_locale::tr("sidebar.pill.mentions"),
+            ChatFilterPill::Chats => app_base::ui_locale::tr("sidebar.pill.chats"),
+            ChatFilterPill::Meetings => app_base::ui_locale::tr("sidebar.pill.meetings"),
+            ChatFilterPill::Muted => app_base::ui_locale::tr("sidebar.pill.muted"),
         }
     }
 
