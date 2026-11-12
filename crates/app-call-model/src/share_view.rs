@@ -5,6 +5,10 @@ pub const ZOOM_MIN: f32 = 1.;
 pub const ZOOM_MAX: f32 = 4.;
 const ZOOM_STEP: f32 = 1.25;
 const WHEEL_ZOOM_PER_PIXEL: f32 = 0.0015;
+pub const STRIP_MIN_WIDTH: f32 = 160.;
+pub const STRIP_MAX_WIDTH: f32 = 400.;
+pub const STRIP_DEFAULT_WIDTH: f32 = 232.;
+pub const STRIP_WIDTH_META_KEY: &str = "call_strip_width";
 pub const SHARE_MOTION_META_KEY: &str = "call_share_motion";
 pub const SHARE_STANDOUT_META_KEY: &str = "call_share_standout";
 
@@ -16,7 +20,10 @@ pub struct ShareView {
 
 impl Default for ShareView {
     fn default() -> Self {
-        ShareView { zoom: ZOOM_MIN, offset: (0., 0.) }
+        ShareView {
+            zoom: ZOOM_MIN,
+            offset: (0., 0.),
+        }
     }
 }
 
@@ -38,7 +45,10 @@ impl ShareView {
     }
 
     pub fn offset(&self, stage: (f32, f32)) -> (f32, f32) {
-        (clamp_axis(self.offset.0, stage.0, self.zoom), clamp_axis(self.offset.1, stage.1, self.zoom))
+        (
+            clamp_axis(self.offset.0, stage.0, self.zoom),
+            clamp_axis(self.offset.1, stage.1, self.zoom),
+        )
     }
 
     pub fn reset(&mut self) {
@@ -54,7 +64,10 @@ impl ShareView {
         let (offset_x, offset_y) = self.offset(stage);
         let ratio = target / self.zoom;
         self.zoom = target;
-        self.offset = (pointer.0 - (pointer.0 - offset_x) * ratio, pointer.1 - (pointer.1 - offset_y) * ratio);
+        self.offset = (
+            pointer.0 - (pointer.0 - offset_x) * ratio,
+            pointer.1 - (pointer.1 - offset_y) * ratio,
+        );
         self.offset = self.offset(stage);
     }
 
@@ -80,14 +93,40 @@ impl ShareView {
     }
 }
 
+pub fn clamp_strip_width(width: f32) -> f32 {
+    width.clamp(STRIP_MIN_WIDTH, STRIP_MAX_WIDTH)
+}
+
+pub fn load_strip_width(store: &store::Store) -> f32 {
+    store
+        .meta(STRIP_WIDTH_META_KEY)
+        .ok()
+        .flatten()
+        .and_then(|text| text.parse().ok())
+        .map_or(STRIP_DEFAULT_WIDTH, clamp_strip_width)
+}
+
 pub fn load_flag(store: &store::Store, key: &str) -> bool {
     store.meta(key).ok().flatten().as_deref() == Some("1")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StripDrag {
+    pub start_pointer: f32,
+    pub start_width: f32,
+}
+
+impl StripDrag {
+    pub fn width_at(&self, pointer: f32) -> f32 {
+        clamp_strip_width(self.start_width + self.start_pointer - pointer)
+    }
 }
 
 #[derive(Default)]
 pub struct ShareStage {
     pub view: ShareView,
     pub pan_from: Option<(f32, f32)>,
+    pub strip_drag: Option<StripDrag>,
     pub popped: bool,
     pub bounds: Rc<Cell<(f32, f32, f32, f32)>>,
 }
@@ -122,7 +161,10 @@ mod tests {
         let pointer = (600., 100.);
         view.zoom_around(2., pointer, STAGE);
         let (offset_x, offset_y) = view.offset(STAGE);
-        let content = ((pointer.0 - offset_x) / view.zoom(), (pointer.1 - offset_y) / view.zoom());
+        let content = (
+            (pointer.0 - offset_x) / view.zoom(),
+            (pointer.1 - offset_y) / view.zoom(),
+        );
         assert!((content.0 - 600.).abs() < 0.01 && (content.1 - 100.).abs() < 0.01);
     }
 
@@ -168,5 +210,17 @@ mod tests {
         let zoomed = view.zoom();
         view.zoom_wheel(-60., (400., 225.), STAGE);
         assert!(view.zoom() < zoomed);
+    }
+
+    #[test]
+    fn the_strip_width_stays_between_160_and_400_and_follows_the_pointer() {
+        let drag = StripDrag {
+            start_pointer: 900.,
+            start_width: 232.,
+        };
+        assert_eq!(drag.width_at(880.), 252.);
+        assert_eq!(drag.width_at(0.), STRIP_MAX_WIDTH);
+        assert_eq!(drag.width_at(2000.), STRIP_MIN_WIDTH);
+        assert_eq!(clamp_strip_width(10.), STRIP_MIN_WIDTH);
     }
 }

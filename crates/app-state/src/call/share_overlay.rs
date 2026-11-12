@@ -41,6 +41,7 @@ pub enum Monitor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
+    Main,
     ShareBar,
     Border,
     Mini,
@@ -51,6 +52,7 @@ pub enum Surface {
 pub struct OverlayPlan {
     pub monitor: Monitor,
     pub share_bar: bool,
+    pub exclude_main: bool,
 }
 
 pub fn overlay_plan(
@@ -68,11 +70,15 @@ pub fn overlay_plan(
     OverlayPlan {
         monitor,
         share_bar: in_call && share != LocalShare::None,
+        exclude_main: excluded_from_capture(Surface::Main, share),
     }
 }
 
-pub fn excluded_from_capture(surface: Surface) -> bool {
-    matches!(surface, Surface::ShareBar | Surface::Border)
+pub fn excluded_from_capture(surface: Surface, share: LocalShare) -> bool {
+    match surface {
+        Surface::Main => share == LocalShare::Screen,
+        Surface::ShareBar | Surface::Border | Surface::Mini | Surface::Gallery => true,
+    }
 }
 
 fn overlap_area(first: ScreenRect, second: ScreenRect) -> i64 {
@@ -81,13 +87,21 @@ fn overlap_area(first: ScreenRect, second: ScreenRect) -> i64 {
     i64::from(width) * i64::from(height)
 }
 
+pub fn portal_minimize(portal: bool, share: LocalShare) -> bool {
+    portal && share == LocalShare::Screen
+}
+
 pub fn minimize_on_share_start(
     share: LocalShare,
     main: Option<ScreenRect>,
     shared: Option<ScreenRect>,
+    portal: bool,
 ) -> bool {
     if share != LocalShare::Screen {
         return false;
+    }
+    if portal_minimize(portal, share) {
+        return true;
     }
     let (Some(main), Some(shared)) = (main, shared) else {
         return true;
@@ -211,17 +225,21 @@ mod tests {
         use LocalShare::*;
         use Monitor as M;
         let rows = [
-            (None, false, M::None, false),
-            (None, true, M::Mini, false),
-            (Screen, false, M::None, true),
-            (Screen, true, M::Gallery, true),
-            (Window, false, M::None, true),
-            (Window, true, M::Gallery, true),
+            (None, false, M::None, false, false),
+            (None, true, M::Mini, false, false),
+            (Screen, false, M::None, true, true),
+            (Screen, true, M::Gallery, true, true),
+            (Window, false, M::None, true, false),
+            (Window, true, M::Gallery, true, false),
         ];
-        for (share, minimized, monitor, share_bar) in rows {
+        for (share, minimized, monitor, share_bar, exclude_main) in rows {
             assert_eq!(
                 overlay_plan(true, share, minimized, false),
-                OverlayPlan { monitor, share_bar },
+                OverlayPlan {
+                    monitor,
+                    share_bar,
+                    exclude_main
+                },
                 "{share:?} minimized={minimized}"
             );
         }
@@ -231,6 +249,7 @@ mod tests {
     fn speaker_only_swaps_the_gallery_for_the_mini_tile() {
         let plan = overlay_plan(true, LocalShare::Screen, true, true);
         assert_eq!(plan.monitor, Monitor::Mini);
+        assert!(plan.exclude_main);
         assert_eq!(
             overlay_plan(true, LocalShare::None, true, true).monitor,
             Monitor::Mini
@@ -245,11 +264,20 @@ mod tests {
     }
 
     #[test]
-    fn only_the_share_chrome_stays_out_of_screenshots() {
-        assert!(excluded_from_capture(Surface::ShareBar));
-        assert!(excluded_from_capture(Surface::Border));
-        assert!(!excluded_from_capture(Surface::Mini));
-        assert!(!excluded_from_capture(Surface::Gallery));
+    fn overlays_are_always_excluded_and_main_only_for_a_screen() {
+        for share in [LocalShare::None, LocalShare::Screen, LocalShare::Window] {
+            for surface in [
+                Surface::ShareBar,
+                Surface::Border,
+                Surface::Mini,
+                Surface::Gallery,
+            ] {
+                assert!(excluded_from_capture(surface, share));
+            }
+        }
+        assert!(excluded_from_capture(Surface::Main, LocalShare::Screen));
+        assert!(!excluded_from_capture(Surface::Main, LocalShare::Window));
+        assert!(!excluded_from_capture(Surface::Main, LocalShare::None));
     }
 
     #[test]
@@ -274,27 +302,53 @@ mod tests {
         assert!(minimize_on_share_start(
             LocalShare::Screen,
             on_monitor,
-            Some(monitor)
+            Some(monitor),
+            false
         ));
         assert!(!minimize_on_share_start(
             LocalShare::Screen,
             other_monitor,
-            Some(monitor)
+            Some(monitor),
+            false
         ));
         assert!(!minimize_on_share_start(
             LocalShare::Screen,
             edge,
-            Some(monitor)
+            Some(monitor),
+            false
         ));
         assert!(minimize_on_share_start(
             LocalShare::Screen,
             None,
-            Some(monitor)
+            Some(monitor),
+            false
         ));
         assert!(minimize_on_share_start(
             LocalShare::Screen,
             on_monitor,
-            None
+            None,
+            false
+        ));
+    }
+
+    #[test]
+    fn portal_minimize_forces_a_screen_and_spares_a_window() {
+        let monitor = Some(rect(0, 0, 1920, 1080));
+        let other = Some(rect(2000, 100, 3000, 800));
+        assert!(portal_minimize(true, LocalShare::Screen));
+        assert!(!portal_minimize(true, LocalShare::Window));
+        assert!(!portal_minimize(false, LocalShare::Screen));
+        assert!(minimize_on_share_start(
+            LocalShare::Screen,
+            other,
+            monitor,
+            true
+        ));
+        assert!(!minimize_on_share_start(
+            LocalShare::Window,
+            monitor,
+            monitor,
+            true
         ));
     }
 
@@ -304,9 +358,15 @@ mod tests {
         assert!(!minimize_on_share_start(
             LocalShare::Window,
             monitor,
-            monitor
+            monitor,
+            false
         ));
-        assert!(!minimize_on_share_start(LocalShare::None, monitor, monitor));
+        assert!(!minimize_on_share_start(
+            LocalShare::None,
+            monitor,
+            monitor,
+            false
+        ));
     }
 
     #[test]
