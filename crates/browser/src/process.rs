@@ -55,7 +55,10 @@ fn listener_pid(platform: Platform, port: u16) -> Result<u32, BrowserError> {
 }
 
 pub(crate) fn is_chrome_image(image_name: &str) -> bool {
-    let lowered = image_name.trim().trim_matches('"').to_ascii_lowercase();
+    // macOS `ps -o comm=` may return a full path; match on the basename.
+    let trimmed = image_name.trim().trim_matches('"');
+    let base = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed).trim();
+    let lowered = base.to_ascii_lowercase();
     lowered.starts_with("chrome")
         || lowered.starts_with("google chrome")
         || lowered.starts_with("chromium")
@@ -111,7 +114,14 @@ mod tests {
         assert!(is_chrome_image("chrome\n"));
         assert!(is_chrome_image("Google Chrome"));
         assert!(is_chrome_image("Chromium"));
+        assert!(is_chrome_image(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        ));
+        assert!(is_chrome_image("/usr/bin/chromium"));
         assert!(!is_chrome_image("\"wslrelay.exe\""));
+        assert!(!is_chrome_image(
+            "/Applications/Firefox.app/Contents/MacOS/firefox"
+        ));
         assert!(!is_chrome_image(""));
     }
 
