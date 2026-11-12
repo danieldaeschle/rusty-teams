@@ -627,6 +627,7 @@ fn share_items(
     options: ShareOptions,
 ) -> PopupMenu {
 <<<<<<< ours
+<<<<<<< ours
     let single_screen = model.screens().len() == 1;
     let mut screen_index = 0usize;
     let mut separated = false;
@@ -692,6 +693,8 @@ fn share_items(
                 popup.item(PopupMenuItem::new(NO_WINDOWS_HINT).disabled(true))
             }
 =======
+=======
+>>>>>>> theirs
     let mut popup = popup
         .min_w(px(SHARE_MENU_WIDTH))
         .item(sound_switch_item(app, options.sound))

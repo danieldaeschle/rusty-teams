@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use calling::{
     AttendeeLimits, CallCommand, CallState, CallUpdate, CameraDevice, CaptionEntry, CaptionState, ContentShare,
     DeviceChoice, DeviceLists, EndKind, EndReason, HoldState, MeetingCapability, MeetingRole,
-    MeetingTarget, Progress, Reaction, Replacement, RosterEntry, ShareKind, ShareSource, SpeakingDetector, StatsSample, VideoHub,
+    MeetingTarget, Progress, Reaction, Replacement, RosterEntry, ShareKind, SharePicker, ShareSource, SpeakingDetector, StatsSample, VideoHub,
     VideoWant,
 };
 use teams_core::RecordingPolicy;
@@ -299,6 +299,8 @@ pub struct CallModel {
     pub cameras: Vec<CameraDevice>,
     pub camera: DeviceChoice,
     pub local_share: Option<String>,
+    pub share_picker: SharePicker,
+    pub share_kind: Option<ShareKind>,
     pub share_sources: Vec<ShareSource>,
     pub share_thumbnails: Vec<(ShareSource, Arc<gpui_kit::RenderImage>)>,
     pub last_sample: Option<StatsSample>,
@@ -369,6 +371,8 @@ impl CallModel {
             cameras: Vec::new(),
             camera: DeviceChoice::SystemDefault,
             local_share: None,
+            share_picker: SharePicker::List,
+            share_kind: None,
             share_sources: Vec::new(),
             share_thumbnails: Vec::new(),
             last_sample: None,
@@ -508,6 +512,8 @@ impl CallModel {
                 }
                 self.local_share = label;
             }
+            CallUpdate::SharePicker(picker) => self.share_picker = picker,
+            CallUpdate::ShareKind(kind) => self.share_kind = kind,
             CallUpdate::ShareSources(sources) => {
                 self.share_thumbnails.retain(|(source, _)| sources.contains(source));
                 self.share_sources = sources;
@@ -1191,7 +1197,11 @@ impl CallModel {
     }
 
     pub fn can_share(&self) -> bool {
-        !self.share_sources.is_empty() && self.is_live()
+        self.is_live() && (self.uses_portal_picker() || !self.share_sources.is_empty())
+    }
+
+    pub fn uses_portal_picker(&self) -> bool {
+        self.share_picker == SharePicker::Portal
     }
 
     pub fn is_live(&self) -> bool {
@@ -1946,6 +1956,16 @@ mod tests {
         assert!(model.share_sound);
         model.apply(CallUpdate::LocalShare(None));
         assert!(!model.share_sound);
+    }
+
+    #[test]
+    fn portal_share_works_without_a_source_list() {
+        let mut model = connected_model();
+        assert!(model.share_sources.is_empty());
+        assert!(!model.can_share());
+        model.apply(CallUpdate::SharePicker(SharePicker::Portal));
+        assert!(model.uses_portal_picker());
+        assert!(model.can_share());
     }
 
     #[test]
