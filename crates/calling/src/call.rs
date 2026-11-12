@@ -3557,13 +3557,28 @@ struct ShareReceive {
     pli_count: u32,
     fir_count: u32,
     freeze_count: u32,
+    qp_sum: u64,
+    bytes_received: u64,
 }
 
 impl ShareReceive {
+    fn average_qp(&self) -> u64 {
+        self.qp_sum.checked_div(u64::from(self.frames_decoded)).unwrap_or(0)
+    }
+
     fn summary(&self) -> String {
         format!(
-            " share in decoded={} keyframes={} {}x{} fps={:.0} pli={} fir={} freezes={}",
-            self.frames_decoded, self.key_frames_decoded, self.width, self.height, self.frames_per_second, self.pli_count, self.fir_count, self.freeze_count
+            " share in decoded={} keyframes={} {}x{} fps={:.0} qp={} bytes={} pli={} fir={} freezes={}",
+            self.frames_decoded,
+            self.key_frames_decoded,
+            self.width,
+            self.height,
+            self.frames_per_second,
+            self.average_qp(),
+            self.bytes_received,
+            self.pli_count,
+            self.fir_count,
+            self.freeze_count
         )
     }
 }
@@ -3604,6 +3619,8 @@ async fn collect_stats(peer: &PeerConnection, share_mids: &[String]) -> StatsSna
                         pli_count: inbound.inbound.pli_count,
                         fir_count: inbound.inbound.fir_count,
                         freeze_count: inbound.inbound.freeze_count,
+                        qp_sum: inbound.inbound.qp_sum,
+                        bytes_received: inbound.inbound.bytes_received,
                     });
                 }
                 snapshot.video.inbound_frames_decoded += u64::from(inbound.inbound.frames_decoded);
