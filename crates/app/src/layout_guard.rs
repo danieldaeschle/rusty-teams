@@ -1335,7 +1335,7 @@ mod frames {
                     message_id: "guard-new".to_owned(),
                     sender_id: Some(demo::PRIYA_ID.to_owned()),
                     sender_name: Some("Priya Nair".to_owned()),
-                    created_at: chrono::Utc::now(),
+                    created_at: chrono::Utc::now().max(demo::at(0, 10, 48)),
                     body_html: "<p>Fresh message</p>".to_owned(),
                     links_json: "[]".to_owned(),
                     attachments_json: "[]".to_owned(),
