@@ -1,8 +1,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use tokio::task::JoinHandle as TaskHandle;
+
+const STOP_WAIT: Duration = Duration::from_secs(2);
+const STOP_POLL: Duration = Duration::from_millis(5);
 
 /// A running frame source; dropping it stops the capture.
 pub enum Capture {
@@ -24,11 +28,47 @@ impl Drop for Capture {
         match self {
             Capture::Thread { stop, thread } => {
                 stop.store(true, Ordering::SeqCst);
-                if let Some(thread) = thread.take() {
+                let Some(thread) = thread.take() else { return };
+                let started = Instant::now();
+                while !thread.is_finished() && started.elapsed() < STOP_WAIT {
+                    std::thread::sleep(STOP_POLL);
+                }
+                if thread.is_finished() {
                     let _ = thread.join();
                 }
             }
             Capture::Task(task) => task.abort(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::Capture;
+
+    #[test]
+    fn a_stuck_capture_thread_does_not_hold_up_the_caller() {
+        let capture = Capture::spawn_thread("stuck", |_| loop {
+            std::thread::sleep(Duration::from_secs(60));
+        })
+        .unwrap();
+        let started = Instant::now();
+        drop(capture);
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_stopped_capture_thread_is_joined() {
+        let capture = Capture::spawn_thread("quick", |stop| {
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        })
+        .unwrap();
+        let started = Instant::now();
+        drop(capture);
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }
