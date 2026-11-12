@@ -156,6 +156,7 @@ pub fn apply(
         } => {
             reactions.remove(&(conversation_id, message_id));
         }
+        UiEvent::MeetingProposalsChanged => {}
     }
 }
 

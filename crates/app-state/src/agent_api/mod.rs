@@ -1,5 +1,6 @@
 pub mod bridge;
 pub mod body;
+pub mod meetings;
 pub mod pending;
 pub mod source;
 
@@ -73,6 +74,7 @@ pub struct AgentApi {
     generation: u64,
     reinstall_note: Option<String>,
     demo: bool,
+    announced_meetings: HashSet<String>,
 }
 
 struct AgentApiHandle(Entity<AgentApi>);
@@ -148,10 +150,14 @@ pub fn init(store: Arc<Store>, demo: bool, cx: &mut App) {
         generation: 0,
         reinstall_note: None,
         demo,
+        announced_meetings: HashSet::new(),
     });
     bridge::drain_ui_events(receiver, api.downgrade(), cx);
     api.update(cx, |api, cx| {
         let _ = api.hub.restore_pending();
+        if demo {
+            let _ = api.hub.propose_meeting(crate::demo::agent_meeting_draft(), Some("claude".to_owned()), None);
+        }
         api.reconcile(cx);
     });
     cx.set_global(AgentApiHandle(api));
@@ -557,6 +563,13 @@ impl AgentApi {
         pictures: Vec<ProposalPicture>,
         cx: &mut Context<Self>,
     ) {
+        if matches!(event, mcp::UiEvent::MeetingProposalsChanged) {
+            let pending = self.hub.pending_meetings();
+            for proposal in meetings::unannounced(&self.announced_meetings, &pending) {
+                meetings::announce(proposal, cx);
+            }
+            self.announced_meetings = pending.into_iter().map(|proposal| proposal.id).collect();
+        }
         if let mcp::UiEvent::ReactionProposalChanged(reaction) = &event
             && let Some(excerpt) = pending::reacted_excerpt(
                 &self.store,

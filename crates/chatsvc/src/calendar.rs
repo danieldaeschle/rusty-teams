@@ -5,8 +5,11 @@ use session::{ApiResponse, Method, Request, Session};
 use crate::cards::{CardTransport, DEFAULT_MT_REGION, SessionCardTransport, spaces_scope};
 use crate::error::{Error, Result};
 
+mod availability;
 mod reminders;
 mod schedule;
+
+pub use availability::{BusyTime, PersonSchedule, parse_schedules};
 
 pub use reminders::{Reminder, parse_reminders};
 pub use schedule::{

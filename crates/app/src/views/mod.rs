@@ -75,6 +75,7 @@ pub mod post_card;
 pub mod prejoin_view;
 pub mod profile_card;
 pub mod proposal_card;
+pub mod meeting_proposal_card;
 pub mod rail;
 pub mod reaction_picker;
 pub mod reaction_pills;

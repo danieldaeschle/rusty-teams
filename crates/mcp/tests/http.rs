@@ -5,7 +5,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use chrono::{DateTime, TimeZone, Utc};
 use mcp::{
-    Access, AgentHub, AgentPolicy, EncodedImage, FileInfo, ForwardedInfo, ImageInfo, ImageKind,
+    Access, AgentHub, AgentPolicy, BusySlot, CreatedMeeting, EncodedImage, MeetingDraft, MeetingOutcome, PersonAvailability, FileInfo, ForwardedInfo, ImageInfo, ImageKind,
     LinkInfo, Meeting, MentionInfo, MessageExtras, Outcome, QuoteInfo, ReactionInfo, ServerHandle,
     SourceError, SourceFuture, TeamsSource, Transcript, TranscriptTurn,
 };
@@ -190,6 +190,36 @@ impl TeamsSource for FakeSource {
                 .into_iter()
                 .filter(|meeting| meeting.start >= start && meeting.start < end)
                 .collect())
+        })
+    }
+
+    fn availability(
+        &self,
+        emails: Vec<String>,
+        start: DateTime<Utc>,
+        _end: DateTime<Utc>,
+    ) -> SourceFuture<'_, Vec<PersonAvailability>> {
+        Box::pin(async move {
+            Ok(emails
+                .into_iter()
+                .map(|email| PersonAvailability {
+                    email,
+                    busy: vec![BusySlot {
+                        start,
+                        end: start + chrono::Duration::hours(1),
+                        status: "busy".to_owned(),
+                    }],
+                    error: None,
+                })
+                .collect())
+        })
+    }
+
+    fn create_meeting(&self, _draft: MeetingDraft) -> SourceFuture<'_, CreatedMeeting> {
+        Box::pin(async {
+            Ok(CreatedMeeting {
+                join_url: Some("https://teams.example/new".to_owned()),
+            })
         })
     }
 
@@ -401,7 +431,7 @@ async fn raw_status(addr: std::net::SocketAddr, host: &str, authorization: Optio
 }
 
 #[tokio::test]
-async fn lists_all_eleven_tools_and_marks_reads_read_only() {
+async fn lists_all_thirteen_tools_and_marks_reads_read_only() {
     let harness = Harness::start(true).await;
     let client = harness.client().await;
     let tools = client.list_all_tools().await.unwrap();
@@ -412,7 +442,7 @@ async fn lists_all_eleven_tools_and_marks_reads_read_only() {
             .annotations
             .as_ref()
             .and_then(|annotations| annotations.read_only_hint);
-        let writes = ["write_message", "add_reaction"].contains(&tool.name.as_ref());
+        let writes = ["write_message", "add_reaction", "create_meeting"].contains(&tool.name.as_ref());
         assert_eq!(read_only == Some(true), !writes, "{}", tool.name);
         if writes {
             let annotations = tool.annotations.as_ref().unwrap();
@@ -424,6 +454,8 @@ async fn lists_all_eleven_tools_and_marks_reads_read_only() {
         names,
         [
             "add_reaction",
+            "create_meeting",
+            "find_availability",
             "get_image",
             "get_transcript",
             "list_channels",
@@ -1700,4 +1732,50 @@ async fn adding_a_reaction_the_user_already_made_is_refused() {
     assert!(is_error);
     assert!(text.contains("already reacted"), "{text}");
     assert!(harness.hub.pending_reactions(ALLOWED_CHAT).is_empty());
+}
+
+#[tokio::test]
+async fn meetings_need_the_permission_and_go_through_review() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let meeting = json!({
+        "subject": "Release review",
+        "start": "2099-11-20T09:00:00Z",
+        "end": "2099-11-20T09:30:00Z",
+        "attendees": ["mara@example.com"],
+        "description": "Agenda",
+    });
+    let (is_error, text) = call(&client, "create_meeting", meeting.clone()).await;
+    assert!(is_error && text.contains("organizing meetings is turned off"), "{text}");
+
+    let mut policy = harness.hub.policy();
+    policy.meetings = true;
+    harness.hub.set_policy(policy.clone());
+    let (is_error, body) = call(
+        &client,
+        "find_availability",
+        json!({"attendees": ["mara@example.com"], "start": "2099-11-20T08:00:00Z", "end": "2099-11-20T18:00:00Z"}),
+    )
+    .await;
+    assert!(!is_error, "{body}");
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["people"][0]["busy"][0]["status"], "busy");
+
+    let (is_error, body) = call(&client, "create_meeting", meeting.clone()).await;
+    assert!(!is_error, "{body}");
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["state"], "pending");
+    let pending = harness.hub.pending_meetings();
+    assert_eq!(pending[0].draft.subject, "Release review");
+    harness.hub.resolve_meeting(&pending[0].id, MeetingOutcome::Created, Some("https://teams.example/new".to_owned()));
+    let (_, events) = call(&client, "wait_for_event", json!({"timeout_seconds": 1, "since": 0})).await;
+    assert!(events.contains("meeting_resolved") && events.contains("teams.example/new"), "{events}");
+    assert!(harness.hub.pending_meetings().is_empty());
+
+    policy.review = false;
+    harness.hub.set_policy(policy);
+    let (is_error, body) = call(&client, "create_meeting", meeting).await;
+    assert!(!is_error, "{body}");
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((body["state"].as_str(), body["join_url"].as_str()), (Some("created"), Some("https://teams.example/new")));
 }

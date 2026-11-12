@@ -37,6 +37,7 @@ pub struct AgentPolicy {
     pub review: bool,
     pub calendar: bool,
     pub transcripts: bool,
+    pub meetings: bool,
 }
 
 impl Default for AgentPolicy {
@@ -50,6 +51,7 @@ impl Default for AgentPolicy {
             review: true,
             calendar: false,
             transcripts: false,
+            meetings: false,
         }
     }
 }
@@ -68,6 +70,10 @@ impl AgentPolicy {
 
     pub fn can_write(&self, kind: ConversationKind, conversation_id: &str) -> bool {
         self.can_read(kind, conversation_id) && self.write
+    }
+
+    pub fn can_organize_meetings(&self) -> bool {
+        self.enabled && self.meetings
     }
 
     pub fn can_read_any_kind(&self, conversation_id: &str) -> bool {

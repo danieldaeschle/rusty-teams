@@ -1,10 +1,10 @@
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use chatsvc::{Calendar, Transcripts};
+use chatsvc::{Attendee, Calendar, NewEvent, Repeat, Transcripts};
 use chrono::{DateTime, Utc};
 use mcp::{
-    EncodedImage, Meeting, MessageExtras, SourceError, SourceFuture, TeamsSource, Transcript,
+    BusySlot, CreatedMeeting, EncodedImage, Meeting, MeetingDraft, PersonAvailability, MessageExtras, SourceError, SourceFuture, TeamsSource, Transcript,
     TranscriptTurn,
 };
 use store::{MessageRecord, Store};
@@ -173,6 +173,44 @@ impl TeamsSource for AppSource {
         })
     }
 
+    fn availability(
+        &self,
+        emails: Vec<String>,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> SourceFuture<'_, Vec<PersonAvailability>> {
+        Box::pin(async move {
+            let engine = self.engine()?;
+            let schedules = Calendar::new(engine.remote().session())
+                .schedules(&emails, start, end)
+                .await
+                .map_err(|error| SourceError::Failed(error.to_string()))?;
+            Ok(schedules
+                .into_iter()
+                .map(|schedule| PersonAvailability {
+                    email: schedule.email,
+                    busy: schedule
+                        .busy
+                        .into_iter()
+                        .map(|slot| BusySlot { start: slot.start, end: slot.end, status: slot.status })
+                        .collect(),
+                    error: schedule.error,
+                })
+                .collect())
+        })
+    }
+
+    fn create_meeting(&self, draft: MeetingDraft) -> SourceFuture<'_, CreatedMeeting> {
+        Box::pin(async move {
+            let engine = self.engine()?;
+            let created = Calendar::new(engine.remote().session())
+                .create_event(&new_event(draft))
+                .await
+                .map_err(|error| SourceError::Failed(error.to_string()))?;
+            Ok(CreatedMeeting { join_url: created.join_url })
+        })
+    }
+
     fn transcript<'a>(&'a self, meeting_chat_id: &'a str) -> SourceFuture<'a, Transcript> {
         Box::pin(async move {
             let engine = self.engine()?;
@@ -261,5 +299,23 @@ mod tests {
             .unwrap();
         assert_eq!(source.image_dimensions(&png), Some((3, 2)));
         assert_eq!(source.image_dimensions(b"nope"), None);
+    }
+}
+
+fn new_event(draft: MeetingDraft) -> NewEvent {
+    NewEvent {
+        subject: draft.subject,
+        start: draft.start,
+        end: draft.end,
+        local_start: draft.start.naive_utc(),
+        local_end: draft.end.naive_utc(),
+        time_zone_name: None,
+        attendees: draft
+            .attendees
+            .into_iter()
+            .map(|address| Attendee { name: address.clone(), address })
+            .collect(),
+        repeat: Repeat::Never,
+        details: draft.description,
     }
 }

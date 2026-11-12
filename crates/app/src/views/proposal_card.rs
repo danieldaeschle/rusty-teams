@@ -256,7 +256,7 @@ pub fn age_label(created_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
     }
 }
 
-fn card_button(
+pub(super) fn card_button(
     id: &'static str,
     label: &'static str,
     background: Hsla,

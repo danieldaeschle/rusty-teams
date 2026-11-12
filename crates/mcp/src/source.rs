@@ -29,6 +29,35 @@ pub struct Meeting {
     pub meeting_chat_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BusySlot {
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PersonAvailability {
+    pub email: String,
+    pub busy: Vec<BusySlot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingDraft {
+    pub subject: String,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub attendees: Vec<String>,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CreatedMeeting {
+    pub join_url: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TranscriptTurn {
     pub speaker: String,
@@ -168,5 +197,18 @@ pub trait TeamsSource: Send + Sync + 'static {
 
     fn transcript<'a>(&'a self, _meeting_chat_id: &'a str) -> SourceFuture<'a, Transcript> {
         Box::pin(async { Err(SourceError::Unsupported("transcript")) })
+    }
+
+    fn availability(
+        &self,
+        _emails: Vec<String>,
+        _start: DateTime<Utc>,
+        _end: DateTime<Utc>,
+    ) -> SourceFuture<'_, Vec<PersonAvailability>> {
+        Box::pin(async { Err(SourceError::Unsupported("availability")) })
+    }
+
+    fn create_meeting(&self, _draft: MeetingDraft) -> SourceFuture<'_, CreatedMeeting> {
+        Box::pin(async { Err(SourceError::Unsupported("create_meeting")) })
     }
 }

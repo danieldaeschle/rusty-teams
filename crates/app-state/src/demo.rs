@@ -920,6 +920,17 @@ pub fn seed(store: &Store) {
     seed_agent_access(store);
 }
 
+pub fn agent_meeting_draft() -> mcp::MeetingDraft {
+    let start = at(-1, 10, 0);
+    mcp::MeetingDraft {
+        subject: "Release 42 go/no-go".to_owned(),
+        start,
+        end: start + Duration::minutes(30),
+        attendees: vec!["mara.lindqvist@example.com".to_owned(), "jonas.ortega@example.com".to_owned()],
+        description: "Walk through the regression results and decide on Friday's rollout.\nOwner: Mara".to_owned(),
+    }
+}
+
 const AGENT_DEMO_PROPOSAL: &str = "I ran the regression suite on staging: 412 passed, 0 failed. The release candidate is good to ship, @Mara Lindqvist.";
 
 fn seed_agent_access(store: &Store) {
@@ -934,6 +945,7 @@ fn seed_agent_access(store: &Store) {
             write: true,
             calendar: true,
             transcripts: false,
+            meetings: true,
             ..mcp::AgentPolicy::default()
         },
     );

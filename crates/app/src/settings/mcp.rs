@@ -873,7 +873,7 @@ impl McpView {
             Hsla,
             bool,
             fn(&mut AgentPolicy),
-        ); 4] = [
+        ); 5] = [
             (
                 "mcp-write",
                 "Write messages and reactions",
@@ -901,6 +901,18 @@ impl McpView {
                 theme::text_muted(),
                 policy.calendar,
                 |policy| policy.calendar = !policy.calendar,
+            ),
+            (
+                "mcp-meetings",
+                "Organize meetings",
+                if policy.review {
+                    "Free/busy of people, meeting card in Calendar. You create it"
+                } else {
+                    "Without review: agents create meetings and invite people right away"
+                },
+                if policy.review { theme::text_muted() } else { theme::amber() },
+                policy.meetings,
+                |policy| policy.meetings = !policy.meetings,
             ),
             (
                 "mcp-transcripts",

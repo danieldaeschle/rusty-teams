@@ -75,6 +75,7 @@ fn serialize(policy: &AgentPolicy) -> String {
         ("review", policy.review.to_string()),
         ("calendar", policy.calendar.to_string()),
         ("transcripts", policy.transcripts.to_string()),
+        ("meetings", policy.meetings.to_string()),
     ]
     .iter()
     .map(|(key, value)| format!("{key}={value}"))
@@ -98,6 +99,7 @@ fn parse(text: &str) -> AgentPolicy {
             "review" => policy.review = flag,
             "calendar" => policy.calendar = flag,
             "transcripts" => policy.transcripts = flag,
+            "meetings" => policy.meetings = flag,
             _ => {}
         }
     }
@@ -124,6 +126,7 @@ mod tests {
             review: false,
             calendar: true,
             transcripts: true,
+            meetings: true,
         };
         assert_eq!(parse(&serialize(&policy)), policy);
     }
