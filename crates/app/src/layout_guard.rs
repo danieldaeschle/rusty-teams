@@ -322,7 +322,6 @@ mod frames {
     const SETTINGS_TAGS: &[&str] = &[
         "settings",
         "settings/nav",
-        "settings/nav/divider",
         "settings/nav/about",
         "settings/main",
         "settings/main/header",
@@ -364,12 +363,13 @@ mod frames {
         SettingsSection::Agents,
         "Agents pages carry their own PAGE_PADDING side inset, the body narrows its side padding to keep the text edge",
     )];
-    const SETTINGS_SECTIONS: [SettingsSection; 9] = [
+    const SETTINGS_SECTIONS: [SettingsSection; 10] = [
         SettingsSection::General,
         SettingsSection::Notifications,
         SettingsSection::Appearance,
         SettingsSection::Chats,
         SettingsSection::Calls,
+        SettingsSection::Calendar,
         SettingsSection::Devices,
         SettingsSection::Agents,
         SettingsSection::Mcp,
@@ -1535,15 +1535,15 @@ mod frames {
         }
     }
 
-    // Not a platform assertion: on macOS the camera effects worker schedules onto
-    // the deterministic test scheduler while this dialog is open.
-    #[cfg_attr(
-        target_os = "macos",
-        ignore = "camera effects thread trips the test scheduler"
-    )]
+    // Devices opens a camera preview; the effects worker schedules onto the
+    // deterministic test scheduler and trips "Your test is not deterministic".
     #[gpui_kit::test]
     fn settings_dialog_keeps_its_inset_at_every_size(cx: &mut TestAppContext) {
-        check_settings_dialog(cx, &SETTINGS_SECTIONS);
+        let sections: Vec<_> = SETTINGS_SECTIONS
+            .into_iter()
+            .filter(|section| *section != SettingsSection::Devices)
+            .collect();
+        check_settings_dialog(cx, &sections);
     }
 
     #[gpui_kit::test]
@@ -1640,7 +1640,7 @@ mod frames {
                 f32::from(
                     window
                         .text_system()
-                        .shape_line(text.into(), px(NAV_LABEL_SIZE), &[run], None)
+                        .shape_line(text.clone().into(), px(NAV_LABEL_SIZE), &[run], None)
                         .width,
                 )
             });

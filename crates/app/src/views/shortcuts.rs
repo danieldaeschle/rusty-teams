@@ -1,6 +1,8 @@
 use gpui_kit::component::input::Enter;
 use gpui_kit::*;
 
+use crate::i18n::tr;
+
 use super::actions::{
     COMPOSER_KEY_CONTEXT as COMPOSER_CONTEXT, EditLastMessage, EditLink, InsertTableLine, NewChat,
     OpenSwitcher, PastePlainText, RemoveTableLine, ReplyToHovered, ScheduleSend, SetHeading1,
@@ -94,12 +96,12 @@ impl Group {
         Group::Calls,
     ];
 
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            Group::General => "General",
-            Group::Navigation => "Navigation",
-            Group::Composer => "Messages and composer",
-            Group::Calls => "Calls",
+            Group::General => tr("shortcuts.group.general"),
+            Group::Navigation => tr("shortcuts.group.navigation"),
+            Group::Composer => tr("shortcuts.group.composer"),
+            Group::Calls => tr("shortcuts.group.calls"),
         }
     }
 }

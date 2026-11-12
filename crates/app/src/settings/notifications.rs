@@ -9,6 +9,7 @@ use super::account::{
 };
 use super::rows::{Choice, caption, control_row, select, text_button, toggle_row};
 use crate::app_state::AppState;
+use crate::i18n::tr;
 use crate::notify::NotificationCenter;
 use crate::notify::rules::{Corner, Settings};
 use crate::notify::sounds::AlertSound;
@@ -22,51 +23,51 @@ type SoundAccessor = fn(&mut Settings) -> &mut AlertSound;
 
 struct Toggle {
     id: &'static str,
-    title: &'static str,
-    detail: &'static str,
+    title_key: &'static str,
+    detail_key: Option<&'static str>,
     field: Accessor,
 }
 
 const FLASH: Toggle = Toggle {
     id: "settings-flash",
-    title: "Flash taskbar when notifications are received",
-    detail: "On new messages, until you open the window",
+    title_key: "settings.notifications.flash_taskbar",
+    detail_key: Some("settings.notifications.flash_taskbar_detail"),
     field: |settings| &mut settings.flash,
 };
 
 const NOTIFICATION_SOUND: Toggle = Toggle {
     id: "settings-notification-sound",
-    title: "Play sounds with notifications",
-    detail: "",
+    title_key: "settings.notifications.play_sounds",
+    detail_key: None,
     field: |settings| &mut settings.sounds.notification_sound,
 };
 
 const URGENT_SOUND: Toggle = Toggle {
     id: "settings-urgent-sound",
-    title: "Play sounds with urgent and priority contact notifications",
-    detail: "",
+    title_key: "settings.notifications.urgent_sounds",
+    detail_key: None,
     field: |settings| &mut settings.sounds.urgent_sound,
 };
 
 const CALL_SOUNDS: [Toggle; 2] = [
     Toggle {
         id: "settings-call-sound",
-        title: "Play sounds with incoming calls, requests to join, and meeting start notifications",
-        detail: "",
+        title_key: "settings.notifications.call_sounds",
+        detail_key: None,
         field: |settings| &mut settings.sounds.call_and_meeting_sound,
     },
     Toggle {
         id: "settings-busy-sound",
-        title: "Play sounds when I'm busy or in a meeting",
-        detail: "",
+        title_key: "settings.notifications.busy_sounds",
+        detail_key: None,
         field: |settings| &mut settings.sounds.sound_when_busy,
     },
 ];
 
 const HIDE_IN_CALLS: Toggle = Toggle {
     id: "settings-hide-in-calls",
-    title: "Hide notifications during calls and meetings",
-    detail: "No message toasts while a call is active",
+    title_key: "settings.notifications.hide_in_calls",
+    detail_key: Some("settings.notifications.hide_in_calls_detail"),
     field: |settings| &mut settings.mute_in_calls,
 };
 
@@ -87,12 +88,12 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
     let test_center = center.clone();
     v_flex()
         .w_full()
-        .child(caption("APPEARANCE AND SOUND"))
+        .child(caption(tr("settings.caption.appearance_and_sound")))
         .child(preview_toggle(app, account.show_preview))
         .child(flash)
         .child(control_row(
-            "Position on the screen",
-            "Corner of the main screen",
+            tr("settings.notifications.position"),
+            tr("settings.notifications.position_detail"),
             select(
                 "settings-position",
                 corner.label(),
@@ -101,15 +102,17 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
             ),
         ))
         .child(control_row(
-            "Test notification",
-            "Shows a toast with the settings above",
-            text_button("settings-test-notification", "Send test notification").on_click(
-                move |_, _, cx| {
-                    test_center.update(cx, |center, cx| center.send_test_notification(cx))
-                },
-            ),
+            tr("settings.notifications.test"),
+            tr("settings.notifications.test_detail"),
+            text_button(
+                "settings-test-notification",
+                tr("settings.notifications.send_test"),
+            )
+            .on_click(move |_, _, cx| {
+                test_center.update(cx, |center, cx| center.send_test_notification(cx))
+            }),
         ))
-        .child(caption("SOUND"))
+        .child(caption(tr("settings.caption.sound")))
         .child(notification_sound)
         .child(sound_row(
             center,
@@ -117,7 +120,7 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
                 "settings-notification-sound-type",
                 "settings-notification-sound-preview",
             ),
-            "Notification sound",
+            tr("settings.notifications.notification_sound"),
             &AlertSound::NORMAL,
             sounds.notification_sound_type,
             sounds.notification_sound,
@@ -130,7 +133,7 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
                 "settings-urgent-sound-type",
                 "settings-urgent-sound-preview",
             ),
-            "Urgent sound",
+            tr("settings.notifications.urgent_sound"),
             &AlertSound::URGENT,
             sounds.urgent_sound_type,
             sounds.urgent_sound,
@@ -142,7 +145,7 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
             app,
             (
                 "settings-notification-preset",
-                "Teams and channels",
+                tr("settings.notifications.teams_channels"),
                 preset_detail(account.preset),
             ),
             &PRESETS,
@@ -152,7 +155,11 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
         .child(caption("CHAT"))
         .child(account_select(
             app,
-            ("settings-chat-messages", "Chat message notifications", ""),
+            (
+                "settings-chat-messages",
+                tr("settings.notifications.chat_messages"),
+                "",
+            ),
             &CHAT_MESSAGES,
             account.chat_messages,
             ChatSettingChange::ChatMessages,
@@ -177,7 +184,11 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
         ))
         .child(account_select(
             app,
-            ("settings-likes", "Likes and reactions", ""),
+            (
+                "settings-likes",
+                tr("settings.notifications.likes_reactions"),
+                "",
+            ),
             &ACTIVITY_OR_OFF,
             account.likes,
             ChatSettingChange::Likes,
@@ -187,7 +198,7 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
             app,
             (
                 "settings-meeting-chats",
-                "Meeting chat notifications",
+                tr("settings.notifications.meeting_chats"),
                 meeting_chats_detail(account.meeting_chats),
             ),
             &MEETING_CHATS,
@@ -230,7 +241,7 @@ fn preview_toggle(app: &Entity<AppState>, on: bool) -> Stateful<Div> {
     let app = app.clone();
     toggle_row(
         "settings-preview",
-        "Show message preview",
+        tr("settings.notifications.show_preview"),
         "Off: only \"New message\"",
         theme::text_muted(),
         on,
@@ -245,10 +256,11 @@ fn preview_toggle(app: &Entity<AppState>, on: bool) -> Stateful<Div> {
 fn toggle_element(center: &Entity<NotificationCenter>, toggle: &Toggle, on: bool) -> Stateful<Div> {
     let center = center.clone();
     let field = toggle.field;
+    let detail = toggle.detail_key.map(tr).unwrap_or_default();
     toggle_row(
         toggle.id,
-        toggle.title,
-        toggle.detail,
+        tr(toggle.title_key),
+        detail,
         theme::text_muted(),
         on,
     )
@@ -279,7 +291,7 @@ fn corner_choices(center: &Entity<NotificationCenter>, current: Corner) -> Vec<C
 fn sound_row(
     center: &Entity<NotificationCenter>,
     (id, preview_id): (&'static str, &'static str),
-    title: &'static str,
+    title: impl Into<SharedString>,
     options: &'static [AlertSound],
     current: AlertSound,
     enabled: bool,

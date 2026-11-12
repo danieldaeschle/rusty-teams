@@ -1,7 +1,12 @@
 use store::SidebarTeam;
 
-pub const CHANNEL_FILTER_PLACEHOLDER: &str = "Filter by channel name";
-pub const UNREAD_PILL: &str = "Unread";
+pub fn channel_filter_placeholder() -> String {
+    app_base::ui_locale::tr("sidebar.filter.channel_placeholder")
+}
+
+pub fn channel_unread_pill() -> String {
+    app_base::ui_locale::tr("sidebar.filter.unread")
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ChannelFilter {

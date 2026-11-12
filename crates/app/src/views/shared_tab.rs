@@ -21,6 +21,7 @@ use crate::channel_files::{
 };
 use crate::downloads::{DownloadState, percent_label};
 use crate::format;
+use crate::i18n::tr;
 use crate::theme;
 
 const SIDE_PADDING: f32 = 20.;
@@ -465,7 +466,7 @@ pub fn render_library(view: LibraryView, run: &SharedRun) -> AnyElement {
                     Button::new("library-retry")
                         .ghost()
                         .compact()
-                        .label("Retry")
+                        .label(tr("common.retry"))
                         .on_click(move |_, window, cx| retry(SharedCommand::Retry, window, cx)),
                 )
                 .into_any_element()

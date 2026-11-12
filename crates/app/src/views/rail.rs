@@ -9,6 +9,7 @@ use super::widgets::{RAIL_BADGE, badge_pill, filled_icon, icon};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRuns, runs_handle};
 use crate::app_state::AppState;
+use crate::i18n::tr;
 use crate::sidebar_model::{any_unread_channel, unread_chat_count};
 use crate::theme;
 use app_ui_kit::layout::{RAIL_ITEM_WIDTH, RAIL_WIDTH};
@@ -25,10 +26,10 @@ enum RailBadge {
     Dot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct RailItem {
     tab: SidebarTab,
-    label: &'static str,
+    label: String,
     shortcut_label: &'static str,
     icon: IconName,
     badge: RailBadge,
@@ -50,21 +51,21 @@ fn rail_items(
     let mut items = vec![
         RailItem {
             tab: SidebarTab::Activity,
-            label: "Activity",
+            label: tr("rail.activity"),
             shortcut_label: "Open Activity",
             icon: IconName::Bell,
             badge: count_badge_for(activity_unread),
         },
         RailItem {
             tab: SidebarTab::Chats,
-            label: "Chat",
+            label: tr("rail.chat"),
             shortcut_label: "Show Chats",
             icon: IconName::MessageSquare,
             badge: count_badge_for(unread_chats),
         },
         RailItem {
             tab: SidebarTab::Channels,
-            label: "Teams",
+            label: tr("rail.teams"),
             shortcut_label: "Show Channels",
             icon: IconName::Users,
             badge: if channel_dot {
@@ -75,14 +76,14 @@ fn rail_items(
         },
         RailItem {
             tab: SidebarTab::Calendar,
-            label: "Calendar",
+            label: tr("rail.calendar"),
             shortcut_label: "Open Calendar",
             icon: IconName::Calendar,
             badge: RailBadge::None,
         },
         RailItem {
             tab: SidebarTab::Calls,
-            label: "Calls",
+            label: tr("rail.calls"),
             shortcut_label: "Show Calls",
             icon: IconName::Phone,
             badge: RailBadge::None,
@@ -91,7 +92,7 @@ fn rail_items(
     if let Some(running) = agents_running {
         items.push(RailItem {
             tab: SidebarTab::Agents,
-            label: "Agents",
+            label: tr("rail.agents"),
             shortcut_label: "Open Agents",
             icon: IconName::Bot,
             badge: count_badge_for(running),
@@ -103,7 +104,7 @@ fn rail_items(
 fn tooltip_text(item: &RailItem) -> SharedString {
     match keys_for_label(item.shortcut_label) {
         Some(keys) => format!("{} ({keys})", item.label).into(),
-        None => item.label.into(),
+        None => item.label.clone().into(),
     }
 }
 
@@ -154,7 +155,7 @@ fn item_element(item: &RailItem, active: bool) -> Stateful<Div> {
                 .line_height(px(LABEL_HEIGHT))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(color)
-                .child(item.label),
+                .child(item.label.clone()),
         )
         .children(badge(item.badge))
         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
@@ -252,11 +253,15 @@ impl Render for RailView {
 
 #[cfg(test)]
 mod tests {
+    use app_base::ui_locale::apply_locale;
+
     use super::{RailBadge, count_badge_for, rail_items, tooltip_text};
+    use crate::i18n::tr;
     use crate::views::sidebar::SidebarTab;
 
     #[test]
     fn items_follow_the_spec_order() {
+        apply_locale("en");
         let tabs: Vec<SidebarTab> = rail_items(0, 0, false, None)
             .iter()
             .map(|item| item.tab)
@@ -275,17 +280,19 @@ mod tests {
 
     #[test]
     fn agents_comes_last_and_only_when_actions_exist() {
+        apply_locale("en");
         assert_eq!(rail_items(0, 0, false, None).len(), 5);
         let with_agents = rail_items(0, 0, false, Some(2));
         assert_eq!(with_agents.len(), 6);
         assert_eq!(with_agents[5].tab, SidebarTab::Agents);
-        assert_eq!(with_agents[5].label, "Agents");
+        assert_eq!(with_agents[5].label, tr("rail.agents"));
         assert_eq!(with_agents[5].badge, RailBadge::Count(2));
         assert_eq!(rail_items(0, 0, false, Some(0))[5].badge, RailBadge::None);
     }
 
     #[test]
     fn badges_follow_the_unread_inputs() {
+        apply_locale("en");
         let items = rail_items(3, 5, true, None);
         assert_eq!(items[0].badge, RailBadge::Count(3));
         assert_eq!(items[1].badge, RailBadge::Count(5));
@@ -300,6 +307,7 @@ mod tests {
     #[cfg_attr(target_os = "macos", ignore = "needs Ctrl bindings")]
     #[test]
     fn every_item_shows_its_shortcut_in_the_tooltip() {
+        apply_locale("en");
         let items = rail_items(0, 0, false, None);
         assert_eq!(tooltip_text(&items[0]), "Activity (Ctrl+1)");
         assert!(items.iter().all(|item| tooltip_text(item).ends_with(')')));

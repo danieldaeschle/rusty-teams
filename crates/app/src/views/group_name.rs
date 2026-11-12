@@ -13,6 +13,7 @@ use gpui_kit::*;
 
 use super::widgets::icon;
 use crate::app_state::AppState;
+use crate::i18n::tr;
 use crate::theme;
 
 pub const GROUP_NAME_FORM: &str = "shell/islands/main/group-name-form";
@@ -135,13 +136,13 @@ impl Render for GroupNameForm {
                     .gap(px(FORM_GAP))
                     .child(
                         Button::new("group-name-cancel")
-                            .label("Cancel")
+                            .label(tr("common.cancel"))
                             .on_click(cx.listener(|form, _, window, cx| form.close(window, cx))),
                     )
                     .child(
                         Button::new("group-name-save")
                             .primary()
-                            .label("Save")
+                            .label(tr("common.save"))
                             .disabled(problem.is_some())
                             .on_click(cx.listener(|form, _, window, cx| form.save(window, cx))),
                     ),

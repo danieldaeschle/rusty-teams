@@ -35,6 +35,7 @@ use crate::chat_actions::TITLE_LIMIT;
 use crate::chat_filter::{ChatFilter, filtered_sections, has_no_matches};
 use crate::data::{AvatarState, Directory, is_pending_folder};
 use crate::format;
+use crate::i18n::{tr, tr_args};
 use crate::local_previews::LocalPreview;
 use crate::notice::truncated;
 use crate::sidebar_model::{
@@ -61,7 +62,6 @@ const PINNED_CHANNEL_HEIGHT: f32 = 48.;
 const SECTION_HEIGHT: f32 = 30.;
 const SECTION_GAP: f32 = 4.;
 const QUICK_VIEWS_SECTION_ID: &str = "quick-views";
-const QUICK_VIEWS_TITLE: &str = "Quick views";
 const QUICK_ROW_HEIGHT: f32 = 32.;
 const QUICK_ICON_SIZE: f32 = 18.;
 const QUICK_VIEWS: [(QuickView, &str); 3] = [
@@ -71,15 +71,9 @@ const QUICK_VIEWS: [(QuickView, &str); 3] = [
 ];
 const HINT_HEIGHT: f32 = 26.;
 const SEE_MORE_HEIGHT: f32 = 28.;
-const LOADING_OLDER_LABEL: &str = "Loading older chats";
 const FALLBACK_VIEWPORT: f32 = 900.;
 const VIEWPORT_MARGIN: f32 = 300.;
 const AVATAR_SIZE: f32 = 36.;
-const PINNED_LABEL: &str = "Pinned";
-const TEAMS_LABEL: &str = "Teams";
-const MARK_ALL_READ_LABEL: &str = "Mark all as read";
-const COLLAPSE_ALL_LABEL: &str = "Collapse all sections";
-const HIDDEN_TEAMS_LABEL: &str = "Hidden teams";
 const TEAM_ROW_HEIGHT: f32 = 36.;
 const CHANNEL_ROW_HEIGHT: f32 = 32.;
 const TEAM_ICON_SIZE: f32 = 20.;
@@ -87,8 +81,6 @@ const TEAM_ICON_RADIUS: f32 = 4.;
 const CHANNEL_INDENT: f32 = 60.;
 pub const CHANNEL_ROW_TAG: &str = "sidebar/channel-row";
 pub const SEE_ALL_CHANNELS_TAG: &str = "sidebar/see-all-channels";
-const SEE_ALL_CHANNELS: &str = "See all channels";
-const SEE_FEWER_CHANNELS: &str = "See fewer channels";
 const PRIVATE_MEMBERSHIP: &str = "private";
 const REVEAL_ROW_HEIGHT: f32 = 32.;
 const NEW_CHAT_BUTTON_SIZE: f32 = 32.;
@@ -107,14 +99,14 @@ pub enum SidebarTab {
 }
 
 impl SidebarTab {
-    fn title(self) -> &'static str {
+    fn title(self) -> String {
         match self {
-            SidebarTab::Activity => "Activity",
-            SidebarTab::Chats => "Chat",
-            SidebarTab::Channels => "Teams",
-            SidebarTab::Calendar => "Calendar",
-            SidebarTab::Calls => "Calls",
-            SidebarTab::Agents => "Agents",
+            SidebarTab::Activity => tr("rail.activity"),
+            SidebarTab::Chats => tr("rail.chat"),
+            SidebarTab::Channels => tr("rail.teams"),
+            SidebarTab::Calendar => tr("rail.calendar"),
+            SidebarTab::Calls => tr("rail.calls"),
+            SidebarTab::Agents => tr("rail.agents"),
         }
     }
 }
@@ -205,7 +197,7 @@ fn drop_target(section: &Section) -> Option<Option<String>> {
 
 fn new_section_item(state: &Entity<AppState>, read_only: bool) -> PopupMenuItem {
     let state = state.clone();
-    PopupMenuItem::new("New section")
+    PopupMenuItem::new(tr("sidebar.new_section"))
         .icon(menu_icon(IconName::Plus))
         .disabled(read_only)
         .on_click(move |_, window, cx| {
@@ -215,7 +207,7 @@ fn new_section_item(state: &Entity<AppState>, read_only: bool) -> PopupMenuItem 
 
 fn move_section_item(
     state: &Entity<AppState>,
-    label: &'static str,
+    label: String,
     glyph: IconName,
     folder_id: &str,
     target_id: Option<&String>,
@@ -249,7 +241,7 @@ fn section_menu(
             name: target.name.clone(),
         };
         popup = popup.item(
-            PopupMenuItem::new("Rename section")
+            PopupMenuItem::new(tr("sidebar.rename_section"))
                 .icon(menu_icon(IconName::Pencil))
                 .disabled(target.read_only)
                 .on_click(move |_, window, cx| {
@@ -266,7 +258,7 @@ fn section_menu(
         popup = popup
             .item(move_section_item(
                 state,
-                "Move up",
+                tr("sidebar.move_up"),
                 IconName::ArrowUp,
                 &target.id,
                 target.previous_id.as_ref(),
@@ -274,7 +266,7 @@ fn section_menu(
             ))
             .item(move_section_item(
                 state,
-                "Move down",
+                tr("sidebar.move_down"),
                 IconName::ArrowDown,
                 &target.id,
                 target.next_id.as_ref(),
@@ -288,7 +280,9 @@ fn section_menu(
         let (folder_id, name) = (target.id.clone(), target.name.clone());
         popup = popup.separator().item(
             PopupMenuItem::element(|_, _| {
-                div().text_color(theme::red_soft()).child("Delete section")
+                div()
+                    .text_color(theme::red_soft())
+                    .child(tr("sidebar.delete_section"))
             })
             .icon(menu_icon(IconName::Trash).text_color(theme::red_soft()))
             .disabled(target.read_only)
@@ -309,15 +303,17 @@ fn confirm_delete_section(
 ) {
     let state = state.clone();
     let folder_id = folder_id.to_owned();
-    let heading = format!("Delete section \"{}\"?", truncated(name, TITLE_LIMIT));
+    let mut args = HashMap::new();
+    args.insert("name".to_owned(), truncated(name, TITLE_LIMIT));
+    let heading = tr_args("sidebar.delete_section_title", &args);
     window.open_alert_dialog(cx, move |alert, _, _| {
         let state = state.clone();
         let folder_id = folder_id.clone();
         let cancel = Button::new("delete-section-cancel")
-            .label("Cancel")
+            .label(tr("common.cancel"))
             .on_click(|_, window, cx| window.close_dialog(cx));
         let delete = Button::new("delete-section-confirm")
-            .label("Delete")
+            .label(tr("common.delete"))
             .danger()
             .on_click(move |_, window, cx| {
                 state.update(cx, |state, cx| state.delete_section(&folder_id, cx));
@@ -325,7 +321,7 @@ fn confirm_delete_section(
             });
         alert
             .title(heading.clone())
-            .description("Chats in it move back to Chats.")
+            .description(tr("sidebar.delete_section_detail"))
             .footer(DialogFooter::new().child(cancel).child(delete))
             .on_ok(|_, _, _| false)
     });
@@ -397,14 +393,14 @@ fn local_preview_row(preview: &LocalPreview, color: Hsla) -> Div {
                 div()
                     .flex_none()
                     .text_color(theme::accent_text())
-                    .child("Draft:"),
+                    .child(tr("sidebar.draft_prefix")),
             )
             .child(div().truncate().child(text.clone())),
         LocalPreview::NotSent => row.child(
             div()
                 .flex_none()
                 .text_color(theme::red_soft())
-                .child("Not sent"),
+                .child(tr("sidebar.not_sent")),
         ),
     }
 }
@@ -658,7 +654,7 @@ impl SidebarView {
             .cursor_pointer()
             .when(active, |button| button.bg(theme::popup_hover()))
             .hover(|button| button.bg(theme::popup_hover()))
-            .tooltip(|window, cx| Tooltip::new("New chat (Ctrl+N)").build(window, cx))
+            .tooltip(|window, cx| Tooltip::new(tr("sidebar.new_chat_shortcut")).build(window, cx))
             .child(icon(IconName::Pencil, 16., theme::text_soft()))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.state.update(cx, |state, cx| state.start_new_chat(cx));
@@ -674,12 +670,12 @@ impl SidebarView {
             .ghost()
             .size(px(NEW_CHAT_BUTTON_SIZE))
             .rounded(px(8.))
-            .tooltip("More options")
+            .tooltip(tr("sidebar.more_options"))
             .dropdown_menu(move |menu, _, _| {
                 let (read_state, collapse_state) = (state.clone(), state.clone());
                 let section_ids = section_ids.clone();
                 menu.item(
-                    PopupMenuItem::new(MARK_ALL_READ_LABEL)
+                    PopupMenuItem::new(tr("sidebar.mark_all_read"))
                         .icon(menu_icon(IconName::CheckCheck))
                         .disabled(read_only)
                         .on_click(move |_, _, cx| {
@@ -687,7 +683,7 @@ impl SidebarView {
                         }),
                 )
                 .item(
-                    PopupMenuItem::new(COLLAPSE_ALL_LABEL)
+                    PopupMenuItem::new(tr("sidebar.collapse_all"))
                         .icon(menu_icon(IconName::ChevronsDownUp))
                         .on_click(move |_, _, cx| {
                             let ids = section_ids.clone();
@@ -717,11 +713,11 @@ impl SidebarView {
             .ghost()
             .size(px(NEW_CHAT_BUTTON_SIZE))
             .rounded(px(8.))
-            .tooltip("More options")
+            .tooltip(tr("sidebar.more_options"))
             .dropdown_menu(move |menu, _, _| {
                 let (state, view, team_ids) = (state.clone(), view.clone(), team_ids.clone());
                 menu.item(
-                    PopupMenuItem::new(MARK_ALL_READ_LABEL)
+                    PopupMenuItem::new(tr("sidebar.mark_all_read"))
                         .icon(menu_icon(IconName::CheckCheck))
                         .disabled(read_only)
                         .on_click(move |_, _, cx| {
@@ -729,7 +725,7 @@ impl SidebarView {
                         }),
                 )
                 .item(
-                    PopupMenuItem::new(COLLAPSE_ALL_LABEL)
+                    PopupMenuItem::new(tr("sidebar.collapse_all"))
                         .icon(menu_icon(IconName::ChevronsDownUp))
                         .on_click(move |_, _, cx| {
                             let team_ids = team_ids.clone();
@@ -772,14 +768,14 @@ impl SidebarView {
                             .truncate()
                             .text_size(px(14.))
                             .text_color(theme::text())
-                            .child("New chat"),
+                            .child(tr("sidebar.new_chat")),
                     )
                     .child(
                         div()
                             .truncate()
                             .text_size(px(12.5))
                             .text_color(theme::text_muted())
-                            .child("Draft"),
+                            .child(tr("sidebar.draft")),
                     ),
             )
     }
@@ -884,7 +880,7 @@ impl SidebarView {
                     .text_size(px(12.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_soft())
-                    .child(QUICK_VIEWS_TITLE),
+                    .child(tr("sidebar.quick_views")),
             )
             .on_click(cx.listener(|this, _, _, cx| {
                 this.state.update(cx, |state, cx| {
@@ -939,9 +935,11 @@ impl SidebarView {
     fn see_more_row(&self, section: &Section, cx: &mut Context<Self>) -> impl IntoElement {
         let toggle_id = section.id.clone();
         let label = if section.hidden_count > 0 {
-            format!("See more ({})", section.hidden_count)
+            let mut args = HashMap::new();
+            args.insert("count".to_owned(), section.hidden_count.to_string());
+            tr_args("sidebar.see_more", &args)
         } else {
-            "See less".to_owned()
+            tr("sidebar.see_less")
         };
         div()
             .id(SharedString::from(format!("see-more-{}", section.id)))
@@ -1109,7 +1107,7 @@ impl SidebarView {
                     .ghost()
                     .xsmall()
                     .icon(IconName::Ellipsis)
-                    .tooltip("More options")
+                    .tooltip(tr("sidebar.more_options"))
                     .dropdown_menu(move |popup, window, cx| {
                         chat_menu(popup, window, cx, &more_context, &more_target)
                     }),
@@ -1315,7 +1313,7 @@ impl SidebarView {
                     .text_size(px(12.5))
                     .italic()
                     .text_color(theme::text_faint())
-                    .child(LOADING_OLDER_LABEL),
+                    .child(tr("sidebar.loading_older")),
             );
         }
         let selected_chat_id = self.selected_chat_id(cx);
@@ -1447,7 +1445,7 @@ impl SidebarView {
             .into_any_element()
     }
 
-    fn plain_header(&self, label: &str) -> impl IntoElement {
+    fn plain_header(&self, label: impl Into<SharedString>) -> impl IntoElement {
         div()
             .h(px(SECTION_HEIGHT))
             .mt(px(SECTION_GAP))
@@ -1457,7 +1455,7 @@ impl SidebarView {
             .text_size(px(12.))
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text_soft())
-            .child(label.to_owned())
+            .child(label.into())
     }
 
     fn team_block(
@@ -1602,9 +1600,9 @@ impl SidebarView {
             .text_size(px(13.5))
             .text_color(theme::accent_text())
             .child(if open {
-                SEE_FEWER_CHANNELS
+                tr("sidebar.see_fewer_channels")
             } else {
-                SEE_ALL_CHANNELS
+                tr("sidebar.see_all_channels")
             })
             .on_click(on_click)
     }
@@ -1775,7 +1773,7 @@ impl SidebarView {
             })
             .collect();
         if !pinned.is_empty() {
-            list = list.child(self.plain_header(PINNED_LABEL));
+            list = list.child(self.plain_header(tr("sidebar.pinned")));
             for (entry, channel) in pinned {
                 let is_selected = selected == Some(Selection::Channel(channel.id.clone()));
                 list = list.child(self.channel_row(
@@ -1787,7 +1785,7 @@ impl SidebarView {
                 ));
             }
         }
-        list = list.child(self.plain_header(TEAMS_LABEL));
+        list = list.child(self.plain_header(tr("sidebar.teams")));
         let hidden_teams: Vec<&SidebarTeam> =
             sidebar.teams.iter().filter(|entry| entry.hidden).collect();
         for entry in sidebar
@@ -1805,7 +1803,7 @@ impl SidebarView {
             let open = self.hidden_teams_open || holds_selection;
             list = list.child(self.reveal_row(
                 "hidden-teams".into(),
-                format!("{HIDDEN_TEAMS_LABEL} ({})", hidden_teams.len()),
+                format!("{} ({})", tr("sidebar.hidden_teams"), hidden_teams.len()),
                 open,
                 10.,
                 cx.listener(|this, _, _, cx| {
@@ -2002,11 +2000,11 @@ fn notifications_submenu(
     let (state, channel_id) = (state.clone(), channel_id.to_owned());
     popup.submenu_with_icon(
         Some(menu_icon(IconName::Bell)),
-        "Notifications",
+        tr("sidebar.notifications"),
         window,
         cx,
         move |submenu, _, _| {
-            let level_item = |label: &'static str, level: ChannelNotificationLevel| {
+            let level_item = |label: String, level: ChannelNotificationLevel| {
                 let (state, channel_id) = (state.clone(), channel_id.clone());
                 PopupMenuItem::new(label)
                     .checked(notifications.level == level)
@@ -2024,14 +2022,20 @@ fn notifications_submenu(
             let (replies_state, replies_id) = (state.clone(), channel_id.clone());
             submenu
                 .item(level_item(
-                    "Banner and activity",
+                    tr("sidebar.notify_banner_activity"),
                     ChannelNotificationLevel::BannerAndFeed,
                 ))
-                .item(level_item("Activity only", ChannelNotificationLevel::Feed))
-                .item(level_item("Off", ChannelNotificationLevel::Off))
+                .item(level_item(
+                    tr("sidebar.notify_activity_only"),
+                    ChannelNotificationLevel::Feed,
+                ))
+                .item(level_item(
+                    tr("sidebar.notify_off"),
+                    ChannelNotificationLevel::Off,
+                ))
                 .separator()
                 .item(
-                    PopupMenuItem::new("Include thread replies")
+                    PopupMenuItem::new(tr("sidebar.include_thread_replies"))
                         .checked(notifications.include_replies)
                         .disabled(notifications.level == ChannelNotificationLevel::Off)
                         .on_click(move |_, _, cx| {
@@ -2140,7 +2144,7 @@ impl Render for SidebarView {
                 v_flex()
                     .flex_none()
                     .child(
-                        page_header(self.tab.title())
+                        page_header(&self.tab.title())
                             .child(self.chat_list_menu_button(cx))
                             .child(self.filter_toggle_button(cx))
                             .child(self.new_chat_button(cx)),
@@ -2151,14 +2155,14 @@ impl Render for SidebarView {
                 v_flex()
                     .flex_none()
                     .child(
-                        page_header(self.tab.title())
+                        page_header(&self.tab.title())
                             .child(self.channel_list_menu_button(cx))
                             .child(self.channel_filter_button(cx))
                             .child(self.new_channel_items_button(cx)),
                     )
                     .child(self.channel_filter_bar(cx)),
             ),
-            SidebarTab::Agents => Some(page_header(self.tab.title())),
+            SidebarTab::Agents => Some(page_header(&self.tab.title())),
             SidebarTab::Activity | SidebarTab::Calls | SidebarTab::Calendar => None,
         };
         v_flex()

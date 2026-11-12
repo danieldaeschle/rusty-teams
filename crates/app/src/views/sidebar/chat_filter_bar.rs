@@ -9,9 +9,10 @@ use gpui_kit::*;
 use super::{NEW_CHAT_BUTTON_SIZE, SidebarEvent, SidebarTab, SidebarView};
 use crate::app_state::Selection;
 use crate::chat_filter::{
-    CLEAR_FILTER_TEXT, CLEAR_FILTERS, CLOSE_FILTER_TEXT, ChatFilterPill, FILTER_PLACEHOLDER,
-    NO_MATCHES, SHOW_FILTER_TEXT, mentioned_conversations,
+    ChatFilterPill, filter_clear_all, filter_clear_text, filter_close_box, filter_no_matches,
+    filter_placeholder, filter_show_box, mentioned_conversations,
 };
+use crate::i18n::tr_args;
 use crate::theme;
 use crate::views::widgets::icon;
 
@@ -83,7 +84,7 @@ impl SidebarView {
         if let Some(input) = &self.filter_input {
             return input.clone();
         }
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder(FILTER_PLACEHOLDER));
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(filter_placeholder()));
         let subscription = cx.subscribe_in(&input, window, |this, input, event, _, cx| {
             if matches!(event, InputEvent::Change) {
                 this.chat_filter.text = input.read(cx).value().to_string();
@@ -99,9 +100,9 @@ impl SidebarView {
         let open = self.filter_box_open;
         let active = open || self.chat_filter.is_active();
         let label = if open {
-            CLOSE_FILTER_TEXT
+            filter_close_box()
         } else {
-            SHOW_FILTER_TEXT
+            filter_show_box()
         };
         div()
             .id("chat-filter-toggle")
@@ -115,7 +116,9 @@ impl SidebarView {
             .when(active, |button| button.bg(theme::popup_hover()))
             .hover(|button| button.bg(theme::popup_hover()))
             .tooltip(move |window, cx| {
-                Tooltip::new(format!("{label} (Ctrl+Shift+F)")).build(window, cx)
+                let mut args = std::collections::HashMap::new();
+                args.insert("label".to_owned(), label.clone());
+                Tooltip::new(tr_args("sidebar.filter.show_shortcut", &args)).build(window, cx)
             })
             .child(icon(
                 IconName::Funnel,
@@ -181,7 +184,7 @@ impl SidebarView {
                         .rounded(px(6.))
                         .cursor_pointer()
                         .hover(|button| button.bg(theme::popup_hover()))
-                        .tooltip(|window, cx| Tooltip::new(CLEAR_FILTER_TEXT).build(window, cx))
+                        .tooltip(|window, cx| Tooltip::new(filter_clear_text()).build(window, cx))
                         .child(icon(IconName::X, 14., theme::text_muted()))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.chat_filter.text.clear();
@@ -260,7 +263,7 @@ impl SidebarView {
                 div()
                     .text_size(px(13.))
                     .text_color(theme::text_muted())
-                    .child(NO_MATCHES),
+                    .child(filter_no_matches()),
             )
             .child(
                 div()
@@ -274,7 +277,7 @@ impl SidebarView {
                     .text_size(px(12.))
                     .text_color(theme::accent_text())
                     .hover(|button| button.bg(theme::surface_raised()))
-                    .child(CLEAR_FILTERS)
+                    .child(filter_clear_all())
                     .on_click(cx.listener(|this, _, window, cx| this.clear_filters(window, cx))),
             )
     }

@@ -20,6 +20,7 @@ use super::shared_tab::{SharedRun, download_label, item_row};
 use super::widgets::icon;
 use crate::channel_files::SharedItem;
 use crate::downloads::DownloadState;
+use crate::i18n::tr;
 use crate::recap::{
     ATTENDANCE_FAILED, ATTENDANCE_OFF, EMPTY_RECAP, Load, NO_TRANSCRIPT, clock_label,
     expiry_is_urgent, expiry_label, highlight_segments, matching_turns, occurrence_label,
@@ -283,7 +284,7 @@ fn failure(reason: String, run: &RecapRun) -> AnyElement {
             Button::new("recap-retry")
                 .ghost()
                 .compact()
-                .label("Retry")
+                .label(tr("common.retry"))
                 .on_click(move |_, window, cx| run(RecapCommand::Retry, window, cx)),
         )
         .into_any_element()

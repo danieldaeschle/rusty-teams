@@ -117,7 +117,7 @@ impl AppState {
         };
         match update {
             CallUpdate::Notice(text) => {
-                self.raise_notice(text, None, cx);
+                self.raise_notice(app_base::ui_locale::localize_notice(&text), None, cx);
                 return;
             }
             CallUpdate::TransferResult { succeeded } => {

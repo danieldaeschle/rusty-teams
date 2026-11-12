@@ -8,15 +8,14 @@ use gpui_kit::*;
 
 use super::{NEW_CHAT_BUTTON_SIZE, SidebarEvent, SidebarView};
 use crate::app_state::Selection;
-use crate::channel_filter::{CHANNEL_FILTER_PLACEHOLDER, UNREAD_PILL};
-use crate::chat_filter::{CLOSE_FILTER_TEXT, SHOW_FILTER_TEXT};
+use crate::channel_filter::{channel_filter_placeholder, channel_unread_pill};
+use crate::chat_filter::{filter_close_box, filter_show_box};
+use crate::i18n::tr;
 use crate::theme;
 use crate::views::create_channel_dialog::open_create_channel_dialog;
 use crate::views::widgets::{icon, menu_icon};
 
 pub const CHANNEL_FILTER_TAG: &str = "shell/islands/sidebar/channel-filter";
-const NEW_CHANNEL_LABEL: &str = "New channel";
-const NEW_MESSAGE_LABEL: &str = "New message";
 const INPUT_HEIGHT: f32 = 32.;
 const PILL_HEIGHT: f32 = 24.;
 const SIDE_INSET: f32 = 16.;
@@ -52,7 +51,7 @@ impl SidebarView {
             return input.clone();
         }
         let input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(CHANNEL_FILTER_PLACEHOLDER));
+            cx.new(|cx| InputState::new(window, cx).placeholder(channel_filter_placeholder()));
         let subscription = cx.subscribe_in(&input, window, |this, input, event, _, cx| {
             if matches!(event, InputEvent::Change) {
                 this.channel_filter.text = input.read(cx).value().to_string();
@@ -67,9 +66,9 @@ impl SidebarView {
     pub(super) fn channel_filter_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let open = self.channel_filter_open;
         let label = if open {
-            CLOSE_FILTER_TEXT
+            filter_close_box()
         } else {
-            SHOW_FILTER_TEXT
+            filter_show_box()
         };
         div()
             .id("channel-filter-toggle")
@@ -82,7 +81,7 @@ impl SidebarView {
             .cursor_pointer()
             .when(open, |button| button.bg(theme::popup_hover()))
             .hover(|button| button.bg(theme::popup_hover()))
-            .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+            .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
             .child(icon(
                 IconName::Search,
                 16.,
@@ -120,11 +119,11 @@ impl SidebarView {
             .ghost()
             .size(px(NEW_CHAT_BUTTON_SIZE))
             .rounded(px(8.))
-            .tooltip("New items")
+            .tooltip(tr("sidebar.new_items"))
             .dropdown_menu(move |menu, _, _| {
                 let (state, team_id, sidebar) = (state.clone(), team_id.clone(), sidebar.clone());
                 menu.item(
-                    PopupMenuItem::new(NEW_MESSAGE_LABEL)
+                    PopupMenuItem::new(tr("sidebar.new_message"))
                         .icon(menu_icon(IconName::MessageSquare))
                         .disabled(!channel_selected)
                         .on_click(move |_, _, cx| {
@@ -134,7 +133,7 @@ impl SidebarView {
                         }),
                 )
                 .item(
-                    PopupMenuItem::new(NEW_CHANNEL_LABEL)
+                    PopupMenuItem::new(tr("sidebar.new_channel"))
                         .icon(menu_icon(IconName::Hash))
                         .disabled(team_id.is_none())
                         .on_click(move |_, window, cx| {
@@ -180,7 +179,7 @@ impl SidebarView {
                                 .text_color(theme::text_soft())
                                 .hover(|chip| chip.bg(theme::border_strong()))
                         })
-                        .child(UNREAD_PILL)
+                        .child(channel_unread_pill())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.channel_filter.unread_only = !this.channel_filter.unread_only;
                             cx.notify();

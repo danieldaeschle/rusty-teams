@@ -14,6 +14,7 @@ use crate::app_state::AppState;
 use crate::call::{
     CallModel, CaptionPosition, CaptionSize, RecordBlock, RecordFeature, record_actions,
 };
+use crate::i18n::tr;
 use crate::theme;
 
 const SETTINGS_WIDTH: f32 = 460.;
@@ -247,7 +248,7 @@ pub fn open_captions_settings(app: &Entity<AppState>, window: &mut Window, cx: &
                 DialogFooter::new().child(
                     Button::new("captions-settings-done")
                         .primary()
-                        .label("Done")
+                        .label(tr("common.done"))
                         .on_click(|_, window, cx| window.close_dialog(cx)),
                 ),
             )

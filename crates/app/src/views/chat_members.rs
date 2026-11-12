@@ -20,6 +20,7 @@ use crate::app_state::AppState;
 use crate::chat_actions::TITLE_LIMIT;
 use crate::chat_members::{MemberRow, can_leave, member_rows};
 use crate::data::Directory;
+use crate::i18n::tr;
 use crate::notice::truncated;
 use crate::theme;
 
@@ -293,10 +294,10 @@ fn confirm_remove(
     window.open_alert_dialog(cx, move |alert, _, _| {
         let (app, chat_id, user_id) = (app.clone(), chat_id.clone(), user_id.clone());
         let cancel = Button::new("remove-member-cancel")
-            .label("Cancel")
+            .label(tr("common.cancel"))
             .on_click(|_, window, cx| window.close_dialog(cx));
         let remove = Button::new("remove-member-confirm")
-            .label("Remove")
+            .label(tr("common.remove"))
             .danger()
             .on_click(move |_, window, cx| {
                 app.update(cx, |state, cx| {

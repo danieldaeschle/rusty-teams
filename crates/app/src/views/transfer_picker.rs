@@ -15,6 +15,7 @@ use super::widgets::icon;
 use crate::app_state::AppState;
 use crate::call::TransferCandidate;
 use crate::fuzzy;
+use crate::i18n::tr;
 use crate::theme::{self, ElevatedSurface as _};
 
 const MAX_RESULTS: usize = 6;
@@ -228,7 +229,7 @@ impl Render for TransferPicker {
             .child(
                 Button::new("transfer-cancel")
                     .ghost()
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
             )
             .children(match self.mode {

@@ -11,6 +11,7 @@ use gpui_kit::component::dialog::DialogFooter;
 
 use crate::app_state::{AppState, Selection, selection_title};
 use crate::channel_menu::post_pin_dialog;
+use crate::i18n::tr;
 use crate::post_follow::post_followed;
 use crate::rows::{Row, reply_excerpt};
 use crate::runtime;
@@ -46,7 +47,7 @@ fn confirm_post_pin(
         let (state, channel_id, message_id) =
             (state.clone(), channel_id.clone(), message_id.clone());
         let cancel = Button::new("post-pin-cancel")
-            .label("Cancel")
+            .label(tr("common.cancel"))
             .on_click(|_, window, cx| window.close_dialog(cx));
         let confirm = Button::new("post-pin-confirm")
             .label(dialog.confirm)

@@ -11,6 +11,7 @@ use gpui_kit::component::{
 use gpui_kit::*;
 
 use super::{ConversationView, ViewMode};
+use crate::i18n::tr;
 use crate::notice::short_error;
 use crate::rows::Row;
 use crate::runtime;
@@ -323,7 +324,7 @@ impl ConversationView {
                     Button::new("cancel-new-post")
                         .ghost()
                         .compact()
-                        .label("Cancel")
+                        .label(tr("common.cancel"))
                         .on_click(
                             cx.listener(|this, _, window, cx| this.cancel_new_post(window, cx)),
                         ),

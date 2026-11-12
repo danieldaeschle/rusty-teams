@@ -20,6 +20,7 @@ use super::{
     mcp_bridge, message_context, raise_notice, runs_handle, start_run, start_run_when_mcp_ready,
 };
 use crate::app_state::AppState;
+use crate::i18n::tr;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::views::widgets::{icon, symbol};
 
@@ -37,7 +38,6 @@ const FIELD_MAX_ROWS: usize = 6;
 const PROMPT_SIZE: f32 = 12.;
 const DISABLED_OPACITY: f32 = 0.5;
 const DEFAULT_PLACEHOLDER: &str = "e.g. only the backend, open a PR when done";
-const SESSION_PLACEHOLDER: &str = "Type the message to send";
 
 pub enum StartDialogEvent {
     Close,
@@ -58,6 +58,7 @@ pub struct StartDialog {
     working_dir: String,
     recent_working_dirs: Vec<String>,
     offers_sessions: bool,
+    asks_for_directory: bool,
     scans_external: bool,
     run_sessions: Vec<SessionOption>,
     external_sessions: Vec<SessionOption>,
@@ -108,6 +109,7 @@ impl StartDialog {
             })
             .unwrap_or_default();
         let offers_sessions = profile.as_ref().is_some_and(agents::supports_resume);
+        let asks_for_directory = profile.as_ref().is_none_or(|profile| profile.is_command());
         let run_sessions = match runs {
             Some(runs) if offers_sessions => {
                 run_options(&runs.for_agent(&action.agent_id), app.read(cx), Utc::now())
@@ -131,6 +133,7 @@ impl StartDialog {
             working_dir: action.working_dir.clone(),
             recent_working_dirs,
             offers_sessions,
+            asks_for_directory,
             scans_external: profile
                 .is_some_and(|profile| profile.output == agents::OutputFormat::ClaudeStreamJson)
                 && offers_sessions,
@@ -180,9 +183,9 @@ impl StartDialog {
         cx: &mut Context<Self>,
     ) {
         let placeholder = if session.is_some() {
-            SESSION_PLACEHOLDER
+            tr("agents.start.message_placeholder")
         } else {
-            DEFAULT_PLACEHOLDER
+            DEFAULT_PLACEHOLDER.to_owned()
         };
         self.input.update(cx, |input, cx| {
             input.set_placeholder(placeholder, window, cx)
@@ -388,7 +391,7 @@ impl StartDialog {
         };
         let new_dialog = dialog.clone();
         let mut parts = vec![MenuPart::Row(MenuRow {
-            label: "New session".to_owned(),
+            label: tr("agents.start.new_session"),
             meta: None,
             running: false,
             selected: self.selected_session.is_none(),
@@ -398,12 +401,12 @@ impl StartDialog {
         })];
         if !self.run_sessions.is_empty() {
             parts.push(MenuPart::Separator);
-            parts.push(MenuPart::Header("Recent sessions".to_owned()));
+            parts.push(MenuPart::Header(tr("agents.start.recent_sessions")));
             parts.extend(self.run_sessions.iter().map(row));
         }
         if !self.external_sessions.is_empty() {
             parts.push(MenuPart::Separator);
-            parts.push(MenuPart::Header("Other sessions".to_owned()));
+            parts.push(MenuPart::Header(tr("agents.start.other_sessions")));
             parts.extend(self.external_sessions.iter().map(row));
         }
         parts
@@ -426,7 +429,7 @@ impl StartDialog {
         };
         let browse_dialog = dialog.clone();
         let mut parts = vec![
-            MenuPart::Header("Recent".to_owned()),
+            MenuPart::Header(tr("agents.start.recent")),
             row(&self.default_working_dir, Some("action default")),
         ];
         parts.extend(
@@ -437,7 +440,7 @@ impl StartDialog {
         );
         parts.push(MenuPart::Separator);
         parts.push(MenuPart::Row(MenuRow {
-            label: "Browse...".to_owned(),
+            label: tr("agents.start.browse"),
             meta: None,
             running: false,
             selected: false,
@@ -457,10 +460,10 @@ impl StartDialog {
                     Some(session.meta.clone()),
                     session.running,
                 ),
-                None => ("New session".to_owned(), None, false),
+                None => (tr("agents.start.new_session"), None, false),
             };
             picker_row(
-                "Session",
+                tr("agents.start.session"),
                 select(
                     "agent-dialog-session",
                     value,
@@ -487,7 +490,12 @@ impl StartDialog {
             .w_full()
             .gap(px(8.))
             .children(session_row)
-            .child(picker_row("Working dir", working_dir_control))
+            .when(self.asks_for_directory, |rows| {
+                rows.child(picker_row(
+                    tr("agents.start.working_dir"),
+                    working_dir_control,
+                ))
+            })
     }
 
     fn field(&self, window: &Window, cx: &App) -> Div {
@@ -501,9 +509,9 @@ impl StartDialog {
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_faint())
                     .child(if self.selected_session.is_some() {
-                        "Message to the session"
+                        tr("agents.start.message_to_session")
                     } else {
-                        "Extra instructions (optional)"
+                        tr("agents.start.extra_instructions")
                     }),
             )
             .child(
@@ -541,7 +549,7 @@ impl StartDialog {
                 12.,
                 theme::text_muted(),
             ))
-            .child("Show prompt")
+            .child(tr("agents.start.show_prompt"))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.show_prompt = !this.show_prompt;
                 cx.notify();
@@ -581,11 +589,11 @@ impl StartDialog {
         let blocked =
             self.selected_session.is_some() && self.input.read(cx).value().trim().is_empty();
         let start_label = if self.selected_session.is_some() {
-            "Send"
+            tr("agents.start.send")
         } else if self.needs_allow {
-            "Allow and start"
+            tr("agents.start.allow_and_start")
         } else {
-            "Start"
+            tr("agents.start.start")
         };
         h_flex()
             .w_full()
@@ -604,7 +612,7 @@ impl StartDialog {
                     .bg(theme::surface_raised())
                     .hover(|button| button.bg(theme::popup_hover()))
                     .text_size(px(13.))
-                    .child("Cancel")
+                    .child(tr("common.cancel"))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(StartDialogEvent::Close))),
             )
             .child(
@@ -673,7 +681,7 @@ impl Render for StartDialog {
                             div()
                                 .text_size(px(12.))
                                 .text_color(theme::text_soft())
-                                .child("Agents can't see this chat yet."),
+                                .child(tr("agents.start.chat_invisible")),
                         )
                     })
                     .child(self.pickers(cx))

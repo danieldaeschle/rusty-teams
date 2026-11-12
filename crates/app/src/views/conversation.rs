@@ -85,6 +85,7 @@ use crate::demo_library::DemoLibrary;
 use crate::downloads::{self, ClickAction, DownloadKey, Downloads, PartFile, RevealTarget};
 use crate::emoji;
 use crate::emoticons;
+use crate::i18n::tr;
 use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
 use crate::notice::short_error;
 use crate::outbox::{Delivered, deliver, new_outbox_id, outbox_record, outgoing_of};
@@ -2894,6 +2895,12 @@ impl ConversationView {
         } else if target.as_deref() == Some(key) {
             *target = None;
         }
+        if !hovered
+            && matches!(slot, HoverSlot::Row)
+            && self.toolbar_hovered.as_deref() == Some(key)
+        {
+            self.toolbar_hovered = None;
+        }
         if hovered
             && matches!(slot, HoverSlot::Row)
             && self
@@ -3713,7 +3720,7 @@ impl ConversationView {
                     Button::new("retry-new-chat")
                         .ghost()
                         .compact()
-                        .label("Retry")
+                        .label(tr("common.retry"))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.retry(&failed_key, window, cx)
                         })),
@@ -4271,7 +4278,7 @@ impl Render for ConversationView {
                             Button::new("retry-fetch")
                                 .ghost()
                                 .compact()
-                                .label("Retry")
+                                .label(tr("common.retry"))
                                 .on_click(cx.listener(|this, _, _, cx| this.retry_fetch(cx))),
                         )
                     }),

@@ -14,6 +14,7 @@ use super::avatar::{person_avatar, status_glyph, with_presence, with_presence_ba
 use super::widgets::{menu_icon, symbol};
 use crate::app_state::AppState;
 use crate::data::{Person, PresenceKind};
+use crate::i18n::tr;
 use crate::notify::pause;
 use crate::own_status::{
     STATUS_CHOICES, STATUS_DURATIONS, StateSummary, StatusDuration, choice_label, duration_target,
@@ -26,8 +27,6 @@ pub const MENU_WIDTH: f32 = 250.;
 pub(crate) const TITLE_AVATAR_SIZE: f32 = 28.;
 pub(crate) const OWN_AVATAR_DISC: &str = "shell/title-bar/own-status/avatar/disc";
 pub(crate) const SETTINGS_MORE_TAG: &str = "shell/title-bar/settings-more";
-const SETTINGS_MORE_TITLE: &str = "Settings and more";
-const VIEW_ACCOUNT_LABEL: &str = "View account";
 const VIEW_ACCOUNT_URL: &str = "https://myaccount.microsoft.com";
 const TITLE_PRESENCE_SIZE: f32 = 14.;
 const HEADER_AVATAR_SIZE: f32 = 40.;
@@ -170,7 +169,7 @@ fn header(context: &MenuContext, cx: &App) -> Div {
                         .text_size(px(12.))
                         .text_color(theme::text_soft())
                         .hover(|link| link.text_color(theme::accent_text()))
-                        .child(VIEW_ACCOUNT_LABEL)
+                        .child(tr("status_menu.view_account"))
                         .child(menu_icon(IconName::ExternalLink).size(px(12.)))
                         .on_click(|_, _, cx| cx.open_url(VIEW_ACCOUNT_URL)),
                 )
@@ -212,7 +211,7 @@ fn status_menu(
         .item(pause_item(&context.app, window, cx))
         .item(work_location_item(context, window, cx))
         .item(
-            PopupMenuItem::new("Set status message")
+            PopupMenuItem::new(tr("status_menu.set_status_message"))
                 .icon(menu_icon(IconName::Pencil))
                 .on_click(move |_, _, cx| {
                     message_app.update(cx, |state, cx| state.request_status_message(cx));
@@ -245,7 +244,7 @@ fn pause_item(
             return menu;
         }
         menu.separator().item(
-            PopupMenuItem::new("Resume notifications")
+            PopupMenuItem::new(tr("status_menu.resume_notifications"))
                 .icon(menu_icon(IconName::BellRing))
                 .on_click(move |_, _, cx| {
                     resume_app.update(cx, |state, cx| state.resume_notifications(cx));
@@ -268,7 +267,7 @@ pub fn settings_more_button(app: &Entity<AppState>) -> AnyElement {
             Button::new("title-settings-more")
                 .ghost()
                 .icon(IconName::Ellipsis)
-                .tooltip(SETTINGS_MORE_TITLE)
+                .tooltip(tr("shell.settings_and_more"))
                 .dropdown_menu_with_anchor(Anchor::TopRight, move |popup, window, cx| {
                     settings_more_menu(popup, window, cx, &app)
                 }),
@@ -293,7 +292,7 @@ fn settings_more_menu(
     let popup = popup
         .min_w(px(MENU_WIDTH))
         .item(
-            PopupMenuItem::new("Settings")
+            PopupMenuItem::new(tr("common.settings"))
                 .icon(menu_icon(IconName::Settings))
                 .on_click(move |_, _, cx| {
                     settings_app.update(cx, |state, cx| {
@@ -303,7 +302,7 @@ fn settings_more_menu(
         )
         .separator()
         .item(
-            PopupMenuItem::new("Chat list")
+            PopupMenuItem::new(tr("status_menu.chat_list"))
                 .icon(menu_icon(IconName::LayoutList))
                 .on_click(move |_, _, cx| {
                     chat_list_app.update(cx, |state, cx| {
@@ -312,7 +311,7 @@ fn settings_more_menu(
                 }),
         )
         .item(
-            PopupMenuItem::new("Translation")
+            PopupMenuItem::new(tr("status_menu.translation"))
                 .icon(menu_icon(IconName::Languages))
                 .on_click(move |_, _, cx| {
                     translation_app.update(cx, |state, cx| {
@@ -321,7 +320,7 @@ fn settings_more_menu(
                 }),
         )
         .item(
-            PopupMenuItem::new("Notification settings")
+            PopupMenuItem::new(tr("status_menu.notification_settings"))
                 .icon(menu_icon(IconName::Bell))
                 .on_click(move |_, _, cx| {
                     notification_app.update(cx, |state, cx| {
@@ -330,7 +329,7 @@ fn settings_more_menu(
                 }),
         )
         .item(
-            PopupMenuItem::new("Make a test call")
+            PopupMenuItem::new(tr("status_menu.test_call"))
                 .icon(menu_icon(IconName::Phone))
                 .on_click(move |_, _, cx| {
                     call_app.update(cx, |state, cx| state.start_test_call(cx));
@@ -343,7 +342,7 @@ fn settings_more_menu(
         return popup;
     }
     popup.item(
-        PopupMenuItem::new("Simulate incoming call")
+        PopupMenuItem::new(tr("status_menu.simulate_incoming"))
             .icon(menu_icon(IconName::Phone))
             .on_click(move |_, _, cx| {
                 ring_app.update(cx, |state, cx| state.demo_incoming_ring(cx));
@@ -367,7 +366,7 @@ fn work_location_item(
     let current = context.status.work_location;
     let app = context.app.clone();
     let submenu = PopupMenu::build(window, cx, move |menu, _, _| {
-        let pick = |label: &'static str, kind: WorkLocationKind| {
+        let pick = |label: String, kind: WorkLocationKind| {
             let app = app.clone();
             PopupMenuItem::new(label)
                 .icon(work_location_icon(Some(kind)))
@@ -377,14 +376,14 @@ fn work_location_item(
         };
         let clear_app = app.clone();
         let menu = menu
-            .item(PopupMenuItem::label("Set work location for today"))
-            .item(pick("Office", WorkLocationKind::Office))
-            .item(pick("Remote", WorkLocationKind::Remote));
+            .item(PopupMenuItem::label(tr("status_menu.work_location_today")))
+            .item(pick(tr("status_menu.office"), WorkLocationKind::Office))
+            .item(pick(tr("status_menu.remote"), WorkLocationKind::Remote));
         if current.is_none() {
             return menu;
         }
         menu.separator().item(
-            PopupMenuItem::new("Clear work location")
+            PopupMenuItem::new(tr("status_menu.clear_work_location"))
                 .icon(menu_icon(IconName::X))
                 .on_click(move |_, _, cx| {
                     clear_app.update(cx, |state, cx| state.set_own_work_location(None, cx));
@@ -429,12 +428,12 @@ fn state_menu(
     popup
         .separator()
         .item(
-            PopupMenuItem::submenu("Duration", durations)
+            PopupMenuItem::submenu(tr("status_menu.duration"), durations)
                 .icon(menu_icon(IconName::Clock))
                 .disabled(target.is_none()),
         )
         .item(
-            PopupMenuItem::new("Reset status")
+            PopupMenuItem::new(tr("status_menu.reset_status"))
                 .icon(menu_icon(IconName::RotateCcw))
                 .on_click(move |_, _, cx| {
                     reset_app.update(cx, |state, cx| state.set_own_availability(None, cx));
