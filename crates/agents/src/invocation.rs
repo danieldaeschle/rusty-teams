@@ -287,7 +287,7 @@ pub fn kill_process_invocation(process_id: u32, session_id: &str) -> Option<Invo
 }
 
 pub fn supports_resume(profile: &AgentProfile) -> bool {
-    profile.command.contains(SESSION_FLAG)
+    profile.is_command() && profile.command.contains(SESSION_FLAG)
 }
 
 pub fn resume_invocation(

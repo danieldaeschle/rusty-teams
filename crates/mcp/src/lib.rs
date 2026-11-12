@@ -3,6 +3,7 @@ mod hub;
 pub mod install;
 mod meetings;
 mod policy;
+mod remote;
 mod server;
 mod settings;
 mod source;
@@ -14,6 +15,7 @@ pub use hub::{
     ProposalMention, ReactionOutcome, ReactionProposal, UiEvent,
 };
 pub use policy::{Access, AgentPolicy, ConversationKind, DEFAULT_PORT};
+pub use remote::{ListedTool, ToolSession};
 pub use server::{ServerError, ServerHandle, start};
 pub use settings::{
     load as load_policy, load_or_create_token, regenerate_token, save as save_policy,

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use agents::{Environment, OutputFormat};
+use agents::{AgentBackend, Environment, OutputFormat};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{ActiveTheme as _, h_flex, input::Textarea, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -27,9 +27,17 @@ const PLACEHOLDER_CHIPS: [&str; 9] = [
     "agent",
 ];
 
+fn host_label() -> &'static str {
+    if cfg!(windows) {
+        "Windows"
+    } else {
+        "This computer"
+    }
+}
+
 fn environment_choices() -> [(&'static str, Environment); 3] {
     [
-        ("Windows", Environment::Host),
+        (host_label(), Environment::Host),
         ("WSL - default distro", Environment::Wsl { distro: None }),
         (
             "WSL - named distro",
@@ -115,7 +123,7 @@ impl AgentsSettings {
         let environment_label = environment_choices()
             .into_iter()
             .find(|(_, environment)| same_environment_kind(environment, &profile.environment))
-            .map_or("Windows", |(label, _)| label);
+            .map_or(host_label(), |(label, _)| label);
         let output_entries: Vec<MenuEntry> = output_choices()
             .into_iter()
             .map(|(label, output)| {
@@ -137,11 +145,67 @@ impl AgentsSettings {
         let open_problem =
             placeholder_problem(&problems, &profile.id, &profile.open_session_command);
         let named_distro = matches!(profile.environment, Environment::Wsl { distro: Some(_) });
+        let chat = profile.is_chat();
         let status = match &self.probe {
             Probe::Idle => None,
-            Probe::Running => Some(("Testing...".to_owned(), theme::text_muted())),
-            Probe::Found(line) => Some((format!("Found: {line}"), theme::green())),
+            Probe::Running => Some((
+                if chat {
+                    "Loading models...".to_owned()
+                } else {
+                    "Testing...".to_owned()
+                },
+                theme::text_muted(),
+            )),
+            Probe::Found(line) => Some((
+                if chat {
+                    line.clone()
+                } else {
+                    format!("Found: {line}")
+                },
+                theme::green(),
+            )),
             Probe::Missing(error) => Some((error.clone(), theme::red_soft())),
+        };
+        let shows_base = matches!(profile.backend, AgentBackend::OpenAi { .. });
+        let key_saved = match &profile.backend {
+            AgentBackend::OpenAi { api_key, .. } | AgentBackend::Anthropic { api_key, .. } => {
+                !api_key.is_empty()
+            }
+            AgentBackend::Command => false,
+        };
+        let model_problem = problems.iter().find_map(|problem| match problem {
+            agents::SettingsProblem::EmptyModel { agent_id } if agent_id == &profile.id => {
+                Some("Choose a model".to_owned())
+            }
+            _ => None,
+        });
+        let current_model = form_state.model.read(cx).value().trim().to_owned();
+        let mut model_names = self.models.clone();
+        if !current_model.is_empty() && !model_names.iter().any(|name| name == &current_model) {
+            model_names.insert(0, current_model.clone());
+        }
+        let model_entries: Vec<MenuEntry> = model_names
+            .iter()
+            .map(|name| {
+                let this = this.clone();
+                let label = name.clone();
+                let chosen = label.clone();
+                let selected = label == current_model;
+                let choose: Choice = Rc::new(move |window, cx| {
+                    let name = chosen.clone();
+                    this.update(cx, |this, cx| this.set_model(name, window, cx))
+                });
+                MenuEntry {
+                    label,
+                    selected,
+                    choose,
+                }
+            })
+            .collect();
+        let model_label = if current_model.is_empty() {
+            "Choose a model".to_owned()
+        } else {
+            current_model
         };
         let test_this = this.clone();
         let delete_this = this.clone();
@@ -156,22 +220,76 @@ impl AgentsSettings {
                     None,
                 )
                 .into_any_element(),
-                field(
-                    "Runs in",
-                    dropdown(
-                        "agent-environment",
-                        environment_label.to_owned(),
-                        environment_entries,
-                    ),
-                    Some(hint(
-                        "Windows or a WSL distro. Paths below are in that system.",
-                    )),
-                    None,
-                )
-                .into_any_element(),
                 div()
                     .w_full()
-                    .when(named_distro, |slot| {
+                    .when(chat && shows_base, |slot| {
+                        slot.child(field(
+                            "Base URL",
+                            text_field(&form_state.base_url, true, false, cx),
+                            Some(hint("OpenAI-compatible, including /v1.")),
+                            None,
+                        ))
+                    })
+                    .into_any_element(),
+                div()
+                    .w_full()
+                    .when(chat && !model_entries.is_empty(), |slot| {
+                        slot.child(field(
+                            "Installed models",
+                            dropdown("agent-model", model_label, model_entries),
+                            Some(hint("Loaded from the endpoint. The choice fills Model.")),
+                            None,
+                        ))
+                    })
+                    .into_any_element(),
+                div()
+                    .w_full()
+                    .when(chat, |slot| {
+                        slot.child(field(
+                            "Model",
+                            text_field(&form_state.model, true, model_problem.is_some(), cx),
+                            Some(hint(
+                                "Pick a loaded model, or type an id. Leave the URL or key field to reload.",
+                            )),
+                            model_problem.clone(),
+                        ))
+                    })
+                    .into_any_element(),
+                div()
+                    .w_full()
+                    .when(chat, |slot| {
+                        slot.child(field(
+                        "API key",
+                        text_field(&form_state.api_key, true, false, cx),
+                        Some(hint(if key_saved {
+                            "A key is saved. Type a new one to replace it. Ollama can stay empty."
+                        } else {
+                            "Stored in the local app database. Ollama can stay empty."
+                        })),
+                        None,
+                    ))
+                    })
+                    .into_any_element(),
+                div()
+                    .w_full()
+                    .when(!chat, |slot| {
+                        slot.child(field(
+                            "Runs in",
+                            dropdown(
+                                "agent-environment",
+                                environment_label.to_owned(),
+                                environment_entries,
+                            ),
+                            Some(hint(
+                                "This computer or a WSL distro. Paths below are in that system.",
+                            )),
+                            None,
+                        ))
+                    })
+                    .into_any_element(),
+                div()
+                    .w_full()
+                    .when(!chat && named_distro, |slot| {
                         slot.child(field(
                             "Distro name",
                             text_field(&form_state.distro, false, false, cx),
@@ -180,38 +298,54 @@ impl AgentsSettings {
                         ))
                     })
                     .into_any_element(),
-                field(
-                    "Command",
-                    text_field(&form_state.command, true, command_problem.is_some(), cx),
-                    Some(hint(
-                        "The prompt goes to stdin unless the command has {prompt}.",
-                    )),
-                    command_problem,
-                )
-                .into_any_element(),
-                field(
-                    "Output",
-                    dropdown("agent-output", output_label.to_owned(), output_entries),
-                    Some(hint("Plain text shows only the time and the last line.")),
-                    None,
-                )
-                .into_any_element(),
-                field(
-                    "MCP config flag",
-                    text_field(&form_state.mcp_flag, true, false, cx),
-                    Some(hint(
-                        "Passes the Teams MCP endpoint to the agent. Empty = none.",
-                    )),
-                    None,
-                )
-                .into_any_element(),
-                field(
-                    "Open session",
-                    text_field(&form_state.open_session, true, open_problem.is_some(), cx),
-                    Some(hint("Available: {cwd} and {session_id}.")),
-                    open_problem,
-                )
-                .into_any_element(),
+                div()
+                    .w_full()
+                    .when(!chat, |slot| {
+                        slot.child(field(
+                            "Command",
+                            text_field(&form_state.command, true, command_problem.is_some(), cx),
+                            Some(hint(
+                                "The prompt goes to stdin unless the command has {prompt}.",
+                            )),
+                            command_problem,
+                        ))
+                    })
+                    .into_any_element(),
+                div()
+                    .w_full()
+                    .when(!chat, |slot| {
+                        slot.child(field(
+                            "Output",
+                            dropdown("agent-output", output_label.to_owned(), output_entries),
+                            Some(hint("Plain text shows only the time and the last line.")),
+                            None,
+                        ))
+                    })
+                    .into_any_element(),
+                div()
+                    .w_full()
+                    .when(!chat, |slot| {
+                        slot.child(field(
+                            "MCP config flag",
+                            text_field(&form_state.mcp_flag, true, false, cx),
+                            Some(hint(
+                                "Passes the Teams MCP endpoint to the agent. Empty = none.",
+                            )),
+                            None,
+                        ))
+                    })
+                    .into_any_element(),
+                div()
+                    .w_full()
+                    .when(!chat, |slot| {
+                        slot.child(field(
+                            "Open session",
+                            text_field(&form_state.open_session, true, open_problem.is_some(), cx),
+                            Some(hint("Available: {cwd} and {session_id}.")),
+                            open_problem,
+                        ))
+                    })
+                    .into_any_element(),
                 h_flex()
                     .w_full()
                     .gap(px(8.))

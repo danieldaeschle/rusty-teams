@@ -838,14 +838,22 @@ impl AgentRuns {
             return;
         };
         let prompt = run.pending_prompt.clone().unwrap_or_default();
-        let planned = self.launch_plan(&run, &prompt, cx);
-        if let Some(run) = self.run_mut(run_id) {
-            run.pending_prompt = None;
-            if run.current_step == QUEUED_STEP {
-                run.started_at = Utc::now();
-                run.push_step("Starting".to_owned());
-            }
+        if let Some(profile) = self
+            .settings
+            .agents
+            .iter()
+            .find(|agent| agent.id == run.agent_id)
+            .cloned()
+            .filter(|profile| profile.is_chat())
+        {
+            self.mark_launching(run_id);
+            let endpoint = mcp_bridge::endpoint(cx);
+            self.spawn_chat(run_id, profile, prompt, endpoint, cx);
+            self.persist(cx);
+            return;
         }
+        let planned = self.launch_plan(&run, &prompt, cx);
+        self.mark_launching(run_id);
         match planned {
             Ok((plan, format)) => self.spawn(run_id, plan, format, cx),
             Err(message) => self.finish(
@@ -896,6 +904,54 @@ impl AgentRuns {
         )
         .map(|plan| (plan, profile.output))
         .map_err(|error| error.to_string())
+    }
+
+    fn mark_launching(&mut self, run_id: u64) {
+        if let Some(run) = self.run_mut(run_id) {
+            run.pending_prompt = None;
+            if run.current_step == QUEUED_STEP {
+                run.started_at = Utc::now();
+                run.push_step("Starting".to_owned());
+            }
+        }
+    }
+
+    fn spawn_chat(
+        &mut self,
+        run_id: u64,
+        profile: AgentProfile,
+        prompt: String,
+        endpoint: Option<McpEndpoint>,
+        cx: &mut Context<Self>,
+    ) {
+        let (updates_sender, mut updates) = mpsc::unbounded_channel();
+        let (stop_sender, stop_receiver) = oneshot::channel();
+        self.stops.insert(run_id, stop_sender);
+        if let Some(run) = self.run_mut(run_id) {
+            run.launch_session_id = Some(run.session_id.clone());
+            run.launched = true;
+        }
+        let outcome = runtime::spawn(super::chat_run::run_chat(
+            profile,
+            prompt,
+            endpoint,
+            updates_sender,
+            stop_receiver,
+        ));
+        cx.spawn(async move |this, cx| {
+            while let Some(update) = updates.recv().await {
+                if this
+                    .update(cx, |runs, cx| runs.apply_update(run_id, update, cx))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            let outcome = outcome.await.ok();
+            this.update(cx, |runs, cx| runs.finish(run_id, outcome, cx))
+                .ok();
+        })
+        .detach();
     }
 
     fn spawn(
@@ -1211,7 +1267,7 @@ pub(super) mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use agents::{AgentAction, AgentProfile, AgentSettings, Environment, OutputFormat};
+    use agents::{AgentAction, AgentProfile, AgentSettings};
     use chrono::TimeZone;
     use store::{MessageRecord, Store};
 
@@ -1237,11 +1293,8 @@ pub(super) mod tests {
         let profile = AgentProfile {
             id: "fake".to_owned(),
             name: "Fake".to_owned(),
-            environment: Environment::Host,
             command: command.to_owned(),
-            output: OutputFormat::ClaudeStreamJson,
-            open_session_command: String::new(),
-            mcp_config_flag: String::new(),
+            ..AgentProfile::default()
         };
         let action = AgentAction {
             id: "ask".to_owned(),

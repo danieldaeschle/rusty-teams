@@ -118,6 +118,64 @@ pub fn preview_prompt(
     ))
 }
 
+/// Newest non-deleted messages of a chat, oldest-first, capped at [`THREAD_LIMIT`].
+pub fn recent_thread(state: &AppState, conversation_id: &str) -> Vec<ThreadMessage> {
+    let names = local_names(state);
+    let sender_of = |entry: &MessageRecord| {
+        entry
+            .sender_name
+            .clone()
+            .filter(|name| !name.trim().is_empty())
+            .or_else(|| {
+                entry
+                    .sender_id
+                    .as_ref()
+                    .and_then(|user_id| names.get(user_id).cloned())
+            })
+            .unwrap_or_else(|| UNKNOWN_SENDER.to_owned())
+    };
+    let mut records = state
+        .store
+        .messages(conversation_id, None, THREAD_LIMIT)
+        .unwrap_or_default();
+    records.retain(|entry| !entry.deleted);
+    let skipped = records.len().saturating_sub(THREAD_LIMIT);
+    records
+        .into_iter()
+        .skip(skipped)
+        .map(|entry| ThreadMessage {
+            sender: sender_of(&entry),
+            text: message_text(&entry),
+            time: entry
+                .created_at
+                .with_timezone(&Local)
+                .format(TIME_FORMAT)
+                .to_string(),
+        })
+        .collect()
+}
+
+pub fn chat_title(state: &AppState, conversation_id: &str) -> String {
+    selection_for(&state.sidebar, conversation_id)
+        .as_ref()
+        .map(|selection| selection_title(&state.sidebar, selection))
+        .unwrap_or_else(|| "Chat".to_owned())
+}
+
+/// Plain-text ask for a local write-with profile: chat title, recent thread, question.
+pub fn ask_prompt(chat: &str, thread: &[ThreadMessage], question: &str) -> String {
+    let thread_block = if thread.is_empty() {
+        "(no messages yet)".to_owned()
+    } else {
+        thread
+            .iter()
+            .map(|entry| format!("{} ({}): {}", entry.sender, entry.time, entry.text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    format!("Chat \"{chat}\"\n\n{thread_block}\n\nQuestion: {question}")
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -239,5 +297,23 @@ mod tests {
         let prompt = preview_prompt(&state, &action, "19:chat", "m1", "").unwrap();
         assert!(prompt.starts_with("Ada asked me in the Teams chat \"Ops\""));
         assert!(prompt.contains("session_id \"(session id)\""));
+    }
+
+    #[test]
+    fn recent_thread_keeps_the_newest_twenty_non_deleted() {
+        let mut records: Vec<MessageRecord> = (0..25)
+            .map(|minute| message(&format!("m{minute}"), None, minute, "Ada"))
+            .collect();
+        records[0].deleted = true;
+        let state = state_with(&records);
+        let thread = recent_thread(&state, "19:chat");
+        assert_eq!(thread.len(), 20);
+        assert_eq!(thread[0].text, "text m5");
+        assert_eq!(thread[19].text, "text m24");
+        assert_eq!(chat_title(&state, "19:chat"), "Ops");
+        let prompt = ask_prompt("Ops", &thread, "Summarize this chat");
+        assert!(prompt.contains("Chat \"Ops\""));
+        assert!(prompt.contains("text m5"));
+        assert!(prompt.contains("Question: Summarize this chat"));
     }
 }
