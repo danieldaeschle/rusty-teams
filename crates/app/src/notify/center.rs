@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -60,11 +61,17 @@ struct OpenWindow {
     handle: AnyWindowHandle,
     native: Option<NativeHandle>,
     opened: Instant,
+    placed: Cell<Option<(i32, i32, i32, i32)>>,
 }
 
 impl OpenWindow {
     fn place(&self, native: NativeHandle, slot: Slot, x: i32, cx: &mut App) {
-        platform::place(native, x, slot.y, slot.width, slot.height);
+        let rect = (x, slot.y, slot.width, slot.height);
+        match self.placed.replace(Some(rect)) {
+            Some(previous) if previous == rect => return,
+            Some(_) => platform::place_rect(native, x, slot.y, slot.width, slot.height),
+            None => platform::place(native, x, slot.y, slot.width, slot.height),
+        }
         // WM_SIZE arrives while the app is borrowed, so GPUI drops its own resize report.
         self.handle
             .update(cx, |_, window, cx| window.bounds_changed(cx))
@@ -1425,6 +1432,7 @@ fn open_popup<V: Into<AnyView>>(
             handle,
             native,
             opened: Instant::now(),
+            placed: Cell::new(None),
         };
         center.update(cx, |this, _| opened(this, Some(window)));
     });
