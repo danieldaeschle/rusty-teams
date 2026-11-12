@@ -170,6 +170,8 @@ fn main() {
         data_path(crash_log::CRASH_LOG_FILE),
     );
     diagnostics::install(data_path(diagnostics::DIAGNOSTICS_FILE));
+    #[cfg(target_os = "linux")]
+    app_base::linux_fonts::hide_system_color_emoji();
     let arguments = parse_arguments();
     if !arguments.demo && arguments.database.is_none() {
         let relaunch_value = std::env::var(updater::RELAUNCH_ENV).ok();

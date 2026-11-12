@@ -295,6 +295,7 @@ impl ReactionPicker {
             .justify_center()
             .rounded(px(6.))
             .text_size(px(20.))
+            .font_family(theme::EMOJI_FONT_FAMILY)
             .cursor_pointer()
             .when(selected, |cell| cell.bg(theme::reaction_on_own()))
             .hover(|cell| cell.bg(theme::popup_hover()))

@@ -373,12 +373,6 @@ fn code_font(cx: &App) -> SharedString {
     cx.theme().mono_font_family.clone()
 }
 
-#[cfg(target_os = "windows")]
-const EMOJI_FONT_FAMILY: &str = "Segoe UI Emoji";
-#[cfg(target_os = "macos")]
-const EMOJI_FONT_FAMILY: &str = "Apple Color Emoji";
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
-const EMOJI_FONT_FAMILY: &str = "Noto Color Emoji";
 const KEYCAP: char = '\u{20e3}';
 const VARIATION_SELECTOR: char = '\u{fe0f}';
 
@@ -406,7 +400,8 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
         .map(|segment| (segment.range.clone(), highlight_for(segment.style, own)))
         .collect::<Vec<_>>();
     let mono = code_font(cx);
-    let font_overrides = inline
+    let emoji_family = SharedString::from(theme::EMOJI_FONT_FAMILY);
+    let mut font_overrides: Vec<_> = inline
         .segments
         .iter()
         .filter(|segment| segment.style.code)
@@ -414,9 +409,17 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
         .chain(
             keycap_ranges(&inline.text)
                 .into_iter()
-                .map(|range| (range, SharedString::from(EMOJI_FONT_FAMILY))),
+                .map(|range| (range, emoji_family.clone())),
+        )
+        .chain(
+            inline
+                .segments
+                .iter()
+                .filter(|segment| segment.emoji.is_some())
+                .map(|segment| (segment.range.clone(), emoji_family.clone())),
         )
         .collect();
+    font_overrides.sort_by_key(|(range, _)| range.start);
     let emoji = inline.emoji();
     let highlights = highlights
         .into_iter()
@@ -456,7 +459,11 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
                     },
                     None => highlight_for(segment.style, own),
                 },
-                family: segment.style.code.then(|| mono.clone()),
+                family: if segment.emoji.is_some() {
+                    Some(SharedString::from(theme::EMOJI_FONT_FAMILY))
+                } else {
+                    segment.style.code.then(|| mono.clone())
+                },
                 scale: segment.style.font_scale(),
                 raise: segment.style.baseline_raise(),
             })

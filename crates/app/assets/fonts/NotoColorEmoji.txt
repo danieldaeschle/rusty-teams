@@ -1,0 +1,12 @@
+Copyright 2022 Google Inc.
+
+Noto Color Emoji (CBDT/CBLC) from
+https://github.com/googlefonts/noto-emoji/tree/main/2D/fonts
+
+Rusty Teams adds a cmap entry for U+006D, mapped onto an existing glyph, so
+GPUI keeps the face when a text run asks for this family. The family name
+"Noto Color Emoji" and the PostScript name "NotoColorEmoji" are unchanged.
+The upstream copyright declares no Reserved Font Name.
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+The license text is in OFL.txt in this directory.
