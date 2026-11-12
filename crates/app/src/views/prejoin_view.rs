@@ -12,7 +12,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
-use super::call_extras::{CameraMenu, background_items};
+use super::call_extras::{CameraMenu, background_items, quality_items};
 use super::call_view::{device_items, round_control};
 use crate::app_state::AppState;
 use crate::call::{AudioChoice, CameraPreview, JoinOptions, PendingJoin};
@@ -45,6 +45,7 @@ pub struct PrejoinView {
     input: DeviceChoice,
     output: DeviceChoice,
     applied_background: crate::call::BackgroundPick,
+    applied_quality: calling::VideoQuality,
     tick: u32,
     _subscription: Subscription,
     _release: Subscription,
@@ -92,7 +93,10 @@ impl PrejoinView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let subscription = cx.observe(&app, |view, _, cx| view.sync_background(cx));
+        let subscription = cx.observe(&app, |view, _, cx| {
+            view.sync_background(cx);
+            view.sync_quality(cx);
+        });
         let release = cx.on_release(|view, cx| view.preview.stop(cx));
         let (preview, mut updates) = CameraPreview::new();
         let state = app.read(cx);
@@ -102,6 +106,7 @@ impl PrejoinView {
         options.camera_on = options.camera_on && !state.mode.read_only;
         let camera = state.call_camera.clone();
         let (input, output) = (state.call_input.clone(), state.call_output.clone());
+        let applied_quality = state.call_video_quality;
         let mut view = PrejoinView {
             pending_id: pending.id,
             demo,
@@ -117,6 +122,7 @@ impl PrejoinView {
             input,
             output,
             applied_background: crate::call::BackgroundPick::None,
+            applied_quality,
             tick: 0,
             _subscription: subscription,
             _release: release,
@@ -159,7 +165,7 @@ impl PrejoinView {
             view.load_devices(cx);
         }
         view.sync_background(cx);
-        view.restart_preview();
+        view.restart_preview(cx);
         view
     }
 
@@ -196,9 +202,10 @@ impl PrejoinView {
         .detach();
     }
 
-    fn restart_preview(&mut self) {
+    fn restart_preview(&mut self, cx: &Context<Self>) {
         if self.options.camera_on && !self.demo {
-            self.preview.start(&self.camera);
+            let quality = self.app.read(cx).call_video_quality;
+            self.preview.start(&self.camera, quality);
         }
     }
 
@@ -215,10 +222,20 @@ impl PrejoinView {
         cx.notify();
     }
 
+    fn sync_quality(&mut self, cx: &mut Context<Self>) {
+        let quality = self.app.read(cx).call_video_quality;
+        if quality == self.applied_quality {
+            return;
+        }
+        self.applied_quality = quality;
+        self.restart_preview(cx);
+        cx.notify();
+    }
+
     fn toggle_camera(&mut self, cx: &mut Context<Self>) {
         self.options.camera_on = !self.options.camera_on;
         if self.options.camera_on {
-            self.restart_preview();
+            self.restart_preview(cx);
         } else {
             self.preview.stop(cx);
         }
@@ -239,7 +256,7 @@ impl PrejoinView {
         self.camera = choice.clone();
         self.app
             .update(cx, |state, cx| state.select_call_camera(choice, cx));
-        self.restart_preview();
+        self.restart_preview(cx);
         cx.notify();
     }
 
@@ -365,7 +382,11 @@ impl PrejoinView {
                     .label("Background")
                     .icon(IconName::ChevronDown)
                     .dropdown_menu(move |menu: PopupMenu, _, _| {
-                        background_items(menu, &background_app, &backgrounds)
+                        background_items(
+                            quality_items(menu, &background_app, backgrounds.quality),
+                            &background_app,
+                            &backgrounds,
+                        )
                     }),
             )
     }

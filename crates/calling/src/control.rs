@@ -35,6 +35,7 @@ pub enum CallCommand {
     SelectInput(DeviceChoice),
     SelectOutput(DeviceChoice),
     SetMicSettings(MicSettings),
+    SetVideoQuality(crate::video_quality::VideoQuality),
     RefreshDevices,
     SetCamera(bool),
     SelectCamera(DeviceChoice),

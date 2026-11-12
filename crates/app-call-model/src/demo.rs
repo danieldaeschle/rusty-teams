@@ -744,7 +744,7 @@ async fn speak_until_hangup(
                     people.iter().for_each(|(mri, _)| control.video.forget(&VideoKey::Person(mri.clone())));
                     control.send(CallUpdate::IncomingVideo(enabled));
                 }
-                Some(CallCommand::SetCameraEffects(_) | CallCommand::SetVideoWants(_) | CallCommand::SetShareMotion(_) | CallCommand::SetShareStandout(_)) => {}
+                Some(CallCommand::SetCameraEffects(_) | CallCommand::SetVideoQuality(_) | CallCommand::SetVideoWants(_) | CallCommand::SetShareMotion(_) | CallCommand::SetShareStandout(_)) => {}
                 Some(CallCommand::StartRecording { kind, .. }) => {
                     recording_on = kind != RecordingKind::TranscriptOnly;
                     transcribing_on = true;

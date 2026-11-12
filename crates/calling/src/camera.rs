@@ -1,7 +1,5 @@
-use std::process::Command;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use libwebrtc::native::yuv_helper::{abgr_to_i420, nv12_to_i420};
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
@@ -11,10 +9,7 @@ use nokhwa::utils::{
     Resolution,
 };
 use nokhwa::{Camera, query};
-use zune_core::bytestream::ZCursor;
-use zune_core::colorspace::ColorSpace;
-use zune_core::options::DecoderOptions;
-use zune_jpeg::JpegDecoder;
+use std::sync::atomic::Ordering;
 
 use crate::blur::BlurSettings;
 use crate::capture::Capture;
@@ -29,79 +24,11 @@ const CAPTURE_FPS: u32 = 30;
 const ASPECT_WIDTH: u32 = 16;
 const ASPECT_HEIGHT: u32 = 9;
 const DIRECT_FORMATS: [FrameFormat; 2] = [FrameFormat::NV12, FrameFormat::YUYV];
-const USABLE_FORMATS: [FrameFormat; 3] =
-    [FrameFormat::NV12, FrameFormat::YUYV, FrameFormat::MJPEG];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CameraDevice {
     pub key: String,
     pub name: String,
-}
-
-/// Shared capture counters for call-report stats (format + fps + decode time).
-#[derive(Debug, Default)]
-pub struct CameraCaptureStats {
-    format: std::sync::Mutex<String>,
-    started: std::sync::Mutex<Option<Instant>>,
-    frames: AtomicU64,
-    decode_ns: AtomicU64,
-}
-
-impl CameraCaptureStats {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
-    }
-
-    fn set_format(&self, label: impl Into<String>) {
-        if let Ok(mut slot) = self.format.lock() {
-            *slot = label.into();
-        }
-        if let Ok(mut started) = self.started.lock() {
-            *started = Some(Instant::now());
-        }
-        self.frames.store(0, Ordering::Relaxed);
-        self.decode_ns.store(0, Ordering::Relaxed);
-    }
-
-    fn note_frame(&self, decode: Duration) {
-        self.frames.fetch_add(1, Ordering::Relaxed);
-        self.decode_ns
-            .fetch_add(decode.as_nanos() as u64, Ordering::Relaxed);
-    }
-
-    pub fn format_label(&self) -> String {
-        self.format
-            .lock()
-            .map(|label| label.clone())
-            .unwrap_or_default()
-    }
-
-    pub fn summary(&self) -> Option<String> {
-        let label = self.format_label();
-        if label.is_empty() {
-            return None;
-        }
-        let frames = self.frames.load(Ordering::Relaxed);
-        let decode_ns = self.decode_ns.load(Ordering::Relaxed);
-        let decode_ms = if frames == 0 {
-            0.0
-        } else {
-            (decode_ns as f64 / frames as f64) / 1_000_000.0
-        };
-        let fps = self
-            .started
-            .lock()
-            .ok()
-            .and_then(|started| *started)
-            .map(|started| {
-                let seconds = started.elapsed().as_secs_f64().max(0.001);
-                frames as f64 / seconds
-            })
-            .unwrap_or(0.0);
-        Some(format!(
-            " camera={label} capture={fps:.1}fps decode={decode_ms:.1}ms"
-        ))
-    }
 }
 
 pub fn list_cameras() -> Vec<CameraDevice> {
@@ -148,30 +75,9 @@ pub fn i420_from_rgba(rgba: &[u8], width: u32, height: u32) -> I420Buffer {
 
 fn format_rank(frame_format: FrameFormat) -> u8 {
     match frame_format {
-        FrameFormat::NV12 => 3,
-        FrameFormat::YUYV => 2,
-        FrameFormat::MJPEG => 1,
+        FrameFormat::NV12 => 1,
         _ => 0,
     }
-}
-
-fn format_short_name(frame_format: FrameFormat) -> String {
-    match frame_format {
-        FrameFormat::MJPEG => "MJPG".into(),
-        FrameFormat::NV12 => "NV12".into(),
-        FrameFormat::YUYV => "YUYV".into(),
-        other => other.to_string(),
-    }
-}
-
-fn format_label(format: &CameraFormat) -> String {
-    format!(
-        "{} {}x{} @{}",
-        format_short_name(format.format()),
-        format.width(),
-        format.height(),
-        format.frame_rate()
-    )
 }
 
 fn is_widescreen(width: u32, height: u32) -> bool {
@@ -196,7 +102,7 @@ fn pick_format(formats: &[CameraFormat], quality: VideoQuality) -> Option<Camera
     formats
         .iter()
         .copied()
-        .filter(|format| USABLE_FORMATS.contains(&format.format()))
+        .filter(|format| DIRECT_FORMATS.contains(&format.format()))
         .filter(|format| format.frame_rate() >= CAPTURE_FPS)
         .filter(|format| {
             format.height() <= capture_height
@@ -210,33 +116,6 @@ fn pick_format(formats: &[CameraFormat], quality: VideoQuality) -> Option<Camera
                 std::cmp::Reverse(format.frame_rate()),
             )
         })
-}
-
-fn candidate_heights(quality: VideoQuality) -> Vec<u32> {
-    match quality {
-        VideoQuality::P720 => vec![720, 540, 360],
-        VideoQuality::Auto | VideoQuality::P1080 => vec![1080, 720, 540, 360],
-    }
-}
-
-fn preferred_candidates(quality: VideoQuality) -> Vec<CameraFormat> {
-    let mut candidates = Vec::new();
-    for height in candidate_heights(quality) {
-        let width = height * ASPECT_WIDTH / ASPECT_HEIGHT;
-        candidates.push(CameraFormat::new(
-            Resolution::new(width, height),
-            FrameFormat::MJPEG,
-            CAPTURE_FPS,
-        ));
-        for frame_format in DIRECT_FORMATS {
-            candidates.push(CameraFormat::new(
-                Resolution::new(width, height),
-                frame_format,
-                CAPTURE_FPS,
-            ));
-        }
-    }
-    candidates
 }
 
 fn even(value: u32) -> u32 {
@@ -310,119 +189,51 @@ pub(crate) fn fit_widescreen(mut buffer: I420Buffer, quality: VideoQuality) -> I
     buffer
 }
 
-fn open_with_request(
-    index: CameraIndex,
-    request: RequestedFormatType,
-) -> std::result::Result<Camera, nokhwa::NokhwaError> {
-    let format = RequestedFormat::new::<RgbAFormat>(request);
-    let mut camera = Camera::new(index, format)?;
-    camera.open_stream()?;
-    Ok(camera)
-}
-
-fn device_path(index: &CameraIndex) -> Option<String> {
-    match index {
-        CameraIndex::Index(number) => Some(format!("/dev/video{number}")),
-        CameraIndex::String(text) if text.starts_with("/dev/") => Some(text.clone()),
-        CameraIndex::String(text) if text.chars().all(|c| c.is_ascii_digit()) => {
-            Some(format!("/dev/video{text}"))
-        }
-        CameraIndex::String(text) if text.starts_with("video") => Some(format!("/dev/{text}")),
-        _ => None,
-    }
-}
-
-fn tune_uvc_controls(index: &CameraIndex) {
-    let Some(device) = device_path(index) else {
-        return;
-    };
-    // Best effort: fixed frame rate (no auto-drop in low light) and 50 Hz mains (CH).
-    let _ = Command::new("v4l2-ctl")
-        .args([
-            "-d",
-            &device,
-            "-c",
-            "exposure_dynamic_framerate=0,power_line_frequency=1",
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-}
-
-fn accept_opened(index: &CameraIndex, mut camera: Camera) -> Option<(Camera, String)> {
-    let got = camera.camera_format();
-    if got.frame_rate() < CAPTURE_FPS {
-        let _ = camera.stop_stream();
-        return None;
-    }
-    tune_uvc_controls(index);
-    let label = format_label(&got);
-    Some((camera, label))
-}
-
-fn try_exact_or_closest(
-    index: CameraIndex,
-    format: CameraFormat,
-) -> std::result::Result<Camera, nokhwa::NokhwaError> {
-    match open_with_request(index.clone(), RequestedFormatType::Exact(format)) {
-        Ok(camera) => Ok(camera),
-        Err(_) => open_with_request(index, RequestedFormatType::Closest(format)),
-    }
-}
-
-fn open_from_list(
+fn open_picked_format(
     index: CameraIndex,
     quality: VideoQuality,
-    formats: &[CameraFormat],
-) -> Option<(Camera, String)> {
-    let Some(wanted) = pick_format(formats, quality) else {
-        return None;
-    };
-    let camera = try_exact_or_closest(index.clone(), wanted).ok()?;
-    accept_opened(&index, camera)
+) -> std::result::Result<Camera, nokhwa::NokhwaError> {
+    let mut camera = Camera::new(
+        index,
+        RequestedFormat::new::<RgbAFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
+    )?;
+    let formats = camera.compatible_camera_formats()?;
+    let format = pick_format(&formats, quality).ok_or_else(|| {
+        nokhwa::NokhwaError::GeneralError("no raw camera format at 30 fps".to_owned())
+    })?;
+    camera.set_camera_requset(RequestedFormat::new::<RgbAFormat>(
+        RequestedFormatType::Exact(format),
+    ))?;
+    camera.open_stream()?;
+    Ok(camera)
 }
 
 fn open_camera(
     index: CameraIndex,
     quality: VideoQuality,
-) -> std::result::Result<(Camera, String), nokhwa::NokhwaError> {
-    // Probe the device list without committing to a slow Closest(NV12) open.
-    for probe in preferred_candidates(quality) {
-        let Ok(mut camera) = try_exact_or_closest(index.clone(), probe) else {
-            continue;
-        };
-        if let Ok(formats) = camera.compatible_camera_formats() {
-            let _ = camera.stop_stream();
-            drop(camera);
-            if let Some(opened) = open_from_list(index.clone(), quality, &formats) {
-                return Ok(opened);
-            }
-        } else if let Some(opened) = accept_opened(&index, camera) {
-            return Ok(opened);
-        }
+) -> std::result::Result<Camera, nokhwa::NokhwaError> {
+    if let Ok(camera) = open_picked_format(index.clone(), quality) {
+        return Ok(camera);
     }
-
+    let wanted = Resolution::new(quality.capture_width(), quality.capture_height());
+    let mut requests: Vec<RequestedFormatType> = DIRECT_FORMATS
+        .into_iter()
+        .map(|frame_format| {
+            RequestedFormatType::Closest(CameraFormat::new(wanted, frame_format, CAPTURE_FPS))
+        })
+        .collect();
+    requests.push(RequestedFormatType::AbsoluteHighestFrameRate);
     let mut last_error = None;
-    for candidate in preferred_candidates(quality) {
-        match try_exact_or_closest(index.clone(), candidate) {
-            Ok(camera) => {
-                if let Some(opened) = accept_opened(&index, camera) {
-                    return Ok(opened);
-                }
-            }
+    for request in requests {
+        let format = RequestedFormat::new::<RgbAFormat>(request);
+        match Camera::new(index.clone(), format)
+            .and_then(|mut camera| camera.open_stream().map(|()| camera))
+        {
+            Ok(camera) => return Ok(camera),
             Err(error) => last_error = Some(error),
         }
     }
-
-    // Last resort: AbsoluteHighest may still yield a usable stream on odd backends.
-    match open_with_request(index.clone(), RequestedFormatType::AbsoluteHighestFrameRate) {
-        Ok(camera) => {
-            tune_uvc_controls(&index);
-            let label = format_label(&camera.camera_format());
-            Ok((camera, label))
-        }
-        Err(error) => Err(last_error.unwrap_or(error)),
-    }
+    Err(last_error.expect("at least one request"))
 }
 
 pub(crate) fn i420_from_nv12(data: &[u8], width: u32, height: u32) -> Option<I420Buffer> {
@@ -482,42 +293,15 @@ pub(crate) fn i420_from_yuyv(data: &[u8], width: u32, height: u32) -> Option<I42
     Some(buffer)
 }
 
-fn i420_from_mjpeg(data: &[u8], rgba_scratch: &mut Vec<u8>) -> Option<(I420Buffer, u32, u32)> {
-    let options = DecoderOptions::default().jpeg_set_out_colorspace(ColorSpace::RGBA);
-    let mut decoder = JpegDecoder::new_with_options(ZCursor::new(data), options);
-    let pixels = decoder.decode().ok()?;
-    let info = decoder.info()?;
-    let (width, height) = (u32::from(info.width), u32::from(info.height));
-    if width < 2 || height < 2 || width % 2 != 0 || height % 2 != 0 {
-        return None;
-    }
-    let rgba_len = (width * height * BYTES_PER_PIXEL) as usize;
-    let rgba = if pixels.len() == rgba_len {
-        pixels.as_slice()
-    } else if pixels.len() == (width * height * 3) as usize {
-        rgba_scratch.clear();
-        rgba_scratch.reserve(rgba_len);
-        for chunk in pixels.chunks_exact(3) {
-            rgba_scratch.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
-        }
-        rgba_scratch.as_slice()
-    } else {
-        return None;
-    };
-    Some((i420_from_rgba(rgba, width, height), width, height))
-}
-
 fn direct_i420(
     frame_format: FrameFormat,
     data: &[u8],
     width: u32,
     height: u32,
-    rgba_scratch: &mut Vec<u8>,
 ) -> Option<I420Buffer> {
     match frame_format {
         FrameFormat::NV12 => i420_from_nv12(data, width, height),
         FrameFormat::YUYV => i420_from_yuyv(data, width, height),
-        FrameFormat::MJPEG => i420_from_mjpeg(data, rgba_scratch).map(|(buffer, _, _)| buffer),
         _ => None,
     }
 }
@@ -526,25 +310,20 @@ pub fn start_camera(
     choice: &DeviceChoice,
     quality: VideoQuality,
     blur: Arc<BlurSettings>,
-    stats: Arc<CameraCaptureStats>,
-    on_opened: impl FnOnce(String) + Send + 'static,
     deliver: impl FnMut(I420Buffer) + Send + 'static,
     failed: impl FnOnce(String) + Send + 'static,
 ) -> Result<Capture> {
     let index = camera_index(choice);
     Capture::spawn_thread("camera", move |stop| {
-        let (mut camera, label) = match open_camera(index, quality) {
-            Ok(opened) => opened,
+        let mut camera = match open_camera(index, quality) {
+            Ok(camera) => camera,
             Err(error) => return failed(error.to_string()),
         };
-        stats.set_format(&label);
-        on_opened(label);
         let effects = match EffectsThread::spawn(blur, deliver) {
             Ok(effects) => effects,
             Err(error) => return failed(format!("effects thread: {error}")),
         };
         let mut warned_undecodable = false;
-        let mut rgba_scratch = Vec::new();
         while !stop.load(Ordering::SeqCst) {
             let Ok(frame) = camera.frame() else {
                 std::thread::sleep(RETRY_PAUSE);
@@ -555,29 +334,22 @@ pub fn start_camera(
             if width < 2 || height < 2 || width % 2 != 0 || height % 2 != 0 {
                 continue;
             }
-            let started = Instant::now();
-            let buffer = match direct_i420(
-                frame.source_frame_format(),
-                frame.buffer(),
-                width,
-                height,
-                &mut rgba_scratch,
-            ) {
-                Some(buffer) => buffer,
-                None => {
-                    let Ok(decoded) = frame.decode_image::<RgbAFormat>() else {
-                        if !std::mem::replace(&mut warned_undecodable, true) {
-                            eprintln!(
-                                "calls: camera delivers {} and no decoder is available",
-                                frame.source_frame_format()
-                            );
-                        }
-                        continue;
-                    };
-                    i420_from_rgba(&decoded.into_raw(), width, height)
-                }
-            };
-            stats.note_frame(started.elapsed());
+            let buffer =
+                match direct_i420(frame.source_frame_format(), frame.buffer(), width, height) {
+                    Some(buffer) => buffer,
+                    None => {
+                        let Ok(decoded) = frame.decode_image::<RgbAFormat>() else {
+                            if !std::mem::replace(&mut warned_undecodable, true) {
+                                eprintln!(
+                                    "calls: camera delivers {} and no decoder is available",
+                                    frame.source_frame_format()
+                                );
+                            }
+                            continue;
+                        };
+                        i420_from_rgba(&decoded.into_raw(), width, height)
+                    }
+                };
             effects.submit(fit_widescreen(buffer, quality));
         }
         let _ = camera.stop_stream();
@@ -649,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn a_c920_like_list_picks_hd_mjpeg_at_30_fps_over_slow_raw() {
+    fn a_c920_like_list_picks_the_raw_format_that_runs_at_30_fps() {
         let formats = [
             format(1280, 720, FrameFormat::YUYV, 10),
             format(640, 480, FrameFormat::YUYV, 30),
@@ -657,39 +429,7 @@ mod tests {
         ];
         assert_eq!(
             pick_format(&formats, VideoQuality::P720),
-            Some(format(1280, 720, FrameFormat::MJPEG, 30))
-        );
-    }
-
-    #[test]
-    fn raw_at_the_same_height_beats_mjpeg() {
-        let formats = [
-            format(1280, 720, FrameFormat::MJPEG, 30),
-            format(1280, 720, FrameFormat::NV12, 30),
-        ];
-        assert_eq!(
-            pick_format(&formats, VideoQuality::P720),
-            Some(format(1280, 720, FrameFormat::NV12, 30))
-        );
-    }
-
-    #[test]
-    fn a_c930e_like_list_picks_mjpeg_1080_for_auto() {
-        let formats = [
-            format(1920, 1080, FrameFormat::YUYV, 5),
-            format(1280, 720, FrameFormat::YUYV, 10),
-            format(640, 360, FrameFormat::YUYV, 30),
-            format(1920, 1080, FrameFormat::MJPEG, 30),
-            format(1280, 720, FrameFormat::MJPEG, 30),
-            format(960, 540, FrameFormat::MJPEG, 30),
-        ];
-        assert_eq!(
-            pick_format(&formats, VideoQuality::Auto),
-            Some(format(1920, 1080, FrameFormat::MJPEG, 30))
-        );
-        assert_eq!(
-            pick_format(&formats, VideoQuality::P720),
-            Some(format(1280, 720, FrameFormat::MJPEG, 30))
+            Some(format(640, 480, FrameFormat::YUYV, 30))
         );
     }
 
@@ -791,7 +531,7 @@ mod tests {
     #[test]
     fn no_usable_format_picks_nothing() {
         let formats = [
-            format(1280, 720, FrameFormat::MJPEG, 15),
+            format(1280, 720, FrameFormat::MJPEG, 30),
             format(1280, 720, FrameFormat::YUYV, 15),
         ];
         assert_eq!(pick_format(&formats, VideoQuality::Auto), None);
@@ -812,81 +552,5 @@ mod tests {
             camera_index(&DeviceChoice::Device("video0".into())),
             CameraIndex::String(_)
         ));
-    }
-
-    #[test]
-    fn mjpeg_decodes_to_i420() {
-        // Minimal valid grayscale JPEG is awkward; encode via `image` crate.
-        let mut rgb = image::RgbImage::new(16, 16);
-        for pixel in rgb.pixels_mut() {
-            *pixel = image::Rgb([40, 80, 120]);
-        }
-        let mut jpeg = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90)
-            .encode(rgb.as_raw(), 16, 16, image::ExtendedColorType::Rgb8)
-            .expect("encode");
-        let mut scratch = Vec::new();
-        let (buffer, width, height) =
-            i420_from_mjpeg(&jpeg, &mut scratch).expect("mjpeg decodes");
-        assert_eq!((width, height), (16, 16));
-        assert_eq!((buffer.width(), buffer.height()), (16, 16));
-    }
-
-    #[test]
-    #[ignore = "timing; run with --release --ignored"]
-    fn mjpeg_1080p_decode_stays_under_fifteen_ms() {
-        let mut rgb = image::RgbImage::new(1920, 1080);
-        for (index, pixel) in rgb.pixels_mut().enumerate() {
-            let value = (index % 255) as u8;
-            *pixel = image::Rgb([value, value.wrapping_add(40), value.wrapping_add(80)]);
-        }
-        let mut jpeg = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85)
-            .encode(rgb.as_raw(), 1920, 1080, image::ExtendedColorType::Rgb8)
-            .expect("encode");
-        let mut scratch = Vec::new();
-        // Warm caches / CPU, then time a steady batch (30 fps allows ~33 ms/frame).
-        for _ in 0..3 {
-            let _ = i420_from_mjpeg(&jpeg, &mut scratch).expect("decode");
-        }
-        let started = Instant::now();
-        for _ in 0..10 {
-            let _ = i420_from_mjpeg(&jpeg, &mut scratch).expect("decode");
-        }
-        let average = started.elapsed() / 10;
-        assert!(
-            average < Duration::from_millis(20),
-            "average decode {average:?} exceeds 20 ms"
-        );
-    }
-
-    #[test]
-    #[ignore = "needs a connected camera"]
-    fn open_picks_at_least_thirty_fps_when_available() {
-        if list_cameras().is_empty() {
-            return;
-        }
-        let (mut camera, label) = open_camera(CameraIndex::Index(0), VideoQuality::Auto)
-            .expect("camera opens");
-        assert!(
-            camera.camera_format().frame_rate() >= CAPTURE_FPS,
-            "opened {label} under 30 fps"
-        );
-        // Warm up buffers, then count for one second.
-        for _ in 0..10 {
-            let _ = camera.frame();
-        }
-        let deadline = Instant::now() + Duration::from_secs(1);
-        let mut frames = 0u32;
-        while Instant::now() < deadline {
-            if camera.frame().is_ok() {
-                frames += 1;
-            }
-        }
-        let _ = camera.stop_stream();
-        assert!(
-            frames >= 20,
-            "expected >= 20 frames in 1 s from {label}, got {frames}"
-        );
     }
 }

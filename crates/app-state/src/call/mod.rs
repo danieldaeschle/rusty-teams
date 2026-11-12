@@ -31,6 +31,7 @@ pub use app_call_model::{
 
 pub use actions::{
     apply_sound_output, load_camera, load_camera_effects, load_input, load_output, load_share_sound,
+    load_video_quality,
 };
 pub use mic::load_mic;
 pub use agenda::{AgendaRow, fetch_window, join_available, response_label};

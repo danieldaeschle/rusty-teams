@@ -14,8 +14,10 @@ use crate::signaling::Signaling;
 use crate::timeline::Timeline;
 use crate::video_frame::{FrameGate, VideoHub, VideoKey, picture_from_frame};
 use crate::video_layout::{
-    Assignment, SlotTable, SourceRequest, TileDetail, VideoRouter, VideoWant, plan_receive, prioritize, requests_for,
+    Assignment, SlotTable, SourceRequest, TileDetail, VideoRouter, VideoWant, plan_receive,
+    prioritize, requests_for,
 };
+use crate::video_quality::VideoQuality;
 
 const HISTORY_LIMIT: usize = 16;
 const REQUEST_LABEL: &str = "POST applyChannelParameters";
@@ -38,12 +40,18 @@ pub fn spawn_video_pump(
         let mut gates: HashMap<VideoKey, FrameGate> = HashMap::new();
         while let Some(frame) = stream.next().await {
             counters.received.fetch_add(1, Ordering::Relaxed);
-            let Some(key) = router.key_for(&mid) else { continue };
-            let gate = gates.entry(key.clone()).or_insert_with(|| FrameGate::new(key.max_fps()));
+            let Some(key) = router.key_for(&mid) else {
+                continue;
+            };
+            let gate = gates
+                .entry(key.clone())
+                .or_insert_with(|| FrameGate::new(key.max_fps()));
             if !gate.admit(Instant::now()) {
                 continue;
             }
-            let Some(picture) = picture_from_frame(frame, key.max_width()) else { continue };
+            let Some(picture) = picture_from_frame(frame, key.max_width()) else {
+                continue;
+            };
             counters.published.fetch_add(1, Ordering::Relaxed);
             hub.publish(key, picture);
         }
@@ -62,7 +70,13 @@ pub struct SourceRequester {
 }
 
 impl SourceRequester {
-    pub fn start(signaling: Arc<Signaling>, url: String, router: VideoRouter, hub: Arc<VideoHub>, timeline: Timeline) -> Self {
+    pub fn start(
+        signaling: Arc<Signaling>,
+        url: String,
+        router: VideoRouter,
+        hub: Arc<VideoHub>,
+        timeline: Timeline,
+    ) -> Self {
         let (queue, mut requests) = mpsc::unbounded_channel::<QueuedRequest>();
         let task = tokio::spawn(async move {
             let mut sequence_number = 0u64;
@@ -72,11 +86,18 @@ impl SourceRequester {
                 match signaling.post_json(REQUEST_LABEL, &url, body).await {
                     Ok(()) => timeline.record(
                         "video source",
-                        format!("mid {} source {:?} accepted", queued.request.mid, queued.request.source),
+                        format!(
+                            "mid {} source {:?} accepted",
+                            queued.request.mid, queued.request.source
+                        ),
                     ),
                     Err(error) => timeline.record("video source failed", error.to_string()),
                 }
-                if let Some(key) = queued.route_after.as_ref().filter(|key| router.key_for(&queued.request.mid).as_ref() != Some(key)) {
+                if let Some(key) = queued
+                    .route_after
+                    .as_ref()
+                    .filter(|key| router.key_for(&queued.request.mid).as_ref() != Some(key))
+                {
                     hub.forget(key);
                 }
                 router.set(&queued.request.mid, queued.route_after);
@@ -86,9 +107,11 @@ impl SourceRequester {
     }
 
     fn send(&self, request: SourceRequest, route_after: Option<VideoKey>) {
-        let _ = self.queue.send(QueuedRequest { request, route_after });
+        let _ = self.queue.send(QueuedRequest {
+            request,
+            route_after,
+        });
     }
-
 }
 
 impl Drop for SourceRequester {
@@ -112,6 +135,8 @@ pub struct VideoReceive {
     wants: Option<Vec<VideoWant>>,
     requester: Option<SourceRequester>,
     incoming_enabled: bool,
+    quality: VideoQuality,
+    refresh_limits: bool,
 }
 
 impl VideoReceive {
@@ -126,11 +151,22 @@ impl VideoReceive {
             wants: None,
             requester: None,
             incoming_enabled: true,
+            quality: VideoQuality::default(),
+            refresh_limits: false,
         }
     }
 
     pub fn set_incoming_enabled(&mut self, enabled: bool) {
         self.incoming_enabled = enabled;
+    }
+
+    pub fn set_video_quality(&mut self, quality: VideoQuality) -> bool {
+        if self.quality == quality {
+            return false;
+        }
+        self.quality = quality;
+        self.refresh_limits = true;
+        true
     }
 
     pub fn set_wants(&mut self, wants: Vec<VideoWant>) -> bool {
@@ -169,20 +205,38 @@ impl VideoReceive {
 
     pub fn reselect(&mut self, roster: &Roster) -> ReceiveChange {
         let mut change = ReceiveChange::default();
-        let Some(requester) = &self.requester else { return change };
+        let Some(requester) = &self.requester else {
+            return change;
+        };
         let candidates = if self.incoming_enabled {
-            prioritize(roster.video_candidates(&self.own_mri), &self.history, self.wants.as_deref())
+            prioritize(
+                roster.video_candidates(&self.own_mri),
+                &self.history,
+                self.wants.as_deref(),
+            )
         } else {
             Vec::new()
         };
         let next = plan_receive(&self.held, &candidates);
-        for request in requests_for(&self.held, &next, &self.table.people) {
-            let slot = self.table.people.iter().position(|slot| slot.mid == request.mid);
+        let current = if self.refresh_limits {
+            vec![None; self.held.len()]
+        } else {
+            self.held.clone()
+        };
+        for request in requests_for(&current, &next, &self.table.people, self.quality) {
+            let slot = self
+                .table
+                .people
+                .iter()
+                .position(|slot| slot.mid == request.mid);
             let route_after = slot
                 .and_then(|index| next[index].as_ref())
                 .map(|assignment| VideoKey::Person(assignment.mri.clone()));
             let same_person = slot.is_some_and(|index| {
-                self.held[index].as_ref().zip(next[index].as_ref()).is_some_and(|(before, after)| before.mri == after.mri)
+                self.held[index]
+                    .as_ref()
+                    .zip(next[index].as_ref())
+                    .is_some_and(|(before, after)| before.mri == after.mri)
             });
             if !same_person {
                 self.router.set(&request.mid, None);
@@ -190,10 +244,15 @@ impl VideoReceive {
             requester.send(request, route_after);
         }
         self.held = next;
+        self.refresh_limits = false;
         if let Some(slot) = &self.table.screen {
             let wanted = roster
                 .screen_share(&self.own_mri)
-                .map(|(mri, source)| Assignment { mri, source, detail: TileDetail::Stage });
+                .map(|(mri, source)| Assignment {
+                    mri,
+                    source,
+                    detail: TileDetail::Stage,
+                });
             if wanted != self.screen_held {
                 let route_after = wanted.as_ref().map(|_| VideoKey::Screen);
                 self.router.set(&slot.mid, route_after.clone());
@@ -204,10 +263,12 @@ impl VideoReceive {
                         source: wanted.as_ref().map(|assignment| assignment.source),
                         screen: true,
                         detail: TileDetail::Stage,
+                        quality: self.quality,
                     },
                     route_after,
                 );
-                change.screen_sharer = Some(wanted.as_ref().map(|assignment| assignment.mri.clone()));
+                change.screen_sharer =
+                    Some(wanted.as_ref().map(|assignment| assignment.mri.clone()));
                 self.screen_held = wanted;
             }
         }

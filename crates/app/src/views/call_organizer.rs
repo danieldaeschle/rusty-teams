@@ -604,7 +604,11 @@ fn camera_menu(
         popup = popup.item(item);
     }
     background_items(
-        effect_items(popup, app, backgrounds.effects),
+        effect_items(
+            super::call_extras::quality_items(popup, app, backgrounds.quality),
+            app,
+            backgrounds.effects,
+        ),
         app,
         backgrounds,
     )

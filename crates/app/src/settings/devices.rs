@@ -135,7 +135,7 @@ impl DevicesView {
         };
         view.load_devices(demo, cx);
         view.apply_background(cx);
-        view.start_preview();
+        view.start_preview(cx);
         view
     }
 
@@ -165,9 +165,10 @@ impl DevicesView {
         .detach();
     }
 
-    fn start_preview(&mut self) {
+    fn start_preview(&mut self, cx: &Context<Self>) {
         if !self.preview_blocked {
-            self.preview.start(&self.camera);
+            let quality = self.app.read(cx).call_video_quality;
+            self.preview.start(&self.camera, quality);
         }
     }
 
@@ -180,7 +181,7 @@ impl DevicesView {
         if blocked {
             self.preview.stop(cx);
         } else {
-            self.start_preview();
+            self.start_preview(cx);
         }
         cx.notify();
     }
@@ -189,7 +190,7 @@ impl DevicesView {
         self.camera = camera.clone();
         self.app
             .update(cx, |state, cx| state.select_call_camera(camera, cx));
-        self.start_preview();
+        self.start_preview(cx);
         cx.notify();
     }
 

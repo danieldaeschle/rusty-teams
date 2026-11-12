@@ -16,14 +16,13 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::background::BackgroundPicture;
 use crate::blur::BlurSettings;
-use crate::camera::{CameraCaptureStats, start_camera};
+use crate::camera::start_camera;
 use crate::video_quality::VideoQuality;
 use crate::capture::Capture;
 use crate::control::{CallCommand, CallUpdate};
 use crate::devices::DeviceChoice;
 use crate::effects::CameraEffects;
 use crate::error::{Error, Result};
-use crate::timeline::Timeline;
 use crate::screen::{
     PortalFollowUp, ShareKind, ShareSource, start_portal_capture, start_screen_capture,
 };
@@ -203,8 +202,6 @@ pub struct LocalVideo {
     share_fps: Arc<AtomicU32>,
     camera_preview: bool,
     quality: VideoQuality,
-    camera_stats: Arc<CameraCaptureStats>,
-    timeline: Option<Timeline>,
     portal_generation: u64,
     portal_armed: bool,
     portal_keep: bool,
@@ -232,17 +229,11 @@ impl LocalVideo {
             share_fps: Arc::new(AtomicU32::new(SCREEN_SHARE_FPS)),
             camera_preview: false,
             quality: VideoQuality::default(),
-            camera_stats: CameraCaptureStats::new(),
-            timeline: None,
             portal_generation: 0,
             portal_armed: false,
             portal_keep: false,
             portal_bound: false,
         }
-    }
-
-    pub fn attach_timeline(&mut self, timeline: Timeline) {
-        self.timeline = Some(timeline);
     }
 
     pub fn video_quality(&self) -> VideoQuality {
@@ -588,10 +579,6 @@ impl LocalVideo {
         Ok(())
     }
 
-    pub fn camera_capture_summary(&self) -> Option<String> {
-        self.camera_stats.summary()
-    }
-
     fn capture_camera(&self, choice: &DeviceChoice) -> Result<Capture> {
         let mut sink = self.camera_sink();
         Ok(match self.mode {
@@ -600,24 +587,13 @@ impl LocalVideo {
                 PatternKind::Camera,
                 Some(self.blur.clone()),
             )),
-            _ => {
-                let timeline = self.timeline.clone();
-                start_camera(
-                    choice,
-                    self.quality,
-                    self.blur.clone(),
-                    self.camera_stats.clone(),
-                    move |label| {
-                        if let Some(timeline) = timeline {
-                            timeline.record("camera capture", label);
-                        } else {
-                            eprintln!("calls: camera capture {label}");
-                        }
-                    },
-                    move |buffer| sink.push(buffer),
-                    self.report_failure("Camera"),
-                )?
-            }
+            _ => start_camera(
+                choice,
+                self.quality,
+                self.blur.clone(),
+                move |buffer| sink.push(buffer),
+                self.report_failure("Camera"),
+            )?,
         })
     }
 

@@ -319,6 +319,7 @@ pub struct CameraMenu {
     pub images: Vec<(String, String, Option<PathBuf>)>,
     pub customs: Vec<PathBuf>,
     pub effects: CameraEffects,
+    pub quality: calling::VideoQuality,
 }
 
 impl CameraMenu {
@@ -339,8 +340,33 @@ impl CameraMenu {
                 .collect(),
             customs: library.customs.clone(),
             effects: state.call_effects,
+            quality: state.call_video_quality,
         }
     }
+}
+
+pub fn quality_items(
+    popup: PopupMenu,
+    app: &Entity<AppState>,
+    current: calling::VideoQuality,
+) -> PopupMenu {
+    let choices = [
+        (calling::VideoQuality::Auto, "Auto"),
+        (calling::VideoQuality::P720, "720p"),
+        (calling::VideoQuality::P1080, "1080p"),
+    ];
+    let mut popup = popup.separator().item(PopupMenuItem::label("Video quality"));
+    for (quality, label) in choices {
+        let app = app.clone();
+        popup = popup.item(
+            PopupMenuItem::new(label)
+                .checked(current == quality)
+                .on_click(move |_, _, cx| {
+                    app.update(cx, |state, cx| state.set_call_video_quality(quality, cx))
+                }),
+        );
+    }
+    popup
 }
 
 fn thumbnail(

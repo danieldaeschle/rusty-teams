@@ -47,7 +47,7 @@ impl CameraPreview {
         (preview, receiver)
     }
 
-    pub fn start(&mut self, choice: &DeviceChoice) {
+    pub fn start(&mut self, choice: &DeviceChoice, quality: calling::VideoQuality) {
         self.release_capture();
         *self.failure.lock().expect("preview failure lock") = None;
         self.frames.store(0, Ordering::Relaxed);
@@ -59,6 +59,7 @@ impl CameraPreview {
         let mirror = self.blur.clone();
         let started = start_camera(
             choice,
+            quality,
             self.blur.clone(),
             CameraCaptureStats::new(),
             |_label| {},
