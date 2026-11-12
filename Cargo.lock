@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "agents"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "reqwest 0.13.5",
  "serde",
@@ -274,7 +274,7 @@ checksum = "fb5dfbc6d8d2675589ccbe4d0fd61df2419075625f8c1a62325e718e2b0049f9"
 
 [[package]]
 name = "app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "agents",
  "app-base",
@@ -307,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "app-base"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "agents",
  "calling",
@@ -340,7 +340,7 @@ dependencies = [
 
 [[package]]
 name = "app-call-model"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "agents",
  "app-base",
@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "app-state"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "agents",
  "app-base",
@@ -395,7 +395,7 @@ dependencies = [
 
 [[package]]
 name = "app-ui-kit"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "app-base",
  "gpui-kit",
@@ -1089,7 +1089,7 @@ dependencies = [
 
 [[package]]
 name = "browser"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "directories",
  "futures-util",
@@ -1198,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "calling"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "chatsvc",
@@ -1364,7 +1364,7 @@ dependencies = [
 
 [[package]]
 name = "chatsvc"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1458,7 +1458,7 @@ checksum = "1c133bc6a41be0d194c306b5506d15e6feeea7b1d6604bd3f8310dfb2ca96486"
 
 [[package]]
 name = "cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "clap",
@@ -4054,8 +4054,6 @@ dependencies = [
 [[package]]
 name = "gpui-pre-wgpu"
 version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "439c5421cafe1a7cf68d0c0ae5cc82b26fad6b0e6345ac98d20acaf1f2463914"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4151,7 +4149,7 @@ dependencies = [
 
 [[package]]
 name = "graph"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5496,7 +5494,7 @@ dependencies = [
 
 [[package]]
 name = "mcp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -8478,7 +8476,7 @@ dependencies = [
 
 [[package]]
 name = "session"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
@@ -8748,7 +8746,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "directories",
@@ -9195,7 +9193,7 @@ dependencies = [
 
 [[package]]
 name = "teams-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chatsvc",
  "chrono",
@@ -10590,7 +10588,7 @@ dependencies = [
 
 [[package]]
 name = "webview"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "session",
