@@ -155,7 +155,7 @@ pub fn init(store: Arc<Store>, demo: bool, cx: &mut App) {
     bridge::drain_ui_events(receiver, api.downgrade(), cx);
     api.update(cx, |api, cx| {
         let _ = api.hub.restore_pending();
-        if demo {
+        if demo && api.hub.pending_meetings().is_empty() {
             let _ = api.hub.propose_meeting(crate::demo::agent_meeting_draft(), Some("claude".to_owned()), None);
         }
         api.reconcile(cx);

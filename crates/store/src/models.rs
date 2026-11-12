@@ -449,6 +449,19 @@ pub struct AgentProposalRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentMeetingRecord {
+    pub id: String,
+    pub subject: String,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub attendees: Vec<String>,
+    pub description: String,
+    pub agent: Option<String>,
+    pub session_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentReactionRecord {
     pub id: String,
     pub conversation_id: String,

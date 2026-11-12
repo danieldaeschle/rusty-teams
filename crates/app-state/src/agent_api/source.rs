@@ -203,8 +203,13 @@ impl TeamsSource for AppSource {
     fn create_meeting(&self, draft: MeetingDraft) -> SourceFuture<'_, CreatedMeeting> {
         Box::pin(async move {
             let engine = self.engine()?;
+            let mut names = Vec::with_capacity(draft.attendees.len());
+            for address in &draft.attendees {
+                let users = engine.search_people(address).await.unwrap_or_default();
+                names.push(users.into_iter().find_map(|user| user.display_name));
+            }
             let created = Calendar::new(engine.remote().session())
-                .create_event(&new_event(draft))
+                .create_event(&new_event(draft, names))
                 .await
                 .map_err(|error| SourceError::Failed(error.to_string()))?;
             Ok(CreatedMeeting { join_url: created.join_url })
@@ -258,7 +263,22 @@ mod tests {
     use mcp::TeamsSource;
     use store::Store;
 
-    use super::AppSource;
+    use super::{AppSource, new_event};
+
+    #[test]
+    fn invitees_carry_their_name_or_fall_back_to_the_address() {
+        let now = chrono::Utc::now();
+        let draft = mcp::MeetingDraft {
+            subject: "Sync".to_owned(),
+            start: now,
+            end: now,
+            attendees: vec!["anna@example.com".to_owned(), "ext@example.org".to_owned()],
+            description: String::new(),
+        };
+        let event = new_event(draft, vec![Some("Anna Berg".to_owned()), None]);
+        let names: Vec<_> = event.attendees.iter().map(|attendee| attendee.name.as_str()).collect();
+        assert_eq!(names, ["Anna Berg", "ext@example.org"]);
+    }
 
     fn source() -> AppSource {
         AppSource::new(Arc::new(Store::open_in_memory().unwrap()))
@@ -302,7 +322,7 @@ mod tests {
     }
 }
 
-fn new_event(draft: MeetingDraft) -> NewEvent {
+fn new_event(draft: MeetingDraft, names: Vec<Option<String>>) -> NewEvent {
     NewEvent {
         subject: draft.subject,
         start: draft.start,
@@ -313,7 +333,8 @@ fn new_event(draft: MeetingDraft) -> NewEvent {
         attendees: draft
             .attendees
             .into_iter()
-            .map(|address| Attendee { name: address.clone(), address })
+            .zip(names.into_iter().chain(std::iter::repeat(None)))
+            .map(|(address, name)| Attendee { name: name.unwrap_or_else(|| address.clone()), address })
             .collect(),
         repeat: Repeat::Never,
         details: draft.description,

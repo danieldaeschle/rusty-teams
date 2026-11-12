@@ -5,7 +5,8 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use store::{
-    AgentProposalMention, AgentProposalRecord, AgentReactionRecord, AttachmentImage, Store,
+    AgentMeetingRecord, AgentProposalMention, AgentProposalRecord, AgentReactionRecord,
+    AttachmentImage, Store,
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Notify, Semaphore};
@@ -378,7 +379,12 @@ impl AgentHub {
         self.store.sweep_agent_proposal_images()?;
         let records = self.store.pending_agent_proposals()?;
         let reactions = self.store.pending_agent_reactions()?;
+        let meetings = self.store.agent_meetings()?;
         let mut state = self.lock();
+        state.pending_meetings = meetings.into_iter().map(meeting_from_record).collect();
+        if !state.pending_meetings.is_empty() {
+            let _ = self.ui.send(UiEvent::MeetingProposalsChanged);
+        }
         for record in records {
             let proposal = proposal_from_record(record);
             let _ = self.ui.send(UiEvent::ProposalChanged(proposal.clone()));
@@ -660,6 +666,9 @@ impl AgentHub {
             session_id,
             created_at: Utc::now(),
         };
+        self.store
+            .insert_agent_meeting(&meeting_record(&proposal))
+            .map_err(|error| error.to_string())?;
         state.pending_meetings.push(proposal.clone());
         drop(state);
         let _ = self.ui.send(UiEvent::MeetingProposalsChanged);
@@ -683,6 +692,7 @@ impl AgentHub {
         {
             let mut state = self.lock();
             state.pending_meetings.retain(|proposal| proposal.id != proposal_id);
+            let _ = self.store.delete_agent_meeting(proposal_id);
             push_event(
                 &mut state,
                 EventKind::MeetingResolved {
@@ -806,6 +816,36 @@ fn reaction_from_record(record: AgentReactionRecord) -> ReactionProposal {
     }
 }
 
+fn meeting_record(proposal: &MeetingProposal) -> AgentMeetingRecord {
+    AgentMeetingRecord {
+        id: proposal.id.clone(),
+        subject: proposal.draft.subject.clone(),
+        start: proposal.draft.start,
+        end: proposal.draft.end,
+        attendees: proposal.draft.attendees.clone(),
+        description: proposal.draft.description.clone(),
+        agent: proposal.agent.clone(),
+        session_id: proposal.session_id.clone(),
+        created_at: proposal.created_at,
+    }
+}
+
+fn meeting_from_record(record: AgentMeetingRecord) -> MeetingProposal {
+    MeetingProposal {
+        id: record.id,
+        draft: MeetingDraft {
+            subject: record.subject,
+            start: record.start,
+            end: record.end,
+            attendees: record.attendees,
+            description: record.description,
+        },
+        agent: record.agent,
+        session_id: record.session_id,
+        created_at: record.created_at,
+    }
+}
+
 fn proposal_from_record(record: AgentProposalRecord) -> Proposal {
     Proposal {
         id: record.id,
@@ -902,6 +942,27 @@ mod tests {
         assert!(hub.propose_meeting(draft.clone(), None, None).is_err());
         hub.resolve_meeting(&first.id, MeetingOutcome::Discarded, None);
         assert!(hub.propose_meeting(draft, None, None).is_ok());
+    }
+
+    #[test]
+    fn a_meeting_waiting_for_review_survives_a_restart() {
+        let (hub, _receiver, store) = hub_with(open_policy());
+        let draft = crate::source::MeetingDraft {
+            subject: "Sync".to_owned(),
+            start: Utc::now(),
+            end: Utc::now(),
+            attendees: vec!["a@example.com".to_owned()],
+            description: "Agenda".to_owned(),
+        };
+        let kept = hub.propose_meeting(draft.clone(), Some("claude".to_owned()), None).unwrap();
+        let resolved = hub.propose_meeting(draft, None, None).unwrap();
+        hub.resolve_meeting(&resolved.id, MeetingOutcome::Created, None);
+        let (sender, _restarted_receiver) = unbounded_channel();
+        let restarted = AgentHub::new(store, open_policy(), sender);
+        restarted.restore_pending().unwrap();
+        let restored = restarted.pending_meetings();
+        assert_eq!(restored.len(), 1);
+        assert_eq!((restored[0].id.as_str(), restored[0].draft.description.as_str(), restored[0].agent.as_deref()), (kept.id.as_str(), "Agenda", Some("claude")));
     }
 
     #[test]
