@@ -42,6 +42,7 @@ pub struct Proposal {
     pub agent: Option<String>,
     pub session_id: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub direct: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -53,6 +54,7 @@ pub struct NewProposal {
     pub images: Vec<ProposalImage>,
     pub agent: Option<String>,
     pub session_id: Option<String>,
+    pub direct: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +66,7 @@ pub struct ReactionProposal {
     pub agent: Option<String>,
     pub session_id: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub direct: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -73,6 +76,7 @@ pub struct NewReactionProposal {
     pub emoji: String,
     pub agent: Option<String>,
     pub session_id: Option<String>,
+    pub direct: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -305,6 +309,7 @@ impl AgentHub {
             agent: new.agent,
             session_id: new.session_id,
             created_at: now_millis(),
+            direct: new.direct,
         };
         self.store.insert_agent_proposal(&AgentProposalRecord {
             id: proposal.id.clone(),
@@ -381,6 +386,7 @@ impl AgentHub {
             agent: new.agent,
             session_id: new.session_id,
             created_at: now_millis(),
+            direct: new.direct,
         };
         self.store.insert_agent_reaction(&AgentReactionRecord {
             id: reaction.id.clone(),
@@ -640,6 +646,7 @@ fn reaction_from_record(record: AgentReactionRecord) -> ReactionProposal {
         agent: record.agent,
         session_id: record.session_id,
         created_at: record.created_at,
+        direct: false,
     }
 }
 
@@ -669,6 +676,7 @@ fn proposal_from_record(record: AgentProposalRecord) -> Proposal {
         agent: record.agent,
         session_id: record.session_id,
         created_at: record.created_at,
+        direct: false,
     }
 }
 
@@ -686,7 +694,7 @@ mod tests {
             enabled: true,
             chats: Access::All,
             channels: Access::All,
-            propose: true,
+            write: true,
             ..AgentPolicy::default()
         }
     }

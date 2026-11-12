@@ -1402,7 +1402,7 @@ pub(super) mod tests {
                 let queued = runs.read(cx).get(second).unwrap();
                 assert_eq!(queued.current_step, "Queued");
                 let prompt = queued.pending_prompt.clone().unwrap();
-                assert!(prompt.contains("propose_message") && prompt.contains("m1"));
+                assert!(prompt.contains("write_message") && prompt.contains("m1"));
                 assert!(prompt.ends_with("\n\ntwo"));
                 assert_eq!(queued.extra, "two");
                 assert_eq!(queued.session_id, session_id);
@@ -1674,7 +1674,7 @@ pub(super) mod tests {
             });
             let received = reader.join().unwrap();
             assert!(received.contains("live-session"));
-            assert!(received.contains("propose_message"));
+            assert!(received.contains("write_message"));
             assert!(received.contains("19:chat"));
             assert!(received.starts_with(r#"{"type":"auth","token":"tok"}"#));
         }

@@ -143,7 +143,8 @@ fn tool_label(block: &Value) -> String {
         "WebFetch" => format!("Reading {}", host_of(input_text(input, "url"))),
         "Task" | "Agent" => "Running subagent".to_string(),
         "TodoWrite" => "Planning".to_string(),
-        "mcp__teams__propose_message" => "Proposing reply".to_string(),
+        "mcp__teams__write_message" => "Writing reply".to_string(),
+        "mcp__teams__add_reaction" => "Reacting".to_string(),
         other if other.starts_with("mcp__teams__") => "Reading Teams".to_string(),
         other => other.to_string(),
     }

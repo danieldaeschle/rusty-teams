@@ -33,7 +33,8 @@ pub struct AgentPolicy {
     pub port: u16,
     pub chats: Access,
     pub channels: Access,
-    pub propose: bool,
+    pub write: bool,
+    pub review: bool,
     pub calendar: bool,
     pub transcripts: bool,
 }
@@ -45,7 +46,8 @@ impl Default for AgentPolicy {
             port: DEFAULT_PORT,
             chats: Access::None,
             channels: Access::None,
-            propose: false,
+            write: false,
+            review: true,
             calendar: false,
             transcripts: false,
         }
@@ -64,8 +66,8 @@ impl AgentPolicy {
         self.enabled && self.access(kind).allows(conversation_id)
     }
 
-    pub fn can_propose(&self, kind: ConversationKind, conversation_id: &str) -> bool {
-        self.can_read(kind, conversation_id) && self.propose
+    pub fn can_write(&self, kind: ConversationKind, conversation_id: &str) -> bool {
+        self.can_read(kind, conversation_id) && self.write
     }
 
     pub fn can_read_any_kind(&self, conversation_id: &str) -> bool {
@@ -94,18 +96,18 @@ mod tests {
         Access::Selected(ids.iter().map(|id| (*id).to_owned()).collect())
     }
 
-    fn policy(chats: Access, channels: Access, propose: bool) -> AgentPolicy {
+    fn policy(chats: Access, channels: Access, write: bool) -> AgentPolicy {
         AgentPolicy {
             enabled: true,
             chats,
             channels,
-            propose,
+            write,
             ..AgentPolicy::default()
         }
     }
 
     #[test]
-    fn read_and_propose_follow_scope_and_flags() {
+    fn read_and_write_follow_scope_and_flags() {
         use ConversationKind::{Channel, Chat, Meeting};
         let cases = [
             (
@@ -172,9 +174,9 @@ mod tests {
                 false,
             ),
         ];
-        for (policy, kind, id, read, propose) in cases {
+        for (policy, kind, id, read, write) in cases {
             assert_eq!(policy.can_read(kind, id), read, "{kind:?} {id}");
-            assert_eq!(policy.can_propose(kind, id), propose, "{kind:?} {id}");
+            assert_eq!(policy.can_write(kind, id), write, "{kind:?} {id}");
         }
     }
 
@@ -184,18 +186,18 @@ mod tests {
             enabled: false,
             chats: Access::All,
             channels: Access::All,
-            propose: true,
+            write: true,
             ..AgentPolicy::default()
         };
         assert!(!policy.can_read(ConversationKind::Chat, "a"));
-        assert!(!policy.can_propose(ConversationKind::Channel, "a"));
+        assert!(!policy.can_write(ConversationKind::Channel, "a"));
     }
 
     #[test]
     fn default_is_closed() {
         let policy = AgentPolicy::default();
         assert_eq!(policy.port, DEFAULT_PORT);
-        assert!(!policy.enabled && !policy.propose && !policy.calendar && !policy.transcripts);
+        assert!(!policy.enabled && !policy.write && policy.review && !policy.calendar && !policy.transcripts);
         assert_eq!(policy.chats, Access::None);
         assert_eq!(policy.channels, Access::None);
     }

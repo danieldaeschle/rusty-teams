@@ -214,11 +214,11 @@ After parity. Not counted in the parity score.
 | Delegate a message to an agent CLI (Claude Code, Copilot, any CLI) from the hover toolbar | Done | Robot button in the hover toolbar, actions and agents in Settings > Agents |
 | Run status: chip under the message, Agents rail entry, toast, Open session | Done | Live step and time on the chip, Agents rail popover with running and done runs, toast on finish or failure, Open session resumes the agent session in a terminal |
 | Local API in the app | Done | MCP only, no CLI by design. Tokens and chat access stay in the app |
-| MCP server on the same API | Done | Read tools (messages with images, reactions, files, quotes, cards, links; `get_image`; `recent_messages`; `search_messages`; `list_meetings` and `get_transcript` when allowed), `wait_for_event` to follow new messages and proposals, `propose_message` (@mentions, up to 4 images), `propose_reaction` and `reaction_changed` events for the user's own messages. Settings > MCP, default port 40615 |
+| MCP server on the same API | Done | Read tools (messages with images, reactions, files, quotes, cards, links; `get_image`; `recent_messages`; `search_messages`; `list_meetings` and `get_transcript` when allowed), `wait_for_event` to follow new messages and proposals, `write_message` (@mentions, up to 4 images), `add_reaction` (both reviewed by the user unless review is off) and `reaction_changed` events for the user's own messages. Settings > MCP, default port 40615 |
 | One-click MCP install | Done | Settings > MCP installs the server into Claude Code, Codex CLI, Copilot CLI, VS Code and Cursor, on Windows and in WSL (needs `networkingMode=mirrored`) |
 | Start dialog per run | Done | Pick the action, the agent session (new or resume) and the working directory for each delegated message |
 | Runs survive a restart | Done | Interrupted runs resume after the app restarts; WSL "Open session" starts the agent through a login shell |
-| Agent permissions in Settings: chats/channels All/Selected/None, propose, calendar, transcripts | Done | Other chats are invisible to agents, search included |
+| Agent permissions in Settings: chats/channels All/Selected/None, write, review before sending, calendar, transcripts | Done | Other chats are invisible to agents, search included |
 | Proposals: card above the composer, send, edit, discard | Done | Agents never send. A proposal is stale once you answered first |
 
 ## Out of scope

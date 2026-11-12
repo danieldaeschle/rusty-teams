@@ -69,7 +69,7 @@ pub fn build_session_prompt(
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "Context: {sender} wrote in the Teams chat \"{chat}\" (conversation_id \"{conversation_id}\", message_id \"{message_id}\"):\n\n{quoted}\n\nThe `teams` MCP server can show images of messages (`get_image`) and list the newest messages of other chats (`recent_messages`). To propose a reply, use the `propose_message` tool of the `teams` MCP server: conversation_id \"{conversation_id}\", reply_to_message_id \"{message_id}\", session_id \"{session_id}\", agent \"{agent_id}\". Never send anything yourself.\n\n{message}",
+        "Context: {sender} wrote in the Teams chat \"{chat}\" (conversation_id \"{conversation_id}\", message_id \"{message_id}\"):\n\n{quoted}\n\nThe `teams` MCP server can show images of messages (`get_image`) and list the newest messages of other chats (`recent_messages`). To reply, use the `write_message` tool of the `teams` MCP server: conversation_id \"{conversation_id}\", reply_to_message_id \"{message_id}\", session_id \"{session_id}\", agent \"{agent_id}\". Never send anything any other way.\n\n{message}",
         sender = context.sender,
         chat = context.chat,
         conversation_id = context.conversation_id,
@@ -104,7 +104,7 @@ mod tests {
         assert!(prompt.starts_with("Context: Ada wrote in the Teams chat \"Ops\""));
         assert!(prompt.contains("conversation_id \"19:abc\", message_id \"42\""));
         assert!(prompt.contains("\n> Where is the report?\n"));
-        assert!(prompt.contains("propose_message"));
+        assert!(prompt.contains("write_message"));
         assert!(prompt.contains("session_id \"sid-9\", agent \"claude\""));
         assert!(prompt.ends_with("\n\nand the tests?"));
     }
@@ -123,7 +123,7 @@ mod tests {
         );
         assert!(prompt.contains("Earlier messages in this chat:\n(none)\n\n"));
         assert!(prompt.contains("conversation_id \"19:abc\", reply_to_message_id \"42\", session_id \"sid-9\", agent \"claude\"."));
-        assert!(prompt.ends_with("Never send anything yourself."));
+        assert!(prompt.ends_with("Never send anything any other way."));
     }
 
     #[test]
@@ -136,7 +136,7 @@ mod tests {
             "claude",
         );
         assert!(prompt.ends_with("agent \"claude\"."));
-        assert!(prompt.contains("propose a short reply to Ada"));
+        assert!(prompt.contains("write a short reply to Ada"));
         assert!(prompt.contains("User0 (10:00): text 0"));
         let with_extra = build_prompt(
             &AgentAction::build_this("claude"),

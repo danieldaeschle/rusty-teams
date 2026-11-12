@@ -4,6 +4,7 @@
 )]
 
 mod active_appearance;
+mod agent_direct;
 pub mod agents;
 pub mod call;
 mod inline_video;
@@ -243,6 +244,7 @@ fn main() {
         views::shell::install_globals(&state, user_input, cx);
         agent_api::init(state.read(cx).store.clone(), arguments.demo, cx);
         agents::install(state.clone(), cx);
+        agent_direct::install(state.clone(), cx);
         if arguments.demo {
             demo::start_session(&state, cx);
         }

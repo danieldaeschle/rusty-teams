@@ -529,7 +529,7 @@ impl McpView {
             (false, _) => ("Off - agents cannot reach Rusty Teams", theme::text_muted()),
             (true, true) => ("Could not start", theme::red_soft()),
             (true, false) => (
-                "Agents on this computer can read and propose",
+                "Agents on this computer can read and write",
                 theme::text_muted(),
             ),
         };
@@ -873,14 +873,26 @@ impl McpView {
             Hsla,
             bool,
             fn(&mut AgentPolicy),
-        ); 3] = [
+        ); 4] = [
             (
-                "mcp-propose",
-                "Propose messages and reactions",
-                "Card above the composer, note under a message. You decide",
+                "mcp-write",
+                "Write messages and reactions",
+                "Agents can answer in the chats and channels above",
                 theme::text_muted(),
-                policy.propose,
-                |policy| policy.propose = !policy.propose,
+                policy.write,
+                |policy| policy.write = !policy.write,
+            ),
+            (
+                "mcp-review",
+                "Review before sending",
+                if policy.review {
+                    "Card above the composer, note under a message. You decide"
+                } else {
+                    "Off: agents send and react right away, as you"
+                },
+                if policy.review { theme::text_muted() } else { theme::amber() },
+                policy.review,
+                |policy| policy.review = !policy.review,
             ),
             (
                 "mcp-calendar",
@@ -908,7 +920,11 @@ impl McpView {
                     .on_click(cx.listener(move |_, _, _, cx| agent_api::update_policy(cx, flip)))
             }))
             .child(note_box(
-                "Agents only see what is allowed here. They never send - you do.",
+                if policy.review {
+                    "Agents only see what is allowed here. They never send - you do."
+                } else {
+                    "Agents only see what is allowed here. Without review they send as you."
+                },
                 4.,
             ))
     }

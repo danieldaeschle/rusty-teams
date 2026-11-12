@@ -931,7 +931,7 @@ fn seed_agent_access(store: &Store) {
             enabled: true,
             chats: selected(&[RELEASE_CHAT, "demo-chat-mara", "demo-chat-meeting-standup"]),
             channels: selected(&["demo-channel-1-1"]),
-            propose: true,
+            write: true,
             calendar: true,
             transcripts: false,
             ..mcp::AgentPolicy::default()

@@ -586,7 +586,7 @@ mod tests {
         AgentPolicy {
             enabled: true,
             chats: Access::All,
-            propose: true,
+            write: true,
             ..AgentPolicy::default()
         }
     }

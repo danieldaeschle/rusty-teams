@@ -25,7 +25,7 @@ Rules for every change, by people and by agents. If a rule here and a habit else
 | Performance | Faster, less memory, offline reading from the cache. |
 | Platform | OS-native toasts, tray, title bar and sounds. |
 | Call windows | Like Teams (Daniel 2026-11-11, replaces the 2026-10-17 deviation): a call or meeting opens in its own window, the main window stays free for chats; a window share minimizes the call window like Teams. Layout and gallery behaviour match Teams. |
-| Own features | MCP, agents, session inbox: allowed when nobody else can tell. Nothing sent automatically, no own message formats. |
+| Own features | MCP, agents, session inbox: allowed when nobody else can tell. Nothing sent automatically unless the user turned review off (Settings > MCP) or granted a time window; no own message formats. |
 | Own settings | Settings Teams does not know stay in the local DB, never in Teams account properties. |
 
 ## Never

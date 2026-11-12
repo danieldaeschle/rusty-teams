@@ -203,7 +203,7 @@ pub fn chat_allowed(conversation_id: &str, cx: &App) -> bool {
     };
     let api = api.read(cx);
     let policy = api.hub.policy();
-    policy.propose && policy.can_read_any_kind(conversation_id)
+    policy.write && policy.can_read_any_kind(conversation_id)
 }
 
 pub fn allow_chat(conversation_id: &str, cx: &mut App) {
@@ -216,7 +216,7 @@ pub fn allow_chat(conversation_id: &str, cx: &mut App) {
         api.update_policy(
             move |policy| {
                 policy.enabled = true;
-                policy.propose = true;
+                policy.write = true;
                 let access = if is_channel {
                     &mut policy.channels
                 } else {
@@ -242,7 +242,59 @@ pub fn update_policy(cx: &mut App, change: impl FnOnce(&mut AgentPolicy)) {
 }
 
 pub fn proposal(conversation_id: &str, cx: &App) -> Option<ProposalEntry> {
-    handle(cx)?.read(cx).proposals.get(conversation_id).cloned()
+    handle(cx)?
+        .read(cx)
+        .proposals
+        .get(conversation_id)
+        .filter(|entry| !entry.proposal.direct)
+        .cloned()
+}
+
+pub fn direct_messages(cx: &App) -> Vec<ProposalEntry> {
+    let Some(api) = handle(cx) else {
+        return Vec::new();
+    };
+    api.read(cx)
+        .proposals
+        .values()
+        .filter(|entry| entry.proposal.direct && entry.status == ProposalStatus::Pending)
+        .cloned()
+        .collect()
+}
+
+pub fn direct_reactions(cx: &App) -> Vec<ReactionProposal> {
+    let Some(api) = handle(cx) else {
+        return Vec::new();
+    };
+    api.read(cx)
+        .reactions
+        .values()
+        .filter(|reaction| reaction.direct)
+        .cloned()
+        .collect()
+}
+
+pub fn hold_for_review(conversation_id: &str, cx: &mut App) {
+    if let Some(api) = handle(cx) {
+        api.update(cx, |api, cx| {
+            if let Some(entry) = api.proposals.get_mut(conversation_id) {
+                entry.proposal.direct = false;
+                cx.notify();
+            }
+        });
+    }
+}
+
+pub fn hold_reaction_for_review(conversation_id: &str, message_id: &str, cx: &mut App) {
+    if let Some(api) = handle(cx) {
+        api.update(cx, |api, cx| {
+            let key = (conversation_id.to_owned(), message_id.to_owned());
+            if let Some(reaction) = api.reactions.get_mut(&key) {
+                reaction.direct = false;
+                cx.notify();
+            }
+        });
+    }
 }
 
 pub fn reaction_proposals(conversation_id: &str, cx: &App) -> HashMap<String, ReactionProposal> {
@@ -252,7 +304,7 @@ pub fn reaction_proposals(conversation_id: &str, cx: &App) -> HashMap<String, Re
     api.read(cx)
         .reactions
         .values()
-        .filter(|reaction| reaction.conversation_id == conversation_id)
+        .filter(|reaction| reaction.conversation_id == conversation_id && !reaction.direct)
         .map(|reaction| (reaction.message_id.clone(), reaction.clone()))
         .collect()
 }
@@ -278,7 +330,9 @@ pub fn pending_agents(cx: &App) -> HashMap<String, &'static str> {
     api.read(cx)
         .proposals
         .iter()
-        .filter(|(_, entry)| !matches!(entry.status, ProposalStatus::Stale { .. }))
+        .filter(|(_, entry)| {
+            !entry.proposal.direct && !matches!(entry.status, ProposalStatus::Stale { .. })
+        })
         .map(|(conversation_id, entry)| {
             (
                 conversation_id.clone(),

@@ -381,6 +381,7 @@ pub fn sample_entry(text: &str, mentions: &[(&str, &str)], images: &[Vec<u8>]) -
             agent: None,
             session_id: None,
             created_at: Utc::now(),
+            direct: false,
         },
         images: images
             .iter()

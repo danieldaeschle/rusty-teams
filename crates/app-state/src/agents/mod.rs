@@ -92,7 +92,7 @@ pub fn start_run_when_mcp_ready(
         cx.update(|cx| {
             if mcp_bridge::endpoint(cx).is_none() {
                 raise_notice(
-                    "MCP server is not running - the agent cannot propose a reply".to_owned(),
+                    "MCP server is not running - the agent cannot reply".to_owned(),
                     cx,
                 );
             }
