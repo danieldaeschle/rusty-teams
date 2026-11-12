@@ -16,7 +16,7 @@ const WEBRTC_AUDIO_MARKERS: [&str; 5] = [
     "WebRtcVoiceEngine",
     "webrtc_voice_engine",
 ];
-const WEBRTC_SKIPPED: [&str; 1] = ["audio_device_buffer"];
+const WEBRTC_SKIPPED: [&str; 3] = ["audio_device_buffer", "requesting data", "will write"];
 const ENDPOINT_DUMP_LINES: std::ops::Range<u32> = 4040..4170;
 
 pub fn install(path: PathBuf) {
@@ -115,6 +115,12 @@ mod tests {
         ));
         assert!(!keeps_webrtc_line(
             "(audio_device_buffer.cc:450): [REC : 10000msec, 48kHz] callbacks: 1000"
+        ));
+        assert!(!keeps_webrtc_line(
+            "(audio_device_pulse_linux.cc:2236): requesting data"
+        ));
+        assert!(!keeps_webrtc_line(
+            "(audio_device_pulse_linux.cc:2256): will write"
         ));
         assert!(!keeps_webrtc_line("(peer_connection.cc:55): something"));
     }

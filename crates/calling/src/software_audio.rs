@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use libwebrtc::audio_source::native::NativeAudioSource;
 use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
 use libwebrtc::audio_stream::native::NativeAudioStream;
@@ -10,7 +10,6 @@ use libwebrtc::prelude::*;
 use tokio::task::JoinHandle;
 
 use crate::audio::{FRAME_SAMPLES, SAMPLE_RATE, SineGenerator};
-use crate::band_meter::HighBandMeter;
 use crate::audio_io::AudioMode;
 use crate::capture::Capture;
 use crate::devices::DeviceChoice;
@@ -22,10 +21,10 @@ use crate::pcm::SampleQueue;
 use crate::sound_capture::{LoopbackKind, start_loopback, start_microphone};
 use crate::wav_dump::StageDumps;
 
-const SOURCE_QUEUE_MS: u32 = 100;
+/// Direct capture: 10 ms frames complete synchronously, so the feeder never parks on the Tokio runtime.
+const SOURCE_QUEUE_MS: u32 = 0;
 const FRAME_PERIOD: Duration = Duration::from_millis(10);
 const MAX_LAG: Duration = Duration::from_millis(100);
-const BAND_REPORT_PERIOD: Duration = Duration::from_secs(10);
 const SYSTEM_TONE_HZ: f32 = 660.0;
 const SYNTHETIC_AMPLITUDE: f32 = 0.3;
 
@@ -36,11 +35,11 @@ enum FrameSource {
 }
 
 impl FrameSource {
-    fn next_frame(&mut self) -> Vec<i16> {
+    fn next_frame(&mut self) -> Option<Vec<i16>> {
         match self {
-            FrameSource::Captured(queue) => queue.next_frame().0,
-            FrameSource::Tone(generator) => generator.next_frame(),
-            FrameSource::Silence => vec![0; FRAME_SAMPLES],
+            FrameSource::Captured(queue) => queue.next_frame(),
+            FrameSource::Tone(generator) => Some(generator.next_frame()),
+            FrameSource::Silence => Some(vec![0; FRAME_SAMPLES]),
         }
     }
 }
@@ -61,48 +60,44 @@ struct Feeder {
     far_end: SampleQueue,
     microphone_muted: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
-    runtime: tokio::runtime::Handle,
 }
 
 impl Feeder {
     fn run(mut self) {
         let mut chain = MicChain::new(self.processing, self.ml_noise, StageDumps::from_env());
         let mut due = Instant::now();
-        let mut last_capture = Duration::ZERO;
         while self.running.load(Ordering::SeqCst) {
             due += FRAME_PERIOD;
             let now = Instant::now();
             if due > now {
                 std::thread::sleep(due - now);
             } else if now - due > MAX_LAG {
-                eprintln!(
-                    "calls: audio feeder fell {} ms behind, last capture_frame took {} ms; echo canceller re-aligns",
-                    (now - due).as_millis(),
-                    last_capture.as_millis()
-                );
                 due = now;
             }
-            let (mut far_end, has_far_end) = self.far_end.next_frame();
-            if has_far_end {
+            if let Some(mut far_end) = self.far_end.next_frame() {
                 chain.process_far_end(&mut far_end);
             }
             let muted = self.microphone_muted.load(Ordering::SeqCst);
-            let mut microphone = self.microphone.next_frame();
-            if !muted {
-                chain.process(&mut microphone);
-            }
-            let computer = self.computer.next_frame();
+            let microphone = match self.microphone.next_frame() {
+                Some(mut frame) if !muted => {
+                    chain.process(&mut frame);
+                    frame
+                }
+                Some(frame) => frame,
+                // Underrun: send silence without feeding AEC/gain a zero-padded partial.
+                None => vec![0; FRAME_SAMPLES],
+            };
+            let computer = self.computer.next_frame().unwrap_or_else(|| vec![0; FRAME_SAMPLES]);
             let frame = AudioFrame {
                 data: mix_frames(&microphone, &computer, muted).into(),
                 sample_rate: SAMPLE_RATE,
                 num_channels: 1,
                 samples_per_channel: FRAME_SAMPLES as u32,
             };
-            let capture_started = Instant::now();
-            if self.runtime.block_on(self.source.capture_frame(&frame)).is_err() {
-                break;
+            match self.source.capture_frame(&frame).now_or_never() {
+                Some(Ok(())) => {}
+                Some(Err(_)) | None => break,
             }
-            last_capture = capture_started.elapsed();
         }
     }
 }
@@ -190,9 +185,9 @@ impl SoftwareAudio {
         let source = NativeAudioSource::new(AudioSourceOptions::default(), SAMPLE_RATE, 1, SOURCE_QUEUE_MS);
         let track = factory.create_audio_track("microphone", source.clone());
         let far_end = SampleQueue::default();
-        let far_end_task = remote.map(|remote| tokio::spawn(feed_far_end(remote, far_end.clone())));
-        let microphone_muted = Arc::new(AtomicBool::new(microphone_muted));
         let running = Arc::new(AtomicBool::new(true));
+        let far_end_task = remote.map(|remote| tokio::spawn(feed_far_end(remote, far_end.clone(), running.clone())));
+        let microphone_muted = Arc::new(AtomicBool::new(microphone_muted));
         let feeder = Feeder {
             processing: plan.processing,
             ml_noise: plan.ml_noise,
@@ -202,7 +197,6 @@ impl SoftwareAudio {
             far_end,
             microphone_muted: microphone_muted.clone(),
             running: running.clone(),
-            runtime: tokio::runtime::Handle::current(),
         };
         let thread = std::thread::Builder::new()
             .name("share-audio".into())
@@ -229,29 +223,33 @@ impl SoftwareAudio {
 
 impl Drop for SoftwareAudio {
     fn drop(&mut self) {
+        // Signal stop so the far-end task closes its WebRTC sink on its own thread, then detach both
+        // workers. Joining the feeder on a Tokio worker used to hang when capture_frame waited on a
+        // drained queue; aborting the far-end mid-OnData raced with remove_sink.
         self.running.store(false, Ordering::SeqCst);
-        if let Some(task) = self.far_end_task.take() {
-            task.abort();
-        }
-        if let Some(thread) = self.feeder.take() {
-            let _ = thread.join();
-        }
+        drop(self.far_end_task.take());
+        drop(self.feeder.take());
     }
 }
 
-async fn feed_far_end(remote: RtcAudioTrack, queue: SampleQueue) {
+async fn feed_far_end(remote: RtcAudioTrack, queue: SampleQueue, running: Arc<AtomicBool>) {
     let mut stream = NativeAudioStream::new(remote, SAMPLE_RATE as i32, 1);
-    let mut band_meter = HighBandMeter::default();
-    let mut next_report = Instant::now() + BAND_REPORT_PERIOD;
-    while let Some(frame) = stream.next().await {
-        queue.push(&frame.data);
-        band_meter.add(&frame.data);
-        if Instant::now() >= next_report {
-            next_report += BAND_REPORT_PERIOD;
-            if let Some(share) = band_meter.take_share() {
-                eprintln!("calls: far-end audio energy above 8 kHz: {:.2}%", share * 100.);
+    while running.load(Ordering::SeqCst) {
+        tokio::select! {
+            biased;
+            _ = wait_stopped(&running) => break,
+            frame = stream.next() => match frame {
+                Some(frame) => queue.push(&frame.data),
+                None => break,
             }
         }
+    }
+    stream.close();
+}
+
+async fn wait_stopped(running: &AtomicBool) {
+    while running.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
@@ -273,10 +271,10 @@ mod tests {
     }
 
     #[test]
-    fn default_settings_run_the_software_chain_on_both_platforms() {
+    fn default_settings_use_the_device_track_on_linux() {
         let default = MicSettings::default();
         assert!(SoftwareAudioPlan::wanted_on(true, default, false, true).is_some());
-        assert!(SoftwareAudioPlan::wanted_on(false, default, false, true).is_some());
+        assert!(SoftwareAudioPlan::wanted_on(false, default, false, true).is_none());
         let low = MicSettings { noise_suppression: NoiseSuppression::Low, music_mode: false };
         assert!(SoftwareAudioPlan::wanted_on(false, low, false, true).is_none());
     }

@@ -4,9 +4,12 @@ use webrtc_sys::apm::GainProcessor;
 
 use crate::audio::{FRAME_SAMPLES, SAMPLE_RATE};
 
-const LIFT_DEFAULT_GAIN_DB: f32 = 12.0;
+/// Start flat; quiet mics climb through adaptive AGC2 instead of blasting a hot PipeWire input.
+const LIFT_DEFAULT_GAIN_DB: f32 = 0.0;
 const LIFT_GAIN_CHANGE_DB_PER_SECOND: f32 = 6.0;
 const OUTPUT_FIXED_GAIN_DB: f32 = 8.0;
+/// Only restore DeepFilterNet's level drop when the post-filter frame is still quiet.
+const OUTPUT_APPLY_BELOW_DBFS: f32 = -25.0;
 const SPEECH_FLOOR_DBFS: f32 = -55.0;
 const MIN_SPEECH_FRAMES: u32 = 100;
 
@@ -50,7 +53,10 @@ impl GainStage {
         if frame.len() != FRAME_SAMPLES {
             return;
         }
-        let input_dbfs = if self.learns { frame_dbfs(frame) } else { 0.0 };
+        let input_dbfs = frame_dbfs(frame);
+        if !self.learns && input_dbfs > OUTPUT_APPLY_BELOW_DBFS {
+            return;
+        }
         let processed = self.module.process(frame, SAMPLE_RATE as i32);
         if processed && self.learns && input_dbfs > SPEECH_FLOOR_DBFS {
             self.measured_gain_db_sum += frame_dbfs(frame) - input_dbfs;
@@ -84,18 +90,21 @@ mod tests {
     }
 
     #[test]
-    fn the_fixed_output_stage_adds_its_gain() {
+    fn the_fixed_output_stage_adds_its_gain_only_to_quiet_frames() {
         let mut stage = GainStage::output();
-        let mut last = Vec::new();
-        for frame_index in 0..100 {
-            let mut frame: Vec<i16> = (0..FRAME_SAMPLES)
-                .map(|sample| (((frame_index * FRAME_SAMPLES + sample) as f32 * 0.04).sin() * 2000.0) as i16)
-                .collect();
-            stage.process(&mut frame);
-            last = frame;
-        }
-        let added = frame_dbfs(&last) - 20.0 * (2000.0_f32 / std::f32::consts::SQRT_2 / 32768.0).log10();
-        assert!((added - OUTPUT_FIXED_GAIN_DB).abs() < 0.5, "added {added:.2} dB");
+        let mut quiet: Vec<i16> = (0..FRAME_SAMPLES)
+            .map(|sample| ((sample as f32 * 0.04).sin() * 200.0) as i16)
+            .collect();
+        let before = frame_dbfs(&quiet);
+        stage.process(&mut quiet);
+        assert!(frame_dbfs(&quiet) - before > 6.0, "quiet speech should be lifted");
+
+        let mut loud: Vec<i16> = (0..FRAME_SAMPLES)
+            .map(|sample| ((sample as f32 * 0.04).sin() * 8000.0) as i16)
+            .collect();
+        let loud_before = loud.clone();
+        stage.process(&mut loud);
+        assert_eq!(loud, loud_before, "already-loud frames stay untouched");
     }
 
     #[test]
