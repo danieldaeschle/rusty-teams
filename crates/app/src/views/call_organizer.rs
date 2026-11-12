@@ -20,6 +20,7 @@ use super::call_view::{BANNER_HEIGHT, MENU_WIDTH};
 use super::widgets::{Corner, corner_badge, count_badge, icon};
 use crate::app_state::AppState;
 use crate::call::{CAPTION_SHOWN, CallModel, CaptionPosition, Focus, contain_size};
+use crate::i18n::tr;
 use crate::notice::truncated;
 use crate::theme;
 
@@ -98,7 +99,7 @@ fn lobby_list(app: &Entity<AppState>, guests: &[(String, String)]) -> Div {
                 )
                 .child(
                     Button::new(SharedString::from(format!("lobby-admit-{mri}")))
-                        .label("Admit")
+                        .label(tr("common.admit"))
                         .on_click(move |_, _, cx| {
                             admit_app.update(cx, |state, cx| {
                                 state.admit_call_guest(admit_mri.clone(), cx)
@@ -107,7 +108,7 @@ fn lobby_list(app: &Entity<AppState>, guests: &[(String, String)]) -> Div {
                 )
                 .child(
                     Button::new(SharedString::from(format!("lobby-deny-{mri}")))
-                        .label("Deny")
+                        .label(tr("common.deny"))
                         .ghost()
                         .on_click(move |_, _, cx| {
                             deny_app
@@ -192,10 +193,10 @@ fn confirm_remove(
         let app = app.clone();
         let mri = mri.clone();
         let cancel = Button::new("remove-cancel")
-            .label("Cancel")
+            .label(tr("common.cancel"))
             .on_click(|_, window, cx| window.close_dialog(cx));
         let remove = Button::new("remove-confirm")
-            .label("Remove")
+            .label(tr("common.remove"))
             .danger()
             .on_click(move |_, window, cx| {
                 app.update(cx, |state, cx| {
@@ -634,7 +635,11 @@ fn camera_menu(
         popup = popup.item(item);
     }
     background_items(
-        effect_items(popup, app, backgrounds.effects),
+        effect_items(
+            super::call_extras::quality_items(popup, app, backgrounds.quality),
+            app,
+            backgrounds.effects,
+        ),
         app,
         backgrounds,
     )

@@ -17,6 +17,7 @@ use crate::video_layout::{
     Assignment, SlotTable, SourceRequest, TileDetail, VideoRouter, VideoWant, plan_receive,
     prioritize, requests_for,
 };
+use crate::video_quality::VideoQuality;
 
 const HISTORY_LIMIT: usize = 16;
 const REQUEST_LABEL: &str = "POST applyChannelParameters";
@@ -134,6 +135,8 @@ pub struct VideoReceive {
     wants: Option<Vec<VideoWant>>,
     requester: Option<SourceRequester>,
     incoming_enabled: bool,
+    quality: VideoQuality,
+    refresh_limits: bool,
 }
 
 impl VideoReceive {
@@ -148,11 +151,22 @@ impl VideoReceive {
             wants: None,
             requester: None,
             incoming_enabled: true,
+            quality: VideoQuality::default(),
+            refresh_limits: false,
         }
     }
 
     pub fn set_incoming_enabled(&mut self, enabled: bool) {
         self.incoming_enabled = enabled;
+    }
+
+    pub fn set_video_quality(&mut self, quality: VideoQuality) -> bool {
+        if self.quality == quality {
+            return false;
+        }
+        self.quality = quality;
+        self.refresh_limits = true;
+        true
     }
 
     pub fn set_wants(&mut self, wants: Vec<VideoWant>) -> bool {
@@ -204,7 +218,12 @@ impl VideoReceive {
             Vec::new()
         };
         let next = plan_receive(&self.held, &candidates);
-        for request in requests_for(&self.held, &next, &self.table.people) {
+        let current = if self.refresh_limits {
+            vec![None; self.held.len()]
+        } else {
+            self.held.clone()
+        };
+        for request in requests_for(&current, &next, &self.table.people, self.quality) {
             let slot = self
                 .table
                 .people
@@ -225,6 +244,7 @@ impl VideoReceive {
             requester.send(request, route_after);
         }
         self.held = next;
+        self.refresh_limits = false;
         if let Some(slot) = &self.table.screen {
             let wanted = roster
                 .screen_share(&self.own_mri)
@@ -243,6 +263,7 @@ impl VideoReceive {
                         source: wanted.as_ref().map(|assignment| assignment.source),
                         screen: true,
                         detail: TileDetail::Stage,
+                        quality: self.quality,
                     },
                     route_after,
                 );

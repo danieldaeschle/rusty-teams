@@ -764,7 +764,7 @@ async fn speak_until_hangup(
                     people.iter().for_each(|(mri, _)| control.video.forget(&VideoKey::Person(mri.clone())));
                     control.send(CallUpdate::IncomingVideo(enabled));
                 }
-                Some(CallCommand::SetCameraEffects(_) | CallCommand::SetVideoWants(_) | CallCommand::SetShareMotion(_) | CallCommand::SetShareStandout(_)) => {}
+                Some(CallCommand::SetCameraEffects(_) | CallCommand::SetVideoQuality(_) | CallCommand::SetVideoWants(_) | CallCommand::SetShareMotion(_) | CallCommand::SetShareStandout(_)) => {}
                 Some(CallCommand::StartRecording { kind, .. }) => {
                     recording_on = kind != RecordingKind::TranscriptOnly;
                     transcribing_on = true;
@@ -789,6 +789,11 @@ async fn speak_until_hangup(
                 }
                 Some(CallCommand::OpenWhiteboard { .. }) => control.send(CallUpdate::WhiteboardUrl(DEMO_BOARD_URL.to_owned())),
                 Some(CallCommand::RefreshShareSources) => send_demo_share_sources(&control),
+                Some(
+                    CallCommand::StartPortalShare(_)
+                    | CallCommand::AbandonPortalShare
+                    | CallCommand::FinishPortalShare { .. },
+                ) => {}
                 Some(CallCommand::Hangup | CallCommand::EndMeeting) | None => {
                     end(&control, EndReason::LocalHangup);
                     return;

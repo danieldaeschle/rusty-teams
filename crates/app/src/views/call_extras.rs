@@ -1,3 +1,4 @@
+use crate::i18n::{tr, tr_args};
 use crate::views::image_memory::bounded;
 use std::path::PathBuf;
 
@@ -61,7 +62,7 @@ pub fn return_button(app: &Entity<AppState>, model: &CallModel) -> Option<AnyEle
     let app = app.clone();
     Some(
         Button::new("call-return-main")
-            .label("Return to main meeting")
+            .label(tr("calls.chrome.return_main"))
             .on_click(move |_, _, cx| app.update(cx, |state, cx| state.return_to_main_meeting(cx)))
             .into_any_element(),
     )
@@ -74,7 +75,7 @@ pub fn room_chip(model: &CallModel) -> Option<AnyElement> {
             .flex_none()
             .text_size(px(13.))
             .text_color(theme::text_muted())
-            .child("Breakout room")
+            .child(tr("calls.chrome.breakout_room"))
             .into_any_element(),
     )
 }
@@ -83,21 +84,21 @@ pub fn hold_panel(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElemen
     let (title, detail) = match model.hold {
         HoldState::Active => return None,
         HoldState::Local => (
-            "On hold".to_owned(),
+            tr("calls.chrome.on_hold"),
             format!(
                 "{} cannot hear you and you cannot hear them.",
                 model.peer_name
             ),
         ),
         HoldState::Remote => (
-            "You're on hold".to_owned(),
+            tr("calls.chrome.you_on_hold"),
             format!("{} put the call on hold.", model.peer_name),
         ),
     };
     let resume = (model.hold == HoldState::Local).then(|| {
         let app = app.clone();
         Button::new("call-resume")
-            .label("Resume")
+            .label(tr("common.resume"))
             .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_hold(cx)))
     });
     Some(
@@ -140,7 +141,7 @@ pub fn whiteboard_stage(app: &Entity<AppState>, model: &CallModel) -> Option<Any
     let open = model.whiteboard_url().is_some().then(|| {
         let app = app.clone();
         Button::new("call-whiteboard-open")
-            .label("Open in browser")
+            .label(tr("calls.chrome.open_in_browser"))
             .icon(IconName::ExternalLink)
             .on_click(move |_, _, cx| app.update(cx, |state, cx| state.open_call_whiteboard(cx)))
     });
@@ -180,7 +181,7 @@ pub fn consult_banner(app: &Entity<AppState>, state: &AppState) -> Option<AnyEle
         .unwrap_or("call")
         .to_owned();
     let (transfer_app, resume_app) = (app.clone(), app.clone());
-    let transfer = pill("call-consult-transfer", "Transfer", true)
+    let transfer = pill("call-consult-transfer", tr("calls.chrome.transfer"), true)
         .debug_selector(|| "shell/islands/main/call-header/call-consult/transfer".into());
     let transfer = if ready {
         transfer.on_click(move |_, _, cx| {
@@ -189,9 +190,17 @@ pub fn consult_banner(app: &Entity<AppState>, state: &AppState) -> Option<AnyEle
     } else {
         transfer.opacity(0.5).cursor_default()
     };
-    let resume = pill("call-consult-resume", format!("Resume {first_name}"), false)
-        .debug_selector(|| "shell/islands/main/call-header/call-consult/resume".into())
-        .on_click(move |_, _, cx| resume_app.update(cx, |state, cx| state.resume_held_call(cx)));
+    let resume = {
+        let mut args = std::collections::HashMap::new();
+        args.insert("name".to_owned(), first_name);
+        pill(
+            "call-consult-resume",
+            tr_args("calls.chrome.resume_person", &args),
+            false,
+        )
+    }
+    .debug_selector(|| "shell/islands/main/call-header/call-consult/resume".into())
+    .on_click(move |_, _, cx| resume_app.update(cx, |state, cx| state.resume_held_call(cx)));
     Some(
         h_flex()
             .id("call-consult-banner")
@@ -259,19 +268,19 @@ pub fn consent_overlay(app: &Entity<AppState>, model: &CallModel) -> Option<AnyE
                                 div()
                                     .text_size(px(16.))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child("This meeting is being recorded"),
+                                    .child(tr("calls.chrome.recording_notice")),
                             ),
                     )
                     .child(
                         div()
                             .text_size(px(13.))
                             .text_color(theme::text_muted())
-                            .child("Your microphone and camera stay off until you accept."),
+                            .child(tr("calls.chrome.recording_accept_hint")),
                     )
                     .child(
                         h_flex().w_full().justify_end().child(
                             Button::new("call-consent-ok")
-                                .label("OK")
+                                .label(tr("common.ok"))
                                 .on_click(move |_, _, cx| {
                                     app.update(cx, |state, cx| state.accept_recording_notice(cx))
                                 }),
@@ -295,8 +304,8 @@ pub fn confirm_record_action(
     let app = app.clone();
     window.open_alert_dialog(cx, move |alert, _, _| {
         let app = app.clone();
-        let cancel = Button::new("recording-cancel").label("Cancel").on_click(|_, window, cx| window.close_dialog(cx));
-        let stop = Button::new("recording-stop").label("Stop").danger().on_click(move |_, window, cx| {
+        let cancel = Button::new("recording-cancel").label(tr("common.cancel")).on_click(|_, window, cx| window.close_dialog(cx));
+        let stop = Button::new("recording-stop").label(tr("common.stop")).danger().on_click(move |_, window, cx| {
             app.update(cx, |state, cx| state.run_call_record_action(action, cx));
             window.close_dialog(cx);
         });
@@ -332,6 +341,7 @@ pub struct CameraMenu {
     pub images: Vec<(String, String, Option<PathBuf>)>,
     pub customs: Vec<PathBuf>,
     pub effects: CameraEffects,
+    pub quality: calling::VideoQuality,
 }
 
 impl CameraMenu {
@@ -352,8 +362,40 @@ impl CameraMenu {
                 .collect(),
             customs: library.customs.clone(),
             effects: state.call_effects,
+            quality: state.call_video_quality,
         }
     }
+}
+
+pub fn quality_items(
+    popup: PopupMenu,
+    app: &Entity<AppState>,
+    current: calling::VideoQuality,
+) -> PopupMenu {
+    let choices = [
+        (calling::VideoQuality::Auto, "Auto"),
+        (calling::VideoQuality::P720, "720p"),
+        (calling::VideoQuality::P1080, "1080p"),
+    ];
+    let mut popup = popup
+        .separator()
+        .item(PopupMenuItem::label(tr("calls.chrome.video_quality")));
+    for (quality, label) in choices {
+        let app = app.clone();
+        let menu_label = if quality == calling::VideoQuality::Auto {
+            tr("calls.chrome.auto")
+        } else {
+            label.to_owned()
+        };
+        popup = popup.item(
+            PopupMenuItem::new(menu_label)
+                .checked(current == quality)
+                .on_click(move |_, _, cx| {
+                    app.update(cx, |state, cx| state.set_call_video_quality(quality, cx))
+                }),
+        );
+    }
+    popup
 }
 
 fn thumbnail(
@@ -412,7 +454,7 @@ fn effect_change(
 fn effect_switch_item(
     app: &Entity<AppState>,
     id: &'static str,
-    label: &'static str,
+    label: String,
     on: bool,
     change: fn(&mut CameraEffects),
 ) -> PopupMenuItem {
@@ -423,7 +465,7 @@ fn effect_switch_item(
             .gap(px(16.))
             .items_center()
             .justify_between()
-            .child(label)
+            .child(label.clone())
             .child(Switch::new(id).checked(on))
     })
     .on_click(effect_change(app, change))
@@ -432,32 +474,32 @@ fn effect_switch_item(
 pub fn effect_items(popup: PopupMenu, app: &Entity<AppState>, effects: CameraEffects) -> PopupMenu {
     popup
         .separator()
-        .item(PopupMenuItem::label("Effects"))
+        .item(PopupMenuItem::label(tr("calls.chrome.effects")))
         .item(effect_switch_item(
             app,
             "call-effect-mirror",
-            "Mirror my video",
+            tr("calls.chrome.mirror_video"),
             effects.mirror,
             |effects| effects.mirror = !effects.mirror,
         ))
         .item(effect_switch_item(
             app,
             "call-effect-framing",
-            "Auto framing",
+            tr("calls.chrome.auto_framing"),
             effects.auto_framing,
             |effects| effects.auto_framing = !effects.auto_framing,
         ))
         .item(effect_switch_item(
             app,
             "call-effect-brightness",
-            "Adjust brightness",
+            tr("calls.chrome.adjust_brightness"),
             effects.adjust_brightness,
             |effects| effects.adjust_brightness = !effects.adjust_brightness,
         ))
         .item(effect_switch_item(
             app,
             "call-effect-soft-focus",
-            "Soft focus",
+            tr("calls.chrome.soft_focus"),
             effects.soft_focus,
             |effects| effects.soft_focus = !effects.soft_focus,
         ))
@@ -469,9 +511,9 @@ pub fn background_items(popup: PopupMenu, app: &Entity<AppState>, menu: &CameraM
     let grid_menu = menu.clone();
     let mut popup = popup
         .separator()
-        .item(PopupMenuItem::label("Background"))
+        .item(PopupMenuItem::label(tr("calls.chrome.background")))
         .item(
-            PopupMenuItem::new("None")
+            PopupMenuItem::new(tr("calls.chrome.background_none"))
                 .checked(menu.pick == BackgroundPick::None)
                 .on_click(move |_, _, cx| {
                     none_app.update(cx, |state, cx| {
@@ -480,7 +522,7 @@ pub fn background_items(popup: PopupMenu, app: &Entity<AppState>, menu: &CameraM
                 }),
         )
         .item(
-            PopupMenuItem::new("Blur")
+            PopupMenuItem::new(tr("calls.chrome.background_blur"))
                 .checked(menu.pick.is_blur())
                 .on_click(move |_, _, cx| {
                     blur_app.update(cx, |state, cx| {
@@ -527,7 +569,7 @@ pub fn background_items(popup: PopupMenu, app: &Entity<AppState>, menu: &CameraM
         }));
     }
     popup.item(
-        PopupMenuItem::new("Add image...")
+        PopupMenuItem::new(tr("calls.chrome.add_image"))
             .icon(IconName::Plus)
             .on_click(move |_, _, cx| {
                 add_app.update(cx, |state, cx| state.add_call_background(cx))

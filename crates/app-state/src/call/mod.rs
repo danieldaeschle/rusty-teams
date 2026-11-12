@@ -7,6 +7,7 @@ pub mod history;
 pub mod join;
 pub mod launcher;
 pub mod list;
+pub mod meeting_create;
 pub mod outlook_reminders;
 pub mod overlay_layout;
 pub mod people_actions;
@@ -29,7 +30,8 @@ pub use app_call_model::{
 };
 
 pub use actions::{
-    apply_sound_output, load_camera, load_camera_effects, load_input, load_output, load_share_sound,
+    apply_sound_output, load_camera, load_camera_effects, load_input, load_output,
+    load_share_sound, load_video_quality,
 };
 pub use agenda::{AgendaRow, fetch_window, join_available, response_label};
 pub use background::{
@@ -62,12 +64,15 @@ pub use report::load_enabled as load_report_enabled;
 pub use ring::{MissedCall, RingEntry, Rings};
 pub use schedule::{FormValues, Invitee, default_window, draft_from_form};
 pub use share_actions::ZoomStep;
-pub use share_view::{SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, ShareStage, load_flag};
+pub use share_view::{
+    SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, STRIP_DEFAULT_WIDTH, STRIP_WIDTH_META_KEY,
+    ShareStage, StripDrag, clamp_strip_width, load_flag, load_strip_width,
+};
 pub use speed_dial::SpeedDialEntry;
 pub use stage_layout::{contain_size, focus_stage_size, gallery_grid};
 pub use stage_split::{
-    GRID_PADDING, GalleryPage, STRIP_GAP, SpeakerSplit, StripSplit, TILE_GAP, gallery_page,
-    measured_stage, speaker_split, strip_split, video_wants,
+    GRID_PADDING, STRIP_GAP, SpeakerSplit, StripSplit, TILE_GAP, gallery_page, measured_stage,
+    speaker_split, strip_split, video_wants,
 };
 pub use target::{is_echo_chat, plan_for_chat};
 pub use transcript::clock_label;
