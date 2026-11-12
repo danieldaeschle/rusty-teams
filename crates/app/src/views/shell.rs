@@ -12,7 +12,6 @@ use super::conversation::ConversationView;
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
 use super::image_viewer::{ImageViewer, ImageViewerEvent};
-use super::prejoin_view::PrejoinView;
 use super::profile_card::{ProfileCard, ProfileCardEvent};
 use gpui_kit::prelude::FluentBuilder as _;
 use super::rail::RailView;
@@ -173,7 +172,6 @@ pub struct AppShell {
     calls_page: Entity<CallsPage>,
     shown_quick_view: Option<QuickView>,
     conversation: Entity<ConversationView>,
-    prejoin: Option<Entity<PrejoinView>>,
     switcher: Option<Entity<Switcher>>,
     notifications: Entity<NotificationCenter>,
     _call_windows: Entity<CallWindows>,
@@ -229,19 +227,6 @@ impl AppShell {
                 None => {}
             })
         });
-    }
-
-    fn sync_prejoin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let wanted = self.state.read(cx).prejoin.clone();
-        let open = self.prejoin.as_ref().map(|view| view.read(cx).pending_id());
-        match (wanted, open) {
-            (Some(pending), Some(id)) if pending.id == id => {}
-            (Some(pending), _) => {
-                let app = self.state.clone();
-                self.prejoin = Some(cx.new(|cx| PrejoinView::new(app, &pending, window, cx)));
-            }
-            (None, _) => self.prejoin = None,
-        }
     }
 
     pub fn new(
@@ -400,7 +385,6 @@ impl AppShell {
             calls_page,
             shown_quick_view: None,
             conversation,
-            prejoin: None,
             switcher: None,
             notifications,
             _call_windows: call_windows,
@@ -943,31 +927,28 @@ impl AppShell {
                         )
                     }),
             )
-            .child(match self.prejoin.clone() {
-                Some(prejoin) => prejoin
-                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
-                    .into_any_element(),
-                None if calls_open => self
+            .child(match () {
+                _ if calls_open => self
                     .calls_page
                     .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
-                None if manage_team_open => self
+                _ if manage_team_open => self
                     .manage_team_page
                     .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
-                None if quick_view_open => self
+                _ if quick_view_open => self
                     .quick_pane
                     .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
-                None if calendar_open => self
+                _ if calendar_open => self
                     .calendar
                     .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
-                None => self
+                _ => self
                     .conversation
                     .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
@@ -1013,7 +994,6 @@ impl Render for AppShell {
                 });
             });
         }
-        self.sync_prejoin(window, cx);
         let notice = self.state.read(cx).notice.clone();
         self.toasts.sync(&self.state, notice.as_ref(), window, cx);
         let update_failure = match &self.update {

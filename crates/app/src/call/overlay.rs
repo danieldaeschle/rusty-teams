@@ -290,7 +290,7 @@ impl CallWindows {
 
     fn stage_wanted(&self, cx: &App) -> bool {
         let state = self.app.read(cx);
-        state.call.is_some() || state.call_end.is_some()
+        state.call.is_some() || state.call_end.is_some() || state.prejoin.is_some()
     }
 
     fn sync_stage(&mut self, cx: &mut Context<Self>) {

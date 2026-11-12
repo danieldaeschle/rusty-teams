@@ -8,6 +8,7 @@ use super::call_pop_out::zoom_listener;
 use super::call_stage::render_stage_overlay;
 use super::call_view::render_call_view;
 use super::conversation::ConversationView;
+use super::prejoin_view::PrejoinView;
 use super::actions::ToggleCallMute;
 use super::shortcuts::{
     HangUpCall, OpenLobbyList, PushToTalk, ToggleCallCamera, ToggleCallFullscreen, ToggleCallHand,
@@ -30,6 +31,7 @@ pub fn call_window_title(state: &AppState) -> String {
         .call
         .as_ref()
         .map(|call| call.model.title.clone())
+        .or_else(|| state.prejoin.as_ref().map(|pending| pending.join.title.clone()))
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| FALLBACK_TITLE.to_owned())
 }
@@ -39,6 +41,7 @@ pub struct CallWindowView {
     app: Entity<AppState>,
     focus: FocusHandle,
     call_chat: Option<(String, Entity<ConversationView>)>,
+    prejoin: Option<Entity<PrejoinView>>,
     fullscreen: bool,
     was_fullscreen: bool,
     _app_subscription: Subscription,
@@ -64,6 +67,7 @@ impl CallWindowView {
             app,
             focus,
             call_chat: None,
+            prejoin: None,
             fullscreen: false,
             was_fullscreen: false,
             _app_subscription: app_subscription,
@@ -81,6 +85,19 @@ impl CallWindowView {
                 self.call_chat = Some((wanted, view));
             }
             (None, _) => self.call_chat = None,
+        }
+    }
+
+    fn sync_prejoin(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let wanted = self.app.read(cx).prejoin.clone();
+        let open = self.prejoin.as_ref().map(|view| view.read(cx).pending_id());
+        match (wanted, open) {
+            (Some(pending), Some(id)) if pending.id == id => {}
+            (Some(pending), _) => {
+                let app = self.app.clone();
+                self.prejoin = Some(cx.new(|cx| PrejoinView::new(app, &pending, window, cx)));
+            }
+            (None, _) => self.prejoin = None,
         }
     }
 
@@ -142,6 +159,8 @@ fn leave_or_dismiss(app: &Entity<AppState>, cx: &mut App) {
     app.update(cx, |state, cx| {
         if state.call.is_some() {
             state.leave_call(cx);
+        } else if state.prejoin.is_some() {
+            state.cancel_prejoin(cx);
         } else {
             state.dismiss_call_end(cx);
         }
@@ -158,6 +177,7 @@ impl Render for CallWindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let chat_thread = self.app.read(cx).call_chat_thread();
         self.sync_call_chat(chat_thread, window, cx);
+        self.sync_prejoin(window, cx);
         let state = self.app.read(cx);
         let fullscreen = state.call_fullscreen();
         let open_dialogs = [
@@ -174,7 +194,8 @@ impl Render for CallWindowView {
         let stage_width = window_width - 2. * ISLAND_GAP;
         let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone().into());
         let stage = render_call_view(&self.app, state, chat_panel, fullscreen, stage_width)
-            .or_else(|| render_call_end(&self.app, state));
+            .or_else(|| render_call_end(&self.app, state))
+            .or_else(|| self.prejoin.clone().map(|prejoin| prejoin.into_any_element()));
         let stage_overlay = render_stage_overlay(&self.app, state);
         elevation::set_app_modal_layers(window, open_dialogs, cx);
         self.sync_fullscreen(fullscreen, window);

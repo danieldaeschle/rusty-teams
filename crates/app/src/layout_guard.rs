@@ -987,7 +987,8 @@ mod frames {
                     screen_name,
                     "call" | "call-people" | "call-transcript" | "call-share" | "call-consult"
                 );
-                let tags = if is_call {
+                let in_call_window = is_call || screen_name == "prejoin";
+                let tags = if in_call_window {
                     let mut call_visual = call_window_context(&mut visual);
                     call_visual.simulate_resize(size(px(width), px(height)));
                     collect(&mut call_visual, None)
@@ -995,8 +996,10 @@ mod frames {
                     collect(&mut visual, status_menu.then_some(MENU))
                 };
                 let mut expected = GUARDED.to_vec();
-                if is_call {
+                if in_call_window {
                     expected = vec!["shell/islands/main"];
+                }
+                if is_call {
                     expected.extend(CALL_GUARDED);
                 }
                 if screen_name == "call-transcript" {
