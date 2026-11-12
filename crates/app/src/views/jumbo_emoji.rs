@@ -11,12 +11,8 @@ use crate::theme;
 const EMOTICON_SIZE: f32 = 50.;
 const GLYPH_SIZE: f32 = 40.;
 const EMOTICON_GAP: f32 = 4.;
-const APPEAR_LOOPS: u32 = 2;
-const HOVER_LOOPS: u32 = 5;
-
 struct Playback {
     started: Option<Instant>,
-    loops: u32,
 }
 
 #[derive(IntoElement)]
@@ -47,21 +43,16 @@ impl RenderOnce for JumboEmoticon {
             Some(Err(_)) => return glyph(&self.emoji),
             None => return div().size(px(EMOTICON_SIZE)).into_any_element(),
         };
-        let playback = window.use_keyed_state(self.id.clone(), cx, |_, _| Playback {
-            started: None,
-            loops: APPEAR_LOOPS,
-        });
+        let playback = window.use_keyed_state(self.id.clone(), cx, |_, _| Playback { started: None });
         let now = Instant::now();
         let active = window.is_window_active();
-        let (started, loops) = playback.update(cx, |playback, _| {
-            if !active {
-                playback.started = None;
+        let started = playback.update(cx, |playback, _| {
+            if active {
+                playback.started.get_or_insert(now);
             }
-            let started = active.then(|| *playback.started.get_or_insert(now));
-            (started, playback.loops)
+            playback.started
         });
-        let playing = started
-            .is_some_and(|started| now.duration_since(started) < resolved.loop_duration() * loops);
+        let playing = started.is_some_and(|started| now.duration_since(started) < resolved.loop_duration());
         let image = if playing {
             images.animated.clone()
         } else {
@@ -76,7 +67,6 @@ impl RenderOnce for JumboEmoticon {
                 if *hovered {
                     playback.update(cx, |playback, cx| {
                         playback.started = Some(Instant::now());
-                        playback.loops = HOVER_LOOPS;
                         cx.notify();
                     });
                 }
