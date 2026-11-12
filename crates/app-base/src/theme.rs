@@ -21,6 +21,16 @@ const FONT_FILES: [&[u8]; 4] = [
     include_bytes!("../../app/assets/fonts/GoogleSansFlex-Bold.ttf"),
     include_bytes!("../../app/assets/fonts/GoogleSansFlex-Italic.ttf"),
 ];
+#[cfg(target_os = "linux")]
+const EMOJI_FONT: &[u8] = include_bytes!("../../app/assets/fonts/NotoColorEmoji.ttf");
+
+/// Family used for emoji glyphs. On Linux this is the bundled CBDT face.
+#[cfg(target_os = "windows")]
+pub const EMOJI_FONT_FAMILY: &str = "Segoe UI Emoji";
+#[cfg(target_os = "macos")]
+pub const EMOJI_FONT_FAMILY: &str = "Apple Color Emoji";
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+pub const EMOJI_FONT_FAMILY: &str = "Noto Color Emoji";
 
 #[cfg(target_os = "linux")]
 const PLATFORM_FONT_FILES: [&[u8]; 1] = [include_bytes!("../../app/assets/fonts/NotoColorEmoji.ttf")];
@@ -425,6 +435,24 @@ mod tests {
         }
         set_thread_scheme(None);
         set_thread_shade(None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bundled_emoji_font_is_cbdt_noto() {
+        let bytes = include_bytes!("../../app/assets/fonts/NotoColorEmoji.ttf");
+        assert!(bytes.windows(4).any(|window| window == b"CBDT"));
+        assert!(bytes.windows(4).any(|window| window == b"CBLC"));
+        assert!(!bytes.windows(4).any(|window| window == b"COLR"));
+        let postscript: Vec<u8> = "NotoColorEmoji"
+            .encode_utf16()
+            .flat_map(|unit| unit.to_be_bytes())
+            .collect();
+        assert!(
+            bytes
+                .windows(postscript.len())
+                .any(|window| window == postscript)
+        );
     }
 
     #[test]

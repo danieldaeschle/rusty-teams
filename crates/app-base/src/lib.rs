@@ -22,6 +22,8 @@ pub mod fuzzy;
 pub mod image_clipboard;
 pub mod image_view_math;
 pub mod inline_image;
+#[cfg(target_os = "linux")]
+pub mod linux_fonts;
 pub mod native_dumps;
 pub mod notify;
 pub mod presence_link;
@@ -36,9 +38,12 @@ pub mod stickers;
 pub mod task_dialog;
 pub mod theme;
 pub mod translation;
+pub mod ui_locale;
 pub mod updater;
 pub mod user_activity;
 pub mod version;
 pub mod zoom;
 
 pub const APP_NAME: &str = "Rusty Teams";
+
+rust_i18n::i18n!("locales", fallback = "en");

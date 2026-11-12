@@ -12,6 +12,7 @@ use gpui_kit::*;
 
 use super::reaction_picker::ReactionPicker;
 use super::widgets::{Corner, corner_badge, icon};
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::default_reactions::{
     filled, place_in_slot, quick_reaction_glyphs, reaction_id_for_glyph, slots_for,
@@ -124,9 +125,12 @@ impl CustomizeForm {
             .rounded(px(10.))
             .tooltip(label)
             .map(|button| match &glyph {
-                Some(glyph) => {
-                    button.child(div().text_size(px(SLOT_GLYPH_SIZE)).child(glyph.clone()))
-                }
+                Some(glyph) => button.child(
+                    div()
+                        .text_size(px(SLOT_GLYPH_SIZE))
+                        .font_family(theme::EMOJI_FONT_FAMILY)
+                        .child(glyph.clone()),
+                ),
                 None => button.child(icon(IconName::Plus, 18., theme::text_muted())),
             });
         let (picker, view) = (self.picker.clone(), cx.entity().downgrade());
@@ -196,6 +200,7 @@ impl CustomizeForm {
             .rounded_full()
             .cursor_pointer()
             .text_size(px(TONE_GLYPH_SIZE))
+            .font_family(theme::EMOJI_FONT_FAMILY)
             .when(selected, |choice| choice.bg(theme::reaction_on_own()))
             .when(!selected, |choice| {
                 choice.hover(|choice| choice.bg(theme::popup_hover()))
@@ -248,13 +253,13 @@ pub fn open_customize_reactions(state: Entity<AppState>, window: &mut Window, cx
         let footer = DialogFooter::new()
             .child(
                 Button::new("customize-reactions-cancel")
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
             .child(
                 Button::new("customize-reactions-save")
                     .primary()
-                    .label("Save")
+                    .label(tr("common.save"))
                     .disabled(unchanged)
                     .on_click(move |_, window, cx| {
                         submit_form.update(cx, |form, cx| form.save(window, cx));

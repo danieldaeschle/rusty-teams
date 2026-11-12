@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Rusty Teams
+Comment=A fast, native Microsoft Teams chat client
+Exec=teams
+Icon=rusty-teams
+StartupWMClass=rusty-teams
+Terminal=false
+Categories=Network;InstantMessaging;
