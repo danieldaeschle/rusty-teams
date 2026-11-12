@@ -1,6 +1,7 @@
 mod activity;
 mod attachment_images;
 mod avatars;
+mod calendar_accounts;
 mod chats;
 mod drafts;
 mod error;
@@ -24,6 +25,10 @@ mod teams;
 mod text;
 mod time;
 
+pub use calendar_accounts::{
+    CALENDAR_ACCOUNTS_KEY, CalendarAccounts, CalendarProvider, CalendarRef, GoogleAccount,
+    GoogleCalendarInfo, GoogleTokenSet, load_calendar_accounts, save_calendar_accounts,
+};
 pub use error::{Error, Result};
 pub use image_files::ImageFileCache;
 pub use migrations::latest_version;

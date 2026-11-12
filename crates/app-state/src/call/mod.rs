@@ -64,10 +64,7 @@ pub use report::load_enabled as load_report_enabled;
 pub use ring::{MissedCall, RingEntry, Rings};
 pub use schedule::{FormValues, Invitee, default_window, draft_from_form};
 pub use share_actions::ZoomStep;
-pub use share_view::{
-    SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, STRIP_DEFAULT_WIDTH, STRIP_WIDTH_META_KEY,
-    ShareStage, StripDrag, clamp_strip_width, load_flag, load_strip_width,
-};
+pub use share_view::{SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, ShareStage, load_flag};
 pub use speed_dial::SpeedDialEntry;
 pub use stage_layout::{contain_size, focus_stage_size, gallery_grid};
 pub use stage_split::{

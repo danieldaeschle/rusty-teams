@@ -17,6 +17,7 @@ pub mod emotions;
 mod error;
 pub mod forward;
 pub mod gifs;
+pub mod google_calendar;
 mod json_id;
 pub mod language_settings;
 pub mod links;
@@ -51,9 +52,10 @@ pub use activity_feed::{
 pub use activity_mentions::{MentionActivity, MentionKind, mentions_of};
 pub use bot_profiles::{BotProfile, BotProfiles, parse_bot_profiles};
 pub use calendar::{
-    Attendee, BusyTime, Calendar, CalendarEvent, CreatedEvent, DialIn, NewEvent, PersonSchedule,
-    Reminder, Repeat, Reply, ResponseType, ShowAs, join_info_text, meet_now_join_url,
-    new_event_body, parse_calendar_events, parse_created_event,
+    Attendee, BusyTime, Calendar, CalendarEvent, CalendarSource, CreatedEvent, DialIn, NewEvent,
+    PersonSchedule, Reminder, Repeat, Reply, ResponseType, ShowAs, join_info_text,
+    meet_now_join_url, new_event_body, new_event_body_with_join, parse_calendar_events,
+    parse_created_event,
 };
 pub use calllog::{CallDirection, CallLogEntry, CallOutcome};
 pub use cards::{
@@ -73,6 +75,12 @@ pub use emotions::{EmotionReaction, MessageEmotions, parse_message_emotions, use
 pub use error::{Error, Result};
 pub use forward::{ForwardResult, MAX_FORWARD_MESSAGES};
 pub use gifs::{Gif, Gifs};
+pub use google_calendar::{
+    AuthPending, GoogleCalendar, GoogleEventDraft, GoogleOAuth, TokenBundle, allocate_redirect_uri,
+    client_id_from_env, exchange_code, google_event_body, google_rsvp_query, google_rsvp_status,
+    merge_calendar_events, normalize_join_url, parse_calendar_list, parse_google_events,
+    refresh_access_token, rrule_for_repeat, wait_for_code,
+};
 pub use language_settings::{
     LanguageSettings, LanguageSettingsClient, TranslationBehavior, authoring_patch, behavior_patch,
     parse_language_settings, target_patch,

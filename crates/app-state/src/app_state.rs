@@ -191,7 +191,6 @@ pub struct AppState {
     pub call_share_motion: bool,
     pub call_share_standout: bool,
     pub call_report_enabled: bool,
-    pub call_strip_width: f32,
     pub call_view: crate::call::ViewSettings,
     pub call_background: crate::call::BackgroundPick,
     pub call_camera: calling::DeviceChoice,
@@ -355,7 +354,6 @@ impl AppState {
             call_share_motion: false,
             call_share_standout: false,
             call_report_enabled: true,
-            call_strip_width: crate::call::STRIP_DEFAULT_WIDTH,
             call_view: crate::call::ViewSettings::default(),
             call_background: crate::call::BackgroundPick::None,
             call_camera: calling::DeviceChoice::SystemDefault,
@@ -406,7 +404,6 @@ impl AppState {
         state.call_effects = crate::call::load_camera_effects(&state.store);
         state.join_options = crate::call::load_join_options(&state.store);
         state.call_backgrounds.customs = crate::call::load_custom_backgrounds(&state.store);
-        state.call_strip_width = crate::call::load_strip_width(&state.store);
         state.load_cached_translation_settings();
         if !mode.demo {
             state.directory.load_cached_presence(&state.store);
