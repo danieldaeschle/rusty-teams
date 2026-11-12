@@ -109,6 +109,7 @@ pub fn share_thumbnail(
         }
     });
     for _ in 0..THUMBNAIL_ATTEMPTS {
+        pump_messages();
         capturer.capture_frame();
         if let Some(picture) = captured.lock().ok().and_then(|mut slot| slot.take()) {
             return Some(picture);
@@ -117,6 +118,22 @@ pub fn share_thumbnail(
     }
     None
 }
+
+// Windows Graphics Capture hands frames to a DispatcherQueue on this thread; without a pump none arrive.
+#[cfg(windows)]
+fn pump_messages() {
+    use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, TranslateMessage};
+    let mut message = MSG::default();
+    unsafe {
+        while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+            let _ = TranslateMessage(&message);
+            let _ = DispatchMessageW(&message);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn pump_messages() {}
 
 fn scaled_bgra(
     bytes: &[u8],
@@ -207,6 +224,7 @@ pub fn start_screen_capture(
             }
         });
         while !stop.load(Ordering::SeqCst) {
+            pump_messages();
             capturer.capture_frame();
             std::thread::sleep(Duration::from_secs(1) / fps.load(Ordering::Relaxed).max(1));
         }
@@ -214,7 +232,7 @@ pub fn start_screen_capture(
     .map_err(|error| Error::Webrtc(format!("screen thread: {error}")))
 }
 
-/// Where the share menu gets its sources. Wayland uses the desktop dialog.
+/// Where the share menu gets its sources. Wayland and macOS use a system dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SharePicker {
     List,
@@ -222,6 +240,13 @@ pub enum SharePicker {
 }
 
 pub fn share_picker_for(wayland_display: Option<&str>) -> SharePicker {
+    share_picker_for_host(cfg!(target_os = "macos"), wayland_display)
+}
+
+pub fn share_picker_for_host(macos: bool, wayland_display: Option<&str>) -> SharePicker {
+    if macos {
+        return SharePicker::Portal;
+    }
     match wayland_display {
         Some(value) if !value.is_empty() => SharePicker::Portal,
         _ => SharePicker::List,
@@ -240,8 +265,7 @@ pub fn share_sources_for_menu(picker: SharePicker, sources: Vec<ShareSource>) ->
     }
 }
 
-pub const PORTAL_UNAVAILABLE_NOTICE: &str =
-    "Screen sharing needs the desktop share dialog, and it could not open.";
+pub use crate::notices::PORTAL_UNAVAILABLE_NOTICE;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PortalFollowUp {
@@ -383,13 +407,23 @@ mod thumbnail_tests {
 
 #[cfg(test)]
 mod portal_mode_tests {
-    use super::{ShareKind, SharePicker, ShareSource, share_picker_for, share_sources_for_menu};
+    use super::{
+        ShareKind, SharePicker, ShareSource, share_picker_for_host, share_sources_for_menu,
+    };
 
     #[test]
     fn portal_mode_follows_wayland_display_and_skips_the_menu_list() {
-        assert_eq!(share_picker_for(None), SharePicker::List);
-        assert_eq!(share_picker_for(Some("")), SharePicker::List);
-        assert_eq!(share_picker_for(Some("wayland-1")), SharePicker::Portal);
+        assert_eq!(share_picker_for_host(false, None), SharePicker::List);
+        assert_eq!(share_picker_for_host(false, Some("")), SharePicker::List);
+        assert_eq!(
+            share_picker_for_host(false, Some("wayland-1")),
+            SharePicker::Portal
+        );
+        assert_eq!(share_picker_for_host(true, None), SharePicker::Portal);
+        assert_eq!(
+            share_picker_for_host(true, Some("")),
+            SharePicker::Portal
+        );
         let sources = vec![ShareSource {
             id: 1,
             kind: ShareKind::Screen,
