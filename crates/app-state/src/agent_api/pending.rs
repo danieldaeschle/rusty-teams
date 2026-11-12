@@ -177,6 +177,7 @@ mod tests {
                 text: "Looks\n good  to me".into(),
                 mentions: Vec::new(),
                 images: Vec::new(),
+                free_writing_ask: None,
                 agent: Some("claude".into()),
                 session_id: None,
                 created_at: Utc.with_ymd_and_hms(2026, 10, 18, 9, minute, 0).unwrap(),

@@ -21,7 +21,9 @@ impl ConversationView {
             return None;
         }
         let conversation_id = self.conversation_id()?;
-        let entry = agent_api::proposal(&conversation_id, cx)?;
+        let Some(entry) = agent_api::proposal(&conversation_id, cx) else {
+            return self.render_free_writing_bar(&conversation_id, cx);
+        };
         let quote = entry
             .proposal
             .reply_to_message_id
@@ -36,12 +38,33 @@ impl ConversationView {
             let view = view.clone();
             Rc::new(move |window, cx| view.update(cx, |this, cx| handler(this, window, cx)))
         };
+        let allow_view = view.clone();
         let actions = CardActions {
             send: action(Self::send_proposal),
             edit: action(Self::edit_proposal),
             discard: action(Self::discard_proposal),
+            allow: Rc::new(move |minutes, window, cx| {
+                allow_view.update(cx, |this, cx| this.send_and_allow(minutes, window, cx))
+            }),
         };
         Some(proposal_card::render(&entry, quote, actions, Utc::now(), cx).into_any_element())
+    }
+
+    fn render_free_writing_bar(&self, conversation_id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let grant = agent_api::free_writing(conversation_id, cx)?;
+        let agent = agent_api::agent_label(grant.agent.as_deref());
+        let conversation_id = conversation_id.to_owned();
+        let stop: proposal_card::CardAction =
+            Rc::new(move |_, cx| agent_api::stop_free_writing(&conversation_id, cx));
+        Some(proposal_card::free_writing_bar(agent, grant.until, stop).into_any_element())
+    }
+
+    fn send_and_allow(&mut self, minutes: u32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((conversation_id, entry)) = self.pending_proposal(cx) else {
+            return;
+        };
+        agent_api::allow_free_writing(&conversation_id, minutes, entry.proposal.agent.clone(), cx);
+        self.send_proposal(window, cx);
     }
 
     pub(super) fn report_composer_activity(&self, event: &ComposerEvent, cx: &App) {

@@ -32,6 +32,18 @@ pub struct ProposalImage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreeWritingAsk {
+    pub minutes: u32,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreeWriting {
+    pub until: DateTime<Utc>,
+    pub agent: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Proposal {
     pub id: String,
     pub conversation_id: String,
@@ -39,6 +51,7 @@ pub struct Proposal {
     pub text: String,
     pub mentions: Vec<ProposalMention>,
     pub images: Vec<ProposalImage>,
+    pub free_writing_ask: Option<FreeWritingAsk>,
     pub agent: Option<String>,
     pub session_id: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -52,6 +65,7 @@ pub struct NewProposal {
     pub reply_to_message_id: Option<String>,
     pub mentions: Vec<ProposalMention>,
     pub images: Vec<ProposalImage>,
+    pub free_writing_ask: Option<FreeWritingAsk>,
     pub agent: Option<String>,
     pub session_id: Option<String>,
     pub direct: bool,
@@ -161,6 +175,10 @@ pub enum EventKind {
         message_id: String,
         reactions: Vec<ReactionInfo>,
     },
+    FreeWritingChanged {
+        conversation_id: String,
+        until: Option<DateTime<Utc>>,
+    },
 }
 
 impl EventKind {
@@ -178,6 +196,9 @@ impl EventKind {
                 conversation_id, ..
             }
             | EventKind::ReactionChanged {
+                conversation_id, ..
+            }
+            | EventKind::FreeWritingChanged {
                 conversation_id, ..
             } => conversation_id,
         }
@@ -213,6 +234,7 @@ struct HubState {
     events: VecDeque<Event>,
     last_seq: u64,
     captions: HashMap<String, VecDeque<CaptionLine>>,
+    free_writing: HashMap<String, FreeWriting>,
 }
 
 pub struct AgentHub {
@@ -247,6 +269,50 @@ impl AgentHub {
 
     pub fn policy(&self) -> AgentPolicy {
         self.lock().policy.clone()
+    }
+
+    pub fn free_writing(&self, conversation_id: &str) -> Option<FreeWriting> {
+        self.lock()
+            .free_writing
+            .get(conversation_id)
+            .filter(|grant| grant.until > Utc::now())
+            .cloned()
+    }
+
+    pub fn grant_free_writing(&self, conversation_id: &str, until: DateTime<Utc>, agent: Option<String>) {
+        let mut state = self.lock();
+        state
+            .free_writing
+            .insert(conversation_id.to_owned(), FreeWriting { until, agent });
+        push_event(
+            &mut state,
+            EventKind::FreeWritingChanged {
+                conversation_id: conversation_id.to_owned(),
+                until: Some(until),
+            },
+        );
+        drop(state);
+        self.wake.notify_waiters();
+    }
+
+    pub fn stop_free_writing(&self, conversation_id: &str) {
+        let mut state = self.lock();
+        if state.free_writing.remove(conversation_id).is_none() {
+            return;
+        }
+        push_event(
+            &mut state,
+            EventKind::FreeWritingChanged {
+                conversation_id: conversation_id.to_owned(),
+                until: None,
+            },
+        );
+        drop(state);
+        self.wake.notify_waiters();
+    }
+
+    pub fn needs_review(&self, conversation_id: &str) -> bool {
+        self.policy().review && self.free_writing(conversation_id).is_none()
     }
 
     pub fn pending_proposal(&self, conversation_id: &str) -> Option<Proposal> {
@@ -306,6 +372,7 @@ impl AgentHub {
             text: new.text,
             mentions: new.mentions,
             images: new.images,
+            free_writing_ask: new.free_writing_ask,
             agent: new.agent,
             session_id: new.session_id,
             created_at: now_millis(),
@@ -673,6 +740,7 @@ fn proposal_from_record(record: AgentProposalRecord) -> Proposal {
                 bytes: Arc::new(image.bytes),
             })
             .collect(),
+        free_writing_ask: None,
         agent: record.agent,
         session_id: record.session_id,
         created_at: record.created_at,
@@ -726,6 +794,30 @@ mod tests {
             ..NewReactionProposal::default()
         })
         .unwrap()
+    }
+
+    #[test]
+    fn a_free_writing_window_skips_review_until_it_ends_or_stops() {
+        let (hub, _receiver, _store) = hub_with(open_policy());
+        assert!(hub.needs_review("c1"));
+        hub.grant_free_writing("c1", Utc::now() + chrono::Duration::minutes(15), Some("claude".to_owned()));
+        assert!(!hub.needs_review("c1"));
+        assert!(hub.needs_review("c2"));
+        hub.stop_free_writing("c1");
+        assert!(hub.needs_review("c1"));
+        hub.grant_free_writing("c1", Utc::now() - chrono::Duration::seconds(1), None);
+        assert!(hub.needs_review("c1"));
+        let kinds: Vec<Option<DateTime<Utc>>> = hub
+            .events_after(0)
+            .0
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                EventKind::FreeWritingChanged { until, .. } => Some(until),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kinds.len(), 3);
+        assert_eq!(kinds[1], None);
     }
 
     #[test]

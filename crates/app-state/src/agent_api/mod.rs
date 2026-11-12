@@ -250,6 +250,43 @@ pub fn proposal(conversation_id: &str, cx: &App) -> Option<ProposalEntry> {
         .cloned()
 }
 
+pub fn free_writing(conversation_id: &str, cx: &App) -> Option<mcp::FreeWriting> {
+    handle(cx)?.read(cx).hub.free_writing(conversation_id)
+}
+
+pub fn allow_free_writing(conversation_id: &str, minutes: u32, agent: Option<String>, cx: &mut App) {
+    let Some(api) = handle(cx) else {
+        return;
+    };
+    let lasting = std::time::Duration::from_secs(u64::from(minutes) * 60);
+    let until = chrono::Utc::now() + chrono::Duration::minutes(i64::from(minutes));
+    api.update(cx, |api, cx| {
+        api.hub.grant_free_writing(conversation_id, until, agent);
+        cx.notify();
+        let conversation_id = conversation_id.to_owned();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(lasting).await;
+            this.update(cx, |api, cx| {
+                if api.hub.free_writing(&conversation_id).is_none() {
+                    api.hub.stop_free_writing(&conversation_id);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    });
+}
+
+pub fn stop_free_writing(conversation_id: &str, cx: &mut App) {
+    if let Some(api) = handle(cx) {
+        api.update(cx, |api, cx| {
+            api.hub.stop_free_writing(conversation_id);
+            cx.notify();
+        });
+    }
+}
+
 pub fn direct_messages(cx: &App) -> Vec<ProposalEntry> {
     let Some(api) = handle(cx) else {
         return Vec::new();

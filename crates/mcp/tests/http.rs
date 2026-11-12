@@ -606,6 +606,25 @@ async fn without_review_messages_and_reactions_go_out_directly() {
 }
 
 #[tokio::test]
+async fn an_agent_asks_for_a_window_and_writes_freely_once_it_is_granted() {
+    let harness = Harness::start(true).await;
+    let client = harness.client().await;
+    let ask = json!({"conversation_id": ALLOWED_CHAT, "text": "First answer", "ask_free_writing": {"minutes": 2000, "reason": "Following the release thread"}});
+    let (is_error, body) = call(&client, "write_message", ask).await;
+    assert!(!is_error, "{body}");
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["state"], "pending");
+    let pending = harness.hub.pending_proposal(ALLOWED_CHAT).unwrap();
+    assert_eq!(pending.free_writing_ask.unwrap().minutes, 480);
+
+    harness.hub.grant_free_writing(ALLOWED_CHAT, chrono::Utc::now() + chrono::Duration::minutes(30), None);
+    let (_, body) = call(&client, "write_message", json!({"conversation_id": ALLOWED_CHAT, "text": "Second"})).await;
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["state"], "sending");
+    assert!(body["free_until"].is_string());
+}
+
+#[tokio::test]
 async fn write_is_refused_when_turned_off_or_out_of_scope() {
     let harness = Harness::start(false).await;
     let client = harness.client().await;

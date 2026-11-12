@@ -8,7 +8,7 @@ mod source;
 mod tools;
 
 pub use hub::{
-    AgentHub, CaptionLine, Event, EventKind, NewProposal, NewReactionProposal, Outcome, Proposal,
+    AgentHub, CaptionLine, Event, EventKind, FreeWriting, FreeWritingAsk, NewProposal, NewReactionProposal, Outcome, Proposal,
     ProposalImage, ProposalMention, ReactionOutcome, ReactionProposal, UiEvent,
 };
 pub use policy::{Access, AgentPolicy, ConversationKind, DEFAULT_PORT};
