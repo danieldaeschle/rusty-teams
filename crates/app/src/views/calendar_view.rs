@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use app_base::format::{self, clock_format};
 use chatsvc::{CalendarEvent, ResponseType, join_info_text};
 use chrono::{DateTime, Local, NaiveDate, Offset, Timelike, Utc};
@@ -11,11 +13,15 @@ use gpui_kit::*;
 
 use super::calendar_date_picker::date_picker_button;
 use super::calendar_month::month_grid;
-use super::meeting_proposal_card::meeting_proposal_cards;
-use super::rsvp_menu::rsvp_menu;
 use super::join_dialog::open_join_with_id;
 use super::new_meeting_dialog::open_new_meeting;
+use super::rsvp_menu::rsvp_menu;
+use super::scroll_edge::scroll_offset;
 use crate::app_state::AppState;
+use crate::call::calendar_now::{
+    DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION,
+    now_scroll_offset_y, offset_differs, shows_hour_grid,
+};
 use crate::call::join_available;
 use crate::call::week_grid::{
     CalendarSpan, EventLook, WeekBlock, WeekDay, event_look, hour_label, month_shown, week_days,
@@ -30,7 +36,6 @@ const HEADER_HEIGHT: f32 = 52.;
 const DAY_HEADER_HEIGHT: f32 = 56.;
 const ALL_DAY_HEIGHT: f32 = 26.;
 const BLOCK_GAP: f32 = 2.;
-const FIRST_VISIBLE_HOUR: f32 = 8.;
 const CANCELED_PREFIX: &str = "Canceled: ";
 const COPY_JOIN_INFO: &str = "Copy join info";
 const COMPACT_HEADER_WIDTH: f32 = 960.;
@@ -42,26 +47,130 @@ const HATCH_GAP: f32 = 2.5;
 const SMALL_TITLE_HEIGHT: f32 = 20.;
 const TODAY_MARK_HEIGHT: f32 = 3.;
 const NOW_DOT_SIZE: f32 = 8.;
+const CLOCK_TICK: Duration = Duration::from_secs(30);
+const CHROME_HEIGHT: f32 = HEADER_HEIGHT + DAY_HEADER_HEIGHT + ALL_DAY_HEIGHT;
 
 pub struct CalendarView {
     state: Entity<AppState>,
     scroll: ScrollHandle,
-    scrolled_to_morning: bool,
+    follow_now: FollowNow,
+    seen_scroll_to_now: u64,
+    last_programmatic_offset: f32,
+    skip_manual_check: bool,
+    clock_running: bool,
     _observation: Subscription,
-    _agent_observation: Option<Subscription>,
 }
 
 impl CalendarView {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         let observation = cx.observe(&state, |_, _, cx| cx.notify());
-        let agent_observation = crate::agent_api::handle(cx).map(|api| cx.observe(&api, |_, _, cx| cx.notify()));
         CalendarView {
             state,
             scroll: ScrollHandle::new(),
-            scrolled_to_morning: false,
+            follow_now: FollowNow { active: true },
+            seen_scroll_to_now: 0,
+            last_programmatic_offset: 0.,
+            skip_manual_check: false,
+            clock_running: false,
             _observation: observation,
-            _agent_observation: agent_observation,
         }
+    }
+
+    fn grid_viewport_height(window: &Window) -> f32 {
+        (f32::from(window.viewport_size().height) - CHROME_HEIGHT).max(DEFAULT_GRID_VIEWPORT * 0.5)
+    }
+
+    fn align_scroll_to_now(&mut self, window: &Window) {
+        let local = Local::now();
+        let offset = now_scroll_offset_y(
+            local.hour(),
+            local.minute(),
+            HOUR_HEIGHT,
+            Self::grid_viewport_height(window),
+            NOW_BIAS_FRACTION,
+        );
+        self.scroll.set_offset(point(px(0.), px(offset)));
+        self.last_programmatic_offset = offset;
+        self.skip_manual_check = true;
+    }
+
+    fn sync_follow_from_state(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let (scroll_to_now, span, today_visible) = {
+            let state = self.state.read(cx);
+            let start = state.calendar_start();
+            let today = Local::now().date_naive();
+            let today_visible = start <= today
+                && today < start + chrono::Duration::days(state.calendar_week.span.days());
+            (
+                state.calendar_scroll_to_now,
+                state.calendar_week.span,
+                today_visible,
+            )
+        };
+        if !shows_hour_grid(span) {
+            self.stop_clock();
+            return;
+        }
+        self.ensure_clock(cx);
+        if scroll_to_now != self.seen_scroll_to_now {
+            self.seen_scroll_to_now = scroll_to_now;
+            self.follow_now.request_align();
+        }
+        if self.skip_manual_check {
+            self.skip_manual_check = false;
+        } else if self.follow_now.active
+            && offset_differs(
+                f32::from(scroll_offset(&self.scroll).y),
+                self.last_programmatic_offset,
+                MANUAL_SCROLL_EPSILON,
+            )
+        {
+            self.follow_now.note_manual_scroll();
+        }
+        if self.follow_now.should_follow(today_visible) {
+            self.align_scroll_to_now(window);
+        }
+    }
+
+    fn ensure_clock(&mut self, cx: &mut Context<Self>) {
+        if self.clock_running {
+            return;
+        }
+        self.clock_running = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(CLOCK_TICK).await;
+                let keep = this
+                    .update(cx, |view, cx| {
+                        let span = view.state.read(cx).calendar_week.span;
+                        if !shows_hour_grid(span) {
+                            view.clock_running = false;
+                            return false;
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !keep {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn stop_clock(&mut self) {
+        self.clock_running = false;
+    }
+
+    fn on_grid_scroll_wheel(
+        &mut self,
+        _event: &ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.follow_now.note_manual_scroll();
+        cx.notify();
     }
 
     fn header(&self, start: NaiveDate, span: CalendarSpan, compact: bool) -> impl IntoElement {
@@ -123,19 +232,17 @@ impl CalendarView {
                         forward.update(cx, |state, cx| state.shift_calendar_week(1, cx))
                     }),
             )
-            .child(
-                h_flex().flex_1().min_w_0().child(date_picker_button(
-                    &self.state,
-                    span.title(start),
-                    start,
-                    span.days(),
-                    if span == CalendarSpan::Month {
-                        month_shown(start)
-                    } else {
-                        start
-                    },
-                )),
-            )
+            .child(h_flex().flex_1().min_w_0().child(date_picker_button(
+                &self.state,
+                span.title(start),
+                start,
+                span.days(),
+                if span == CalendarSpan::Month {
+                    month_shown(start)
+                } else {
+                    start
+                },
+            )))
             .child(
                 Button::new("calendar-span")
                     .small()
@@ -396,6 +503,7 @@ impl CalendarView {
         today: NaiveDate,
         now: DateTime<Utc>,
         send_response: bool,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let total_height = 24. * HOUR_HEIGHT;
         let twelve_hour = clock_format().contains("%p") || clock_format().contains("%P");
@@ -409,6 +517,7 @@ impl CalendarView {
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
+            .on_scroll_wheel(cx.listener(Self::on_grid_scroll_wheel))
             .child(
                 h_flex()
                     .h(px(total_height))
@@ -576,11 +685,7 @@ fn event_title(event: &CalendarEvent) -> String {
 impl Render for CalendarView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let compact = f32::from(window.viewport_size().width) < COMPACT_HEADER_WIDTH;
-        if !self.scrolled_to_morning {
-            self.scrolled_to_morning = true;
-            self.scroll
-                .set_offset(point(px(0.), px(-FIRST_VISIBLE_HOUR * HOUR_HEIGHT)));
-        }
+        self.sync_follow_from_state(window, cx);
         let state = self.state.read(cx);
         let start = state.calendar_start();
         let events = state.calendar_week.events.clone();
@@ -600,15 +705,21 @@ impl Render for CalendarView {
             .bg(theme::surface())
             .overflow_hidden()
             .child(self.header(start, span, compact))
-            .children(meeting_proposal_cards(cx))
             .map(|calendar| {
                 if span == CalendarSpan::Month {
-                    calendar.child(month_grid(&self.state, start, &days, &events, today, offset))
+                    calendar.child(month_grid(
+                        &self.state,
+                        start,
+                        &days,
+                        &events,
+                        today,
+                        offset,
+                    ))
                 } else {
                     calendar
                         .child(self.day_headers(&days, today))
                         .children(self.all_day_row(&days, &events))
-                        .child(self.grid(&days, &events, today, now, send_response))
+                        .child(self.grid(&days, &events, today, now, send_response, cx))
                 }
             })
     }
