@@ -6,6 +6,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::new_meeting_dialog::labeled;
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::team_admin::{can_create_channel, channel_name_problem};
 use crate::theme;
@@ -156,13 +157,13 @@ pub fn open_edit_channel_dialog(
         let footer = DialogFooter::new()
             .child(
                 Button::new("edit-channel-cancel")
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
             .child(
                 Button::new("edit-channel-save")
                     .primary()
-                    .label("Save")
+                    .label(tr("common.save"))
                     .disabled(!can_save)
                     .on_click(move |_, window, cx| {
                         if submit_form.update(cx, |form, cx| form.submit(cx)) {
@@ -207,10 +208,10 @@ pub fn confirm_delete_channel(
     window.open_alert_dialog(cx, move |alert, _, _| {
         let (state, channel_id) = (state.clone(), channel_id.clone());
         let cancel = Button::new("delete-channel-cancel")
-            .label("Cancel")
+            .label(tr("common.cancel"))
             .on_click(|_, window, cx| window.close_dialog(cx));
         let delete = Button::new("delete-channel-confirm")
-            .label("Delete")
+            .label(tr("common.delete"))
             .danger()
             .on_click(move |_, window, cx| {
                 state.update(cx, |state, cx| state.delete_channel(&channel_id, cx));

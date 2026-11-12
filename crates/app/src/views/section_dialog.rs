@@ -4,6 +4,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{WindowExt as _, v_flex};
 use gpui_kit::*;
 
+use crate::i18n::tr;
 use crate::app_state::AppState;
 
 const DIALOG_WIDTH: f32 = 380.;
@@ -114,7 +115,7 @@ pub fn open_section_name_dialog(
         let footer = DialogFooter::new()
             .child(
                 Button::new("section-name-cancel")
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
             .child(

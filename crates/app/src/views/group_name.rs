@@ -12,6 +12,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::widgets::icon;
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::theme;
 
@@ -135,13 +136,13 @@ impl Render for GroupNameForm {
                     .gap(px(FORM_GAP))
                     .child(
                         Button::new("group-name-cancel")
-                            .label("Cancel")
+                            .label(tr("common.cancel"))
                             .on_click(cx.listener(|form, _, window, cx| form.close(window, cx))),
                     )
                     .child(
                         Button::new("group-name-save")
                             .primary()
-                            .label("Save")
+                            .label(tr("common.save"))
                             .disabled(problem.is_some())
                             .on_click(cx.listener(|form, _, window, cx| form.save(window, cx))),
                     ),

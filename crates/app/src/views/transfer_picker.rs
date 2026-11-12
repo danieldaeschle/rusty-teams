@@ -12,6 +12,7 @@ use gpui_kit::*;
 use super::avatar::person_avatar;
 use super::switcher::clamp_highlight;
 use super::widgets::icon;
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::call::TransferCandidate;
 use crate::fuzzy;
@@ -228,7 +229,7 @@ impl Render for TransferPicker {
             .child(
                 Button::new("transfer-cancel")
                     .ghost()
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
             )
             .children(match self.mode {

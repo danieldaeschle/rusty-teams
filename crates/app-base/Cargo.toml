@@ -30,6 +30,7 @@ image = { version = "0.25", default-features = false, features = ["bmp", "gif", 
 raw-window-handle = "0.6"
 sha2 = "0.10"
 sys-locale = "0.3"
+rust-i18n = "4.2"
 resvg = { version = "0.46", default-features = false, features = ["text"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]

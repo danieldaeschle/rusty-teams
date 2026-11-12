@@ -14,6 +14,7 @@ use gpui_kit::*;
 
 use super::new_chat::{NewChatDraft, Pick};
 use super::widgets::icon;
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::call::{FormValues, Invitee, default_window, draft_from_form};
 use crate::theme;
@@ -21,7 +22,6 @@ use crate::theme;
 const DIALOG_WIDTH: f32 = 520.;
 const FIELD_GAP: f32 = 12.;
 const LABEL_SIZE: f32 = 12.;
-const TITLE: &str = "New meeting";
 const DATE_FORMAT: &str = "%a, %b %-d, %Y";
 const DETAILS_MIN_ROWS: usize = 3;
 const DETAILS_MAX_ROWS: usize = 6;
@@ -45,7 +45,9 @@ struct MeetingForm {
 impl MeetingForm {
     fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let (start_moment, end_moment) = default_window(Utc::now(), &Local);
-        let title = cx.new(|cx| InputState::new(window, cx).placeholder("Add a title"));
+        let title = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(tr("calls.meeting.title_placeholder"))
+        });
         let people_state = state.clone();
         let people = cx.new(|cx| NewChatDraft::new(people_state, window, cx).compact());
         let date = cx.new(|cx| {
@@ -66,7 +68,7 @@ impl MeetingForm {
         let details = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .auto_grow(DETAILS_MIN_ROWS, DETAILS_MAX_ROWS)
-                .placeholder("Add details")
+                .placeholder(tr("calls.meeting.details_placeholder"))
         });
         MeetingForm {
             state,
@@ -181,9 +183,9 @@ impl Render for MeetingForm {
         v_flex()
             .debug_selector(|| "new-meeting".into())
             .gap(px(FIELD_GAP))
-            .child(labeled("Title", Input::new(&self.title)))
+            .child(labeled(&tr("calls.meeting.title_label"), Input::new(&self.title)))
             .child(labeled(
-                "People",
+                &tr("calls.meeting.people"),
                 div()
                     .debug_selector(|| "new-meeting/people".into())
                     .rounded(px(6.))
@@ -197,22 +199,28 @@ impl Render for MeetingForm {
                     .gap(px(8.))
                     .items_end()
                     .child(div().w(px(DATE_FIELD_WIDTH)).child(labeled(
-                        "Date",
+                        &tr("calls.meeting.date"),
                         DatePicker::new(&self.date).cleanable(false),
                     )))
                     .child(
                         div()
                             .w(px(TIME_FIELD_WIDTH))
-                            .child(labeled("Start", TimeField::new(&self.start))),
+                            .child(labeled(
+                                &tr("calls.meeting.start"),
+                                TimeField::new(&self.start),
+                            )),
                     )
                     .child(
                         div()
                             .w(px(TIME_FIELD_WIDTH))
-                            .child(labeled("End", TimeField::new(&self.end))),
+                            .child(labeled(&tr("calls.meeting.end"), TimeField::new(&self.end))),
                     ),
             )
-            .child(labeled("Repeat", repeat_button))
-            .child(labeled("Details", Textarea::new(&self.details)))
+            .child(labeled(&tr("calls.meeting.repeat"), repeat_button))
+            .child(labeled(
+                &tr("calls.meeting.details"),
+                Textarea::new(&self.details),
+            ))
             .child(
                 h_flex()
                     .gap(px(6.))
@@ -220,7 +228,7 @@ impl Render for MeetingForm {
                     .text_size(px(LABEL_SIZE))
                     .text_color(theme::text_muted())
                     .child(icon(IconName::Video, 14., theme::text_muted()))
-                    .child("Teams meeting link is added"),
+                    .child(tr("calls.meeting.teams_link_added")),
             )
             .when_some(self.error.clone(), |form, error| {
                 form.child(
@@ -255,19 +263,23 @@ pub fn open_new_meeting_with(
         let footer = DialogFooter::new()
             .child(
                 Button::new("meeting-cancel")
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
             .child(
                 Button::new("meeting-send")
                     .primary()
-                    .label(if sending { "Sending..." } else { "Send" })
+                    .label(if sending {
+                        tr("common.sending")
+                    } else {
+                        tr("common.send")
+                    })
                     .on_click(move |_, window, cx| {
                         submit_form.update(cx, |form, cx| form.submit(window, cx));
                     }),
             );
         dialog
-            .title(TITLE)
+            .title(tr("calls.meeting.new_title"))
             .w(px(DIALOG_WIDTH))
             .child(form.clone())
             .footer(footer)

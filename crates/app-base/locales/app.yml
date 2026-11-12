@@ -1,0 +1,1168 @@
+_version: 2
+common:
+  cancel:
+    en: Cancel
+    de: Abbrechen
+  save:
+    en: Save
+    de: Speichern
+  close:
+    en: Close
+    de: Schließen
+  delete:
+    en: Delete
+    de: Löschen
+  ok:
+    en: OK
+    de: OK
+  add:
+    en: Add
+    de: Hinzufügen
+  remove:
+    en: Remove
+    de: Entfernen
+  join:
+    en: Join
+    de: Beitreten
+  leave:
+    en: Leave
+    de: Verlassen
+  retry:
+    en: Retry
+    de: Erneut versuchen
+  invite:
+    en: Invite
+    de: Einladen
+  admit:
+    en: Admit
+    de: Zulassen
+  deny:
+    en: Deny
+    de: Ablehnen
+  stop:
+    en: Stop
+    de: Stoppen
+  resume:
+    en: Resume
+    de: Fortsetzen
+  done:
+    en: Done
+    de: Fertig
+  send:
+    en: Send
+    de: Senden
+  sending:
+    en: Sending...
+    de: Wird gesendet...
+  you:
+    en: You
+    de: Sie
+  create:
+    en: Create
+    de: Erstellen
+  attach:
+    en: Attach
+    de: Anhängen
+  chat:
+    en: Chat
+    de: Chat
+  call:
+    en: Call
+    de: Anruf
+  settings:
+    en: Settings
+    de: Einstellungen
+  open:
+    en: Open
+    de: Öffnen
+  quit:
+    en: Quit
+    de: Beenden
+notice:
+  generic_detail:
+    en: "Something went wrong: %{detail}"
+    de: "Etwas ist schiefgelaufen: %{detail}"
+settings:
+  search:
+    no_results:
+      en: No settings found
+      de: Keine Einstellungen gefunden
+  nav:
+    general:
+      en: General
+      de: Allgemein
+    notifications:
+      en: Notifications and activity
+      de: Benachrichtigungen und Aktivität
+    appearance:
+      en: Appearance and accessibility
+      de: Darstellung und Barrierefreiheit
+    chats:
+      en: Chats and channels
+      de: Chats und Kanäle
+    calls:
+      en: Calls
+      de: Anrufe
+    calendar:
+      en: Calendar
+      de: Kalender
+    devices:
+      en: Devices
+      de: Geräte
+    agents:
+      en: Agents
+      de: Agents
+    mcp:
+      en: MCP
+      de: MCP
+    about:
+      en: About
+      de: Info
+  caption:
+    system:
+      en: SYSTEM
+      de: SYSTEM
+    compose_box:
+      en: COMPOSE BOX
+      de: EINGABEFELD
+    translation:
+      en: TRANSLATION
+      de: ÜBERSETZUNG
+    language:
+      en: LANGUAGE
+      de: SPRACHE
+    theme:
+      en: THEME
+      de: DESIGN
+    app_icon:
+      en: APP ICON
+      de: APP-SYMBOL
+    appearance_and_sound:
+      en: APPEARANCE AND SOUND
+      de: DARSTELLUNG UND TON
+    sound:
+      en: SOUND
+      de: TON
+  general:
+    auto_start:
+      en: Auto-start Teams
+      de: Teams automatisch starten
+    open_in_background:
+      en: Open application in background
+      de: Anwendung im Hintergrund starten
+    close_to_tray:
+      en: On close, keep the application running
+      de: Beim Schließen Anwendung weiterlaufen lassen
+    close_to_tray_detail:
+      en: The title bar X hides the window to the tray
+      de: Das X in der Titelleiste blendet das Fenster ins Infobereich-Symbol aus
+    up_arrow:
+      en: Up arrow key behaviour in compose box
+      de: Verhalten der Aufwärtspfeil-Taste im Eingabefeld
+    up_arrow_detail:
+      en: Choose what happens when you press Up arrow at the beginning of the compose box.
+      de: Legen Sie fest, was passiert, wenn Sie am Anfang des Eingabefelds die Aufwärtspfeil-Taste drücken.
+    translation_not_loaded:
+      en: Translation settings not loaded yet
+      de: Übersetzungseinstellungen noch nicht geladen
+    translation_title:
+      en: Translation
+      de: Übersetzung
+    translate_into:
+      en: Translate messages into this language
+      de: Nachrichten in diese Sprache übersetzen
+    behavior_title:
+      en: How to handle messages in other languages
+      de: Umgang mit Nachrichten in anderen Sprachen
+    behavior_ask:
+      en: Ask me before translating
+      de: Vor dem Übersetzen nachfragen
+    behavior_auto:
+      en: Auto-translate all messages
+      de: Alle Nachrichten automatisch übersetzen
+    behavior_never:
+      en: Never translate
+      de: Nie übersetzen
+    never_translate:
+      en: Never translate messages in these languages
+      de: Nachrichten in diesen Sprachen nie übersetzen
+  notifications:
+    flash_taskbar:
+      en: Flash taskbar when notifications are received
+      de: Taskleiste bei Benachrichtigungen blinken lassen
+    flash_taskbar_detail:
+      en: On new messages, until you open the window
+      de: Bei neuen Nachrichten, bis Sie das Fenster öffnen
+    play_sounds:
+      en: Play sounds with notifications
+      de: Töne bei Benachrichtigungen abspielen
+    urgent_sounds:
+      en: Play sounds with urgent and priority contact notifications
+      de: Töne bei dringenden und Prioritätskontakt-Benachrichtigungen
+    call_sounds:
+      en: Play sounds with incoming calls, requests to join, and meeting start notifications
+      de: Töne bei eingehenden Anrufen, Beitrittsanfragen und Besprechungsstarts
+    busy_sounds:
+      en: Play sounds when I'm busy or in a meeting
+      de: Töne abspielen, wenn ich beschäftigt bin oder in einer Besprechung
+    hide_in_calls:
+      en: Hide notifications during calls and meetings
+      de: Benachrichtigungen während Anrufen und Besprechungen ausblenden
+    hide_in_calls_detail:
+      en: No message toasts while a call is active
+      de: Keine Nachrichten-Toasts während ein Anruf aktiv ist
+    position:
+      en: Position on the screen
+      de: Position auf dem Bildschirm
+    position_detail:
+      en: Corner of the main screen
+      de: Ecke des Hauptbildschirms
+    test:
+      en: Test notification
+      de: Testbenachrichtigung
+    test_detail:
+      en: Shows a toast with the settings above
+      de: Zeigt einen Toast mit den obigen Einstellungen
+    send_test:
+      en: Send test notification
+      de: Testbenachrichtigung senden
+    notification_sound:
+      en: Notification sound
+      de: Benachrichtigungston
+    urgent_sound:
+      en: Urgent sound
+      de: Dringlichkeitston
+    chat_messages:
+      en: Chat message notifications
+      de: Chatnachrichten-Benachrichtigungen
+    meeting_chats:
+      en: Meeting chat notifications
+      de: Besprechungschat-Benachrichtigungen
+    likes_reactions:
+      en: Likes and reactions
+      de: Likes und Reaktionen
+    teams_channels:
+      en: Teams and channels
+      de: Teams und Kanäle
+    show_preview:
+      en: Show message preview
+      de: Nachrichtenvorschau anzeigen
+  appearance:
+    color_scheme:
+      en: Color scheme
+      de: Farbschema
+    color_scheme_detail:
+      en: The colors to use for Rusty Teams
+      de: Die Farben für Rusty Teams
+    theme:
+      en: Theme
+      de: Design
+    theme_detail:
+      en: The theme to use for Teams
+      de: Das Design für Teams
+    theme_follow_os:
+      en: Follow operating system theme
+      de: Systemdesign folgen
+    theme_light:
+      en: Light
+      de: Hell
+    theme_dark:
+      en: Dark
+      de: Dunkel
+    theme_high_contrast:
+      en: High contrast
+      de: Hoher Kontrast
+    app_icon:
+      en: App icon
+      de: App-Symbol
+    app_icon_detail_windows:
+      en: Shown in the title bar, taskbar and tray. Pinned shortcuts keep the icon of the .exe
+      de: In Titelleiste, Taskleiste und Infobereich. Angeheftete Verknüpfungen behalten das Symbol der .exe
+    app_icon_detail:
+      en: Shown in the title bar, taskbar and tray
+      de: In Titelleiste, Taskleiste und Infobereich
+    language:
+      title:
+        en: Language
+        de: Sprache
+      detail:
+        en: Language for Rusty Teams and controls
+        de: Sprache für Rusty Teams und Steuerelemente
+      follow_system:
+        en: Follow system
+        de: Systemeinstellung folgen
+      english:
+        en: English
+        de: Englisch
+      german:
+        en: Deutsch
+        de: Deutsch
+  chats:
+    density:
+      en: Message density
+      de: Nachrichtendichte
+    read_receipts:
+      en: Read receipts
+      de: Lesebestätigungen
+    message_actions:
+      en: Show message actions on right click
+      de: Nachrichtenaktionen per Rechtsklick anzeigen
+    muted_section:
+      en: Show muted items in their own section
+      de: Stummgeschaltete Einträge in eigenem Abschnitt anzeigen
+    enter_to:
+      en: When writing a message, press Enter to
+      de: Beim Schreiben einer Nachricht führt Eingabetaste zu
+    markdown:
+      en: Format messages using mark-down
+      de: Nachrichten mit Mark-down formatieren
+    markdown_detail:
+      en: Use mark-down language to define the structure and appearance of messages. Your formatting will take effect once you send your message. When this is on, the formatting options menu won't be visible.
+      de: Verwenden Sie Mark-down, um Struktur und Darstellung von Nachrichten festzulegen. Die Formatierung gilt nach dem Senden. Ist diese Option aktiv, ist das Formatierungsmenü ausgeblendet.
+  calls:
+    ringtones:
+      en: Ringtones
+      de: Klingeltöne
+rail:
+  activity:
+    en: Activity
+    de: Aktivität
+  chat:
+    en: Chat
+    de: Chat
+  teams:
+    en: Teams
+    de: Teams
+  calendar:
+    en: Calendar
+    de: Kalender
+  calls:
+    en: Calls
+    de: Anrufe
+  agents:
+    en: Agents
+    de: Agents
+  shortcut_activity:
+    en: Open Activity
+    de: Aktivität öffnen
+  shortcut_chats:
+    en: Show Chats
+    de: Chats anzeigen
+  shortcut_channels:
+    en: Show Channels
+    de: Kanäle anzeigen
+  shortcut_calendar:
+    en: Open Calendar
+    de: Kalender öffnen
+  shortcut_calls:
+    en: Show Calls
+    de: Anrufe anzeigen
+  shortcut_agents:
+    en: Open Agents
+    de: Agents öffnen
+tray:
+  open:
+    en: Open
+    de: Öffnen
+  quit:
+    en: Quit
+    de: Beenden
+  do_not_disturb:
+    en: Do not disturb
+    de: Nicht stören
+  notifications:
+    en: Notifications
+    de: Benachrichtigungen
+  mute_sound:
+    en: Mute sound
+    de: Ton stumm schalten
+calls:
+  notice:
+    not_connected:
+      en: Not connected to Teams yet
+      de: Noch nicht mit Teams verbunden
+    read_only:
+      en: Calls are off in read-only mode
+      de: Anrufe sind im Nur-Lesen-Modus deaktiviert
+    not_callable:
+      en: This chat cannot be called
+      de: Dieser Chat kann nicht angerufen werden
+    meeting_unavailable:
+      en: This meeting cannot be joined
+      de: Dieser Besprechung kann nicht beigetreten werden
+    answer_failed:
+      en: Could not answer the call
+      de: Anruf konnte nicht angenommen werden
+    consult_ended:
+      en: The consultation ended
+      de: Die Rücksprache ist beendet
+    report_saved:
+      en: Test report saved
+      de: Testbericht gespeichert
+    response_failed:
+      en: Could not send your response
+      de: Ihre Antwort konnte nicht gesendet werden
+    delete_failed:
+      en: Could not delete the meeting
+      de: Besprechung konnte nicht gelöscht werden
+    delete_read_only:
+      en: Meetings cannot be deleted in read-only mode.
+      de: Besprechungen können im Nur-Lesen-Modus nicht gelöscht werden.
+    no_meeting_chat:
+      en: This meeting chat is not available
+      de: Dieser Besprechungschat ist nicht verfügbar
+    invite_failed:
+      en: Could not add that person
+      de: Diese Person konnte nicht hinzugefügt werden
+    no_peer:
+      en: This call cannot be extended
+      de: Dieser Anruf kann nicht erweitert werden
+    missed:
+      en: Call missed
+      de: Anruf verpasst
+    not_found:
+      en: Could not find that meeting
+      de: Diese Besprechung wurde nicht gefunden
+    meet_now_failed:
+      en: Could not start the meeting
+      de: Besprechung konnte nicht gestartet werden
+    consent_first:
+      en: Accept the recording notice first
+      de: Bitte zuerst den Aufzeichnungshinweis bestätigen
+    on_hold:
+      en: Resume the call first
+      de: Setzen Sie den Anruf zuerst fort
+    change_running:
+      en: Another change is still running, try again in a moment
+      de: Eine andere Änderung läuft noch, versuchen Sie es gleich erneut
+    video_failed:
+      en: Video could not start, the call stays audio only
+      de: Video konnte nicht starten, der Anruf bleibt nur Audio
+    share_queued:
+      en: Sharing starts in a moment
+      de: Freigabe startet gleich
+    share_refused:
+      en: The other side did not accept the screen share
+      de: Die Gegenseite hat die Bildschirmfreigabe nicht akzeptiert
+    portal_unavailable:
+      en: Screen sharing needs a desktop portal on this system
+      de: Bildschirmfreigabe benötigt auf diesem System ein Desktop-Portal
+    files_later:
+      en: Files can be added once the chat exists.
+      de: Dateien können hinzugefügt werden, sobald der Chat existiert.
+    calendar_load_failed:
+      en: We couldn't load your calendar.
+      de: Ihr Kalender konnte nicht geladen werden.
+    no_calls:
+      en: No calls yet
+      de: Noch keine Anrufe
+    video_starts_once_connected:
+      en: Video starts once the call is connected
+      de: Video startet, sobald der Anruf verbunden ist
+    call_transferred:
+      en: Call transferred
+      de: Anruf weitergeleitet
+    transfer_failed:
+      en: The transfer did not go through
+      de: Die Weiterleitung ist fehlgeschlagen
+    recording_join_failed:
+      en: The recording service could not join
+      de: Der Aufzeichnungsdienst konnte nicht beitreten
+    captions_join_failed:
+      en: The captions service could not join
+      de: Der Untertitel-Dienst konnte nicht beitreten
+    caption_language_failed:
+      en: Could not change the spoken language
+      de: Gesprochene Sprache konnte nicht geändert werden
+    camera_start:
+      en: "Camera could not start: %{detail}"
+      de: "Kamera konnte nicht starten: %{detail}"
+    camera_restart:
+      en: "Camera could not restart: %{detail}"
+      de: "Kamera konnte nicht neu starten: %{detail}"
+    sharing_start:
+      en: "Sharing could not start: %{detail}"
+      de: "Freigabe konnte nicht starten: %{detail}"
+    raise_hand_failed:
+      en: Could not raise your hand
+      de: Hand heben ist fehlgeschlagen
+    lower_hand_failed:
+      en: Could not lower your hand
+      de: Hand senken ist fehlgeschlagen
+    lower_that_hand_failed:
+      en: Could not lower that hand
+      de: Diese Hand konnte nicht gesenkt werden
+    lower_all_hands_failed:
+      en: Could not lower all hands
+      de: Alle Hände konnten nicht gesenkt werden
+    confirm_recording_failed:
+      en: Could not confirm the recording notice
+      de: Aufzeichnungshinweis konnte nicht bestätigt werden
+    hold_failed:
+      en: Could not put the call on hold
+      de: Anruf konnte nicht gehalten werden
+    resume_failed:
+      en: Could not resume the call
+      de: Anruf konnte nicht fortgesetzt werden
+    transfer_not_allowed:
+      en: This call cannot be transferred
+      de: Dieser Anruf kann nicht weitergeleitet werden
+    transfer_call_failed:
+      en: Could not transfer the call
+      de: Anruf konnte nicht weitergeleitet werden
+    transferring:
+      en: "Transferring to %{detail}..."
+      de: "Weiterleitung an %{detail}..."
+    whiteboards_meetings_only:
+      en: Whiteboards belong to meetings
+      de: Whiteboards gehören zu Besprechungen
+    whiteboard_open_failed:
+      en: The whiteboard could not be opened
+      de: Das Whiteboard konnte nicht geöffnet werden
+    reaction_failed:
+      en: Could not send the reaction
+      de: Reaktion konnte nicht gesendet werden
+    recording_not_started:
+      en: The recording did not start
+      de: Die Aufzeichnung hat nicht gestartet
+    recording_start_failed:
+      en: The recording could not start
+      de: Die Aufzeichnung konnte nicht starten
+    captions_start_failed:
+      en: Captions could not start
+      de: Untertitel konnten nicht starten
+    hold_change_failed:
+      en: The hold did not go through
+      de: Halten ist fehlgeschlagen
+    recording_stop_failed:
+      en: The recording could not be stopped
+      de: Die Aufzeichnung konnte nicht gestoppt werden
+    background_image_failed:
+      en: That background image could not be used
+      de: Dieses Hintergrundbild konnte nicht verwendet werden
+    camera_stopped:
+      en: "Camera stopped: %{detail}"
+      de: "Kamera gestoppt: %{detail}"
+    screen_share_stopped:
+      en: "Screen share stopped: %{detail}"
+      de: "Bildschirmfreigabe gestoppt: %{detail}"
+    admit_failed:
+      en: Could not admit that person
+      de: Diese Person konnte nicht zugelassen werden
+    admit_all_failed:
+      en: Could not admit everyone
+      de: Nicht alle konnten zugelassen werden
+    deny_failed:
+      en: Could not deny that person
+      de: Diese Person konnte nicht abgewiesen werden
+    remove_participant_failed:
+      en: Could not remove that person
+      de: Diese Person konnte nicht entfernt werden
+    mute_participant_failed:
+      en: Could not mute that person
+      de: Diese Person konnte nicht stummgeschaltet werden
+    mute_all_failed:
+      en: Could not mute everyone
+      de: Nicht alle konnten stummgeschaltet werden
+    meeting_lock_failed:
+      en: Could not change the meeting lock
+      de: Besprechungssperre konnte nicht geändert werden
+    change_role_failed:
+      en: Could not change that role
+      de: Diese Rolle konnte nicht geändert werden
+    mic_setting_failed:
+      en: Could not change that microphone setting
+      de: Diese Mikrofoneinstellung konnte nicht geändert werden
+    camera_setting_failed:
+      en: Could not change that camera setting
+      de: Diese Kameraeinstellung konnte nicht geändert werden
+    attendee_settings_failed:
+      en: Could not change the attendee settings
+      de: Teilnehmereinstellungen konnten nicht geändert werden
+    invite_person_failed:
+      en: Could not invite that person
+      de: Diese Person konnte nicht eingeladen werden
+    spotlight_failed:
+      en: Could not spotlight that person
+      de: Diese Person konnte nicht hervorgehoben werden
+    stop_spotlight_failed:
+      en: Could not stop the spotlight
+      de: Hervorhebung konnte nicht beendet werden
+  page:
+    title:
+      en: Calls
+      de: Anrufe
+    history:
+      en: History
+      de: Verlauf
+    speed_dial:
+      en: Speed dial
+      de: Kurzwahl
+    speed_dial_empty:
+      en: Add people to speed dial for quick access.
+      de: Personen zur Kurzwahl hinzufügen für schnellen Zugriff.
+    speed_dial_add:
+      en: Add to speed dial
+      de: Zur Kurzwahl hinzufügen
+    pick_one:
+      en: Pick one person to call
+      de: Eine Person zum Anrufen wählen
+  chrome:
+    video_call:
+      en: Video call
+      de: Videoanruf
+    audio_call:
+      en: Audio call
+      de: Audioanruf
+    call_options:
+      en: Call options
+      de: Anrufoptionen
+    meet_now:
+      en: Meet now
+      de: Jetzt besprechen
+    stop_sharing:
+      en: Stop sharing
+      de: Freigabe beenden
+    raise_hand:
+      en: Raise hand
+      de: Hand heben
+    lower_hand:
+      en: Lower hand
+      de: Hand senken
+    lower_all_hands:
+      en: Lower all hands
+      de: Alle Hände senken
+    end_meeting_for_all:
+      en: End meeting for everyone
+      de: Besprechung für alle beenden
+    open_chat:
+      en: Open the chat
+      de: Chat öffnen
+    close_chat:
+      en: Close the chat
+      de: Chat schließen
+    share_entire_screen:
+      en: Share entire screen
+      de: Gesamten Bildschirm freigeben
+    share_screen_n:
+      en: "Share screen %{n}"
+      de: "Bildschirm %{n} freigeben"
+    share_window:
+      en: Share a window
+      de: Fenster freigeben
+    share_window_ellipsis:
+      en: Share a window...
+      de: Fenster freigeben...
+    computer_sound_on:
+      en: Computer sound on
+      de: Computerton ein
+    computer_sound_off:
+      en: Computer sound off
+      de: Computerton aus
+    sharing_label:
+      en: "You are sharing: %{label}"
+      de: "Sie geben frei: %{label}"
+    no_microphone:
+      en: No microphone found
+      de: Kein Mikrofon gefunden
+    audio_off_meeting:
+      en: Audio is off for this meeting
+      de: Audio ist für diese Besprechung aus
+    no_camera:
+      en: No camera found
+      de: Keine Kamera gefunden
+    sharing_when_connected:
+      en: Sharing starts once the call is connected
+      de: Freigabe startet, sobald der Anruf verbunden ist
+    no_windows:
+      en: No windows found
+      de: Keine Fenster gefunden
+    lobby_waiting:
+      en: Waiting in the lobby...
+      de: Warten in der Lobby...
+    include_computer_sound:
+      en: Include computer sound
+      de: Computerton einbeziehen
+    optimize_motion:
+      en: Optimize for motion
+      de: Für Bewegung optimieren
+    show_me_over_content:
+      en: Show me over my content
+      de: Mich über meinen Inhalt anzeigen
+    camera_on_first:
+      en: Turn your camera on first
+      de: Kamera zuerst einschalten
+    noise_suppression:
+      en: Noise suppression
+      de: Rauschunterdrückung
+    music_mode:
+      en: Music mode
+      de: Musikmodus
+    push_to_talk:
+      en: Unmuted - release Ctrl+Space to mute
+      de: Entstummt – Strg+Leertaste loslassen zum Stummschalten
+    hand_raised:
+      en: Hand raised
+      de: Hand gehoben
+    hand_position:
+      en: "Hand %{position}"
+      de: "Hand %{position}"
+    reconnecting:
+      en: Reconnecting...
+      de: Verbindung wird wiederhergestellt...
+    microphone:
+      en: Microphone
+      de: Mikrofon
+    speaker:
+      en: Speaker
+      de: Lautsprecher
+    return_main:
+      en: Return to main meeting
+      de: Zur Hauptbesprechung zurück
+    breakout_room:
+      en: Breakout room
+      de: Breakout-Raum
+    on_hold:
+      en: On hold
+      de: Gehalten
+    you_on_hold:
+      en: You're on hold
+      de: Sie sind in der Warteschleife
+    open_in_browser:
+      en: Open in browser
+      de: Im Browser öffnen
+    recording_notice:
+      en: This meeting is being recorded
+      de: Diese Besprechung wird aufgezeichnet
+    recording_accept_hint:
+      en: Your microphone and camera stay off until you accept.
+      de: Mikrofon und Kamera bleiben aus, bis Sie zustimmen.
+    transfer:
+      en: Transfer
+      de: Weiterleiten
+    resume_person:
+      en: "Resume %{name}"
+      de: "%{name} fortsetzen"
+    video_quality:
+      en: Video quality
+      de: Videoqualität
+    auto:
+      en: Auto
+      de: Auto
+    effects:
+      en: Effects
+      de: Effekte
+    mirror_video:
+      en: Mirror my video
+      de: Video spiegeln
+    auto_framing:
+      en: Auto framing
+      de: Automatischer Bildausschnitt
+    adjust_brightness:
+      en: Adjust brightness
+      de: Helligkeit anpassen
+    soft_focus:
+      en: Soft focus
+      de: Weichzeichner
+    background:
+      en: Background
+      de: Hintergrund
+    background_none:
+      en: None
+      de: Keiner
+    background_blur:
+      en: Blur
+      de: Unscharf
+    add_image:
+      en: Add image...
+      de: Bild hinzufügen...
+  prejoin:
+    camera_off:
+      en: Your camera is off
+      de: Ihre Kamera ist aus
+    default_device:
+      en: Default device
+      de: Standardgerät
+    starting_camera:
+      en: Starting camera...
+      de: Kamera wird gestartet...
+    camera_failed:
+      en: "Camera could not start: %{detail}"
+      de: "Kamera konnte nicht starten: %{detail}"
+    background:
+      en: Background
+      de: Hintergrund
+    camera:
+      en: Camera
+      de: Kamera
+    microphone:
+      en: Microphone
+      de: Mikrofon
+    speaker:
+      en: Speaker
+      de: Lautsprecher
+    join_now:
+      en: Join now
+      de: Jetzt beitreten
+    choose_av:
+      en: Choose your video and audio settings, then join
+      de: Video- und Audioeinstellungen wählen, dann beitreten
+  join_dialog:
+    title:
+      en: Join with a meeting ID
+      de: Mit Besprechungs-ID beitreten
+    meeting_id:
+      en: Meeting ID
+      de: Besprechungs-ID
+    passcode:
+      en: Passcode
+      de: Kenncode
+    passcode_placeholder:
+      en: Passcode (if the invitation has one)
+      de: Kenncode (falls in der Einladung angegeben)
+  meeting:
+    new_title:
+      en: New meeting
+      de: Neue Besprechung
+    title_label:
+      en: Title
+      de: Titel
+    title_placeholder:
+      en: Add a title
+      de: Titel hinzufügen
+    people:
+      en: People
+      de: Personen
+    date:
+      en: Date
+      de: Datum
+    start:
+      en: Start
+      de: Beginn
+    end:
+      en: End
+      de: Ende
+    repeat:
+      en: Repeat
+      de: Wiederholen
+    details:
+      en: Details
+      de: Details
+    details_placeholder:
+      en: Add details
+      de: Details hinzufügen
+    teams_link_added:
+      en: Teams meeting link is added
+      de: Teams-Besprechungslink wird hinzugefügt
+agents:
+  start:
+    new_session:
+      en: New session
+      de: Neue Sitzung
+    recent_sessions:
+      en: Recent sessions
+      de: Letzte Sitzungen
+    other_sessions:
+      en: Other sessions
+      de: Weitere Sitzungen
+    recent:
+      en: Recent
+      de: Zuletzt
+    browse:
+      en: Browse...
+      de: Durchsuchen...
+    session:
+      en: Session
+      de: Sitzung
+    working_dir:
+      en: Working dir
+      de: Arbeitsverzeichnis
+    message_to_session:
+      en: Message to the session
+      de: Nachricht an die Sitzung
+    extra_instructions:
+      en: Extra instructions (optional)
+      de: Zusätzliche Anweisungen (optional)
+    show_prompt:
+      en: Show prompt
+      de: Prompt anzeigen
+    send:
+      en: Send
+      de: Senden
+    allow_and_start:
+      en: Allow and start
+      de: Erlauben und starten
+    start:
+      en: Start
+      de: Starten
+    message_placeholder:
+      en: Type the message to send
+      de: Nachricht zum Senden eingeben
+    chat_invisible:
+      en: Agents can't see this chat yet.
+      de: Agents sehen diesen Chat noch nicht.
+  settings:
+    note:
+      en: Agents get the message, its sender and up to 20 earlier messages. Nothing is sent to Teams without you.
+      de: Agents erhalten die Nachricht, den Absender und bis zu 20 frühere Nachrichten. Ohne Sie wird nichts an Teams gesendet.
+    on_this_computer:
+      en: ON THIS COMPUTER
+      de: AUF DIESEM COMPUTER
+    scan_again:
+      en: Scan again
+      de: Erneut suchen
+    no_cli_found:
+      en: No Claude, Copilot, Codex, Cursor or Antigravity CLI is waiting to be added.
+      de: Keine Claude-, Copilot-, Codex-, Cursor- oder Antigravity-CLI wartet auf Hinzufügen.
+    agents_header:
+      en: AGENTS
+      de: AGENTS
+    actions_header:
+      en: ACTIONS - IN THIS ORDER IN THE MENU
+      de: AKTIONEN – IN DIESER REIHENFOLGE IM MENÜ
+    write_with:
+      en: Write with
+      de: Schreiben mit
+    rewrite_hint:
+      en: Rewrite in the composer and the chat assistant island. Microsoft Copilot needs the licence.
+      de: Umschreiben im Editor und im Chat-Assistenten-Insel. Microsoft Copilot benötigt die Lizenz.
+    answer_with:
+      en: "Answer with %{name}"
+      de: "Antworten mit %{name}"
+    new_action:
+      en: New action
+      de: Neue Aktion
+    custom_agent:
+      en: Custom agent
+      de: Eigener Agent
+    unknown_agent:
+      en: Unknown agent
+      de: Unbekannter Agent
+auth:
+  sign_in:
+    en: Sign in
+    de: Anmelden
+shell:
+  settings_and_more:
+    en: Settings and more
+    de: Einstellungen und mehr
+status_menu:
+  view_account:
+    en: View account
+    de: Konto anzeigen
+  set_status_message:
+    en: Set status message
+    de: Statusmeldung festlegen
+  resume_notifications:
+    en: Resume notifications
+    de: Benachrichtigungen fortsetzen
+  chat_list:
+    en: Chat list
+    de: Chatliste
+  translation:
+    en: Translation
+    de: Übersetzung
+  notification_settings:
+    en: Notification settings
+    de: Benachrichtigungseinstellungen
+  test_call:
+    en: Make a test call
+    de: Testanruf starten
+  simulate_incoming:
+    en: Simulate incoming call
+    de: Eingehenden Anruf simulieren
+  duration:
+    en: Duration
+    de: Dauer
+  reset_status:
+    en: Reset status
+    de: Status zurücksetzen
+  work_location_today:
+    en: Set work location for today
+    de: Arbeitsort für heute festlegen
+  office:
+    en: Office
+    de: Büro
+  remote:
+    en: Remote
+    de: Remote
+  clear_work_location:
+    en: Clear work location
+    de: Arbeitsort löschen
+sidebar:
+  pinned:
+    en: Pinned
+    de: Angepinnt
+  quick_views:
+    en: Quick views
+    de: Schnellansichten
+  teams:
+    en: Teams
+    de: Teams
+  mark_all_read:
+    en: Mark all as read
+    de: Alle als gelesen markieren
+  collapse_all:
+    en: Collapse all sections
+    de: Alle Abschnitte einklappen
+  hidden_teams:
+    en: Hidden teams
+    de: Ausgeblendete Teams
+  see_all_channels:
+    en: See all channels
+    de: Alle Kanäle anzeigen
+  see_fewer_channels:
+    en: See fewer channels
+    de: Weniger Kanäle anzeigen
+  loading_older:
+    en: Loading older chats
+    de: Ältere Chats werden geladen
+  new_chat:
+    en: New chat
+    de: Neuer Chat
+  new_chat_shortcut:
+    en: New chat (Ctrl+N)
+    de: Neuer Chat (Strg+N)
+  more_options:
+    en: More options
+    de: Weitere Optionen
+  draft:
+    en: Draft
+    de: Entwurf
+  draft_prefix:
+    en: "Draft:"
+    de: "Entwurf:"
+  not_sent:
+    en: Not sent
+    de: Nicht gesendet
+  see_more:
+    en: "See more (%{count})"
+    de: "Mehr anzeigen (%{count})"
+  see_less:
+    en: See less
+    de: Weniger anzeigen
+  new_section:
+    en: New section
+    de: Neuer Abschnitt
+  rename_section:
+    en: Rename section
+    de: Abschnitt umbenennen
+  move_up:
+    en: Move up
+    de: Nach oben
+  move_down:
+    en: Move down
+    de: Nach unten
+  delete_section:
+    en: Delete section
+    de: Abschnitt löschen
+  delete_section_title:
+    en: 'Delete section "%{name}"?'
+    de: 'Abschnitt „%{name}" löschen?'
+  delete_section_detail:
+    en: Chats in it move back to Chats.
+    de: Chats darin werden zurück zu Chats verschoben.
+  new_channel:
+    en: New channel
+    de: Neuer Kanal
+  new_message:
+    en: New message
+    de: Neue Nachricht
+  new_items:
+    en: New items
+    de: Neue Elemente
+  notifications:
+    en: Notifications
+    de: Benachrichtigungen
+  notify_banner_activity:
+    en: Banner and activity
+    de: Banner und Aktivität
+  notify_activity_only:
+    en: Activity only
+    de: Nur Aktivität
+  notify_off:
+    en: Off
+    de: Aus
+  include_thread_replies:
+    en: Include thread replies
+    de: Thread-Antworten einschließen
+  filter:
+    placeholder:
+      en: Filter by person or chat name
+      de: Nach Person oder Chatname filtern
+    channel_placeholder:
+      en: Filter by channel name
+      de: Nach Kanalname filtern
+    no_matches:
+      en: We didn't find any matches.
+      de: Keine Treffer gefunden.
+    clear:
+      en: Clear filters
+      de: Filter zurücksetzen
+    clear_text:
+      en: Clear filter text
+      de: Filtertext löschen
+    show_box:
+      en: Show filter text box
+      de: Filterfeld anzeigen
+    close_box:
+      en: Close filter text box
+      de: Filterfeld schließen
+    show_shortcut:
+      en: "%{label} (Ctrl+Shift+F)"
+      de: "%{label} (Strg+Umschalt+F)"
+    unread:
+      en: Unread
+      de: Ungelesen
+  pill:
+    unread:
+      en: Unread
+      de: Ungelesen
+    mentions:
+      en: "@Mentions"
+      de: "@Erwähnungen"
+    chats:
+      en: Chats
+      de: Chats
+    meetings:
+      en: Meeting chats
+      de: Besprechungschats
+    muted:
+      en: Muted
+      de: Stummgeschaltet
+  quick_view:
+    mentions:
+      en: Mentions
+      de: Erwähnungen
+    drafts:
+      en: Drafts
+      de: Entwürfe
+    saved:
+      en: Saved
+      de: Gespeichert
+    mentions_empty:
+      en: No mentions yet. When someone @mentions you, it shows up here.
+      de: Noch keine Erwähnungen. Wenn Sie jemand @erwähnt, erscheint es hier.
+    drafts_empty:
+      en: No drafts. Messages you start and do not send show up here.
+      de: Keine Entwürfe. Begonnene, aber nicht gesendete Nachrichten erscheinen hier.
+    saved_empty:
+      en: No saved messages. Use Save message in the ... menu of a message.
+      de: Keine gespeicherten Nachrichten. Nutzen Sie «Nachricht speichern» im …-Menü einer Nachricht.
+shortcuts:
+  title:
+    en: Keyboard shortcuts
+    de: Tastenkürzel
+  group:
+    general:
+      en: General
+      de: Allgemein
+    navigation:
+      en: Navigation
+      de: Navigation
+    composer:
+      en: Messages and composer
+      de: Nachrichten und Editor
+    calls:
+      en: Calls
+      de: Anrufe

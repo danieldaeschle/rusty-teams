@@ -5,13 +5,13 @@ use gpui_kit::component::{WindowExt as _, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::theme;
 
 const DIALOG_WIDTH: f32 = 380.;
 const FIELD_GAP: f32 = 12.;
 const LABEL_SIZE: f32 = 12.;
-const TITLE: &str = "Join with a meeting ID";
 
 struct JoinForm {
     state: Entity<AppState>,
@@ -25,7 +25,7 @@ impl JoinForm {
     fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let meeting_id = cx.new(|cx| InputState::new(window, cx).placeholder("123 456 789 012"));
         let passcode = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Passcode (if the invitation has one)")
+            InputState::new(window, cx).placeholder(tr("calls.join_dialog.passcode_placeholder"))
         });
         let subscriptions = [
             cx.subscribe_in(&meeting_id, window, Self::on_enter),
@@ -80,8 +80,14 @@ impl Render for JoinForm {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap(px(FIELD_GAP))
-            .child(labeled("Meeting ID", Input::new(&self.meeting_id)))
-            .child(labeled("Passcode", Input::new(&self.passcode)))
+            .child(labeled(
+                &tr("calls.join_dialog.meeting_id"),
+                Input::new(&self.meeting_id),
+            ))
+            .child(labeled(
+                &tr("calls.join_dialog.passcode"),
+                Input::new(&self.passcode),
+            ))
             .when_some(self.error.clone(), |form, error| {
                 form.child(
                     div()
@@ -101,13 +107,13 @@ pub fn open_join_with_id(state: Entity<AppState>, window: &mut Window, cx: &mut 
         let footer = DialogFooter::new()
             .child(
                 Button::new("join-cancel")
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
             .child(
                 Button::new("join-confirm")
                     .primary()
-                    .label("Join")
+                    .label(tr("common.join"))
                     .on_click(move |_, window, cx| {
                         if submit_form.update(cx, |form, cx| form.submit(cx)) {
                             window.close_dialog(cx);
@@ -115,7 +121,7 @@ pub fn open_join_with_id(state: Entity<AppState>, window: &mut Window, cx: &mut 
                     }),
             );
         dialog
-            .title(TITLE)
+            .title(tr("calls.join_dialog.title"))
             .w(px(DIALOG_WIDTH))
             .child(form.clone())
             .footer(footer)

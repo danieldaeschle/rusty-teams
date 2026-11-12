@@ -34,7 +34,7 @@ pub enum MenuPart {
     Row(MenuRow),
 }
 
-pub fn picker_row(label: &'static str, control: impl IntoElement) -> Div {
+pub fn picker_row(label: String, control: impl IntoElement) -> Div {
     h_flex()
         .w_full()
         .items_center()

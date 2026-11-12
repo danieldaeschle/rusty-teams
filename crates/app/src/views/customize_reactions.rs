@@ -12,6 +12,7 @@ use gpui_kit::*;
 
 use super::reaction_picker::ReactionPicker;
 use super::widgets::{Corner, corner_badge, icon};
+use crate::i18n::tr;
 use crate::app_state::AppState;
 use crate::default_reactions::{
     filled, place_in_slot, quick_reaction_glyphs, reaction_id_for_glyph, slots_for,
@@ -252,13 +253,13 @@ pub fn open_customize_reactions(state: Entity<AppState>, window: &mut Window, cx
         let footer = DialogFooter::new()
             .child(
                 Button::new("customize-reactions-cancel")
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
             .child(
                 Button::new("customize-reactions-save")
                     .primary()
-                    .label("Save")
+                    .label(tr("common.save"))
                     .disabled(unchanged)
                     .on_click(move |_, window, cx| {
                         submit_form.update(cx, |form, cx| form.save(window, cx));

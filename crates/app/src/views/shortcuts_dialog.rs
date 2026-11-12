@@ -4,6 +4,7 @@ use gpui_kit::*;
 
 use super::shortcuts::{Group, shortcuts_in};
 use super::widgets::symbol;
+use crate::i18n::tr;
 use crate::theme::{self, ElevatedSurface as _};
 
 const CARD_WIDTH: f32 = 520.;
@@ -50,7 +51,7 @@ impl ShortcutsDialog {
                     .flex_1()
                     .text_size(px(15.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child("Keyboard shortcuts"),
+                    .child(tr("shortcuts.title")),
             )
             .child(
                 div()

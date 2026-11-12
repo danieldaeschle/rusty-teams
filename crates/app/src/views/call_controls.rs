@@ -11,6 +11,7 @@ use super::shortcuts::{StartAudioCall, StartVideoCall};
 use super::widgets::{icon, menu_icon};
 use crate::app_state::{AppState, Selection};
 use crate::call::{is_echo_chat, plan_for_chat};
+use crate::i18n::tr;
 use crate::theme;
 
 const BUTTON_SIZE: f32 = 30.;
@@ -20,10 +21,6 @@ const CHEVRON_WIDTH: f32 = 18.;
 const CHEVRON_GLYPH: f32 = 12.;
 pub const HEADER_VIDEO_CALL_TAG: &str = "header-video-call";
 pub const HEADER_CALL_OPTIONS_TAG: &str = "header-call-options";
-const VIDEO_CALL_LABEL: &str = "Video call";
-const AUDIO_CALL_LABEL: &str = "Audio call";
-const CALL_OPTIONS_LABEL: &str = "Call options";
-const MEET_NOW_LABEL: &str = "Meet now";
 const GROUP_KIND: &str = "group";
 const MEETING_KIND: &str = "meeting";
 
@@ -64,8 +61,10 @@ pub fn header_call_controls(
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .hover(|button| button.opacity(0.85))
-                .when(running, |button| button.child(icon(IconName::Phone, 14., foreground)))
-                .child("Join")
+                .when(running, |button| {
+                    button.child(icon(IconName::Phone, 14., foreground))
+                })
+                .child(tr("common.join"))
                 .on_click(move |_, _, cx| {
                     join_app.update(cx, |state, cx| state.join_chat_meeting(&join_id, cx));
                 })
@@ -105,8 +104,18 @@ fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> 
             Button::new(HEADER_VIDEO_CALL_TAG)
                 .ghost()
                 .h(px(BUTTON_SIZE))
-                .map(|button| if labelled { button.px(px(8.)) } else { button.p_0().w(px(BUTTON_SIZE)) })
-                .tooltip(if meet_now { MEET_NOW_LABEL } else { VIDEO_CALL_LABEL })
+                .map(|button| {
+                    if labelled {
+                        button.px(px(8.))
+                    } else {
+                        button.p_0().w(px(BUTTON_SIZE))
+                    }
+                })
+                .tooltip(if meet_now {
+                    tr("calls.chrome.meet_now")
+                } else {
+                    tr("calls.chrome.video_call")
+                })
                 .debug_selector(|| HEADER_VIDEO_CALL_TAG.into())
                 .child(
                     h_flex()
@@ -119,7 +128,7 @@ fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> 
                                     .text_size(px(14.))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
-                                    .child(MEET_NOW_LABEL),
+                                    .child(tr("calls.chrome.meet_now")),
                             )
                         }),
                 )
@@ -131,23 +140,27 @@ fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> 
                 .p_0()
                 .w(px(CHEVRON_WIDTH))
                 .h(px(BUTTON_SIZE))
-                .tooltip(CALL_OPTIONS_LABEL)
+                .tooltip(tr("calls.chrome.call_options"))
                 .debug_selector(|| HEADER_CALL_OPTIONS_TAG.into())
-                .child(icon(IconName::ChevronDown, CHEVRON_GLYPH, theme::text_soft()))
+                .child(icon(
+                    IconName::ChevronDown,
+                    CHEVRON_GLYPH,
+                    theme::text_soft(),
+                ))
                 .dropdown_menu(move |popup, _, _| {
                     let (video, audio) = (menu_app.clone(), menu_app.clone());
                     let popup = if meet_now {
                         popup
                     } else {
                         popup.item(
-                            PopupMenuItem::new(VIDEO_CALL_LABEL)
+                            PopupMenuItem::new(tr("calls.chrome.video_call"))
                                 .icon(menu_icon(IconName::Video))
                                 .action(Box::new(StartVideoCall))
                                 .on_click(move |_, _, cx| start_call(&video, true, cx)),
                         )
                     };
                     popup.item(
-                        PopupMenuItem::new(AUDIO_CALL_LABEL)
+                        PopupMenuItem::new(tr("calls.chrome.audio_call"))
                             .icon(menu_icon(IconName::Phone))
                             .action(Box::new(StartAudioCall))
                             .on_click(move |_, _, cx| start_call(&audio, false, cx)),

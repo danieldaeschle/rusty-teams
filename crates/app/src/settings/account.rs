@@ -97,7 +97,11 @@ pub fn label_of<T: PartialEq + Copy>(options: &[Labeled<T>], current: T) -> &'st
 
 pub fn account_select<T: PartialEq + Copy + 'static>(
     app: &Entity<AppState>,
-    (id, title, detail): (&'static str, &'static str, &'static str),
+    (id, title, detail): (
+        &'static str,
+        impl Into<SharedString>,
+        impl Into<SharedString>,
+    ),
     options: &'static [Labeled<T>],
     current: T,
     change: fn(T) -> ChatSettingChange,

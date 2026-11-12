@@ -14,6 +14,7 @@ use gpui_kit::*;
 use super::avatar::person_avatar;
 use super::call_extras::{CameraMenu, background_items};
 use super::call_view::{device_items, round_control};
+use crate::i18n::{tr, tr_args};
 use crate::app_state::AppState;
 use crate::call::{AudioChoice, CameraPreview, JoinOptions, PendingJoin};
 use crate::theme;
@@ -28,8 +29,6 @@ const PANE_PADDING: f32 = 12.;
 const PREVIEW_MIN_HEIGHT: f32 = 60.;
 const FRAME_TICK: Duration = Duration::from_millis(100);
 const FPS_TICK: Duration = Duration::from_millis(500);
-const CAMERA_OFF_TEXT: &str = "Your camera is off";
-const DEFAULT_LABEL: &str = "Default device";
 const DEMO_MICROPHONES: [&str; 2] = ["Headset microphone", "Laptop microphone"];
 const DEMO_SPEAKERS: [&str; 2] = ["Headset earphones", "Laptop speakers"];
 
@@ -52,7 +51,7 @@ pub struct PrejoinView {
 
 struct DeviceSelect {
     id: &'static str,
-    label: &'static str,
+    label: String,
     entries: Vec<DeviceEntry>,
     current: DeviceChoice,
     enabled: bool,
@@ -82,7 +81,7 @@ fn label_of(entries: &[DeviceEntry], choice: &DeviceChoice) -> String {
     entries
         .iter()
         .find(|entry| &entry.choice == choice)
-        .map_or_else(|| DEFAULT_LABEL.to_owned(), |entry| entry.label.clone())
+        .map_or_else(|| tr("calls.prejoin.default_device"), |entry| entry.label.clone())
 }
 
 impl PrejoinView {
@@ -270,8 +269,12 @@ impl PrejoinView {
 
     fn preview_status(&self) -> String {
         match self.preview.failure() {
-            Some(reason) => format!("Camera could not start: {reason}"),
-            None => "Starting camera...".to_owned(),
+            Some(reason) => {
+                let mut args = std::collections::HashMap::new();
+                args.insert("detail".to_owned(), reason.clone());
+                tr_args("calls.prejoin.camera_failed", &args)
+            }
+            None => tr("calls.prejoin.starting_camera"),
         }
     }
 
@@ -295,14 +298,15 @@ impl PrejoinView {
                 .child(person_avatar(
                     &state.directory,
                     me.as_ref().map(|me| me.user_id.as_str()),
-                    me.as_ref().map_or("You", |me| me.display_name.as_str()),
+                    me.as_ref()
+                        .map_or(tr("common.you").as_str(), |me| me.display_name.as_str()),
                     AVATAR_SIZE,
                 ))
                 .child(
                     div()
                         .text_size(px(13.))
                         .text_color(theme::text_muted())
-                        .child(CAMERA_OFF_TEXT),
+                        .child(tr("calls.prejoin.camera_off")),
                 )
                 .into_any_element(),
         };
@@ -362,7 +366,7 @@ impl PrejoinView {
             .child(
                 Button::new("prejoin-background")
                     .outline()
-                    .label("Background")
+                    .label(tr("calls.prejoin.background"))
                     .icon(IconName::ChevronDown)
                     .dropdown_menu(move |menu: PopupMenu, _, _| {
                         background_items(menu, &background_app, &backgrounds)
@@ -473,7 +477,7 @@ impl Render for PrejoinView {
             .child(self.select(
                 DeviceSelect {
                     id: "prejoin-camera-select",
-                    label: "Camera",
+                    label: tr("calls.prejoin.camera"),
                     entries: cameras,
                     current: camera,
                     enabled: true,
@@ -484,7 +488,7 @@ impl Render for PrejoinView {
             .child(self.select(
                 DeviceSelect {
                     id: "prejoin-mic-select",
-                    label: "Microphone",
+                    label: tr("calls.prejoin.microphone"),
                     entries: inputs,
                     current: input,
                     enabled: audio_on,
@@ -495,7 +499,7 @@ impl Render for PrejoinView {
             .child(self.select(
                 DeviceSelect {
                     id: "prejoin-speaker-select",
-                    label: "Speaker",
+                    label: tr("calls.prejoin.speaker"),
                     entries: outputs,
                     current: output,
                     enabled: audio_on,
@@ -520,13 +524,13 @@ impl Render for PrejoinView {
             .child(
                 Button::new("prejoin-cancel")
                     .ghost()
-                    .label("Cancel")
+                    .label(tr("common.cancel"))
                     .on_click(move |_, _, cx| cancel_view.update(cx, |view, cx| view.cancel(cx))),
             )
             .child(
                 Button::new("prejoin-join")
                     .primary()
-                    .label("Join now")
+                    .label(tr("calls.prejoin.join_now"))
                     .on_click(move |_, _, cx| join_view.update(cx, |view, cx| view.join(cx))),
             );
         v_flex()
@@ -563,7 +567,7 @@ impl Render for PrejoinView {
                                     .truncate()
                                     .text_size(px(13.))
                                     .text_color(theme::text_muted())
-                                    .child("Choose your video and audio settings, then join"),
+                                    .child(tr("calls.prejoin.choose_av")),
                             ),
                     )
                     .child(self.preview_box(cx))

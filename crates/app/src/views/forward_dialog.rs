@@ -11,6 +11,7 @@ use gpui_kit::*;
 
 use super::switcher::{Candidate, candidate_avatar, clamp_highlight};
 use super::widgets::{icon, symbol};
+use crate::i18n::tr;
 use crate::app_state::{AppState, Selection};
 use crate::fuzzy;
 use crate::message_actions::{ForwardItem, ForwardSource};
@@ -526,7 +527,7 @@ impl Render for ForwardDialog {
                             .child(
                                 Button::new("forward-cancel")
                                     .ghost()
-                                    .label("Cancel")
+                                    .label(tr("common.cancel"))
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(ForwardDialogEvent::Close)
                                     })),

@@ -14,6 +14,7 @@ use super::new_chat::NewChatDraft;
 use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::widgets::{icon, menu_icon, symbol};
 use crate::app_state::AppState;
+use crate::i18n::tr;
 use crate::call::{
     CALL_ROW_HEIGHT, CallRow, EMPTY_HEIGHT, HistoryFilter, ListEntry, SpeedDialEntry,
 };
@@ -23,17 +24,8 @@ pub const CALLS_DIAL_TAG: &str = "shell/islands/main/calls-dial";
 pub const CALLS_HISTORY_TAG: &str = "shell/islands/main/calls-history";
 pub const CALLS_SPEED_DIAL_TAG: &str = "shell/islands/main/calls-speed-dial";
 const CALLS_SCROLL_DIVIDER: &str = "shell/islands/main/calls-history/divider-scroll";
-const CALLS_TITLE: &str = "Calls";
-const HISTORY_TITLE: &str = "History";
-const SPEED_DIAL_TITLE: &str = "Speed dial";
-const SPEED_DIAL_EMPTY: &str = "Add people to speed dial for quick access.";
-const SPEED_DIAL_ADD_TITLE: &str = "Add to speed dial";
-const ADD_LABEL: &str = "Add";
-const CANCEL_LABEL: &str = "Cancel";
 const SPEED_DIAL_WIDTH: f32 = 340.;
 const SPEED_DIAL_MIN_WINDOW_WIDTH: f32 = 1100.;
-const CALL_LABEL: &str = "Call";
-const CALL_ONE_PERSON_HINT: &str = "Pick one person to call";
 const HEADER_HEIGHT: f32 = 60.;
 const PAGE_PADDING: f32 = 20.;
 const DIAL_WIDTH: f32 = 340.;
@@ -163,7 +155,7 @@ fn call_row(
                 })
                 .when(can_add_to_speed_dial, |popup| {
                     popup.item(
-                        PopupMenuItem::new(SPEED_DIAL_ADD_TITLE)
+                        PopupMenuItem::new(tr("calls.page.speed_dial_add"))
                             .icon(menu_icon(IconName::Star))
                             .on_click(move |_, _, cx| {
                                 let Some(user_id) = dial_row.user_id.as_deref() else {
@@ -184,7 +176,10 @@ fn history_filters(state: &Entity<AppState>, current: HistoryFilter) -> AnyEleme
         let selected = filter == current;
         let state = state.clone();
         div()
-            .id(SharedString::from(format!("calls-filter-{}", filter.label())))
+            .id(SharedString::from(format!(
+                "calls-filter-{}",
+                filter.label()
+            )))
             .h(px(24.))
             .px(px(10.))
             .flex()
@@ -206,7 +201,11 @@ fn history_filters(state: &Entity<AppState>, current: HistoryFilter) -> AnyEleme
                 state.update(cx, |state, cx| state.set_call_history_filter(filter, cx))
             })
     });
-    h_flex().gap(px(6.)).items_center().children(pills).into_any_element()
+    h_flex()
+        .gap(px(6.))
+        .items_center()
+        .children(pills)
+        .into_any_element()
 }
 
 fn empty_row(text: &'static str) -> AnyElement {
@@ -377,14 +376,14 @@ impl CallsPage {
                     .justify_end()
                     .child(
                         Button::new("speed-dial-cancel")
-                            .label(CANCEL_LABEL)
+                            .label(tr("common.cancel"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.close_speed_dial_add(window, cx)
                             })),
                     )
                     .child(
                         Button::new("speed-dial-confirm")
-                            .label(ADD_LABEL)
+                            .label(tr("common.add"))
                             .when(picked, |button| button.primary())
                             .disabled(!picked)
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -404,14 +403,14 @@ impl CallsPage {
                 div()
                     .text_size(px(13.))
                     .text_color(theme::text_muted())
-                    .child(SPEED_DIAL_EMPTY),
+                    .child(tr("calls.page.speed_dial_empty")),
             )
             .child(
                 Button::new("speed-dial-empty-add")
-                    .label(ADD_LABEL)
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_speed_dial_add(window, cx)
-                    })),
+                    .label(tr("common.add"))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_speed_dial_add(window, cx)),
+                    ),
             )
     }
 
@@ -423,9 +422,7 @@ impl CallsPage {
             .map(|entry| speed_dial_row(&self.app, entry, &state.directory))
             .collect::<Vec<_>>();
         let body = if self.adding_speed_dial {
-            div()
-                .p(px(PAGE_PADDING))
-                .child(self.speed_dial_adder(cx))
+            div().p(px(PAGE_PADDING)).child(self.speed_dial_adder(cx))
         } else if rows.is_empty() {
             self.speed_dial_empty(cx)
         } else {
@@ -460,7 +457,7 @@ impl CallsPage {
                             .text_size(px(14.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
-                            .child(SPEED_DIAL_TITLE),
+                            .child(tr("calls.page.speed_dial")),
                     )
                     .child(
                         div()
@@ -473,7 +470,7 @@ impl CallsPage {
                             .cursor_pointer()
                             .hover(|button| button.bg(theme::row_hover()))
                             .tooltip(|window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new(SPEED_DIAL_ADD_TITLE)
+                                gpui_kit::component::tooltip::Tooltip::new(tr("calls.page.speed_dial_add"))
                                     .build(window, cx)
                             })
                             .child(symbol("person_add", 18., theme::text_soft()))
@@ -501,10 +498,10 @@ impl CallsPage {
                     .w_full()
                     .h(px(CALL_BUTTON_HEIGHT))
                     .icon(IconName::Phone)
-                    .label(CALL_LABEL)
+                    .label(tr("common.call"))
                     .when(callable, |button| button.primary())
                     .disabled(!callable)
-                    .when(picked > 1, |button| button.tooltip(CALL_ONE_PERSON_HINT))
+                    .when(picked > 1, |button| button.tooltip(tr("calls.page.pick_one")))
                     .on_click(cx.listener(|this, _, window, cx| this.call_picked(window, cx))),
             )
     }
@@ -570,7 +567,7 @@ impl CallsPage {
                             .text_size(px(14.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
-                            .child(HISTORY_TITLE),
+                            .child(tr("calls.page.history")),
                     )
                     .child(history_filters(&self.app, filter)),
             )
@@ -612,7 +609,7 @@ impl Render for CallsPage {
                             .text_size(px(16.))
                             .font_weight(FontWeight::BOLD)
                             .text_color(theme::text())
-                            .child(CALLS_TITLE),
+                            .child(tr("calls.page.title")),
                     ),
             )
             .child(div().w_full().h(px(1.)).flex_none().bg(theme::border()))

@@ -37,19 +37,19 @@ pub enum QuickView {
 }
 
 impl QuickView {
-    pub fn title(self) -> &'static str {
+    pub fn title(self) -> String {
         match self {
-            QuickView::Mentions => "Mentions",
-            QuickView::Drafts => "Drafts",
-            QuickView::Saved => "Saved",
+            QuickView::Mentions => app_base::ui_locale::tr("sidebar.quick_view.mentions"),
+            QuickView::Drafts => app_base::ui_locale::tr("sidebar.quick_view.drafts"),
+            QuickView::Saved => app_base::ui_locale::tr("sidebar.quick_view.saved"),
         }
     }
 
-    pub fn empty_text(self) -> &'static str {
+    pub fn empty_text(self) -> String {
         match self {
-            QuickView::Mentions => "No mentions yet. When someone @mentions you, it shows up here.",
-            QuickView::Drafts => "No drafts. Messages you start and do not send show up here.",
-            QuickView::Saved => "No saved messages. Use Save message in the ... menu of a message.",
+            QuickView::Mentions => app_base::ui_locale::tr("sidebar.quick_view.mentions_empty"),
+            QuickView::Drafts => app_base::ui_locale::tr("sidebar.quick_view.drafts_empty"),
+            QuickView::Saved => app_base::ui_locale::tr("sidebar.quick_view.saved_empty"),
         }
     }
 }
