@@ -600,6 +600,7 @@ impl<R: Remote> SyncEngine<R> {
     pub(crate) fn update_chat_preview(&self, records: &[MessageRecord]) -> Result<()> {
         let (calls, lines): (Vec<&MessageRecord>, Vec<&MessageRecord>) = records
             .iter()
+            .filter(|record| crate::preview::moves_the_chat(record))
             .partition(|record| crate::preview::keeps_previous_line(record));
         let mut changed = false;
         if let Some(newest) = lines.into_iter().max_by_key(|record| record.created_at) {

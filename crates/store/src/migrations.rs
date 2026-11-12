@@ -125,6 +125,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0029_departed_names.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0030_chat_time_without_departures.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {

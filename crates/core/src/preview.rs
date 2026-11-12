@@ -200,6 +200,11 @@ pub(crate) fn keeps_previous_line(record: &MessageRecord) -> bool {
     call_event(record).is_some_and(|event| event.phase.is_call())
 }
 
+/// Teams keeps a chat in place when someone leaves it or it is renamed; only being added moves it.
+pub(crate) fn moves_the_chat(record: &MessageRecord) -> bool {
+    roster_event(record).is_none_or(|roster| roster.change == RosterChange::Added)
+}
+
 fn added_only_self(detail: &Value) -> bool {
     let Some(initiator) = detail.pointer("/initiator/user/id").and_then(Value::as_str) else {
         return false;
@@ -316,6 +321,20 @@ mod tests {
 
     fn graph_message(value: serde_json::Value) -> Message {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn only_being_added_moves_a_chat() {
+        let roster = |change: &str| MessageRecord {
+            call_event_json: Some(format!(
+                r#"{{"roster":{{"change":"{change}","initiator_id":null,"initiator_name":null,"member_ids":["u"],"member_names":[null]}}}}"#
+            )),
+            ..MessageRecord::default()
+        };
+        assert!(moves_the_chat(&roster("Added")));
+        assert!(!moves_the_chat(&roster("Left")));
+        assert!(!moves_the_chat(&roster("Removed")));
+        assert!(moves_the_chat(&MessageRecord::default()));
     }
 
     #[test]

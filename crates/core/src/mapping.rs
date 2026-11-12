@@ -27,7 +27,10 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> ChatRecord {
         .iter()
         .filter(|member| member.user_id.as_deref() != Some(my_user_id))
         .collect();
-    let last_message_at = chat.last_message_time().or(chat.last_updated_date_time);
+    let last_message_at = chat
+        .last_message_time()
+        .or(chat.created_date_time)
+        .or(chat.last_updated_date_time);
     let last_read_at = chat
         .viewpoint
         .as_ref()
@@ -81,6 +84,7 @@ pub fn chat_record(chat: &Chat, my_user_id: &str) -> ChatRecord {
             .and_then(|preview| preview.sender_name.clone()),
         last_event_system,
         keeps_stored_preview,
+        without_last_message: chat.last_message_preview.is_none(),
     }
 }
 
@@ -333,6 +337,20 @@ mod tests {
             "lastMessagePreview": preview,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_chat_without_messages_dates_from_its_creation_not_its_last_change() {
+        let chat: Chat = serde_json::from_value(json!({
+            "id": "19:meeting@thread.v2",
+            "chatType": "meeting",
+            "createdDateTime": "2025-03-21T10:00:00Z",
+            "lastUpdatedDateTime": "2026-11-02T14:41:00Z",
+        }))
+        .unwrap();
+        let record = chat_record(&chat, "me");
+        assert_eq!(record.last_message_at, "2025-03-21T10:00:00Z".parse().ok());
+        assert!(record.without_last_message);
     }
 
     #[test]

@@ -165,6 +165,7 @@ mod tests {
             last_message_deleted: false,
             last_event_system: false,
             keeps_stored_preview: false,
+            without_last_message: false,
         });
         state
     }

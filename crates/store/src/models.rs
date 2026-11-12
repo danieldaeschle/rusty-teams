@@ -39,6 +39,7 @@ pub struct ChatRecord {
     pub last_message_deleted: bool,
     pub last_event_system: bool,
     pub keeps_stored_preview: bool,
+    pub without_last_message: bool,
 }
 
 impl ChatRecord {

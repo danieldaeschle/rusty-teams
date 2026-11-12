@@ -25,7 +25,12 @@ impl Store {
                     title = CASE WHEN excluded.title IN ('(only you)', 'Unknown User') AND chats.title NOT IN ('', '?', '(only you)', 'Unknown User')
                         THEN chats.title ELSE excluded.title END,
                     member_summary = excluded.member_summary,
-                    last_message_at = excluded.last_message_at,
+                    last_message_at = CASE WHEN ?15 THEN COALESCE((
+                        SELECT MAX(created_at) FROM messages
+                        WHERE conversation_id = excluded.id
+                          AND (call_event_json IS NULL OR NOT json_valid(call_event_json)
+                               OR COALESCE(json_extract(call_event_json, '$.roster.change'), 'Added') = 'Added')
+                    ), excluded.last_message_at) ELSE excluded.last_message_at END,
                     last_read_at = COALESCE(MAX(chats.last_read_at, excluded.last_read_at), chats.last_read_at, excluded.last_read_at),
                     unread = CASE WHEN ?12 THEN chats.unread ELSE excluded.unread AND (
                         excluded.last_message_at IS NULL
@@ -59,6 +64,7 @@ impl Store {
                     chat.last_event_system,
                     chat.keeps_stored_preview,
                     optional_to_millis(chat.preview_at),
+                    chat.without_last_message,
                 ])?;
                 clear_members.execute([&chat.id])?;
                 for (position, member) in chat.members.iter().enumerate() {
@@ -230,6 +236,7 @@ fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<ChatRecord> {
         preview_at: optional_from_millis(row.get(12)?),
         last_event_system: false,
         keeps_stored_preview: false,
+        without_last_message: false,
     })
 }
 

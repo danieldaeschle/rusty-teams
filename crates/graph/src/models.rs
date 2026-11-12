@@ -167,6 +167,7 @@ pub struct Chat {
     pub id: String,
     pub topic: Option<String>,
     pub chat_type: String,
+    pub created_date_time: Option<DateTime<Utc>>,
     pub last_updated_date_time: Option<DateTime<Utc>>,
     #[serde(default)]
     pub members: Vec<Member>,

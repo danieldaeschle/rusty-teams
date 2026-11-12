@@ -1849,3 +1849,26 @@ fn migration_to_v29_names_departed_people_from_their_messages() {
     assert_eq!(named.member_summary, "Ada Example");
     assert_eq!(store.chat("gone").unwrap().unwrap().title, UNKNOWN_USER_NAME);
 }
+
+#[test]
+fn a_chat_without_a_last_message_keeps_the_time_of_its_last_real_activity() {
+    let store = Store::open_in_memory().unwrap();
+    store.upsert_chats(&[chat("meeting", "Review", Some(at(1)))]).unwrap();
+    let left = MessageRecord {
+        call_event_json: Some(r#"{"roster":{"change":"Left","member_ids":["user-bob"]}}"#.to_owned()),
+        ..call_message("left", 40)
+    };
+    store
+        .upsert_messages(&[MessageRecord { conversation_id: "meeting".to_owned(), ..call_message("ended", 10) }, MessageRecord { conversation_id: "meeting".to_owned(), ..left }])
+        .unwrap();
+    let mut bumped = chat("meeting", "Review", Some(at(40)));
+    bumped.without_last_message = true;
+    store.upsert_chats(&[bumped]).unwrap();
+    assert_eq!(store.chat("meeting").unwrap().unwrap().last_message_at, Some(at(10)));
+
+    let mut never_used = chat("empty", "Planning", Some(at(3)));
+    never_used.without_last_message = true;
+    store.upsert_chats(&[never_used.clone()]).unwrap();
+    store.upsert_chats(&[never_used]).unwrap();
+    assert_eq!(store.chat("empty").unwrap().unwrap().last_message_at, Some(at(3)));
+}
