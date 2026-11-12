@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chatsvc::{CalendarEvent, Reminder};
+use chatsvc::{CalendarEvent, CalendarSource, Reminder};
 use chrono::{DateTime, Duration, Utc};
 use gpui_kit::Context;
 
@@ -33,6 +33,9 @@ pub enum ReminderWrite {
 }
 
 fn watched(event: &CalendarEvent, now: DateTime<Utc>) -> bool {
+    if event.source != CalendarSource::Outlook {
+        return false;
+    }
     let watch_from = event.start - Duration::minutes(LEAD_MINUTES + WATCH_BEFORE_LEAD_MINUTES);
     let watch_until = event
         .end
@@ -79,6 +82,11 @@ impl OutlookReminders {
     }
 
     pub fn allows(&self, event: &CalendarEvent, now: DateTime<Utc>) -> bool {
+        // Google (and later sources) use the local Soon/Started phase only —
+        // Outlook ReminderView must not suppress them when the id is absent.
+        if event.source != CalendarSource::Outlook {
+            return true;
+        }
         let Some(known) = &self.known else {
             return true;
         };
@@ -192,6 +200,7 @@ mod tests {
             show_as: Default::default(),
             dial_in: None,
             response: ResponseType::Accepted,
+            ..Default::default()
         }
     }
 
@@ -241,6 +250,16 @@ mod tests {
         let outlook = known(vec![reminder("b", at(9, 30))], at(9, 39));
         assert!(!outlook.allows(&event("a"), at(9, 40)));
         assert!(outlook.allows(&event("b"), at(9, 40)));
+    }
+
+    #[test]
+    fn google_events_stay_allowed_when_outlook_reminder_view_is_loaded() {
+        let outlook = known(vec![reminder("outlook-1", at(9, 30))], at(9, 39));
+        let mut google = event("google-1");
+        google.source = CalendarSource::Google;
+        google.sources = vec![CalendarSource::Google];
+        assert!(outlook.allows(&google, at(9, 40)));
+        assert!(!outlook.allows(&event("missing-outlook"), at(9, 40)));
     }
 
     #[test]

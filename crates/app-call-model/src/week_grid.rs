@@ -1,5 +1,7 @@
 use chatsvc::{CalendarEvent, ResponseType, ShowAs};
-use chrono::{DateTime, Datelike, Duration, FixedOffset, Months, NaiveDate, Utc, Weekday};
+use chrono::{
+    DateTime, Datelike, Duration, FixedOffset, Months, NaiveDate, NaiveTime, Utc, Weekday,
+};
 
 pub const WORK_WEEK_DAYS: i64 = 5;
 pub const MINUTES_PER_DAY: i64 = 24 * 60;
@@ -72,7 +74,9 @@ impl CalendarSpan {
     pub fn shifted(self, start: NaiveDate, steps: i32) -> NaiveDate {
         match self {
             CalendarSpan::Day => start + Duration::days(i64::from(steps)),
-            CalendarSpan::WorkWeek | CalendarSpan::Week => start + Duration::weeks(i64::from(steps)),
+            CalendarSpan::WorkWeek | CalendarSpan::Week => {
+                start + Duration::weeks(i64::from(steps))
+            }
             CalendarSpan::Month => {
                 let month = month_shown(start);
                 let moved = if steps >= 0 {
@@ -136,6 +140,25 @@ pub fn shown_in_calendar(event: &CalendarEvent) -> bool {
     event.response != ResponseType::Declined
 }
 
+/// True all-day events, plus timed blocks that cover whole local days
+/// (Google holidays/week markers as 00:00→00:00, or multi-day 00:00→23:59).
+pub fn is_effective_all_day(event: &CalendarEvent, offset: FixedOffset) -> bool {
+    if event.all_day {
+        return true;
+    }
+    let start = event.start.with_timezone(&offset);
+    let end = event.end.with_timezone(&offset);
+    if start.time() != NaiveTime::MIN || end <= start {
+        return false;
+    }
+    if end.time() == NaiveTime::MIN {
+        return true;
+    }
+    // Multi-day blocks that run from midnight through end-of-day (e.g. 23:59).
+    end.date_naive() > start.date_naive()
+        && end.time() >= NaiveTime::from_hms_opt(23, 59, 0).unwrap()
+}
+
 pub fn week_days(
     events: &[CalendarEvent],
     start: NaiveDate,
@@ -152,7 +175,7 @@ pub fn week_days(
                 if !shown_in_calendar(event) || event.end <= day_start || event.start >= day_end {
                     continue;
                 }
-                if event.all_day {
+                if is_effective_all_day(event, offset) {
                     all_day.push(index);
                     continue;
                 }
@@ -267,6 +290,7 @@ mod tests {
             show_as: Default::default(),
             dial_in: None,
             response: ResponseType::Accepted,
+            ..Default::default()
         }
     }
 
@@ -285,7 +309,10 @@ mod tests {
         assert_eq!(CalendarSpan::Month.title(next), "December 2026");
         let back = CalendarSpan::Month.shifted(start, -11);
         assert_eq!(CalendarSpan::Month.title(back), "December 2025");
-        assert_eq!(CalendarSpan::Week.shifted(date(2), -1), date(2) - Duration::weeks(1));
+        assert_eq!(
+            CalendarSpan::Week.shifted(date(2), -1),
+            date(2) - Duration::weeks(1)
+        );
     }
 
     #[test]
@@ -347,6 +374,32 @@ mod tests {
     }
 
     #[test]
+    fn midnight_to_midnight_timed_events_sit_in_the_all_day_row() {
+        // Google holidays / week markers often arrive as dateTime 00:00→00:00.
+        let holiday = event(0, 0, 24 * 60);
+        let meeting = event(9, 30, 60);
+        let monday = NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
+        assert!(is_effective_all_day(&holiday, utc()));
+        assert!(!is_effective_all_day(&meeting, utc()));
+        let days = week_days(&[holiday, meeting], monday, 1, utc());
+        assert_eq!(days[0].all_day, [0]);
+        assert_eq!(days[0].blocks.len(), 1);
+        assert_eq!(days[0].blocks[0].event_index, 1);
+    }
+
+    #[test]
+    fn multi_day_midnight_to_end_of_day_is_all_day() {
+        // e.g. KubeCon as 00:00 Mon → 23:59 Thu.
+        let conference = event(0, 0, 4 * 24 * 60 - 1);
+        assert!(is_effective_all_day(&conference, utc()));
+        let monday = NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
+        let days = week_days(&[conference], monday, 5, utc());
+        assert!(days.iter().all(|day| day.blocks.is_empty()));
+        assert_eq!(days[0].all_day, [0]);
+        assert_eq!(days[3].all_day, [0]);
+    }
+
+    #[test]
     fn spans_start_and_step_like_teams() {
         let wednesday = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
         let monday = NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
@@ -355,7 +408,10 @@ mod tests {
         assert_eq!(CalendarSpan::Week.start_for(wednesday), monday);
         let sunday = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
         assert_eq!(CalendarSpan::Week.start_for(sunday), monday);
-        assert_eq!(CalendarSpan::Day.shifted(wednesday, 1), wednesday + Duration::days(1));
+        assert_eq!(
+            CalendarSpan::Day.shifted(wednesday, 1),
+            wednesday + Duration::days(1)
+        );
         assert_eq!(CalendarSpan::Week.days(), 7);
     }
 

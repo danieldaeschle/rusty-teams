@@ -1,7 +1,7 @@
 use app_ui_kit::settings_controls::PAGE_PADDING;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::*;
 
@@ -9,7 +9,7 @@ use super::devices::DevicesView;
 use super::mcp::McpView;
 use super::nav::{NavLayout, NavSearch, first_match, label, matches, render_nav};
 use super::rows::ROW_INSET;
-use super::{about, appearance, calls, chats, general, notifications};
+use super::{about, appearance, calendar, calls, chats, general, notifications};
 use crate::agents::AgentsSettings;
 use crate::app_state::AppState;
 use crate::notify::NotificationCenter;
@@ -85,11 +85,15 @@ impl SettingsDialog {
         let subscriptions = [
             cx.observe(&center, |_, _, cx| cx.notify()),
             cx.observe(&app, |_, _, cx| cx.notify()),
-            cx.subscribe_in(&search, window, |this, _, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.follow_search(window, cx);
-                }
-            }),
+            cx.subscribe_in(
+                &search,
+                window,
+                |this, _, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        this.follow_search(window, cx);
+                    }
+                },
+            ),
         ];
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
@@ -182,6 +186,7 @@ impl SettingsDialog {
             SettingsSection::Appearance => appearance::render(&self.app, cx).into_any_element(),
             SettingsSection::Chats => chats::render(&self.app, cx).into_any_element(),
             SettingsSection::Calls => calls::render(&self.center, cx).into_any_element(),
+            SettingsSection::Calendar => calendar::render(&self.app, cx).into_any_element(),
             SettingsSection::Devices => self
                 .devices
                 .clone()

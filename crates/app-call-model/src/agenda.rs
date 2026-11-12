@@ -1,6 +1,8 @@
 use chatsvc::{CalendarEvent, ResponseType};
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 
+use crate::week_grid::is_effective_all_day;
+
 const JOIN_LEAD_MINUTES: i64 = 5;
 const AGENDA_DAYS: i64 = 7;
 const ALL_DAY_LABEL: &str = "All day";
@@ -73,17 +75,25 @@ fn detail_label(event: &CalendarEvent) -> String {
 }
 
 fn time_label(event: &CalendarEvent, offset: FixedOffset) -> String {
-    if event.all_day {
+    if is_effective_all_day(event, offset) {
         return ALL_DAY_LABEL.to_owned();
     }
     format!(
         "{} - {}",
-        event.start.with_timezone(&offset).format(app_base::format::clock_format()),
-        event.end.with_timezone(&offset).format(app_base::format::clock_format())
+        event
+            .start
+            .with_timezone(&offset)
+            .format(app_base::format::clock_format()),
+        event
+            .end
+            .with_timezone(&offset)
+            .format(app_base::format::clock_format())
     )
 }
 
 fn agenda_day(event: &CalendarEvent, today: NaiveDate, offset: FixedOffset) -> NaiveDate {
+    // Flagged all-day (`date`) uses the UTC calendar date; midnight-span
+    // dateTime events use the local calendar day.
     let start_day = if event.all_day {
         event.start.date_naive()
     } else {
@@ -104,7 +114,7 @@ fn agenda_row(event: &CalendarEvent, offset: FixedOffset) -> AgendaRow {
         detail: detail_label(event),
         response: event.response,
         can_respond: event.response != ResponseType::Organizer && event.organizer_name.is_some(),
-        all_day: event.all_day,
+        all_day: is_effective_all_day(event, offset),
         join_url: event.join_url.clone().filter(|_| event.online),
         thread_id: event.thread_id.clone(),
         start: event.start,
@@ -154,22 +164,30 @@ pub fn demo_events(now: DateTime<Utc>) -> Vec<CalendarEvent> {
                  minutes_from_now: i64,
                  length_minutes: i64,
                  organizer: &str,
-                 response: ResponseType| CalendarEvent {
-        object_id: id.to_owned(),
-        subject: subject.to_owned(),
-        start: now + Duration::minutes(minutes_from_now),
-        end: now + Duration::minutes(minutes_from_now + length_minutes),
-        all_day: false,
-        cancelled: false,
-        online: true,
-        join_url: Some(demo_join_url(id)),
-        thread_id: None,
-        organizer_name: Some(organizer.to_owned()),
-        organizer_address: None,
-        ical_uid: None,
-        show_as: Default::default(),
-        dial_in: None,
-        response,
+                 response: ResponseType| {
+        let (source, account_id, calendar_id, sources) = CalendarEvent::outlook_defaults();
+        CalendarEvent {
+            object_id: id.to_owned(),
+            subject: subject.to_owned(),
+            start: now + Duration::minutes(minutes_from_now),
+            end: now + Duration::minutes(minutes_from_now + length_minutes),
+            all_day: false,
+            cancelled: false,
+            online: true,
+            join_url: Some(demo_join_url(id)),
+            thread_id: None,
+            organizer_name: Some(organizer.to_owned()),
+            organizer_address: None,
+            ical_uid: None,
+            show_as: Default::default(),
+            dial_in: None,
+            response,
+            source,
+            account_id,
+            calendar_id,
+            sources,
+            ..Default::default()
+        }
     };
     vec![
         event(
@@ -247,6 +265,7 @@ mod tests {
             show_as: Default::default(),
             dial_in: None,
             response: ResponseType::Accepted,
+            ..Default::default()
         }
     }
 
