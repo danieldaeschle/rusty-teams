@@ -12,6 +12,7 @@ pub(super) const TOOL_GAP: f32 = 2.;
 pub(super) const GROUP_GAP: f32 = 12.;
 pub(super) const SPLIT_CHEVRON_WIDTH: f32 = 20.;
 pub(super) const LEAVE_HEIGHT: f32 = 32.;
+pub(super) const GROUP_DIVIDER_WIDTH: f32 = 1.;
 const TOOL_ICON: f32 = 20.;
 const TOOL_LABEL: f32 = 11.;
 const TOOL_RADIUS: f32 = 6.;
@@ -78,4 +79,12 @@ pub(super) fn split_chevron(button_id: &'static str, face_id: &'static str) -> B
                 .hover(|face| face.bg(theme::row_hover()))
                 .child(icon(IconName::ChevronDown, CHEVRON_ICON, theme::text())),
         )
+}
+
+pub(super) fn group_divider() -> Div {
+    div()
+        .flex_none()
+        .w(px(GROUP_DIVIDER_WIDTH))
+        .h(px(TOOL_HEIGHT - 16.))
+        .bg(theme::border())
 }

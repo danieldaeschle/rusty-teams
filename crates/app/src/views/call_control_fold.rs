@@ -4,7 +4,7 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::*;
 
-use super::call_toolbar::{GROUP_GAP, SPLIT_CHEVRON_WIDTH, TOOL_GAP, TOOL_WIDTH};
+use super::call_toolbar::{GROUP_DIVIDER_WIDTH, GROUP_GAP, SPLIT_CHEVRON_WIDTH, TOOL_GAP, TOOL_WIDTH};
 use super::call_view::reaction_glyph;
 use super::call_view_menu::view_items;
 use crate::app_state::AppState;
@@ -51,7 +51,7 @@ pub fn fixed_controls_width(has_camera_menu: bool, has_more: bool, has_leave_men
         } else {
             0.
         };
-    devices_width + more_width + leave_width + 3. * GROUP_GAP
+    devices_width + more_width + leave_width + 5. * GROUP_GAP + 2. * GROUP_DIVIDER_WIDTH
 }
 
 pub fn in_more_menu(folded: Vec<Foldable>) -> Vec<Foldable> {

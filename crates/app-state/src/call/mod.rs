@@ -57,7 +57,7 @@ pub use prejoin::{AudioChoice, JoinOptions, PendingJoin, load_join_options};
 pub use people::{PeopleSections, PersonRow, people_sections};
 pub use share_actions::ZoomStep;
 pub use speed_dial::SpeedDialEntry;
-pub use share_view::{SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, STRIP_DEFAULT_WIDTH, ShareStage, load_flag, load_strip_width};
+pub use share_view::{SHARE_MOTION_META_KEY, SHARE_STANDOUT_META_KEY, ShareStage, load_flag};
 pub use preview::{CameraPreview, preview_backgrounds};
 pub use reminder::{MeetingToasts, ReminderPhase, subtitle as meeting_subtitle};
 pub use ring::{MissedCall, RingEntry, Rings};

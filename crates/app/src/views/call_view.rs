@@ -18,7 +18,7 @@ use gpui_kit::*;
 use super::avatar::person_avatar;
 use super::call_control_fold::{Foldable, FoldedControls, fixed_controls_width, folded_for_width, in_more_menu};
 use super::call_toolbar::{
-    GROUP_GAP, LEAVE_HEIGHT, SPLIT_CHEVRON_WIDTH, TOOL_GAP, tool_face, tool_trigger, split_chevron,
+    GROUP_GAP, LEAVE_HEIGHT, group_divider, SPLIT_CHEVRON_WIDTH, TOOL_GAP, tool_face, tool_trigger, split_chevron,
 };
 use super::call_extras::{
     CameraMenu, consent_overlay, consult_banner, hold_panel, recording_chip, return_button,
@@ -907,7 +907,7 @@ fn shows_pop_out(call: &ActiveCall) -> bool {
 fn leave_group(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
     let leave = leave_button(app, model, "call-leave", false)
         .rounded(px(LEAVE_RADIUS))
-        .debug_selector(|| "shell/islands/main/call-header/controls/leave".into());
+        .debug_selector(|| "shell/islands/main/call-header/leave".into());
     if !has_leave_menu(model) {
         return leave.into_any_element();
     }
@@ -1310,8 +1310,10 @@ pub fn render_call_view(
         .flex_basis(px(0.))
         .min_w_0()
         .justify_end()
+        .gap(px(GROUP_GAP))
         .items_center()
-        .children(return_button(app, model));
+        .children(return_button(app, model))
+        .child(leave_group(app, model));
 
     let hold = hold_panel(app, model);
     let share_stage = share_stage_element(app, state, call);
@@ -1369,9 +1371,10 @@ pub fn render_call_view(
         .gap(px(GROUP_GAP))
         .items_center()
         .child(devices)
+        .child(group_divider())
         .child(panels_and_reactions)
-        .child(stage_and_more)
-        .child(leave_group(app, model));
+        .child(group_divider())
+        .child(stage_and_more);
     let header = header.child(title_group).child(controls).child(end_group);
 
     let top = v_flex()

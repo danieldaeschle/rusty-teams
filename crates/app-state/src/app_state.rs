@@ -194,7 +194,6 @@ pub struct AppState {
     pub call_share_motion: bool,
     pub call_share_standout: bool,
     pub call_report_enabled: bool,
-    pub call_strip_width: f32,
     pub call_view: crate::call::ViewSettings,
     pub call_background: crate::call::BackgroundPick,
     pub call_camera: calling::DeviceChoice,
@@ -355,7 +354,6 @@ impl AppState {
             call_share_motion: false,
             call_share_standout: false,
             call_report_enabled: true,
-            call_strip_width: crate::call::STRIP_DEFAULT_WIDTH,
             call_view: crate::call::ViewSettings::default(),
             call_background: crate::call::BackgroundPick::None,
             call_camera: calling::DeviceChoice::SystemDefault,
@@ -391,7 +389,6 @@ impl AppState {
         state.call_share_motion = crate::call::load_flag(&state.store, crate::call::SHARE_MOTION_META_KEY);
         state.call_share_standout = crate::call::load_flag(&state.store, crate::call::SHARE_STANDOUT_META_KEY);
         state.call_report_enabled = crate::call::load_report_enabled(&state.store);
-        state.call_strip_width = crate::call::load_strip_width(&state.store);
         state.call_view = crate::call::ViewSettings::load(&state.store);
         state.call_background = crate::call::load_background(&state.store);
         state.call_camera = crate::call::load_camera(&state.store);

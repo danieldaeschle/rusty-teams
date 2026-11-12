@@ -263,7 +263,7 @@ mod frames {
         "shell/islands/main/call-stage",
         "shell/islands/main/call-header/controls",
         "shell/islands/main/call-header/controls/mic",
-        "shell/islands/main/call-header/controls/leave",
+        "shell/islands/main/call-header/leave",
     ];
     const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
     const CALENDAR: &str = "shell/islands/calendar";
@@ -300,7 +300,6 @@ mod frames {
     const SHARE_GUARDED: &[&str] = &[
         "shell/islands/main/call-stage/share-content",
         "shell/islands/main/call-stage/share-content/zoom-chip",
-        "shell/islands/main/call-stage/share-divider",
         "shell/islands/main/call-stage/share-strip",
     ];
     const OVERLAY_PANELS: &[&str] = &[CALL_TRANSCRIPT, PEOPLE_PANEL];

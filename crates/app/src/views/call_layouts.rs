@@ -26,8 +26,6 @@ use crate::theme;
 
 const MEASURE_TOLERANCE: f32 = 0.5;
 const OVERLAY_INSET: f32 = 16.;
-const DIVIDER_LINE: f32 = 4.;
-const DIVIDER_LENGTH: f32 = 48.;
 const CHIP_TOP: f32 = 12.;
 const TILE_RADIUS: f32 = 12.;
 const HIDDEN_LIST_WIDTH: f32 = 260.;
@@ -514,7 +512,7 @@ fn people_strip(
     now: Instant,
     stage: (f32, f32),
 ) -> Stateful<Div> {
-    let StripSplit { width, others, plan } = strip_split(model, state.call_strip_width, stage);
+    let StripSplit { others, plan } = strip_split(model, stage);
     let size = TileSize::sixteen_by_nine(plan.tile_width);
     let shown = &others[..plan.overflow.shown];
     let mut cells: Vec<AnyElement> = shown
@@ -528,38 +526,14 @@ fn people_strip(
     if plan.overflow.hidden > 0 {
         cells.push(overflow_tile(app, state, size, &others[plan.overflow.shown..]));
     }
-    v_flex()
+    h_flex()
         .id("call-strip")
         .debug_selector(|| "shell/islands/main/call-stage/share-strip".into())
         .flex_none()
-        .w(px(width))
-        .items_center()
+        .w_full()
+        .justify_center()
         .gap(px(STRIP_GAP))
         .children(cells)
-}
-
-fn strip_divider(app: &Entity<AppState>, dragging: bool) -> Stateful<Div> {
-    let app = app.clone();
-    h_flex()
-        .id("call-strip-divider")
-        .debug_selector(|| "shell/islands/main/call-stage/share-divider".into())
-        .flex_none()
-        .w(px(TILE_GAP))
-        .h_full()
-        .items_center()
-        .justify_center()
-        .cursor_col_resize()
-        .child(
-            div()
-                .w(px(DIVIDER_LINE))
-                .h(px(DIVIDER_LENGTH))
-                .rounded_full()
-                .bg(if dragging { theme::accent() } else { theme::border() }),
-        )
-        .on_mouse_down(MouseButton::Left, move |event, _, cx| {
-            let pointer_x = f32::from(event.position.x);
-            app.update(cx, |state, cx| state.begin_strip_drag(pointer_x, cx));
-        })
 }
 
 fn share_body(
@@ -571,30 +545,16 @@ fn share_body(
     layout: CallLayout,
     stage: (f32, f32),
 ) -> AnyElement {
-    let move_app = app.clone();
-    let up_app = app.clone();
-    let up_out_app = app.clone();
-    let dragging = state.call.as_ref().is_some_and(|call| call.share_stage.strip_drag.is_some());
-    h_flex()
+    v_flex()
         .id("call-share-body")
         .absolute()
         .inset_0()
         .p(px(GRID_PADDING))
-        .items_center()
-        .on_mouse_move(move |event, _, cx| {
-            let pointer_x = f32::from(event.position.x);
-            move_app.update(cx, |state, cx| state.drag_strip_to(pointer_x, cx));
+        .gap(px(STRIP_GAP))
+        .when(layout != CallLayout::Content, |column| {
+            column.child(people_strip(app, state, model, now, stage))
         })
-        .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-            up_app.update(cx, |state, cx| state.end_strip_drag(cx));
-        })
-        .on_mouse_up_out(MouseButton::Left, move |_, _, cx| {
-            up_out_app.update(cx, |state, cx| state.end_strip_drag(cx));
-        })
-        .child(share)
-        .when(layout != CallLayout::Content, |row| {
-            row.child(strip_divider(app, dragging)).child(people_strip(app, state, model, now, stage))
-        })
+        .child(h_flex().flex_1().min_h_0().w_full().child(share))
         .into_any_element()
 }
 
