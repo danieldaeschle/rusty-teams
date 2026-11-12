@@ -41,7 +41,6 @@ pub enum Monitor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Surface {
-    Main,
     ShareBar,
     Border,
     Mini,
@@ -52,7 +51,6 @@ pub enum Surface {
 pub struct OverlayPlan {
     pub monitor: Monitor,
     pub share_bar: bool,
-    pub exclude_main: bool,
 }
 
 pub fn overlay_plan(
@@ -70,15 +68,11 @@ pub fn overlay_plan(
     OverlayPlan {
         monitor,
         share_bar: in_call && share != LocalShare::None,
-        exclude_main: excluded_from_capture(Surface::Main, share),
     }
 }
 
-pub fn excluded_from_capture(surface: Surface, share: LocalShare) -> bool {
-    match surface {
-        Surface::Main => share == LocalShare::Screen,
-        Surface::ShareBar | Surface::Border | Surface::Mini | Surface::Gallery => true,
-    }
+pub fn excluded_from_capture(surface: Surface) -> bool {
+    matches!(surface, Surface::ShareBar | Surface::Border)
 }
 
 fn overlap_area(first: ScreenRect, second: ScreenRect) -> i64 {
@@ -217,21 +211,17 @@ mod tests {
         use LocalShare::*;
         use Monitor as M;
         let rows = [
-            (None, false, M::None, false, false),
-            (None, true, M::Mini, false, false),
-            (Screen, false, M::None, true, true),
-            (Screen, true, M::Gallery, true, true),
-            (Window, false, M::None, true, false),
-            (Window, true, M::Gallery, true, false),
+            (None, false, M::None, false),
+            (None, true, M::Mini, false),
+            (Screen, false, M::None, true),
+            (Screen, true, M::Gallery, true),
+            (Window, false, M::None, true),
+            (Window, true, M::Gallery, true),
         ];
-        for (share, minimized, monitor, share_bar, exclude_main) in rows {
+        for (share, minimized, monitor, share_bar) in rows {
             assert_eq!(
                 overlay_plan(true, share, minimized, false),
-                OverlayPlan {
-                    monitor,
-                    share_bar,
-                    exclude_main
-                },
+                OverlayPlan { monitor, share_bar },
                 "{share:?} minimized={minimized}"
             );
         }
@@ -241,7 +231,6 @@ mod tests {
     fn speaker_only_swaps_the_gallery_for_the_mini_tile() {
         let plan = overlay_plan(true, LocalShare::Screen, true, true);
         assert_eq!(plan.monitor, Monitor::Mini);
-        assert!(plan.exclude_main);
         assert_eq!(
             overlay_plan(true, LocalShare::None, true, true).monitor,
             Monitor::Mini
@@ -256,20 +245,11 @@ mod tests {
     }
 
     #[test]
-    fn overlays_are_always_excluded_and_main_only_for_a_screen() {
-        for share in [LocalShare::None, LocalShare::Screen, LocalShare::Window] {
-            for surface in [
-                Surface::ShareBar,
-                Surface::Border,
-                Surface::Mini,
-                Surface::Gallery,
-            ] {
-                assert!(excluded_from_capture(surface, share));
-            }
-        }
-        assert!(excluded_from_capture(Surface::Main, LocalShare::Screen));
-        assert!(!excluded_from_capture(Surface::Main, LocalShare::Window));
-        assert!(!excluded_from_capture(Surface::Main, LocalShare::None));
+    fn only_the_share_chrome_stays_out_of_screenshots() {
+        assert!(excluded_from_capture(Surface::ShareBar));
+        assert!(excluded_from_capture(Surface::Border));
+        assert!(!excluded_from_capture(Surface::Mini));
+        assert!(!excluded_from_capture(Surface::Gallery));
     }
 
     #[test]

@@ -37,6 +37,17 @@ enum Role {
     Border(usize),
 }
 
+impl Role {
+    fn surface(self) -> Surface {
+        match self {
+            Role::Bar => Surface::ShareBar,
+            Role::Mini => Surface::Mini,
+            Role::Gallery => Surface::Gallery,
+            Role::Border(_) => Surface::Border,
+        }
+    }
+}
+
 struct Placed {
     handle: AnyWindowHandle,
     native: Option<NativeHandle>,
@@ -114,7 +125,6 @@ pub struct CallWindows {
     gallery_seen: Option<(i32, i32)>,
     gallery_layout: GalleryLayout,
     speaker_only: bool,
-    main_excluded: bool,
     minimized_for_share: bool,
     ticks: u32,
 }
@@ -194,7 +204,6 @@ impl CallWindows {
             gallery_seen: None,
             gallery_layout: gallery_layout(0, true, f32::MAX),
             speaker_only: false,
-            main_excluded: false,
             minimized_for_share: false,
             ticks: 0,
         };
@@ -315,7 +324,6 @@ impl CallWindows {
         self.stage_native = None;
         self.minimized = false;
         self.minimized_for_share = false;
-        self.main_excluded = false;
         self.seen_viewing = None;
     }
 
@@ -389,7 +397,6 @@ impl CallWindows {
             && self.share.is_none()
             && self.windows.is_empty()
             && self.opening.is_empty()
-            && !self.main_excluded
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) -> Duration {
@@ -402,7 +409,6 @@ impl CallWindows {
         self.refresh_stage_window();
         self.sync_viewing(cx);
         self.sync_share(slow, cx);
-        self.sync_capture_exclusion();
         self.sync_pop_out(cx);
         self.sync_monitor(cx);
         if slow {
@@ -540,22 +546,6 @@ impl CallWindows {
         self.minimized_for_share = true;
         if let Some(stage) = self.stage {
             stage.update(cx, |_, window, _| window.minimize_window()).ok();
-        }
-    }
-
-    fn sync_capture_exclusion(&mut self) {
-        let Some(native) = self.stage_native else {
-            return;
-        };
-        let wanted = excluded_from_capture(Surface::Main, self.local_share_mode());
-        if wanted == self.main_excluded {
-            return;
-        }
-        self.main_excluded = wanted;
-        if wanted {
-            platform::exclude_from_capture(native);
-        } else {
-            platform::include_in_capture(native);
         }
     }
 
@@ -787,7 +777,9 @@ impl CallWindows {
                     .flatten();
                 if let Some(native) = native {
                     platform::prepare_toast_window(native);
-                    platform::exclude_from_capture(native);
+                    if excluded_from_capture(role.surface()) {
+                        platform::exclude_from_capture(native);
+                    }
                 }
                 if matches!(role, Role::Border(_)) {
                     handle
