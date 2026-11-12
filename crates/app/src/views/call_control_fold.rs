@@ -37,21 +37,32 @@ impl FoldedControls {
     }
 }
 
-pub fn fixed_controls_width(has_camera_menu: bool, has_more: bool, has_leave_menu: bool) -> f32 {
+pub fn fixed_controls_width(has_camera_menu: bool, has_more: bool, has_leave_menu: bool, has_pop_out: bool) -> f32 {
     let devices = [
         TOOL_WIDTH + if has_camera_menu { SPLIT_CHEVRON_WIDTH } else { 0. },
         TOOL_WIDTH + SPLIT_CHEVRON_WIDTH,
         TOOL_WIDTH,
     ];
     let devices_width = devices.iter().sum::<f32>() + TOOL_GAP * (devices.len() - 1) as f32;
-    let more_width = if has_more { TOOL_WIDTH } else { 0. };
+    let more_width = if has_more { TOOL_WIDTH } else { 0. } + if has_pop_out { TOOL_WIDTH + TOOL_GAP } else { 0. };
     let leave_width = LEAVE_WIDTH
         + if has_leave_menu {
             SPLIT_CHEVRON_WIDTH + 4. + 1.
         } else {
             0.
         };
-    devices_width + more_width + leave_width + 2. * GROUP_GAP
+    devices_width + more_width + leave_width + 3. * GROUP_GAP
+}
+
+pub fn in_more_menu(folded: Vec<Foldable>) -> Vec<Foldable> {
+    let mut items = vec![Foldable::View];
+    for control in folded {
+        items.push(control);
+        if control == Foldable::Reactions {
+            items.push(Foldable::RaiseHand);
+        }
+    }
+    items
 }
 
 pub fn folded_for_width(available: f32, fixed: f32, present: &[Foldable]) -> Vec<Foldable> {
@@ -173,15 +184,9 @@ fn chat_item(popup: PopupMenu, app: &Entity<AppState>, folded: &FoldedControls) 
 
 #[cfg(test)]
 mod tests {
-    use super::{Foldable, TITLE_RESERVE, fixed_controls_width, folded_for_width};
+    use super::{Foldable, TITLE_RESERVE, fixed_controls_width, folded_for_width, in_more_menu};
 
-    const ALL: [Foldable; 5] = [
-        Foldable::View,
-        Foldable::Reactions,
-        Foldable::RaiseHand,
-        Foldable::People,
-        Foldable::Chat,
-    ];
+    const ALL: [Foldable; 3] = [Foldable::Reactions, Foldable::People, Foldable::Chat];
     const SLOT: f32 = 56. + 2.;
     const FIXED: f32 = 400.;
 
@@ -191,16 +196,16 @@ mod tests {
 
     #[test]
     fn nothing_folds_when_everything_fits() {
-        assert!(folded_for_width(width_for(5.), FIXED, &ALL).is_empty());
+        assert!(folded_for_width(width_for(3.), FIXED, &ALL).is_empty());
         assert!(folded_for_width(width_for(9.), FIXED, &ALL).is_empty());
     }
 
     #[test]
-    fn folds_view_first_then_reactions() {
-        assert_eq!(folded_for_width(width_for(4.), FIXED, &ALL), [Foldable::View]);
+    fn folds_reactions_first_then_people() {
+        assert_eq!(folded_for_width(width_for(2.), FIXED, &ALL), [Foldable::Reactions]);
         assert_eq!(
-            folded_for_width(width_for(3.), FIXED, &ALL),
-            [Foldable::View, Foldable::Reactions]
+            folded_for_width(width_for(1.), FIXED, &ALL),
+            [Foldable::Reactions, Foldable::People]
         );
     }
 
@@ -211,20 +216,20 @@ mod tests {
     }
 
     #[test]
-    fn only_present_controls_are_counted() {
-        let present = [Foldable::View, Foldable::People];
-        assert!(folded_for_width(width_for(2.), FIXED, &present).is_empty());
+    fn view_always_sits_in_more_and_the_hand_follows_the_reactions() {
+        assert_eq!(in_more_menu(Vec::new()), [Foldable::View]);
         assert_eq!(
-            folded_for_width(width_for(1.), FIXED, &present),
-            [Foldable::View]
+            in_more_menu(vec![Foldable::Reactions, Foldable::Chat]),
+            [Foldable::View, Foldable::Reactions, Foldable::RaiseHand, Foldable::Chat]
         );
     }
 
     #[test]
     fn fixed_width_counts_optional_controls() {
-        let base = fixed_controls_width(false, false, false);
-        assert_eq!(fixed_controls_width(true, false, false), base + 20.);
-        assert_eq!(fixed_controls_width(false, true, false), base + 56.);
-        assert_eq!(fixed_controls_width(false, false, true), base + 25.);
+        let base = fixed_controls_width(false, false, false, false);
+        assert_eq!(fixed_controls_width(true, false, false, false), base + 20.);
+        assert_eq!(fixed_controls_width(false, true, false, false), base + 56.);
+        assert_eq!(fixed_controls_width(false, false, true, false), base + 25.);
+        assert_eq!(fixed_controls_width(false, false, false, true), base + 58.);
     }
 }

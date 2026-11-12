@@ -16,7 +16,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::avatar::person_avatar;
-use super::call_control_fold::{Foldable, FoldedControls, fixed_controls_width, folded_for_width};
+use super::call_control_fold::{Foldable, FoldedControls, fixed_controls_width, folded_for_width, in_more_menu};
 use super::call_toolbar::{
     GROUP_GAP, LEAVE_HEIGHT, SPLIT_CHEVRON_WIDTH, TOOL_GAP, tool_face, tool_trigger, split_chevron,
 };
@@ -32,7 +32,7 @@ use super::call_organizer::{
     more_button, pin_chip, spotlight_chip, with_tile_menu,
 };
 use super::call_people::{lock_banner, lock_chip, options_dialog, people_button, people_panel};
-use super::call_stage::{StageMode, popped_placeholder, render_stage};
+use super::call_stage::{POP_OUT_TOOLTIP, StageMode, popped_placeholder, render_stage};
 use super::call_view_menu::view_button;
 use app_ui_kit::layout::ISLAND_GAP;
 use super::widgets::{Corner, corner_badge, count_badge, icon};
@@ -825,24 +825,9 @@ fn chat_button(app: &Entity<AppState>, open: bool, unread: u32) -> Stateful<Div>
         .on_click(move |_, _, cx| app.update(cx, |state, cx| state.toggle_call_chat(cx)))
 }
 
-fn hand_button(app: &Entity<AppState>, model: &CallModel) -> Stateful<Div> {
-    let raised = model.own_hand.is_some();
-    let label = if raised { "Lower" } else { "Raise" };
-    let button = tool_face("call-hand", IconName::Hand, label, raised);
-    let tooltip = if raised { "Lower hand" } else { "Raise hand" };
-    let button = button.tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx));
-    if !model.can_react() {
-        return button.opacity(DISABLED_OPACITY).cursor_default();
-    }
-    let app = app.clone();
-    button.on_click(move |_, _, cx| {
-        cx.stop_propagation();
-        app.update(cx, |state, cx| state.toggle_call_hand(cx));
-    })
-}
-
 fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
-    let face = tool_face("call-reactions-face", IconName::FaceSlightlySmiling, "React", false);
+    let raised = model.own_hand.is_some();
+    let face = tool_face("call-reactions-face", IconName::FaceSlightlySmiling, "React", raised);
     if !model.can_react() {
         return face
             .opacity(DISABLED_OPACITY)
@@ -856,7 +841,9 @@ fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
         .trigger(tool_trigger("call-reactions", face))
         .content(move |_, _, cx| {
             let popover = cx.entity().downgrade();
-            h_flex()
+            let hand_app = app.clone();
+            let hand_popover = popover.clone();
+            let reactions = h_flex()
                 .id("call-reactions-row")
                 .gap(px(4.))
                 .children(Reaction::ALL.into_iter().map(|reaction| {
@@ -879,9 +866,42 @@ fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
                                 .update(cx, |state, cx| state.dismiss(window, cx))
                                 .ok();
                         })
-                }))
+                }));
+            v_flex()
+                .gap(px(6.))
+                .child(reactions)
+                .child(
+                    h_flex()
+                        .id("call-hand")
+                        .h(px(36.))
+                        .px(px(10.))
+                        .gap(px(8.))
+                        .items_center()
+                        .rounded(px(8.))
+                        .cursor_pointer()
+                        .when(raised, |row| row.bg(theme::accent_soft()))
+                        .hover(|row| row.bg(theme::border_strong()))
+                        .child(icon(IconName::Hand, 18., if raised { theme::accent_text() } else { theme::text() }))
+                        .child(div().text_size(px(13.)).child(if raised { "Lower hand" } else { "Raise hand" }))
+                        .on_click(move |_, window, cx| {
+                            hand_app.update(cx, |state, cx| state.toggle_call_hand(cx));
+                            hand_popover
+                                .update(cx, |state, cx| state.dismiss(window, cx))
+                                .ok();
+                        }),
+                )
         })
         .into_any_element()
+}
+
+fn pop_out_tool(app: &Entity<AppState>) -> Stateful<Div> {
+    let app = app.clone();
+    tool_face("call-pop-out", IconName::ExternalLink, POP_OUT_TOOLTIP, false)
+        .on_click(move |_, _, cx| app.update(cx, |state, cx| state.pop_out_stage(cx)))
+}
+
+fn shows_pop_out(call: &ActiveCall) -> bool {
+    call.model.screen_sharer.is_some() && !call.share_stage.popped
 }
 
 fn leave_group(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
@@ -1215,9 +1235,9 @@ fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> Fol
     if !has_more {
         return FoldedControls::default();
     }
-    let mut present = vec![Foldable::View];
+    let mut present = Vec::new();
     if model.has_reaction_controls() {
-        present.extend([Foldable::Reactions, Foldable::RaiseHand]);
+        present.push(Foldable::Reactions);
     }
     if model.kind != CallKind::Test {
         present.push(Foldable::People);
@@ -1229,9 +1249,10 @@ fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> Fol
         model.can_use_camera(),
         has_more,
         has_leave_menu(model),
+        shows_pop_out(call),
     );
     FoldedControls {
-        items: folded_for_width(measured_stage(call).0, fixed, &present),
+        items: in_more_menu(folded_for_width(measured_stage(call).0, fixed, &present)),
         fullscreen,
         people_open: call.people_open,
         chat_open: call.chat_open,
@@ -1290,21 +1311,21 @@ pub fn render_call_view(
         .gap(px(TOOL_GAP))
         .items_center()
         .when(
+            model.has_reaction_controls() && !folded.folds(Foldable::Reactions),
+            |row| row.child(reactions_button(app, model)),
+        )
+        .when(
             call.chat_thread().is_some() && !folded.folds(Foldable::Chat),
             |row| row.child(chat_button(app, call.chat_open, state.call_chat_unread())),
         )
         .when(
             model.kind != CallKind::Test && !folded.folds(Foldable::People),
             |row| row.child(people_button(app, call.people_open, model.raised_hands())),
-        )
-        .when(
-            model.has_reaction_controls() && !folded.folds(Foldable::RaiseHand),
-            |row| row.child(hand_button(app, model)),
-        )
-        .when(
-            model.has_reaction_controls() && !folded.folds(Foldable::Reactions),
-            |row| row.child(reactions_button(app, model)),
-        )
+        );
+    let stage_and_more = h_flex()
+        .gap(px(TOOL_GAP))
+        .items_center()
+        .when(shows_pop_out(call), |row| row.child(pop_out_tool(app)))
         .when(!folded.folds(Foldable::View), |row| {
             row.child(view_button(app, model, fullscreen))
         })
@@ -1314,16 +1335,16 @@ pub fn render_call_view(
         .items_center()
         .child(
             h_flex()
-                .items_center()
-                .child(toolbar_camera(app, model))
-                .children(camera_menu_button(app, model, CameraMenu::of(state))),
-        )
-        .child(
-            h_flex()
                 .debug_selector(|| "shell/islands/main/call-header/controls/mic".into())
                 .items_center()
                 .child(toolbar_mic(app, model))
                 .child(mic_menu_button(app, model, state.call_mic)),
+        )
+        .child(
+            h_flex()
+                .items_center()
+                .child(toolbar_camera(app, model))
+                .children(camera_menu_button(app, model, CameraMenu::of(state))),
         )
         .child(share_button(
             app,
@@ -1336,8 +1357,9 @@ pub fn render_call_view(
         .flex_none()
         .gap(px(GROUP_GAP))
         .items_center()
-        .child(panels_and_reactions)
         .child(devices)
+        .child(panels_and_reactions)
+        .child(stage_and_more)
         .child(leave_group(app, model));
     let header = header.child(controls);
 

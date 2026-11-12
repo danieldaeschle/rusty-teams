@@ -141,36 +141,6 @@ fn zoom_chip(app: &Entity<AppState>, stage: &ShareStage) -> Option<AnyElement> {
     )
 }
 
-fn pop_out_button(app: &Entity<AppState>) -> AnyElement {
-    let app = app.clone();
-    div()
-        .absolute()
-        .bottom(px(LABEL_OFFSET))
-        .right(px(LABEL_OFFSET))
-        .child(
-            h_flex()
-                .id("call-stage-pop-out")
-                .h(px(CHIP_HEIGHT))
-                .px(px(12.))
-                .gap(px(8.))
-                .items_center()
-                .rounded_full()
-                .bg(hsla(0., 0., 0., LABEL_BACKGROUND))
-                .text_color(theme::white())
-                .text_size(px(13.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .cursor_pointer()
-                .hover(|chip| chip.opacity(0.85))
-                .child(icon(IconName::ExternalLink, 15., theme::white()))
-                .child(POP_OUT_TOOLTIP)
-                .on_click(move |_, _, cx| {
-                    cx.stop_propagation();
-                    app.update(cx, |state, cx| state.pop_out_stage(cx));
-                }),
-        )
-        .into_any_element()
-}
-
 pub fn popped_placeholder(app: &Entity<AppState>) -> AnyElement {
     let app = app.clone();
     v_flex()
@@ -280,7 +250,6 @@ pub fn render_stage(
             .child(picture(image, share_stage))
             .child(label_chip(label))
             .children(zoom_chip(app, share_stage))
-            .when(mode == StageMode::Docked, |stage| stage.child(pop_out_button(app)))
             .when(mode == StageMode::Fullscreen, |stage| {
                 stage.child(
                     div()
