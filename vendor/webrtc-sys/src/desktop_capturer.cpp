@@ -74,6 +74,62 @@ std::unique_ptr<DesktopCapturer> new_desktop_capturer(
   return std::make_unique<DesktopCapturer>(std::move(capturer));
 }
 
+DesktopCapturer::~DesktopCapturer() {
+  if (auto* controller = picker_controller()) {
+    controller->Observe(nullptr);
+  }
+}
+
+webrtc::DelegatedSourceListController* DesktopCapturer::picker_controller()
+    const {
+  if (!capturer) {
+    return nullptr;
+  }
+  return capturer->GetDelegatedSourceListController();
+}
+
+bool DesktopCapturer::has_delegated_picker() const {
+  return picker_controller() != nullptr;
+}
+
+void DesktopCapturer::observe_picker(
+    rust::Box<PortalPickerCallbackWrapper> callback) {
+  picker = std::move(callback);
+  if (auto* controller = picker_controller()) {
+    controller->Observe(this);
+  }
+}
+
+void DesktopCapturer::ensure_picker_visible() {
+  if (auto* controller = picker_controller()) {
+    controller->EnsureVisible();
+  }
+}
+
+void DesktopCapturer::ensure_picker_hidden() {
+  if (auto* controller = picker_controller()) {
+    controller->EnsureHidden();
+  }
+}
+
+void DesktopCapturer::OnSelection() {
+  if (picker) {
+    (*picker)->on_selection();
+  }
+}
+
+void DesktopCapturer::OnCancelled() {
+  if (picker) {
+    (*picker)->on_cancelled();
+  }
+}
+
+void DesktopCapturer::OnError() {
+  if (picker) {
+    (*picker)->on_error();
+  }
+}
+
 void DesktopCapturer::start(
     rust::Box<DesktopCapturerCallbackWrapper> callback) {
   this->callback = std::move(callback);

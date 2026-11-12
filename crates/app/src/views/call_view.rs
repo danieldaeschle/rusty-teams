@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use calling::{DeviceEntry, MicSettings, NoiseSuppression, Reaction, VideoKey};
+use calling::{DeviceEntry, MicSettings, NoiseSuppression, Reaction, ShareKind, VideoKey};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
@@ -661,14 +661,33 @@ fn share_items(
     model: &CallModel,
     options: ShareOptions,
 ) -> PopupMenu {
-    let screens = model.screens();
-    let single_screen = screens.len() == 1;
     let mut popup = popup
         .min_w(px(SHARE_MENU_WIDTH))
         .item(sound_switch_item(app, options.sound))
         .item(motion_switch_item(app, options.motion))
         .item(standout_switch_item(app, options.standout, model.camera_on))
         .separator();
+    if model.uses_portal_picker() {
+        let screen_app = app.clone();
+        let window_app = app.clone();
+        return popup
+            .item(
+                PopupMenuItem::new("Share entire screen").on_click(move |_, _, cx| {
+                    screen_app.update(cx, |state, cx| {
+                        state.start_portal_share(ShareKind::Screen, cx)
+                    })
+                }),
+            )
+            .item(
+                PopupMenuItem::new("Share a window").on_click(move |_, _, cx| {
+                    window_app.update(cx, |state, cx| {
+                        state.start_portal_share(ShareKind::Window, cx)
+                    })
+                }),
+            );
+    }
+    let screens = model.screens();
+    let single_screen = screens.len() == 1;
     for (index, source) in screens.into_iter().enumerate() {
         let label = if single_screen {
             "Share entire screen".to_owned()

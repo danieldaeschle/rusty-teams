@@ -20,7 +20,7 @@ use crate::organizer::{MeetingCapability, Modality};
 use crate::reaction::Reaction;
 use crate::recording::{RecordingKind, StopScope};
 use crate::roster::{MeetingRole, RosterEntry};
-use crate::screen::ShareSource;
+use crate::screen::{ShareKind, SharePicker, ShareSource};
 use crate::signaling::{Callee, MeetingTarget};
 use crate::state::CallState;
 use crate::transfer::Replacement;
@@ -35,10 +35,17 @@ pub enum CallCommand {
     SelectInput(DeviceChoice),
     SelectOutput(DeviceChoice),
     SetMicSettings(MicSettings),
+    SetVideoQuality(crate::video_quality::VideoQuality),
     RefreshDevices,
     SetCamera(bool),
     SelectCamera(DeviceChoice),
     StartShare(ShareSource),
+    StartPortalShare(ShareKind),
+    FinishPortalShare {
+        source: ShareSource,
+        generation: u64,
+    },
+    AbandonPortalShare,
     StopShare,
     SetShareSound(bool),
     SetShareMotion(bool),
@@ -155,6 +162,8 @@ pub enum CallUpdate {
     Camera(bool),
     Cameras(Vec<CameraDevice>),
     LocalShare(Option<String>),
+    SharePicker(SharePicker),
+    ShareKind(Option<ShareKind>),
     ShareSources(Vec<ShareSource>),
     ShareThumbnail {
         source: ShareSource,
@@ -207,6 +216,7 @@ pub struct CallHandle {
 
 pub struct CallControl {
     commands: UnboundedReceiver<CallCommand>,
+    command_sender: UnboundedSender<CallCommand>,
     updates: UnboundedSender<CallUpdate>,
     deferred: Vec<CallCommand>,
     pub video: Arc<VideoHub>,
@@ -218,12 +228,13 @@ pub fn call_channel() -> (CallHandle, CallControl) {
     let video = VideoHub::new(update_sender.clone());
     (
         CallHandle {
-            commands: command_sender,
+            commands: command_sender.clone(),
             updates: update_receiver,
             video: video.clone(),
         },
         CallControl {
             commands: command_receiver,
+            command_sender,
             updates: update_sender,
             deferred: Vec::new(),
             video,
@@ -238,6 +249,10 @@ impl CallControl {
 
     pub fn updates(&self) -> UnboundedSender<CallUpdate> {
         self.updates.clone()
+    }
+
+    pub fn command_sender(&self) -> UnboundedSender<CallCommand> {
+        self.command_sender.clone()
     }
 
     pub fn defer(&mut self, command: CallCommand) {

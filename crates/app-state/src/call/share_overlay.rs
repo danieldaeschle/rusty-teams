@@ -81,13 +81,21 @@ fn overlap_area(first: ScreenRect, second: ScreenRect) -> i64 {
     i64::from(width) * i64::from(height)
 }
 
+pub fn portal_minimize(portal: bool, share: LocalShare) -> bool {
+    portal && share == LocalShare::Screen
+}
+
 pub fn minimize_on_share_start(
     share: LocalShare,
     main: Option<ScreenRect>,
     shared: Option<ScreenRect>,
+    portal: bool,
 ) -> bool {
     if share != LocalShare::Screen {
         return false;
+    }
+    if portal_minimize(portal, share) {
+        return true;
     }
     let (Some(main), Some(shared)) = (main, shared) else {
         return true;
@@ -274,27 +282,53 @@ mod tests {
         assert!(minimize_on_share_start(
             LocalShare::Screen,
             on_monitor,
-            Some(monitor)
+            Some(monitor),
+            false
         ));
         assert!(!minimize_on_share_start(
             LocalShare::Screen,
             other_monitor,
-            Some(monitor)
+            Some(monitor),
+            false
         ));
         assert!(!minimize_on_share_start(
             LocalShare::Screen,
             edge,
-            Some(monitor)
+            Some(monitor),
+            false
         ));
         assert!(minimize_on_share_start(
             LocalShare::Screen,
             None,
-            Some(monitor)
+            Some(monitor),
+            false
         ));
         assert!(minimize_on_share_start(
             LocalShare::Screen,
             on_monitor,
-            None
+            None,
+            false
+        ));
+    }
+
+    #[test]
+    fn portal_minimize_forces_a_screen_and_spares_a_window() {
+        let monitor = Some(rect(0, 0, 1920, 1080));
+        let other = Some(rect(2000, 100, 3000, 800));
+        assert!(portal_minimize(true, LocalShare::Screen));
+        assert!(!portal_minimize(true, LocalShare::Window));
+        assert!(!portal_minimize(false, LocalShare::Screen));
+        assert!(minimize_on_share_start(
+            LocalShare::Screen,
+            other,
+            monitor,
+            true
+        ));
+        assert!(!minimize_on_share_start(
+            LocalShare::Window,
+            monitor,
+            monitor,
+            true
         ));
     }
 
@@ -304,9 +338,15 @@ mod tests {
         assert!(!minimize_on_share_start(
             LocalShare::Window,
             monitor,
-            monitor
+            monitor,
+            false
         ));
-        assert!(!minimize_on_share_start(LocalShare::None, monitor, monitor));
+        assert!(!minimize_on_share_start(
+            LocalShare::None,
+            monitor,
+            monitor,
+            false
+        ));
     }
 
     #[test]

@@ -441,13 +441,27 @@ impl CallWindows {
     fn local_share(&self, cx: &App) -> Option<Option<ShareSource>> {
         let model = &self.app.read(cx).call.as_ref()?.model;
         let label = model.local_share.as_ref()?;
-        Some(
-            model
-                .share_sources
-                .iter()
-                .find(|source| &source.label() == label)
-                .cloned(),
-        )
+        if let Some(source) = model
+            .share_sources
+            .iter()
+            .find(|source| &source.label() == label)
+            .cloned()
+        {
+            return Some(Some(source));
+        }
+        Some(model.share_kind.map(|kind| ShareSource {
+            id: 0,
+            kind,
+            title: label.clone(),
+        }))
+    }
+
+    fn portal_picker(&self, cx: &App) -> bool {
+        self.app
+            .read(cx)
+            .call
+            .as_ref()
+            .is_some_and(|call| call.model.uses_portal_picker())
     }
 
     fn sync_share(&mut self, refresh_geometry: bool, cx: &mut Context<Self>) {
@@ -546,6 +560,7 @@ impl CallWindows {
             self.local_share_mode(),
             platform::window_rect(native),
             shared,
+            self.portal_picker(cx),
         ) {
             return;
         }

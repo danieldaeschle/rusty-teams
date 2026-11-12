@@ -16,22 +16,27 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::background::BackgroundPicture;
 use crate::blur::BlurSettings;
-use crate::camera::start_camera;
+use crate::camera::{CameraCaptureStats, start_camera};
 use crate::capture::Capture;
-use crate::control::CallUpdate;
+use crate::control::{CallCommand, CallUpdate};
 use crate::devices::DeviceChoice;
 use crate::effects::CameraEffects;
 use crate::error::{Error, Result};
-use crate::screen::{ShareSource, start_screen_capture};
+use crate::notices::{CAMERA_STOPPED_NOTICE, SCREEN_SHARE_STOPPED_NOTICE, notice_with_detail};
+use crate::screen::{
+    PortalFollowUp, ShareKind, ShareSource, start_portal_capture, start_screen_capture,
+};
 use crate::send_control::{
     EncoderLimits, KEYFRAME_NUDGE, LayerPlan, SendLimit, encoder_limits, plan_layers,
 };
 use crate::standout::StandoutOverlay;
+use crate::timeline::Timeline;
 use crate::video_frame::{
     FrameGate, PERSON_FPS, SCREEN_FPS, VideoHub, VideoKey, picture_from_i420,
 };
 use crate::video_layout::VideoLines;
 use crate::video_pattern::{PatternKind, spawn_pattern};
+use crate::video_quality::VideoQuality;
 
 pub const VIDEO_MODE_ENV: &str = "CALLING_VIDEO";
 const CAMERA_LABEL: &str = "camera";
@@ -198,6 +203,15 @@ pub struct LocalVideo {
     motion: bool,
     share_fps: Arc<AtomicU32>,
     camera_preview: bool,
+    quality: VideoQuality,
+    camera_stats: Arc<CameraCaptureStats>,
+    timeline: Option<Timeline>,
+    portal_generation: u64,
+    portal_armed: bool,
+    portal_keep: bool,
+    /// The desktop dialog already bound the PipeWire stream. Later `StartShare`
+    /// commands must attach that capturer, not replace it.
+    portal_bound: bool,
 }
 
 impl LocalVideo {
@@ -218,7 +232,26 @@ impl LocalVideo {
             motion: false,
             share_fps: Arc::new(AtomicU32::new(SCREEN_SHARE_FPS)),
             camera_preview: false,
+            quality: VideoQuality::default(),
+            camera_stats: CameraCaptureStats::new(),
+            timeline: None,
+            portal_generation: 0,
+            portal_armed: false,
+            portal_keep: false,
+            portal_bound: false,
         }
+    }
+
+    pub fn attach_timeline(&mut self, timeline: Timeline) {
+        self.timeline = Some(timeline);
+    }
+
+    pub fn video_quality(&self) -> VideoQuality {
+        self.quality
+    }
+
+    pub fn set_video_quality(&mut self, quality: VideoQuality) {
+        self.quality = quality;
     }
 
     pub fn set_motion(&mut self, motion: bool) {
@@ -468,6 +501,10 @@ impl LocalVideo {
         self.screen.capture.is_some()
     }
 
+    pub fn portal_is_open(&self) -> bool {
+        self.portal_armed
+    }
+
     pub fn set_lines(&mut self, lines: VideoLines) -> Result<()> {
         if self.camera_on() {
             Self::begin_sending(&lines.camera.sender(), &self.camera.track)?;
@@ -507,10 +544,20 @@ impl LocalVideo {
         .reporting_size(self.camera.frame_size.clone())
     }
 
-    fn report_failure(&self, what: &'static str) -> impl FnOnce(String) + Send + 'static {
+    /// Local share frames go to the encoder and to the window in the chat.
+    fn screen_sink(&self) -> LocalSink {
+        LocalSink::new(
+            self.screen.source.clone(),
+            Some((self.hub.clone(), VideoKey::LocalScreen)),
+        )
+        .with_standout(self.blur.clone())
+        .reporting_size(self.screen.frame_size.clone())
+    }
+
+    fn report_failure(&self, notice_key: &'static str) -> impl FnOnce(String) + Send + 'static {
         let updates = self.updates.clone();
         move |reason| {
-            let _ = updates.send(CallUpdate::Notice(format!("{what} stopped: {reason}")));
+            let _ = updates.send(CallUpdate::Notice(notice_with_detail(notice_key, reason)));
         }
     }
 
@@ -542,6 +589,10 @@ impl LocalVideo {
         Ok(())
     }
 
+    pub fn camera_capture_summary(&self) -> Option<String> {
+        self.camera_stats.summary()
+    }
+
     fn capture_camera(&self, choice: &DeviceChoice) -> Result<Capture> {
         let mut sink = self.camera_sink();
         Ok(match self.mode {
@@ -550,13 +601,42 @@ impl LocalVideo {
                 PatternKind::Camera,
                 Some(self.blur.clone()),
             )),
-            _ => start_camera(
-                choice,
-                self.blur.clone(),
-                move |buffer| sink.push(buffer),
-                self.report_failure("Camera"),
-            )?,
+            _ => {
+                let timeline = self.timeline.clone();
+                start_camera(
+                    choice,
+                    self.quality,
+                    self.blur.clone(),
+                    self.camera_stats.clone(),
+                    move |label| {
+                        if let Some(timeline) = timeline {
+                            timeline.record("camera capture", label);
+                        } else {
+                            eprintln!("calls: camera capture {label}");
+                        }
+                    },
+                    move |buffer| sink.push(buffer),
+                    self.report_failure(CAMERA_STOPPED_NOTICE),
+                )?
+            }
         })
+    }
+
+    /// Restart capture with the current quality if the camera is already running.
+    pub fn refresh_camera_capture(&mut self, choice: &DeviceChoice) -> Result<()> {
+        if self.camera.capture.is_none() {
+            return Ok(());
+        }
+        let preview = self.camera_preview;
+        self.camera.capture = None;
+        self.camera.capture = Some(self.capture_camera(choice)?);
+        self.camera_preview = preview;
+        if !preview {
+            if let Some(lines) = self.lines.as_ref() {
+                Self::begin_sending(&lines.camera.sender(), &self.camera.track)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn stop_camera(&mut self) {
@@ -567,6 +647,69 @@ impl LocalVideo {
             let _ = Self::set_active(&lines.camera.sender(), false);
         }
         self.hub.forget(&VideoKey::LocalCamera);
+    }
+
+    pub fn accept_portal(&mut self, generation: u64) -> bool {
+        if self.portal_armed && self.portal_generation == generation {
+            self.portal_armed = false;
+            self.portal_keep = true;
+            self.portal_bound = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn open_portal(
+        &mut self,
+        kind: ShareKind,
+        commands: UnboundedSender<CallCommand>,
+    ) -> Result<()> {
+        if !self.is_available() {
+            return Err(Error::Webrtc("video is switched off".into()));
+        }
+        if self.mode == VideoMode::Pattern {
+            let source = ShareSource {
+                id: if kind == ShareKind::Screen { 1 } else { 2 },
+                kind,
+                title: if kind == ShareKind::Screen {
+                    "Test screen"
+                } else {
+                    "Test window"
+                }
+                .into(),
+            };
+            let _ = commands.send(CallCommand::StartShare(source));
+            return Ok(());
+        }
+        self.portal_generation = self.portal_generation.wrapping_add(1);
+        let generation = self.portal_generation;
+        self.portal_armed = false;
+        self.portal_keep = false;
+        self.portal_bound = false;
+        self.screen.capture = None;
+        let mut sink = self.screen_sink();
+        let updates = self.updates.clone();
+        let capture = start_portal_capture(
+            kind,
+            self.share_fps.clone(),
+            move |buffer| sink.push(buffer),
+            move |follow| match follow {
+                PortalFollowUp::Share(source) => {
+                    let _ = commands.send(CallCommand::FinishPortalShare { source, generation });
+                }
+                PortalFollowUp::Quiet => {
+                    let _ = commands.send(CallCommand::AbandonPortalShare);
+                }
+                PortalFollowUp::Notice(text) => {
+                    let _ = updates.send(CallUpdate::Notice(text.to_owned()));
+                    let _ = commands.send(CallCommand::AbandonPortalShare);
+                }
+            },
+        )?;
+        self.portal_armed = true;
+        self.screen.capture = Some(capture);
+        Ok(())
     }
 
     pub fn start_share(&mut self, source: &ShareSource) -> Result<()> {
@@ -581,27 +724,35 @@ impl LocalVideo {
         if !self.is_available() {
             return Err(Error::Webrtc("video is switched off".into()));
         }
-        self.screen.capture = None;
-        let mut sink = LocalSink::new(self.screen.source.clone(), None)
-            .with_standout(self.blur.clone())
-            .reporting_size(self.screen.frame_size.clone());
-        let capture = match self.mode {
-            VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Screen, None)),
-            _ => start_screen_capture(
-                source.clone(),
-                self.share_fps.clone(),
-                move |buffer| sink.push(buffer),
-                self.report_failure("Screen share"),
-            )?,
-        };
+        let keep = std::mem::take(&mut self.portal_keep) || self.portal_bound;
+        if !keep {
+            self.portal_armed = false;
+            self.portal_generation = self.portal_generation.wrapping_add(1);
+            self.screen.capture = None;
+            let mut sink = self.screen_sink();
+            let capture = match self.mode {
+                VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Screen, None)),
+                _ => start_screen_capture(
+                    source.clone(),
+                    self.share_fps.clone(),
+                    move |buffer| sink.push(buffer),
+                    self.report_failure(SCREEN_SHARE_STOPPED_NOTICE),
+                )?,
+            };
+            self.screen.capture = Some(capture);
+        }
         Self::begin_sending(&share.sender(), &self.screen.track)?;
         let _ = self.tune_share(&share.sender());
-        self.screen.capture = Some(capture);
         Ok(())
     }
 
     pub fn stop_share(&mut self) {
+        self.portal_generation = self.portal_generation.wrapping_add(1);
+        self.portal_armed = false;
+        self.portal_keep = false;
+        self.portal_bound = false;
         self.screen.capture = None;
+        self.hub.forget(&VideoKey::LocalScreen);
         if let Some(share) = self.lines.as_ref().and_then(|lines| lines.share.as_ref()) {
             let _ = Self::set_active(&share.sender(), false);
         }

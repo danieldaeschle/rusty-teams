@@ -61,7 +61,7 @@
 **Calls**
 - Test call to the Teams Echo bot from the avatar menu: native WebRTC audio, mute (`Ctrl+Shift+M`), device switching, mini window while you read other chats
 - Phone button in 1:1 and group chat headers: callee tiles show Calling and Ringing, Cancel while ringing, notices like "Bea declined" or "No answer"
-- Video and screen sharing: H264 tiles, shared screen on a stage (double click for full window, Esc back), camera and screen share buttons with a "You are sharing" banner. Linux needs glib at run time
+- Video and screen sharing: H264 tiles, shared screen on a stage (double click for full window, Esc back), camera and screen share buttons with a "You are sharing" banner. Linux needs glib at run time. On Wayland, sharing opens the desktop ScreenCast portal dialog, including on KDE, GNOME and Hyprland
 - Incoming calls: topmost ring toast with Decline and Accept, ring tone, missed calls in Activity
 - Join a running meeting from its chat (audio): roster tiles, speaking ring, lobby state, Leave or End meeting for the organizer
 - After every call a pseudonymized test report (JSON and Markdown, newest 30) is saved to the app data folder `call-reports`; toast "Test report saved" with Open folder, Settings > Devices switch
@@ -74,6 +74,11 @@
 - One-click install for Claude Code, Codex CLI, Copilot CLI, VS Code and Cursor, Windows and WSL. WSL needs `networkingMode=mirrored`
 - Delegate a message to a coding-agent CLI (Claude Code, Copilot, any CLI) from the hover toolbar: progress chip, Agents page, toast when it finishes, Open session
 
+**Calendar (fork)**
+- Outlook calendar as today, plus optional Google Calendar accounts (Settings > Calendar)
+- Merge by iCal UID / Teams join URL; New meeting writes to the home calendar and optional extra targets
+- Google OAuth Desktop (PKCE): set `TEAMS_GOOGLE_CLIENT_ID` and optionally `TEAMS_GOOGLE_CLIENT_SECRET` before Connect
+
 **App**
 - Dark theme, opens instantly from the cache
 - Self-update from an update folder
@@ -84,8 +89,8 @@
 | Platform | State |
 |---|---|
 | 🪟 Windows | Main target. Login through an embedded WebView2 |
-| 🐧 Linux | Starts Google Chrome or Chromium on its own (debug port 9222, own profile in the XDG data folder) and keeps it headless in the background. When Teams asks for a login, the Chrome window shows itself and goes back to the background once you are signed in. `--endpoint` connects to a Chrome you started yourself instead. The app opens an Outlook on the web tab next to Teams when missing (some tenants grant chat scopes only to Outlook). Built-in login without Chrome is planned |
-| 🍎 macOS | Experimental. Universal arm64 + x86_64 binary, connects to a Chrome like Linux |
+| 🐧 Linux | Starts Google Chrome or Chromium on its own (debug port 9222, own profile in the XDG data folder) and keeps it headless in the background. When Teams asks for a login, the Chrome window shows itself and goes back to the background once you are signed in. `--endpoint` connects to a Chrome you started yourself instead. The app opens an Outlook on the web tab next to Teams when missing (some tenants grant chat scopes only to Outlook). Color emoji use a bundled bitmap Noto Color Emoji font; a system COLRv1 face of the same name is left out of the font list. The window id is `rusty-teams`. Copy `crates/app/assets/linux/rusty-teams.desktop` to `~/.local/share/applications/` and `crates/app/assets/icon/teams-fast-256.png` to `~/.local/share/icons/hicolor/256x256/apps/rusty-teams.png` so the dock can match it. Built-in login without Chrome is planned |
+| 🍎 macOS | Starts Google Chrome or Chromium on its own (debug port 9222, own profile under Application Support) and keeps it headless in the background. When Teams asks for a login, the Chrome window shows itself and goes back to the background once you are signed in. `--endpoint` connects to a Chrome you started yourself instead. Universal arm64 + x86_64 `.app` bundle. Screen share uses the ScreenCaptureKit system dialog |
 
 The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
 
@@ -96,6 +101,21 @@ Try it with demo data, no account needed:
 ```bash
 cargo run -p app -- --demo
 ```
+
+### Google Calendar (optional)
+
+1. Create an OAuth Desktop client in Google Cloud Console with redirect `http://127.0.0.1:<port>/` (loopback; the app picks a free port).
+2. Export before starting the app:
+
+```bash
+export TEAMS_GOOGLE_CLIENT_ID="….apps.googleusercontent.com"
+# only if the client has a secret:
+export TEAMS_GOOGLE_CLIENT_SECRET="…"
+```
+
+3. Settings > Calendar > Connect Google, then choose home calendar and optional dual-write targets.
+
+Without these env vars the calendar stays Outlook-only.
 
 | Task | Command |
 |---|---|

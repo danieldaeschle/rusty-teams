@@ -14,6 +14,19 @@
 
 use crate::imp::desktop_capturer as imp_dc;
 
+/// Starts one GLib main loop for the process, on the default context.
+///
+/// Wayland's screen-cast portal needs this loop before a capturer starts or shows its picker.
+/// Dropping a capturer does not stop the loop.
+pub fn ensure_shared_glib_loop() {
+    imp_dc::ensure_shared_glib_loop();
+}
+
+/// Identity of the process-wide GLib loop. `0` when the loop is not built into this target.
+pub fn shared_glib_loop_id() -> usize {
+    imp_dc::shared_glib_loop_id()
+}
+
 /// Configuration options for creating a desktop capturer.
 ///
 /// It contains a subset of libwebrtc's DesktopCaptureOptions.
@@ -148,6 +161,42 @@ impl DesktopCapturer {
         let source_list = self.handle.get_source_list();
         source_list.into_iter().map(|source| CaptureSource { sys_handle: source }).collect()
     }
+
+    /// Selects one source after a delegated picker has already chosen it.
+    pub fn select_source(&self, id: u64) -> bool {
+        self.handle.select_source(id)
+    }
+
+    /// Whether this capturer shows its own source picker (Wayland portal, macOS system picker).
+    pub fn has_delegated_picker(&self) -> bool {
+        self.handle.has_delegated_picker()
+    }
+
+    /// Receives selection, cancel, and failure from the delegated picker.
+    ///
+    /// Call this after [`start_capture`](Self::start_capture) and before [`ensure_picker_visible`](Self::ensure_picker_visible).
+    pub fn watch_picker<T>(&mut self, mut callback: T)
+    where
+        T: FnMut(PortalPickerEvent) + Send + 'static,
+    {
+        self.handle.observe_picker(move |event| {
+            callback(match event {
+                imp_dc::PickerEvent::Selected => PortalPickerEvent::Selected,
+                imp_dc::PickerEvent::Cancelled => PortalPickerEvent::Cancelled,
+                imp_dc::PickerEvent::Failed => PortalPickerEvent::Failed,
+            });
+        });
+    }
+
+    /// Shows the delegated picker. No-op when [`has_delegated_picker`](Self::has_delegated_picker) is false.
+    pub fn ensure_picker_visible(&mut self) {
+        self.handle.ensure_picker_visible();
+    }
+
+    /// Hides the delegated picker. No-op when there is none.
+    pub fn ensure_picker_hidden(&mut self) {
+        self.handle.ensure_picker_hidden();
+    }
 }
 
 pub struct DesktopFrame {
@@ -215,6 +264,14 @@ impl std::fmt::Display for CaptureSource {
 pub enum CaptureError {
     Temporary,
     Permanent,
+}
+
+/// Outcome of a desktop-owned source picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortalPickerEvent {
+    Selected,
+    Cancelled,
+    Failed,
 }
 
 fn capture_result_from_sys(

@@ -24,6 +24,7 @@ namespace livekit_ffi {
 class DesktopFrame;
 class DesktopCapturer;
 class DesktopCapturerOptions;
+class PortalPickerCallbackWrapper;
 class Source;
 }  // namespace livekit_ffi
 
@@ -31,22 +32,34 @@ class Source;
 
 namespace livekit_ffi {
 
-class DesktopCapturer : public webrtc::DesktopCapturer::Callback {
+class DesktopCapturer : public webrtc::DesktopCapturer::Callback,
+                        public webrtc::DelegatedSourceListController::Observer {
  public:
   explicit DesktopCapturer(std::unique_ptr<webrtc::DesktopCapturer> capturer)
       : capturer(std::move(capturer)), callback(std::nullopt) {}
+  ~DesktopCapturer() override;
 
   void OnCaptureResult(webrtc::DesktopCapturer::Result result,
                        std::unique_ptr<webrtc::DesktopFrame> frame) final;
+  void OnSelection() override;
+  void OnCancelled() override;
+  void OnError() override;
 
   rust::Vec<Source> get_source_list() const;
   bool select_source(uint64_t id) const { return capturer->SelectSource(id); }
   void start(rust::Box<DesktopCapturerCallbackWrapper> callback);
   void capture_frame() const { capturer->CaptureFrame(); }
+  bool has_delegated_picker() const;
+  void observe_picker(rust::Box<PortalPickerCallbackWrapper> callback);
+  void ensure_picker_visible();
+  void ensure_picker_hidden();
 
  private:
+  webrtc::DelegatedSourceListController* picker_controller() const;
+
   std::unique_ptr<webrtc::DesktopCapturer> capturer;
   std::optional<rust::Box<DesktopCapturerCallbackWrapper>> callback;
+  std::optional<rust::Box<PortalPickerCallbackWrapper>> picker;
 };
 
 class DesktopFrame {

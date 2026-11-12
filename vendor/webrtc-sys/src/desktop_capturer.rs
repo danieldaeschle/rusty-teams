@@ -57,6 +57,13 @@ pub mod ffi {
         fn get_source_list(self: &DesktopCapturer) -> Vec<Source>;
         fn select_source(self: &DesktopCapturer, id: u64) -> bool;
         fn start(self: Pin<&mut DesktopCapturer>, callback: Box<DesktopCapturerCallbackWrapper>);
+        fn has_delegated_picker(self: &DesktopCapturer) -> bool;
+        fn observe_picker(
+            self: Pin<&mut DesktopCapturer>,
+            callback: Box<PortalPickerCallbackWrapper>,
+        );
+        fn ensure_picker_visible(self: Pin<&mut DesktopCapturer>);
+        fn ensure_picker_hidden(self: Pin<&mut DesktopCapturer>);
 
         fn width(self: &DesktopFrame) -> i32;
         fn height(self: &DesktopFrame) -> i32;
@@ -74,6 +81,12 @@ pub mod ffi {
             result: CaptureResult,
             frame: UniquePtr<DesktopFrame>,
         );
+
+        type PortalPickerCallbackWrapper;
+
+        fn on_selection(self: &mut PortalPickerCallbackWrapper);
+        fn on_cancelled(self: &mut PortalPickerCallbackWrapper);
+        fn on_error(self: &mut PortalPickerCallbackWrapper);
     }
 }
 
@@ -109,5 +122,34 @@ impl DesktopCapturerCallbackWrapper {
             }
             _ => self.callback.on_capture_result(Err(CaptureError::Permanent)),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerEvent {
+    Selected,
+    Cancelled,
+    Failed,
+}
+
+pub struct PortalPickerCallbackWrapper {
+    callback: Box<dyn FnMut(PickerEvent) + Send>,
+}
+
+impl PortalPickerCallbackWrapper {
+    pub fn new(callback: Box<dyn FnMut(PickerEvent) + Send>) -> Self {
+        Self { callback }
+    }
+
+    fn on_selection(&mut self) {
+        (self.callback)(PickerEvent::Selected);
+    }
+
+    fn on_cancelled(&mut self) {
+        (self.callback)(PickerEvent::Cancelled);
+    }
+
+    fn on_error(&mut self) {
+        (self.callback)(PickerEvent::Failed);
     }
 }

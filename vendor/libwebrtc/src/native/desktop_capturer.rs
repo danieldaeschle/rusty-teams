@@ -15,6 +15,8 @@
 use cxx::UniquePtr;
 use webrtc_sys::desktop_capturer::{self as sys_dc, ffi::new_desktop_capturer};
 
+pub(crate) use sys_dc::PickerEvent;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum SourceType {
     Screen,
@@ -84,10 +86,48 @@ impl DesktopCapturerOptions {
     }
 }
 
+#[cfg(all(any(target_os = "linux", target_os = "freebsd"), feature = "glib-main-loop"))]
+mod shared_glib {
+    use std::sync::OnceLock;
+
+    static LOOP: OnceLock<glib::MainLoop> = OnceLock::new();
+
+    pub(super) fn ensure() {
+        LOOP.get_or_init(|| {
+            let main_loop = glib::MainLoop::new(None, false);
+            let running = main_loop.clone();
+            std::thread::Builder::new()
+                .name("glib-portal".into())
+                .spawn(move || running.run())
+                .expect("glib portal loop");
+            main_loop
+        });
+    }
+
+    pub(super) fn id() -> usize {
+        ensure();
+        LOOP.get().map(|main_loop| main_loop as *const glib::MainLoop as usize).unwrap_or(0)
+    }
+}
+
+pub(crate) fn ensure_shared_glib_loop() {
+    #[cfg(all(any(target_os = "linux", target_os = "freebsd"), feature = "glib-main-loop"))]
+    shared_glib::ensure();
+}
+
+pub(crate) fn shared_glib_loop_id() -> usize {
+    #[cfg(all(any(target_os = "linux", target_os = "freebsd"), feature = "glib-main-loop"))]
+    {
+        return shared_glib::id();
+    }
+    #[cfg(not(all(any(target_os = "linux", target_os = "freebsd"), feature = "glib-main-loop")))]
+    {
+        0
+    }
+}
+
 pub(crate) struct DesktopCapturer {
     sys_handle: UniquePtr<sys_dc::ffi::DesktopCapturer>,
-    #[cfg(all(any(target_os = "linux", target_os = "freebsd"), feature = "glib-main-loop"))]
-    glib_loop: Option<glib::MainLoop>,
 }
 
 impl DesktopCapturer {
@@ -96,14 +136,7 @@ impl DesktopCapturer {
         if sys_handle.is_null() {
             None
         } else {
-            Some(Self {
-                sys_handle,
-                #[cfg(all(
-                    any(target_os = "linux", target_os = "freebsd"),
-                    feature = "glib-main-loop"
-                ))]
-                glib_loop: None,
-            })
+            Some(Self { sys_handle })
         }
     }
 
@@ -117,11 +150,7 @@ impl DesktopCapturer {
     {
         #[cfg(all(any(target_os = "linux", target_os = "freebsd"), feature = "glib-main-loop"))]
         if std::env::var("WAYLAND_DISPLAY").is_ok() {
-            let main_loop = glib::MainLoop::new(None, false);
-            self.glib_loop = Some(main_loop.clone());
-            let _handle = std::thread::spawn(move || {
-                main_loop.run();
-            });
+            ensure_shared_glib_loop();
         }
         let pin_handle = self.sys_handle.pin_mut();
         let callback = DesktopCallback::new(callback);
@@ -141,14 +170,26 @@ impl DesktopCapturer {
         }
         sources
     }
-}
 
-#[cfg(all(any(target_os = "linux", target_os = "freebsd"), feature = "glib-main-loop"))]
-impl Drop for DesktopCapturer {
-    fn drop(&mut self) {
-        if let Some(glib_loop) = &self.glib_loop {
-            glib_loop.quit();
+    pub(crate) fn has_delegated_picker(&self) -> bool {
+        self.sys_handle.has_delegated_picker()
+    }
+
+    pub(crate) fn observe_picker(&mut self, callback: impl FnMut(sys_dc::PickerEvent) + Send + 'static) {
+        let wrapper = sys_dc::PortalPickerCallbackWrapper::new(Box::new(callback));
+        self.sys_handle.pin_mut().observe_picker(Box::new(wrapper));
+    }
+
+    pub(crate) fn ensure_picker_visible(&mut self) {
+        #[cfg(all(any(target_os = "linux", target_os = "freebsd"), feature = "glib-main-loop"))]
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+            ensure_shared_glib_loop();
         }
+        self.sys_handle.pin_mut().ensure_picker_visible();
+    }
+
+    pub(crate) fn ensure_picker_hidden(&mut self) {
+        self.sys_handle.pin_mut().ensure_picker_hidden();
     }
 }
 
