@@ -1278,6 +1278,12 @@ pub fn render_call_view(
         .pl(px(20.))
         .pr(px(HEADER_END_PADDING))
         .gap(px(12.))
+        .items_center();
+    let title_group = h_flex()
+        .flex_1()
+        .flex_basis(px(0.))
+        .min_w_0()
+        .gap(px(12.))
         .items_center()
         .child(icon(IconName::Phone, 18., theme::accent_text()))
         .child(
@@ -1298,8 +1304,13 @@ pub fn render_call_view(
         .children(health_indicator(model))
         .children(recording_chip(model))
         .children(lock_chip(model))
-        .children(room_chip(model))
-        .child(div().flex_1())
+        .children(room_chip(model));
+    let end_group = h_flex()
+        .flex_1()
+        .flex_basis(px(0.))
+        .min_w_0()
+        .justify_end()
+        .items_center()
         .children(return_button(app, model));
 
     let hold = hold_panel(app, model);
@@ -1361,7 +1372,7 @@ pub fn render_call_view(
         .child(panels_and_reactions)
         .child(stage_and_more)
         .child(leave_group(app, model));
-    let header = header.child(controls);
+    let header = header.child(title_group).child(controls).child(end_group);
 
     let top = v_flex()
         .w_full()
