@@ -27,7 +27,9 @@ impl Graph {
     }
 
     pub async fn me(&self) -> Result<User> {
-        let body = self.get(&urls::me(), &Scope::graph("User.Read")).await?;
+        let body = self
+            .get(&urls::me(), &Scope::graph("User.ReadBasic.All"))
+            .await?;
         Ok(serde_json::from_value(body)?)
     }
 

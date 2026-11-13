@@ -1463,7 +1463,7 @@ pub async fn fetch_self(session: &Session) -> Result<SelfIdentity> {
         .request(
             Method::Get,
             &format!("{GRAPH}/v1.0/me?$select=id,displayName"),
-            &Scope::graph("User.Read"),
+            &Scope::graph("User.ReadBasic.All"),
             None,
         )
         .await?;

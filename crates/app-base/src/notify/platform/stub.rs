@@ -1,4 +1,6 @@
+#[cfg(not(target_os = "linux"))]
 use std::sync::Arc;
+#[cfg(not(target_os = "linux"))]
 use std::sync::atomic::AtomicBool;
 
 use gpui_kit::Window;
@@ -86,12 +88,19 @@ pub fn stop_flash(_handle: NativeHandle) {}
 
 pub fn set_badge(_handle: NativeHandle, _badge: Option<&Badge>) {}
 
+#[cfg(target_os = "linux")]
+pub use super::linux_sound::{play_mp3, play_mp3_until, play_sound, set_sound_output};
+
+#[cfg(not(target_os = "linux"))]
 pub fn play_sound() {}
 
+#[cfg(not(target_os = "linux"))]
 pub fn set_sound_output(_device_key: Option<String>) {}
 
+#[cfg(not(target_os = "linux"))]
 pub fn play_mp3(_bytes: Vec<u8>) {}
 
+#[cfg(not(target_os = "linux"))]
 pub fn play_mp3_until(_bytes: Vec<u8>, _looped: bool, _stop: Arc<AtomicBool>) {}
 
 pub struct Tray;
