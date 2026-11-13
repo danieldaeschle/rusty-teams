@@ -33,6 +33,7 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.general.auto_start"),
             tr("settings.general.open_in_background"),
             tr("settings.general.close_to_tray"),
+            tr("settings.general.external_browser"),
             tr("settings.general.up_arrow"),
             tr("settings.general.translate_into"),
             tr("settings.general.behavior_title"),

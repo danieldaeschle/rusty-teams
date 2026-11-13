@@ -122,6 +122,9 @@ settings:
     system:
       en: SYSTEM
       de: SYSTEM
+    browser:
+      en: BROWSER
+      de: BROWSER
     compose_box:
       en: COMPOSE BOX
       de: EINGABEFELD
@@ -186,6 +189,15 @@ settings:
     never_translate:
       en: Never translate messages in these languages
       de: Nachrichten in diesen Sprachen nie übersetzen
+    external_browser:
+      en: Open links and Google sign-in with
+      de: Links und Google-Anmeldung öffnen mit
+    external_browser_detail:
+      en: Does not change the Teams session browser (Chrome/Chromium is required for that).
+      de: Ändert nicht den Browser der Teams-Sitzung (dafür bleibt Chrome/Chromium nötig).
+    external_browser_system:
+      en: System default
+      de: Systemstandard
   notifications:
     flash_taskbar:
       en: Flash taskbar when notifications are received
