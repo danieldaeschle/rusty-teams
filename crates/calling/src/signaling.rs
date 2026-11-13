@@ -190,6 +190,12 @@ pub fn routed_url(url: &str) -> Result<String> {
 
 const FAILURE_BODY_CHARS: usize = 240;
 
+/// Status plus a short body excerpt for the timeline and `Error::Signaling`.
+pub(crate) fn signaling_failure_detail(status: u16, body: &str) -> String {
+    let reason: String = body.chars().take(FAILURE_BODY_CHARS).collect();
+    format!("HTTP {status} {reason}")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LeaveReason {
     Hangup,
@@ -301,21 +307,14 @@ impl Signaling {
     ) -> Result<ApiResponse> {
         request.url = routed_url(&request.url)?;
         let response = session.batch(&[request], &ic3_scope()).await?.remove(0);
-        self.timeline
-            .record(label, format!("HTTP {}", response.status));
-        if !response.is_success() {
-            let reason: String = response
-                .body
-                .to_string()
-                .chars()
-                .take(FAILURE_BODY_CHARS)
-                .collect();
-            return Err(Error::Signaling(format!(
-                "{label} answered HTTP {} {reason}",
-                response.status
-            )));
+        if response.is_success() {
+            self.timeline
+                .record(label, format!("HTTP {}", response.status));
+            return Ok(response);
         }
-        Ok(response)
+        let detail = signaling_failure_detail(response.status, &response.body.to_string());
+        self.timeline.record(label, detail.clone());
+        Err(Error::Signaling(format!("{label} answered {detail}")))
     }
 
     async fn send(
@@ -510,21 +509,7 @@ impl Signaling {
         thread_id: Option<&str>,
         callbacks: &CallbackLinks,
     ) -> Result<()> {
-        let body = json!({
-            "disableUnmute": false,
-            "participants": {
-                "from": from.wire(),
-                "to": [{"id": ECHO_BOT_MRI, "participantId": uuid::Uuid::new_v4().to_string()}],
-            },
-            "participantInvitationData": {},
-            "replacementDetails": null,
-            "groupContext": null,
-            "groupChat": thread_id.map(|thread_id| json!({"threadId": thread_id, "messageId": null})),
-            "links": {
-                "addParticipantSuccess": callbacks.conversation("addParticipantSuccess"),
-                "addParticipantFailure": callbacks.conversation("addParticipantFailure"),
-            },
-        });
+        let body = echo_bot_add_body(from, thread_id, callbacks);
         let url = conversation.link("addParticipantAndModality")?;
         self.post_json("POST add (echo bot)", url, body).await
     }
@@ -1479,6 +1464,28 @@ pub async fn fetch_self(session: &Session) -> Result<SelfIdentity> {
     })
 }
 
+pub(crate) fn echo_bot_add_body(
+    from: &Participant,
+    thread_id: Option<&str>,
+    callbacks: &CallbackLinks,
+) -> Value {
+    json!({
+        "disableUnmute": false,
+        "participants": {
+            "from": from.wire(),
+            "to": [{"id": ECHO_BOT_MRI, "participantId": uuid::Uuid::new_v4().to_string()}],
+        },
+        "participantInvitationData": {},
+        "replacementDetails": null,
+        "groupContext": null,
+        "groupChat": thread_id.map(|thread_id| json!({"threadId": thread_id, "messageId": null})),
+        "links": {
+            "addParticipantSuccess": callbacks.conversation("addParticipantSuccess"),
+            "addParticipantFailure": callbacks.conversation("addParticipantFailure"),
+        },
+    })
+}
+
 /// The 1:1 chat with the Echo bot; Teams sends it as `groupChat` when adding the bot.
 pub async fn find_echo_bot_thread(
     session: &Session,
@@ -1499,6 +1506,29 @@ pub async fn find_echo_bot_thread(
         }
     }
     Ok(None)
+}
+
+/// Finds the Echo bot 1:1 chat or creates it so `add_echo_bot` can send `groupChat`.
+pub async fn ensure_echo_bot_thread(session: &Session, self_object_id: &str) -> Result<String> {
+    if let Some(thread_id) = find_echo_bot_thread(session, self_object_id).await? {
+        return Ok(thread_id);
+    }
+    let self_mri = format!("8:orgid:{self_object_id}");
+    match chatsvc::ThreadMembers::with_region(session, CHATSVC_REGION)
+        .create_one_to_one(&[self_mri, ECHO_BOT_MRI.to_owned()])
+        .await
+    {
+        Ok(thread_id) => Ok(thread_id),
+        Err(error) => {
+            // Create may succeed without a parseable id; the unique roster is still findable.
+            if let Some(thread_id) = find_echo_bot_thread(session, self_object_id).await? {
+                return Ok(thread_id);
+            }
+            Err(Error::Signaling(format!(
+                "echo bot chat create failed: {error}"
+            )))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1618,6 +1648,24 @@ mod tests {
         assert!(routed_url("https://user@cc.skype.com/x").is_err());
         assert!(routed_url("http://cc.skype.com/x").is_err());
         assert!(routed_url("https://.skype.com/x").is_err());
+    }
+
+    #[test]
+    fn signaling_failure_detail_keeps_status_and_a_short_body() {
+        let detail = signaling_failure_detail(400, &"x".repeat(300));
+        assert!(detail.starts_with("HTTP 400 "));
+        assert_eq!(detail.chars().count(), "HTTP 400 ".chars().count() + FAILURE_BODY_CHARS);
+    }
+
+    #[test]
+    fn echo_bot_add_body_carries_the_group_chat_thread() {
+        let body = echo_bot_add_body(&from(), Some("19:me_bot@unq.gbl.spaces"), &callbacks());
+        assert_eq!(body["groupChat"]["threadId"], "19:me_bot@unq.gbl.spaces");
+        assert_eq!(body["groupChat"]["messageId"], Value::Null);
+        assert_eq!(body["participants"]["to"][0]["id"], ECHO_BOT_MRI);
+        assert!(!body["groupChat"].is_null());
+        let without = echo_bot_add_body(&from(), None, &callbacks());
+        assert_eq!(without["groupChat"], Value::Null);
     }
 
     #[test]

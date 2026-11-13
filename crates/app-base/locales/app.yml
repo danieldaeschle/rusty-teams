@@ -468,6 +468,9 @@ calls:
     recording_join_failed:
       en: The recording service could not join
       de: Der Aufzeichnungsdienst konnte nicht beitreten
+    echo_test_failed:
+      en: The test call could not start
+      de: Der Testanruf konnte nicht gestartet werden
     captions_join_failed:
       en: The captions service could not join
       de: Der Untertitel-Dienst konnte nicht beitreten

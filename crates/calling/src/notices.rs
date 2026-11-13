@@ -12,6 +12,7 @@ pub const PORTAL_UNAVAILABLE_NOTICE: &str = "calls.notice.portal_unavailable";
 pub const CALL_TRANSFERRED_NOTICE: &str = "calls.notice.call_transferred";
 pub const TRANSFER_FAILED_NOTICE: &str = "calls.notice.transfer_failed";
 pub const RECORDING_JOIN_FAILED_NOTICE: &str = "calls.notice.recording_join_failed";
+pub const ECHO_TEST_FAILED_NOTICE: &str = "calls.notice.echo_test_failed";
 pub const CAPTIONS_JOIN_FAILED_NOTICE: &str = "calls.notice.captions_join_failed";
 pub const CAPTION_LANGUAGE_FAILED_NOTICE: &str = "calls.notice.caption_language_failed";
 pub const CAMERA_START_NOTICE: &str = "calls.notice.camera_start";
@@ -80,6 +81,7 @@ mod tests {
             RECORDING_JOIN_FAILED_NOTICE,
             "calls.notice.recording_join_failed"
         );
+        assert_eq!(ECHO_TEST_FAILED_NOTICE, "calls.notice.echo_test_failed");
         assert_eq!(
             CAPTIONS_JOIN_FAILED_NOTICE,
             "calls.notice.captions_join_failed"

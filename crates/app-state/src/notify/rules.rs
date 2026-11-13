@@ -588,6 +588,10 @@ mod tests {
         let mut incoming = CallModel::incoming("Bea", "8:orgid:b", "Bea");
         incoming.progress = Some(Progress::Ringing);
         assert!(!should_ringback(Some(&incoming)));
+        let mut echo = CallModel::test();
+        echo.state = CallState::Connecting;
+        echo.progress = Some(Progress::Calling);
+        assert!(should_ringback(Some(&echo)));
     }
 
     #[test]

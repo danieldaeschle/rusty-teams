@@ -206,11 +206,20 @@ impl NativeHttp {
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
         let text = response.text().await?;
-        let body = if text.is_empty() {
-            location.map_or(Value::Null, |location| json!({ "location": location }))
+        let mut body = if text.is_empty() {
+            Value::Null
         } else {
             serde_json::from_str(&text).unwrap_or(Value::String(text))
         };
+        if let Some(location) = location {
+            match &mut body {
+                Value::Null => body = json!({ "location": location }),
+                Value::Object(map) if !map.contains_key("location") => {
+                    map.insert("location".into(), Value::String(location));
+                }
+                _ => {}
+            }
+        }
         Ok(ApiResponse {
             status,
             body,
