@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Instant;
 
 use gpui_kit::component::h_flex;
@@ -13,6 +14,15 @@ const GLYPH_SIZE: f32 = 40.;
 const EMOTICON_GAP: f32 = 4.;
 struct Playback {
     started: Option<Instant>,
+}
+
+#[derive(Default)]
+struct PlayedEmoticons(HashSet<ElementId>);
+
+impl Global for PlayedEmoticons {}
+
+fn first_play(id: &ElementId, cx: &mut App) -> bool {
+    cx.default_global::<PlayedEmoticons>().0.insert(id.clone())
 }
 
 #[derive(IntoElement)]
@@ -47,9 +57,10 @@ impl RenderOnce for JumboEmoticon {
             window.use_keyed_state(self.id.clone(), cx, |_, _| Playback { started: None });
         let now = Instant::now();
         let active = window.is_window_active();
+        let unplayed = active && playback.read(cx).started.is_none() && first_play(&self.id, cx);
         let started = playback.update(cx, |playback, _| {
-            if active {
-                playback.started.get_or_insert(now);
+            if unplayed {
+                playback.started = Some(now);
             }
             playback.started
         });
