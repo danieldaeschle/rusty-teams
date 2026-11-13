@@ -135,7 +135,11 @@ mod tests {
             "sid-9",
             "claude",
         );
-        assert!(prompt.ends_with("agent \"claude\"."));
+        assert!(prompt.ends_with("also after a restart."));
+        assert!(
+            prompt
+                .contains("`schedule_wakeup` of the `teams` MCP server with session_id \"sid-9\"")
+        );
         assert!(prompt.contains("write a short reply to Ada"));
         assert!(prompt.contains("User0 (10:00): text 0"));
         let with_extra = build_prompt(
@@ -145,7 +149,7 @@ mod tests {
             "sid-9",
             "claude",
         );
-        assert!(with_extra.ends_with("agent \"claude\". Use Rust"));
+        assert!(with_extra.ends_with("also after a restart. Use Rust"));
     }
 
     #[test]

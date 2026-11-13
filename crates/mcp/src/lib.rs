@@ -12,7 +12,7 @@ mod tools;
 pub use hub::{
     AgentHub, CaptionLine, Event, EventKind, FreeWriting, FreeWritingAsk, MeetingOutcome,
     MeetingProposal, NewProposal, NewReactionProposal, Outcome, Proposal, ProposalImage,
-    ProposalMention, ReactionOutcome, ReactionProposal, UiEvent,
+    ProposalMention, ReactionOutcome, ReactionProposal, UiEvent, Wakeup,
 };
 pub use policy::{Access, AgentPolicy, ConversationKind, DEFAULT_PORT};
 pub use remote::{ListedTool, ToolSession};
