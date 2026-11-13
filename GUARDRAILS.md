@@ -51,3 +51,4 @@ Clean up after every test: delete test messages, restore settings and status.
 1. Find how Teams does it: `docs/research/*.md`, then the live bundle.
 2. Write findings back to `docs/research/<topic>.md`.
 3. If a change has to break a "must match" rule, name the deviation in the commit body.
+4. If the change picks one reasonable path over another, and that choice is not already a rule here, add a short note under `docs/decisions/` (see `docs/decisions/README.md`).
