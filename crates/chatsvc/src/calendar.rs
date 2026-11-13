@@ -428,10 +428,53 @@ fn body_html_text(entry: &Value) -> Option<String> {
             .replace('<', "&lt;")
             .replace('>', "&gt;")
             .replace("\r\n", "\n")
+            .replace('\r', "\n")
             .replace('\n', "<br>");
         return Some(escaped);
     }
-    Some(content)
+    // Drop non-http(s)/mailto hrefs so the agenda renderer cannot open them.
+    Some(sanitize_html_hrefs(&content))
+}
+
+fn sanitize_html_hrefs(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(start) = rest.find("href=") {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let quote = rest.as_bytes().get(5).copied();
+        let (quote_char, after_quote) = match quote {
+            Some(b'"') | Some(b'\'') => (quote.unwrap() as char, &rest[6..]),
+            _ => {
+                out.push_str("href=");
+                rest = &rest[5..];
+                continue;
+            }
+        };
+        let Some(end) = after_quote.find(quote_char) else {
+            out.push_str(rest);
+            return out;
+        };
+        let url = &after_quote[..end];
+        let safe = url_is_safe_href(url);
+        out.push_str("href=");
+        out.push(quote_char);
+        if safe {
+            out.push_str(url);
+        }
+        out.push(quote_char);
+        rest = &after_quote[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn url_is_safe_href(url: &str) -> bool {
+    let trimmed = url.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("https://")
+        || lower.starts_with("http://")
+        || lower.starts_with("mailto:")
 }
 
 fn attendee_response(label: &str) -> ResponseType {
@@ -840,6 +883,49 @@ mod tests {
             events[0].location.as_deref(),
             Some("Microsoft Teams-Besprechung")
         );
+    }
+
+    #[test]
+    fn text_body_normalizes_lone_carriage_returns() {
+        let mut event = CalendarEvent {
+            object_id: "cr".into(),
+            start: Utc.with_ymd_and_hms(2026, 10, 12, 8, 30, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 10, 12, 9, 0, 0).unwrap(),
+            ..Default::default()
+        };
+        apply_event_details(
+            &mut event,
+            &serde_json::json!({
+                "body": {"contentType": "text", "content": "Line1\rLine2\r\nLine3"}
+            }),
+        );
+        assert_eq!(
+            event.body_html.as_deref(),
+            Some("Line1<br>Line2<br>Line3")
+        );
+    }
+
+    #[test]
+    fn html_body_drops_javascript_hrefs() {
+        let mut event = CalendarEvent {
+            object_id: "js".into(),
+            start: Utc.with_ymd_and_hms(2026, 10, 12, 8, 30, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 10, 12, 9, 0, 0).unwrap(),
+            ..Default::default()
+        };
+        apply_event_details(
+            &mut event,
+            &serde_json::json!({
+                "body": {
+                    "contentType": "html",
+                    "content": r#"<p><a href="javascript:alert(1)">x</a> <a href='https://ok.example'>y</a></p>"#
+                }
+            }),
+        );
+        let html = event.body_html.as_deref().expect("html");
+        assert!(!html.to_ascii_lowercase().contains("javascript:"));
+        assert!(html.contains(r#"href="""#) || html.contains("href=''"));
+        assert!(html.contains(r#"href='https://ok.example'"#));
     }
 
     #[test]

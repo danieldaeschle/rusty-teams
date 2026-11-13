@@ -120,22 +120,14 @@ impl EventPeek {
             .events
             .iter()
             .chain(app.calendar_events.iter())
-            .find(|event| event.object_id == key)
-            .cloned();
-        let best = app
-            .calendar_week
-            .events
-            .iter()
-            .chain(app.calendar_events.iter())
             .filter(|event| event.object_id == key)
             .cloned()
-            .fold(best, |best, candidate| {
-                Some(match best {
-                    Some(current) if event_detail_score(&current) >= event_detail_score(&candidate) => {
-                        current
-                    }
-                    _ => candidate,
-                })
+            .reduce(|best, candidate| {
+                if event_detail_score(&candidate) > event_detail_score(&best) {
+                    candidate
+                } else {
+                    best
+                }
             });
         if let Some(event) = best {
             self.event = event;
@@ -522,15 +514,10 @@ impl EventPeek {
         if !addresses.is_empty() {
             let mut mailto = format!("mailto:{}", addresses.join(","));
             if !self.event.subject.is_empty() {
-                let subject = self
-                    .event
-                    .subject
-                    .replace('%', "%25")
-                    .replace(' ', "%20")
-                    .replace('&', "%26")
-                    .replace('?', "%3F")
-                    .replace('#', "%23");
-                mailto = format!("{mailto}?subject={subject}");
+                mailto = format!(
+                    "{mailto}?subject={}",
+                    percent_encode_query(&self.event.subject)
+                );
             }
             buttons.push(
                 Button::new("calendar-peek-email-guests")
@@ -960,6 +947,21 @@ fn group_label(group: ResponseType) -> String {
         ResponseType::Declined => tr("calendar.peek.declined"),
         ResponseType::NotResponded => tr("calendar.peek.no_response"),
     }
+}
+
+/// Percent-encode a mailto `subject` query value (UTF-8, RFC 3986).
+fn percent_encode_query(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() * 3);
+    for byte in value.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char);
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 fn is_teams_url(url: &str) -> bool {

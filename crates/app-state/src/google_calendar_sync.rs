@@ -34,7 +34,10 @@ pub async fn fetch_google_events(
             .map(|calendar| (calendar.id.clone(), calendar.summary.clone()))
             .collect();
         let calendars = if calendars.is_empty() {
-            vec![("primary".to_owned(), "Primary".to_owned())]
+            vec![(
+                "primary".to_owned(),
+                app_base::ui_locale::tr("settings.calendar.primary"),
+            )]
         } else {
             calendars
         };

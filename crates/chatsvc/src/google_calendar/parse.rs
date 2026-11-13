@@ -122,13 +122,16 @@ fn parse_event(
     })
 }
 
-/// Plain Google descriptions become escaped HTML with links and line breaks.
-/// Descriptions that already look like HTML are kept as-is.
+/// Google descriptions become escaped HTML with http(s) links and line breaks.
+/// Existing markup is flattened first so untrusted schemes (e.g. `javascript:`)
+/// cannot become clickable `href`s through the message HTML pipeline.
 pub fn description_html(text: &str) -> String {
-    if looks_like_html(text) {
-        return text.to_owned();
-    }
-    let escaped = text
+    let plain = if looks_like_html(text) {
+        strip_html(text)
+    } else {
+        text.to_owned()
+    };
+    let escaped = plain
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;");
@@ -141,15 +144,17 @@ pub fn description_html(text: &str) -> String {
 
 fn looks_like_html(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
-    lower.contains("<br")
-        || lower.contains("<p")
-        || lower.contains("<div")
-        || lower.contains("<a ")
-        || lower.contains("<b>")
-        || lower.contains("<i>")
-        || lower.contains("<ul")
-        || lower.contains("<ol")
-        || lower.contains("<li")
+    lower.contains('<')
+        && (lower.contains("<br")
+            || lower.contains("<p")
+            || lower.contains("<div")
+            || lower.contains("<a ")
+            || lower.contains("<b>")
+            || lower.contains("<i>")
+            || lower.contains("<ul")
+            || lower.contains("<ol")
+            || lower.contains("<li")
+            || lower.contains("<span"))
 }
 
 fn linkify_escaped(text: &str) -> String {
@@ -424,8 +429,20 @@ mod tests {
         );
         assert_eq!(
             events[0].body_html.as_deref(),
-            Some("<b>Agenda</b><br> Item&nbsp;1 &amp; notes")
+            Some("Agenda Item 1 &amp; notes")
         );
+    }
+
+    #[test]
+    fn html_description_strips_javascript_hrefs() {
+        let html = description_html(
+            r#"Click <a href="javascript:alert(1)">here</a> or https://safe.example/x"#,
+        );
+        assert!(!html.to_ascii_lowercase().contains("javascript:"));
+        assert!(html.contains(
+            r#"<a href="https://safe.example/x">https://safe.example/x</a>"#
+        ));
+        assert!(html.contains("Click here or"));
     }
 
     #[test]
