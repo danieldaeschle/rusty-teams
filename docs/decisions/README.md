@@ -24,5 +24,8 @@ Statuses: `proposed`, `accepted`, `superseded`.
 | [0006](0006-mic-path-matches-browser-teams.md) | The mic path matches Teams in the browser |
 | [0007](0007-local-agent-clis-beside-copilot.md) | Local agent CLIs sit beside Copilot |
 | [0008](0008-product-ui-locale-en-de.md) | Product UI is English and German |
+| [0009](0009-bundled-google-oauth-client.md) | Bundled Google OAuth Desktop client |
+| [0010](0010-preferred-external-browser.md) | Preferred browser for links and Google OAuth |
+| [0011](0011-calendar-event-peek.md) | Calendar events open as a Teams-like peek |
 
-Records `0001` to `0008` are the decisions already shipped. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.
+Records `0001` to `0010` are the decisions already shipped. `0011` stays `proposed` until the calendar-peek pull request merges. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.
