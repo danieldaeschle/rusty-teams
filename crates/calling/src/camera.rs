@@ -381,10 +381,34 @@ fn open_from_list(
     accept_opened(&index, camera)
 }
 
+fn open_picked_format(
+    index: CameraIndex,
+    quality: VideoQuality,
+) -> std::result::Result<(Camera, String), nokhwa::NokhwaError> {
+    let mut camera = Camera::new(
+        index,
+        RequestedFormat::new::<RgbAFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
+    )?;
+    let formats = camera.compatible_camera_formats()?;
+    let format = pick_format(&formats, quality).ok_or_else(|| {
+        nokhwa::NokhwaError::GeneralError("no camera format at 30 fps".to_owned())
+    })?;
+    camera.set_camera_requset(RequestedFormat::new::<RgbAFormat>(
+        RequestedFormatType::Exact(format),
+    ))?;
+    camera.open_stream()?;
+    Ok((camera, format_label(&format)))
+}
+
 fn open_camera(
     index: CameraIndex,
     quality: VideoQuality,
 ) -> std::result::Result<(Camera, String), nokhwa::NokhwaError> {
+    if cfg!(windows)
+        && let Ok(opened) = open_picked_format(index.clone(), quality)
+    {
+        return Ok(opened);
+    }
     // Probe the device list without committing to a slow Closest(NV12) open.
     for probe in preferred_candidates(quality) {
         let Ok(mut camera) = try_exact_or_closest(index.clone(), probe) else {
