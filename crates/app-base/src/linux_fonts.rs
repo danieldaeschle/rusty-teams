@@ -6,6 +6,12 @@
 //! `add_fonts`. fontdb only honors `<dir>` entries from `FONTCONFIG_FILE`,
 //! so this module rewrites those directories and leaves the system color
 //! emoji file out. An existing `FONTCONFIG_FILE` is left alone.
+//!
+//! This `FONTCONFIG_FILE` is for the app process only. Chrome must not
+//! inherit the app-generated `fontconfig-emoji` conf (`browser::launch`
+//! strips that path on spawn) — the dirs-only file breaks Segoe/Arial
+//! fallback on the Microsoft login page. A user-provided
+//! `FONTCONFIG_FILE` is left alone for both the app and Chrome.
 
 use std::collections::HashSet;
 use std::fs;

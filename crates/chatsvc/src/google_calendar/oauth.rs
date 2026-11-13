@@ -38,16 +38,38 @@ pub struct TokenBundle {
     pub token_type: String,
 }
 
+/// Runtime env wins; otherwise the value baked in at compile time (`option_env!`).
+/// Empty strings count as missing. Used by Connect and token refresh.
 pub fn client_id_from_env() -> Option<GoogleOAuth> {
-    let client_id = std::env::var(GOOGLE_CLIENT_ID_ENV).ok()?;
-    if client_id.trim().is_empty() {
-        return None;
-    }
-    let client_secret = std::env::var(GOOGLE_CLIENT_SECRET_ENV).unwrap_or_default();
+    resolve_oauth(
+        std::env::var(GOOGLE_CLIENT_ID_ENV).ok().as_deref(),
+        std::env::var(GOOGLE_CLIENT_SECRET_ENV).ok().as_deref(),
+        option_env!("TEAMS_GOOGLE_CLIENT_ID"),
+        option_env!("TEAMS_GOOGLE_CLIENT_SECRET"),
+    )
+}
+
+fn resolve_oauth(
+    runtime_id: Option<&str>,
+    runtime_secret: Option<&str>,
+    compile_id: Option<&str>,
+    compile_secret: Option<&str>,
+) -> Option<GoogleOAuth> {
+    let client_id = first_non_empty(runtime_id).or_else(|| first_non_empty(compile_id))?;
+    let client_secret = first_non_empty(runtime_secret)
+        .or_else(|| first_non_empty(compile_secret))
+        .unwrap_or_default();
     Some(GoogleOAuth {
         client_id,
         client_secret,
     })
+}
+
+fn first_non_empty(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_owned)
 }
 
 impl GoogleOAuth {
@@ -181,5 +203,39 @@ mod tests {
         assert_eq!(bundle.access_token, "a");
         assert_eq!(bundle.refresh_token, "r");
         assert_eq!(bundle.expires_in, 3600);
+    }
+
+    #[test]
+    fn resolve_prefers_runtime_over_compile() {
+        let oauth = resolve_oauth(
+            Some("runtime-id"),
+            Some("runtime-secret"),
+            Some("compile-id"),
+            Some("compile-secret"),
+        )
+        .unwrap();
+        assert_eq!(oauth.client_id, "runtime-id");
+        assert_eq!(oauth.client_secret, "runtime-secret");
+    }
+
+    #[test]
+    fn resolve_falls_back_to_compile_when_runtime_empty() {
+        let oauth = resolve_oauth(Some("  "), None, Some("compile-id"), Some("compile-secret"))
+            .unwrap();
+        assert_eq!(oauth.client_id, "compile-id");
+        assert_eq!(oauth.client_secret, "compile-secret");
+    }
+
+    #[test]
+    fn resolve_returns_none_when_both_missing() {
+        assert!(resolve_oauth(None, None, None, None).is_none());
+        assert!(resolve_oauth(Some(""), None, Some("  "), None).is_none());
+    }
+
+    #[test]
+    fn resolve_allows_missing_secret() {
+        let oauth = resolve_oauth(Some("cid"), None, None, None).unwrap();
+        assert_eq!(oauth.client_id, "cid");
+        assert!(oauth.client_secret.is_empty());
     }
 }

@@ -35,7 +35,7 @@ impl Default for WatchdogConfig {
             died_wait: Duration::from_millis(1000),
             probe_interval: Duration::from_secs(30),
             probe_failures: 2,
-            login_grace: Duration::from_secs(4),
+            login_grace: Duration::from_secs(1),
         }
     }
 }
