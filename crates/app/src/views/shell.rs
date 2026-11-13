@@ -880,8 +880,14 @@ impl AppShell {
                 demo: state.mode.demo,
                 opening,
             });
-            // Poll while splash is up so BrowserSignIn updates rewrite the status line.
-            if phase != Phase::Ready && !self.splash.recheck_scheduled {
+            // Poll only when the progress bar is not already driving repaints
+            // (idle/stopped bar or reduced motion); otherwise the sweep animation
+            // wakes the splash often enough for BrowserSignIn status updates.
+            let needs_poll = match &phase {
+                Phase::Loading { running, .. } => !*running || cx.reduce_motion(),
+                Phase::Ready => false,
+            };
+            if needs_poll && !self.splash.recheck_scheduled {
                 self.splash.recheck_scheduled = true;
                 cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(splash::STILL_RECHECK).await;

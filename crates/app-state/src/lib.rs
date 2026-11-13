@@ -7,7 +7,6 @@ pub mod backend;
 pub mod banner_image;
 pub mod browser_sign_in;
 pub mod calendar_accounts_actions;
-pub mod external_browser;
 pub mod call;
 pub mod call_rows;
 pub mod card_actions;
