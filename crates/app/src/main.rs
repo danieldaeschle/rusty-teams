@@ -16,6 +16,8 @@ mod layout_guard;
 mod linux_browser;
 #[cfg(target_os = "linux")]
 mod linux_install;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod linux_park;
 #[cfg(target_os = "linux")]
 mod linux_update;
 mod main_window;

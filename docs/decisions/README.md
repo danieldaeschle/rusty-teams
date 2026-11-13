@@ -37,5 +37,6 @@ Statuses: `proposed`, `accepted`, `superseded`.
 | [0019](0019-caldav-app-password-and-keyring.md) | CalDAV with app password and OS keyring |
 | [0020](0020-macos-tray-and-close-to-tray.md) | macOS tray and close-to-tray match Linux |
 | [0021](0021-linux-packages.md) | Linux releases also ship an AppImage, a deb and an rpm |
+| [0022](0022-linux-parks-the-idle-teams-tab.md) | Linux parks the idle Teams tab in a Chromium browser |
 
 Records `0001` to `0021` are the decisions already shipped. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.
