@@ -56,6 +56,31 @@ impl CalendarSource {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AttendeeResponseCounts {
+    pub accepted: u32,
+    pub declined: u32,
+    pub tentative: u32,
+    pub not_responded: u32,
+}
+
+impl AttendeeResponseCounts {
+    pub fn is_empty(self) -> bool {
+        self.accepted == 0
+            && self.declined == 0
+            && self.tentative == 0
+            && self.not_responded == 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventAttendee {
+    pub name: String,
+    pub address: Option<String>,
+    pub response: ResponseType,
+    pub required: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CalendarEvent {
     pub object_id: String,
@@ -78,6 +103,22 @@ pub struct CalendarEvent {
     pub calendar_id: Option<String>,
     /// When a merge collapsed duplicates, every contributing source.
     pub sources: Vec<CalendarSource>,
+    pub location: Option<String>,
+    pub body_preview: Option<String>,
+    /// Full event body (HTML). `body_preview` from list payloads is server-truncated.
+    pub body_html: Option<String>,
+    pub series: bool,
+    pub series_master_id: Option<String>,
+    pub response_counts: Option<AttendeeResponseCounts>,
+    pub attendees: Vec<EventAttendee>,
+    /// Minutes before start (Google reminders). Empty when unknown.
+    pub reminders: Vec<u32>,
+    /// Google `source` title + URL (View source).
+    pub source_link: Option<(String, String)>,
+    /// Google `htmlLink` — open in Google Calendar.
+    pub web_link: Option<String>,
+    /// Display name of the calendar that owns the event (Google).
+    pub calendar_name: Option<String>,
 }
 
 impl CalendarEvent {
@@ -119,6 +160,17 @@ impl Default for CalendarEvent {
             account_id,
             calendar_id,
             sources,
+            location: None,
+            body_preview: None,
+            body_html: None,
+            series: false,
+            series_master_id: None,
+            response_counts: None,
+            attendees: Vec::new(),
+            reminders: Vec::new(),
+            source_link: None,
+            web_link: None,
+            calendar_name: None,
         }
     }
 }
@@ -158,6 +210,7 @@ pub struct Calendar<T: CardTransport = SessionCardTransport> {
     transport: T,
     url: String,
     create_url: String,
+    mt_region: String,
 }
 
 impl Calendar<SessionCardTransport> {
@@ -176,7 +229,16 @@ impl<T: CardTransport> Calendar<T> {
             create_url: format!(
                 "https://teams.cloud.microsoft/api/mt/{mt_region}/beta/me/calendarEvents/privateMeeting/schedulingService/create"
             ),
+            mt_region: mt_region.to_owned(),
         }
+    }
+
+    pub fn teams_event_url(&self, event_id: &str) -> String {
+        format!(
+            "https://teams.cloud.microsoft/api/mt/{}/beta/me/calendarEvents/{}",
+            self.mt_region,
+            crate::messages::encode(event_id)
+        )
     }
 
     pub async fn calendar_view(
@@ -322,6 +384,247 @@ fn show_as(entry: &Value) -> ShowAs {
     }
 }
 
+fn location_text(entry: &Value) -> Option<String> {
+    text(entry, "locationDisplayName")
+        .or_else(|| text(entry, "location"))
+        .or_else(|| {
+            entry
+                .get("location")
+                .and_then(|location| text(location, "displayName"))
+        })
+        .filter(|value| !value.is_empty())
+}
+
+fn body_preview_text(entry: &Value) -> Option<String> {
+    text(entry, "bodyPreview")
+        .or_else(|| text(entry, "bodyContent").map(|content| strip_html(&content)))
+        .or_else(|| {
+            entry
+                .get("body")
+                .and_then(|body| text(body, "content"))
+                .map(|content| strip_html(&content))
+        })
+        .map(|preview| normalize_preview_whitespace(&preview))
+        .map(|preview| truncate_preview(&preview))
+        .filter(|value| !value.is_empty())
+}
+
+/// Full body as HTML: Teams MT `bodyContent` or Graph `body.content`.
+/// Plain-text bodies are escaped and keep their line breaks.
+fn body_html_text(entry: &Value) -> Option<String> {
+    let (content, kind) = match text(entry, "bodyContent") {
+        Some(content) => (content, text(entry, "bodyContentType")),
+        None => {
+            let body = entry.get("body")?;
+            (text(body, "content")?, text(body, "contentType"))
+        }
+    };
+    if content.trim().is_empty() {
+        return None;
+    }
+    if kind.is_some_and(|kind| kind.eq_ignore_ascii_case("text")) {
+        let escaped = content
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace("\r\n", "\n")
+            .replace('\n', "<br>");
+        return Some(escaped);
+    }
+    Some(content)
+}
+
+fn attendee_response(label: &str) -> ResponseType {
+    match label {
+        "accepted" | "Accepted" => ResponseType::Accepted,
+        "organizer" | "Organizer" => ResponseType::Organizer,
+        "declined" | "Declined" => ResponseType::Declined,
+        "tentativelyAccepted" | "TentativelyAccepted" | "tentative" | "Tentative" => {
+            ResponseType::Tentative
+        }
+        _ => ResponseType::NotResponded,
+    }
+}
+
+/// Attendee roster from Graph (`emailAddress{name,address}`) or Teams MT (`name`, `address`).
+pub fn attendees_from_entry(entry: &Value) -> Vec<EventAttendee> {
+    let Some(list) = entry.get("attendees").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    list.iter()
+        .filter_map(|attendee| {
+            let address = attendee
+                .pointer("/emailAddress/address")
+                .and_then(Value::as_str)
+                .or_else(|| attendee.get("address").and_then(Value::as_str))
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned);
+            let name = attendee
+                .pointer("/emailAddress/name")
+                .and_then(Value::as_str)
+                .or_else(|| attendee.get("name").and_then(Value::as_str))
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .or_else(|| address.clone())?;
+            let required = !attendee
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|kind| !kind.eq_ignore_ascii_case("required"));
+            Some(EventAttendee {
+                name,
+                address,
+                response: attendee_response(attendee_response_label(attendee).unwrap_or("none")),
+                required,
+            })
+        })
+        .collect()
+}
+
+fn normalize_preview_whitespace(preview: &str) -> String {
+    preview
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .trim()
+        .to_owned()
+}
+
+pub fn strip_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    for character in input.chars() {
+        match character {
+            '<' => {
+                in_tag = true;
+                // Keep a word break when tags sit flush against text (`</p><p>`).
+                out.push(' ');
+            }
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(character),
+            _ => {}
+        }
+    }
+    html_entities(&out).split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn html_entities(input: &str) -> String {
+    input
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+}
+
+pub fn truncate_preview(preview: &str) -> String {
+    // Long enough for a Teams peek agenda; UI scrolls instead of hard-clipping.
+    const MAX_CHARS: usize = 4_000;
+    let trimmed = preview.trim();
+    if trimmed.chars().count() <= MAX_CHARS {
+        return trimmed.to_owned();
+    }
+    let mut cut: String = trimmed.chars().take(MAX_CHARS).collect();
+    cut.push('…');
+    cut
+}
+
+fn series_flag(entry: &Value) -> bool {
+    if flag(entry, "isRecurring") || flag(entry, "isSeriesMaster") {
+        return true;
+    }
+    match text(entry, "eventType")
+        .or_else(|| text(entry, "type"))
+        .as_deref()
+    {
+        Some("occurrence" | "exception" | "seriesMaster") => true,
+        _ => entry.get("seriesMasterId").and_then(Value::as_str).is_some()
+            || entry.get("recurrence").is_some(),
+    }
+}
+
+fn series_master_id(entry: &Value) -> Option<String> {
+    text(entry, "seriesMasterId").or_else(|| text(entry, "seriesMasterObjectId"))
+}
+
+fn attendee_response_label(attendee: &Value) -> Option<&str> {
+    attendee
+        .pointer("/status/response")
+        .and_then(Value::as_str)
+        .or_else(|| attendee.get("responseStatus").and_then(Value::as_str))
+}
+
+pub fn response_counts_from_attendees(entry: &Value) -> Option<AttendeeResponseCounts> {
+    let attendees = entry.get("attendees")?.as_array()?;
+    if attendees.is_empty() {
+        return None;
+    }
+    let mut counts = AttendeeResponseCounts::default();
+    for attendee in attendees {
+        match attendee_response_label(attendee).unwrap_or("none") {
+            "accepted" | "Accepted" | "organizer" | "Organizer" => counts.accepted += 1,
+            "declined" | "Declined" => counts.declined += 1,
+            "tentativelyAccepted" | "TentativelyAccepted" | "tentative" | "Tentative" => {
+                counts.tentative += 1
+            }
+            _ => counts.not_responded += 1,
+        }
+    }
+    Some(counts)
+}
+
+/// Merge Graph / detail fields into a calendar event without wiping list data.
+pub fn apply_event_details(event: &mut CalendarEvent, entry: &Value) {
+    if let Some(location) = location_text(entry) {
+        event.location = Some(location);
+    }
+    if let Some(preview) = body_preview_text(entry) {
+        event.body_preview = Some(preview);
+    }
+    if let Some(html) = body_html_text(entry) {
+        event.body_html = Some(html);
+    }
+    if series_flag(entry) {
+        event.series = true;
+    }
+    if let Some(master) = series_master_id(entry) {
+        event.series_master_id = Some(master);
+        event.series = true;
+    }
+    if let Some(counts) = response_counts_from_attendees(entry) {
+        event.response_counts = Some(counts);
+    }
+    let attendees = attendees_from_entry(entry);
+    if !attendees.is_empty() {
+        event.attendees = attendees;
+    }
+    if let Some(name) = entry
+        .pointer("/organizer/emailAddress/name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        event.organizer_name = Some(name.to_owned());
+    }
+    if let Some(address) = entry
+        .pointer("/organizer/emailAddress/address")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        event.organizer_address = Some(address.to_owned());
+    }
+    if event.join_url.is_none() {
+        if let Some(url) = entry
+            .pointer("/onlineMeeting/joinUrl")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| text(entry, "skypeTeamsMeetingUrl"))
+            .or_else(|| text(entry, "joinUrl"))
+        {
+            event.join_url = Some(url);
+            event.online = true;
+        }
+    }
+}
+
 fn parse_event(entry: &Value) -> Option<CalendarEvent> {
     let join_url = text(entry, "skypeTeamsMeetingUrl").or_else(|| text(entry, "joinUrl"));
     let (source, account_id, calendar_id, sources) = CalendarEvent::outlook_defaults();
@@ -337,7 +640,9 @@ fn parse_event(entry: &Value) -> Option<CalendarEvent> {
         thread_id: thread_id(entry),
         organizer_name: text(entry, "organizerName"),
         organizer_address: text(entry, "organizerAddress"),
-        ical_uid: text(entry, "iCalUid").or_else(|| text(entry, "iCalUId")),
+        ical_uid: text(entry, "iCalUid")
+            .or_else(|| text(entry, "iCalUId"))
+            .or_else(|| text(entry, "iCalUID")),
         response: response_type(entry),
         show_as: show_as(entry),
         dial_in: dial_in(entry),
@@ -345,6 +650,17 @@ fn parse_event(entry: &Value) -> Option<CalendarEvent> {
         account_id,
         calendar_id,
         sources,
+        location: location_text(entry),
+        body_preview: body_preview_text(entry),
+        body_html: body_html_text(entry),
+        series: series_flag(entry),
+        series_master_id: series_master_id(entry),
+        response_counts: response_counts_from_attendees(entry),
+        attendees: attendees_from_entry(entry),
+        reminders: Vec::new(),
+        source_link: None,
+        web_link: None,
+        calendar_name: None,
     })
 }
 
@@ -438,6 +754,157 @@ mod tests {
             standup.thread_id.as_deref(),
             Some("19:meeting_demo1@thread.v2")
         );
+        assert_eq!(
+            standup.location.as_deref(),
+            Some("Microsoft Teams Meeting")
+        );
+        assert_eq!(
+            standup.body_preview.as_deref(),
+            Some("Daily agenda and blockers")
+        );
+        assert!(standup.series);
+        assert_eq!(
+            standup.series_master_id.as_deref(),
+            Some("evt-standup-master")
+        );
+        let counts = standup.response_counts.expect("counts");
+        assert_eq!(counts.accepted, 2);
+        assert_eq!(counts.declined, 1);
+        assert_eq!(counts.not_responded, 2);
+    }
+
+    #[test]
+    fn strip_html_flattens_markup_for_peek_preview() {
+        assert_eq!(
+            strip_html("<p>Hello&nbsp;<b>team</b></p>"),
+            "Hello team"
+        );
+        assert_eq!(
+            strip_html("<p>NEUE</p><p>Agenda</p>"),
+            "NEUE Agenda"
+        );
+        assert_eq!(truncate_preview(&"x".repeat(4_100)).chars().count(), 4_001);
+    }
+
+    #[test]
+    fn apply_event_details_fills_missing_peek_fields() {
+        let mut event = CalendarEvent {
+            object_id: "a".into(),
+            start: Utc.with_ymd_and_hms(2026, 10, 12, 8, 30, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 10, 12, 9, 0, 0).unwrap(),
+            ..Default::default()
+        };
+        apply_event_details(
+            &mut event,
+            &serde_json::json!({
+                "bodyPreview": "Notes",
+                "location": {"displayName": "Room A"},
+                "type": "seriesMaster",
+                "seriesMasterId": "master",
+                "attendees": [
+                    {"status": {"response": "accepted"}},
+                    {"status": {"response": "tentativelyAccepted"}},
+                ],
+                "onlineMeeting": {"joinUrl": "https://teams.microsoft.com/l/meetup-join/z"}
+            }),
+        );
+        assert_eq!(event.body_preview.as_deref(), Some("Notes"));
+        assert_eq!(event.location.as_deref(), Some("Room A"));
+        assert!(event.series);
+        assert_eq!(event.series_master_id.as_deref(), Some("master"));
+        assert_eq!(event.join_url.as_deref(), Some("https://teams.microsoft.com/l/meetup-join/z"));
+        let counts = event.response_counts.expect("counts");
+        assert_eq!(counts.accepted, 1);
+        assert_eq!(counts.tentative, 1);
+    }
+
+    #[test]
+    fn parses_teams_ical_uid_and_body_content() {
+        let events = parse_calendar_events(&serde_json::json!({
+            "value": [{
+                "objectId": "evt-1",
+                "subject": "Standup",
+                "startTime": "2026-11-09T11:00:00Z",
+                "endTime": "2026-11-09T11:15:00Z",
+                "iCalUID": "uid-from-teams",
+                "bodyContent": "<p>NEUE TERMINE</p><p>Agenda</p>",
+                "location": "Microsoft Teams-Besprechung"
+            }]
+        }));
+        assert_eq!(events[0].ical_uid.as_deref(), Some("uid-from-teams"));
+        assert_eq!(
+            events[0].body_preview.as_deref(),
+            Some("NEUE TERMINE Agenda")
+        );
+        assert_eq!(
+            events[0].location.as_deref(),
+            Some("Microsoft Teams-Besprechung")
+        );
+    }
+
+    #[test]
+    fn apply_event_details_uses_body_content_when_preview_missing() {
+        let mut event = CalendarEvent {
+            object_id: "b".into(),
+            start: Utc.with_ymd_and_hms(2026, 10, 12, 8, 30, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2026, 10, 12, 9, 0, 0).unwrap(),
+            ..Default::default()
+        };
+        apply_event_details(
+            &mut event,
+            &serde_json::json!({
+                "body": {"contentType": "html", "content": "<p>NEUE TERMINE!!!!!</p><p>Agenda</p>"},
+                "attendees": [{"status": {"response": "accepted"}}]
+            }),
+        );
+        assert_eq!(
+            event.body_preview.as_deref(),
+            Some("NEUE TERMINE!!!!! Agenda")
+        );
+        assert_eq!(
+            event.body_html.as_deref(),
+            Some("<p>NEUE TERMINE!!!!!</p><p>Agenda</p>")
+        );
+    }
+
+    #[test]
+    fn attendees_parse_graph_and_teams_shapes() {
+        let mut event = CalendarEvent::default();
+        apply_event_details(
+            &mut event,
+            &serde_json::json!({
+                "attendees": [
+                    {"emailAddress": {"name": "Ada", "address": "ada@x.ch"},
+                     "status": {"response": "accepted"}, "type": "required"},
+                    {"name": "Bob", "address": "bob@x.ch",
+                     "status": {"response": "NotResponded"}, "type": "Optional"},
+                    {"address": "eve@x.ch", "status": {"response": "Declined"}}
+                ]
+            }),
+        );
+        let roster: Vec<_> = event
+            .attendees
+            .iter()
+            .map(|a| (a.name.as_str(), a.response, a.required))
+            .collect();
+        assert_eq!(
+            roster,
+            vec![
+                ("Ada", ResponseType::Accepted, true),
+                ("Bob", ResponseType::NotResponded, false),
+                ("eve@x.ch", ResponseType::Declined, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn plain_text_body_becomes_escaped_html() {
+        let mut event = CalendarEvent::default();
+        apply_event_details(
+            &mut event,
+            &serde_json::json!({"body": {"contentType": "text", "content": "a < b\r\nnext"}}),
+        );
+        assert_eq!(event.body_html.as_deref(), Some("a &lt; b<br>next"));
     }
 
     #[test]

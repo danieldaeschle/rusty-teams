@@ -26,7 +26,18 @@
       "organizerAddress": "mara@example.invalid",
       "myResponseType": "Accepted",
       "skypeTeamsMeetingUrl": "https://teams.microsoft.com/l/meetup-join/19%3ameeting_demo1%40thread.v2/0",
-      "threadId": "19:meeting_demo1@thread.v2"
+      "threadId": "19:meeting_demo1@thread.v2",
+      "locationDisplayName": "Microsoft Teams Meeting",
+      "bodyPreview": "Daily agenda and blockers",
+      "eventType": "occurrence",
+      "seriesMasterId": "evt-standup-master",
+      "attendees": [
+        {"status": {"response": "accepted"}},
+        {"status": {"response": "accepted"}},
+        {"status": {"response": "declined"}},
+        {"status": {"response": "none"}},
+        {"status": {"response": "none"}}
+      ]
     },
     {
       "objectId": "evt-offsite",

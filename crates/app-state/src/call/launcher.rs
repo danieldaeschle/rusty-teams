@@ -241,6 +241,7 @@ impl CallLauncher {
         ical_uid: Option<&str>,
         reply: chatsvc::Reply,
         send_response: bool,
+        comment: &str,
     ) -> Result<(), String> {
         let session = self
             .ready_engine()
@@ -248,7 +249,23 @@ impl CallLauncher {
             .ok_or_else(|| NOT_READY.to_owned())?
             .session();
         chatsvc::Calendar::new(&session)
-            .respond(event_id, ical_uid, reply, send_response)
+            .respond(event_id, ical_uid, reply, send_response, comment)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn calendar_event_details(
+        &self,
+        event_id: &str,
+        ical_uid: Option<&str>,
+    ) -> Result<serde_json::Value, String> {
+        let session = self
+            .ready_engine()
+            .await
+            .ok_or_else(|| NOT_READY.to_owned())?
+            .session();
+        chatsvc::Calendar::new(&session)
+            .event_details(event_id, ical_uid)
             .await
             .map_err(|error| error.to_string())
     }

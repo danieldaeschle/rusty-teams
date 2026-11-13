@@ -110,19 +110,23 @@ impl AppState {
                     }
                 }
             }
+            let mut google_error = None;
             match crate::google_calendar_sync::fetch_google_events(&mut accounts, from, to).await {
                 Ok(events) => {
                     let _ = store::save_calendar_accounts(&store, &accounts);
                     combined.extend(events);
                 }
-                Err(error) => crate::diagnostics::record(format!(
-                    "calls: google calendar week not loaded: {error}"
-                )),
+                Err(error) => {
+                    crate::diagnostics::record(format!(
+                        "calls: google calendar week not loaded: {error}"
+                    ));
+                    google_error = Some(error);
+                }
             }
             if combined.is_empty() && outlook_failed && !accounts.has_google() {
                 return Err(CALENDAR_LOAD_FAILURE.to_owned());
             }
-            Ok(chatsvc::merge_calendar_events(combined))
+            Ok((chatsvc::merge_calendar_events(combined), google_error))
         });
         cx.spawn(async move |this, cx| {
             let loaded = receiver
@@ -134,7 +138,19 @@ impl AppState {
                 }
                 state.calendar_week.loading = false;
                 match loaded {
-                    Ok(events) => state.calendar_week.events = events,
+                    Ok((events, google_error)) => {
+                        // Keep detail enrichment (agenda/location/RSVP counts) across week reloads.
+                        let previous = std::mem::take(&mut state.calendar_week.events);
+                        let mut events = events;
+                        retain_peek_details(&previous, &mut events);
+                        state.calendar_week.events = events;
+                        if let Some(error) = google_error {
+                            if !state.google_sync_notice_shown {
+                                state.google_sync_notice_shown = true;
+                                state.raise_notice(error, None, cx);
+                            }
+                        }
+                    }
                     Err(notice) => state.raise_notice(notice, None, cx),
                 }
                 cx.notify();
@@ -142,6 +158,50 @@ impl AppState {
             .ok();
         })
         .detach();
+    }
+}
+
+fn retain_peek_details(previous: &[CalendarEvent], events: &mut [CalendarEvent]) {
+    for event in events {
+        let Some(old) = previous
+            .iter()
+            .find(|candidate| candidate.object_id == event.object_id)
+        else {
+            continue;
+        };
+        if event.body_preview.is_none() {
+            event.body_preview = old.body_preview.clone();
+        }
+        if event.body_html.is_none() {
+            event.body_html = old.body_html.clone();
+        }
+        if event.attendees.is_empty() {
+            event.attendees = old.attendees.clone();
+        }
+        if event.location.is_none() {
+            event.location = old.location.clone();
+        }
+        if event.response_counts.is_none() {
+            event.response_counts = old.response_counts;
+        }
+        if event.series_master_id.is_none() {
+            event.series_master_id = old.series_master_id.clone();
+        }
+        if event.reminders.is_empty() {
+            event.reminders = old.reminders.clone();
+        }
+        if event.source_link.is_none() {
+            event.source_link = old.source_link.clone();
+        }
+        if event.web_link.is_none() {
+            event.web_link = old.web_link.clone();
+        }
+        if event.calendar_name.is_none() {
+            event.calendar_name = old.calendar_name.clone();
+        }
+        if old.series {
+            event.series = true;
+        }
     }
 }
 

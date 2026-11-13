@@ -427,9 +427,16 @@ impl CalendarView {
         let width = 1. / block.lanes as f32;
         let compact = height < 36.;
         let small = height < SMALL_TITLE_HEIGHT;
+        let title_size = if small { 10. } else { 12. };
+        let title_line = if small { 14. } else { 18. };
+        let pad_y = if compact { 1. } else { 4. };
+        // Fill the block: long titles use the free height instead of clamping to 2 lines.
+        let title_lines = (((height - pad_y * 2.) / title_line).floor() as usize).clamp(1, 8);
         let look = event_look(event);
         // Join on the block whenever a Teams link exists (same as detail dialog).
-        let can_join = event.online && !event.cancelled && event.join_url.is_some();
+        // Skip on tiny blocks — the button would crush the title.
+        let can_join =
+            !compact && event.online && !event.cancelled && event.join_url.is_some();
         let open_state = self.state.clone();
         let open_event = event.clone();
         let (menu_state, menu_event) = (self.state.clone(), event.clone());
@@ -471,19 +478,20 @@ impl CalendarView {
                             .pl(px(5.))
                             .pr(px(4.))
                             .h_full()
-                            .py(px(if compact { 1. } else { 4. }))
+                            .py(px(pad_y))
+                            .overflow_hidden()
                             .when(compact, |body| body.justify_center())
                             .child(
                                 div()
-                                    .text_size(px(if small { 10. } else { 12. }))
-                                    .line_height(px(if small { 13. } else { 16. }))
+                                    .text_size(px(title_size))
+                                    .line_height(px(title_line))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(title_color)
                                     .when(compact, |title| title.truncate())
-                                    .when(!compact, |title| title.line_clamp(2))
+                                    .when(!compact, |title| title.line_clamp(title_lines))
                                     .child(event_title(event)),
                             )
-                            .when(!compact, |body| {
+                            .when(!compact && title_lines > 2, |body| {
                                 body.children(event.organizer_name.clone().map(|organizer| {
                                     div()
                                         .text_size(px(12.))
@@ -496,7 +504,7 @@ impl CalendarView {
                     )
                     .when(can_join, |block| {
                         block.child(
-                            div().flex_none().pr(px(4.)).pt(px(3.)).h_full().child(
+                            div().flex_none().pr(px(4.)).pt(px(3.)).child(
                                 Button::new(SharedString::from(format!(
                                     "calendar-join-{}-{}",
                                     event.object_id, day
