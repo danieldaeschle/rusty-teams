@@ -51,7 +51,8 @@ pub fn open_url(cx: &mut App, store: &Store, url: &str) {
     match load(store) {
         ExternalBrowser::System => cx.open_url(url),
         ExternalBrowser::Program(program) => {
-            if launch_program(&program, url).is_err() {
+            let known = available_choices().iter().any(|choice| choice.id == program);
+            if !known || launch_program(&program, url).is_err() {
                 cx.open_url(url);
             }
         }
