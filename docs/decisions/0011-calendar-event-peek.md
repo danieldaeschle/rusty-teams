@@ -21,4 +21,4 @@ Untrusted agenda HTML is sanitized before render (plain Google descriptions are 
 
 - Calendar UX matches Teams chrome without a second navigation stack for every event.
 - List payloads stay light; the peek loads full body and attendees on open.
-- Behaviour stays proposed until the calendar-peek pull request merges; then set status to accepted.
+- Status stays `proposed` until the calendar-peek pull request merges; then set `status` to `accepted`.
