@@ -118,7 +118,11 @@ impl AppState {
                     return;
                 }
             };
-            this.update(cx, |_, cx| cx.open_url(&authorize_url)).ok();
+            this
+                .update(cx, |state, cx| {
+                    crate::external_browser::open_url(cx, &state.store, &authorize_url);
+                })
+                .ok();
             let finished = runtime::spawn(async move {
                 finish_google_connect(oauth, pending, listener, store).await
             });

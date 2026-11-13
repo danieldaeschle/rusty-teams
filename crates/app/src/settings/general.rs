@@ -78,6 +78,7 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
                 })
             }),
         )
+        .children(external_browser_rows(app, cx))
         .child(caption(tr("settings.caption.compose_box")))
         .child(account_select(
             app,
@@ -92,6 +93,68 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
         ))
         .child(caption(tr("settings.caption.translation")))
         .children(translation_rows(app, cx))
+}
+
+fn external_browser_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (app, cx);
+        return Vec::new();
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use crate::external_browser::{self, ExternalBrowser};
+
+        let selected = external_browser::load(&app.read(cx).store);
+        let current_label = external_browser::available_choices()
+            .into_iter()
+            .find(|choice| choice.id == selected.id())
+            .map(|choice| {
+                if external_browser::is_system_id(&choice.id) {
+                    tr("settings.general.external_browser_system")
+                } else {
+                    choice.label
+                }
+            })
+            .unwrap_or_else(|| tr("settings.general.external_browser_system"));
+        let choices: Vec<Choice> = external_browser::available_choices()
+            .into_iter()
+            .map(|choice| {
+                let label = if external_browser::is_system_id(&choice.id) {
+                    tr("settings.general.external_browser_system")
+                } else {
+                    choice.label.clone()
+                };
+                let is_selected = selected.id() == choice.id;
+                let (app, id) = (app.clone(), choice.id);
+                Choice::new(label, is_selected, move |cx| {
+                    app.update(cx, |state, cx| {
+                        let browser = if external_browser::is_system_id(&id) {
+                            ExternalBrowser::System
+                        } else {
+                            ExternalBrowser::Program(id.clone())
+                        };
+                        external_browser::save(&state.store, &browser);
+                        cx.notify();
+                    });
+                })
+            })
+            .collect();
+        vec![
+            caption(tr("settings.caption.browser")).into_any_element(),
+            control_row(
+                tr("settings.general.external_browser"),
+                tr("settings.general.external_browser_detail"),
+                select(
+                    "settings-external-browser",
+                    current_label,
+                    false,
+                    choices,
+                ),
+            )
+            .into_any_element(),
+        ]
+    }
 }
 
 fn translation_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
