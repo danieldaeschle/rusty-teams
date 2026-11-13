@@ -1,7 +1,9 @@
-# ADR 0002: Optional calendars beside Outlook
+---
+status: accepted
+date: 2026-11-11
+---
 
-- Status: accepted
-- Date: 2026-11-11
+# ADR 0002: Optional calendars beside Outlook
 
 ## Context
 

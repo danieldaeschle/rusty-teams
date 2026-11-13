@@ -1,7 +1,9 @@
-# ADR 0006: The mic path matches Teams in the browser
+---
+status: accepted
+date: 2026-11-12
+---
 
-- Status: accepted
-- Date: 2026-11-12
+# ADR 0006: The mic path matches Teams in the browser
 
 ## Context
 

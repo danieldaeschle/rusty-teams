@@ -1,7 +1,9 @@
-# ADR 0008: Product UI is English and German
+---
+status: accepted
+date: 2026-11-12
+---
 
-- Status: accepted
-- Date: 2026-11-12
+# ADR 0008: Product UI is English and German
 
 ## Context
 

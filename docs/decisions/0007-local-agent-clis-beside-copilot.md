@@ -1,7 +1,9 @@
-# ADR 0007: Local agent CLIs sit beside Copilot
+---
+status: accepted
+date: 2026-11-12
+---
 
-- Status: accepted
-- Date: 2026-11-12
+# ADR 0007: Local agent CLIs sit beside Copilot
 
 ## Context
 

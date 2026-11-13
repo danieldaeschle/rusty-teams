@@ -1,7 +1,10 @@
-# ADR NNNN: short title
+---
+status: proposed
+date: YYYY-MM-DD
+superseded-by:
+---
 
-- Status: proposed
-- Date: YYYY-MM-DD
+# ADR NNNN: short title
 
 ## Context
 
@@ -14,7 +17,3 @@ What we will do. One decision per file.
 ## Consequences
 
 What gets easier, what gets harder, and what we are explicitly not doing.
-
-## Superseded by
-
-Leave this out until a later ADR replaces this one. Then set Status to `superseded` and link the replacement, for example `0007-new-title.md`.

@@ -1,7 +1,9 @@
-# ADR 0004: Match Teams behavior, use the OS mechanism
+---
+status: accepted
+date: 2026-11-12
+---
 
-- Status: accepted
-- Date: 2026-11-12
+# ADR 0004: Match Teams behavior, use the OS mechanism
 
 ## Context
 

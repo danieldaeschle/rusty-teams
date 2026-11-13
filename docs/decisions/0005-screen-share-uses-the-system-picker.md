@@ -1,7 +1,9 @@
-# ADR 0005: Screen share uses the system picker where the OS forbids enumeration
+---
+status: accepted
+date: 2026-11-12
+---
 
-- Status: accepted
-- Date: 2026-11-12
+# ADR 0005: Screen share uses the system picker where the OS forbids enumeration
 
 ## Context
 

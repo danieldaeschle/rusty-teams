@@ -7,8 +7,8 @@ Write one when a future contributor would otherwise have to guess. Skip one for 
 ## How to add one
 
 1. Copy `0000-template.md` to `NNNN-short-title.md`. Numbers start at `0001` and only go up.
-2. Status starts as `proposed`. It becomes `accepted` when the pull request that introduces it is merged, unless the discussion says otherwise.
-3. One decision per file. If a later change replaces it, add a new ADR and mark the old one `superseded`. Do not rewrite history in place.
+2. Fill the frontmatter: `status`, `date` (YYYY-MM-DD). `status` starts as `proposed`. It becomes `accepted` when the pull request that introduces it is merged, unless the discussion says otherwise.
+3. One decision per file. If a later change replaces it, add a new ADR and set the old one to `status: superseded` and `superseded-by: NNNN-new-title.md`. Leave `superseded-by` empty or out otherwise. Do not rewrite history in place.
 
 Statuses: `proposed`, `accepted`, `superseded`.
 

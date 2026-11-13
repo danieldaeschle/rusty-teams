@@ -1,7 +1,9 @@
-# ADR 0003: Sign-in through a browser session
+---
+status: accepted
+date: 2026-11-12
+---
 
-- Status: accepted
-- Date: 2026-11-12
+# ADR 0003: Sign-in through a browser session
 
 ## Context
 

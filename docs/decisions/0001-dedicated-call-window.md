@@ -1,7 +1,9 @@
-# ADR 0001: Calls and meetings open in their own window
+---
+status: accepted
+date: 2026-11-11
+---
 
-- Status: accepted
-- Date: 2026-11-11
+# ADR 0001: Calls and meetings open in their own window
 
 ## Context
 
