@@ -2,9 +2,10 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use tokio::sync::{Notify, watch};
+use tokio::sync::{Notify, mpsc, watch};
 
 use crate::backend::BackendEvent;
+use crate::browser_sign_in::BrowserSignInState;
 
 const STARTUP_WAIT: Duration = Duration::from_secs(20);
 const RELAUNCH_WAIT: Duration = Duration::from_secs(5);
@@ -16,9 +17,22 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 
 static LINUX_BROWSER: OnceLock<browser::Browser> = OnceLock::new();
 static LIVE_RETRY: OnceLock<Mutex<Option<Arc<Notify>>>> = OnceLock::new();
+static UI_EVENTS: OnceLock<mpsc::UnboundedSender<BackendEvent>> = OnceLock::new();
 
 fn live_retry_slot() -> &'static Mutex<Option<Arc<Notify>>> {
     LIVE_RETRY.get_or_init(|| Mutex::new(None))
+}
+
+/// Lets the managed-browser supervisor push splash/banner updates into the UI event loop.
+pub fn attach_ui_events(sender: mpsc::UnboundedSender<BackendEvent>) {
+    let _ = UI_EVENTS.set(sender);
+}
+
+fn publish_sign_in(state: BrowserSignInState) {
+    crate::browser_sign_in::set(state.clone());
+    if let Some(sender) = UI_EVENTS.get() {
+        let _ = sender.send(BackendEvent::BrowserSignIn(state));
+    }
 }
 
 pub fn note_backend_event(event: &BackendEvent) {
@@ -26,6 +40,9 @@ pub fn note_backend_event(event: &BackendEvent) {
         && let Ok(mut slot) = live_retry_slot().lock()
     {
         *slot = Some(retry.clone());
+    }
+    if let BackendEvent::Connection(crate::backend::ConnectionState::Online) = event {
+        publish_sign_in(BrowserSignInState::Idle);
     }
 }
 
@@ -104,8 +121,10 @@ async fn hide_after_login(browser: browser::Browser, headless_notify: Arc<Notify
         };
         if tracker.step(status.as_ref(), has_msal_cache) {
             log::info!("Teams sign-in finished: moving Chrome to the background");
+            publish_sign_in(BrowserSignInState::Finishing);
             if let Err(error) = browser.headless().await {
                 log::error!("Failed to switch Chrome to headless: {error}");
+                publish_sign_in(BrowserSignInState::Failed(error.to_string()));
             } else {
                 headless_notify.notify_waiters();
                 trigger_live_retry();
@@ -119,6 +138,7 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
         Ok(browser) => browser,
         Err(error) => {
             log::warn!("Could not detect Chrome/Chromium on system: {error}");
+            publish_sign_in(BrowserSignInState::Failed(error.to_string()));
             return Arc::new(session::CdpTransport::new(endpoint));
         }
     };
@@ -127,15 +147,24 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
     let headless_notify = Arc::new(Notify::new());
     let supervisor_browser = browser.clone();
     let supervisor_notify = headless_notify.clone();
+    publish_sign_in(BrowserSignInState::Opening);
     app_base::runtime::handle().spawn(async move {
         let first_run = !Path::new(&supervisor_browser.config().profile).exists();
         let outcome = if first_run {
+            publish_sign_in(BrowserSignInState::Opening);
             supervisor_browser.login_window().await
         } else {
             supervisor_browser.ensure_running().await
         };
-        if let Err(error) = outcome {
-            log::warn!("browser launch failed: {error}");
+        match &outcome {
+            Ok(()) if supervisor_browser.is_visible_managed() => {
+                publish_sign_in(BrowserSignInState::AwaitingSignIn);
+            }
+            Ok(()) => {}
+            Err(error) => {
+                log::warn!("browser launch failed: {error}");
+                publish_sign_in(BrowserSignInState::Failed(error.to_string()));
+            }
         }
         let _ = init_done_tx.send(true);
         app_base::runtime::handle().spawn(hide_after_login(
@@ -149,9 +178,18 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
         while let Some(event) = watchdog.events.recv().await {
             match event {
                 browser::BrowserEvent::LoginRequired => {
+                    if supervisor_browser.is_visible_managed() {
+                        publish_sign_in(BrowserSignInState::AwaitingSignIn);
+                        continue;
+                    }
                     log::info!("Teams sign-in required: opening browser window");
-                    if let Err(error) = supervisor_browser.login_window().await {
-                        log::error!("Failed to open login window: {error}");
+                    publish_sign_in(BrowserSignInState::Opening);
+                    match supervisor_browser.login_window().await {
+                        Ok(()) => publish_sign_in(BrowserSignInState::AwaitingSignIn),
+                        Err(error) => {
+                            log::error!("Failed to open login window: {error}");
+                            publish_sign_in(BrowserSignInState::Failed(error.to_string()));
+                        }
                     }
                 }
                 browser::BrowserEvent::Hung => {
@@ -162,6 +200,9 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
                 }
                 browser::BrowserEvent::Started | browser::BrowserEvent::Restarted => {
                     log::info!("Chrome browser ready on port");
+                    if supervisor_browser.is_visible_managed() {
+                        publish_sign_in(BrowserSignInState::AwaitingSignIn);
+                    }
                     supervisor_notify.notify_waiters();
                 }
             }

@@ -233,6 +233,9 @@ fn main() {
     );
     let user_input = user_activity::UserInput::new();
     let receiver = (!arguments.demo).then(|| {
+        let (ui_events, ui_receiver) = tokio::sync::mpsc::unbounded_channel();
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        linux_browser::attach_ui_events(ui_events.clone());
         #[cfg(windows)]
         let transport = transport(
             arguments.endpoint.as_deref(),
@@ -242,7 +245,16 @@ fn main() {
         #[cfg(not(windows))]
         let transport = transport(arguments.endpoint.as_deref(), arguments.database.as_deref());
         let activity = user_activity::track(user_input.clone());
-        backend::start(store.clone(), transport, !arguments.read_only, activity)
+        let mut backend_events =
+            backend::start(store.clone(), transport, !arguments.read_only, activity);
+        app_base::runtime::handle().spawn(async move {
+            while let Some(event) = backend_events.recv().await {
+                if ui_events.send(event).is_err() {
+                    break;
+                }
+            }
+        });
+        ui_receiver
     });
 
     let startup_zoom = appearance::load(&store).zoom;

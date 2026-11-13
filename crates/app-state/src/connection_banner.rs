@@ -5,12 +5,11 @@ use gpui_kit::*;
 
 use crate::app_state::AppState;
 use crate::backend::{ConnectionState, LiveState};
+use crate::browser_sign_in::BrowserSignInState;
 
 pub const SHOW_AFTER: Duration = Duration::from_secs(4);
 pub const CONNECTING_SHOW_AFTER: Duration = Duration::from_secs(15);
 pub const MIN_VISIBLE: Duration = Duration::from_secs(3);
-const OFFLINE_TEXT: &str =
-    "Something went wrong while connecting to Teams. Reconnect to keep the conversation going.";
 const DEMO_OFFLINE_VARIABLE: &str = "TEAMS_DEMO_OFFLINE";
 const DEMO_LAST_SYNC_AGO: chrono::Duration = chrono::Duration::minutes(12);
 
@@ -31,7 +30,19 @@ pub struct BannerText {
 }
 
 /// What is wrong right now; `None` while live or while only missed messages are being synced.
-pub fn banner_kind(connection: &ConnectionState, live: LiveState) -> Option<BannerKind> {
+pub fn banner_kind(
+    connection: &ConnectionState,
+    live: LiveState,
+    browser_sign_in: &BrowserSignInState,
+) -> Option<BannerKind> {
+    match browser_sign_in {
+        BrowserSignInState::AwaitingSignIn => return Some(BannerKind::SignIn),
+        BrowserSignInState::Opening | BrowserSignInState::Finishing => {
+            return Some(BannerKind::Connecting);
+        }
+        BrowserSignInState::Failed(_) => return Some(BannerKind::Offline),
+        BrowserSignInState::Idle => {}
+    }
     match connection {
         ConnectionState::Connecting => return Some(BannerKind::Connecting),
         ConnectionState::LoginRequired => return Some(BannerKind::SignIn),
@@ -49,28 +60,30 @@ pub fn banner_kind(connection: &ConnectionState, live: LiveState) -> Option<Bann
 }
 
 pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> BannerText {
-    let text = |text: &str| BannerText {
-        text: text.to_owned(),
+    let text = |key: &str| BannerText {
+        text: app_base::ui_locale::tr(key),
         detail: None,
         retry: false,
     };
     match kind {
-        BannerKind::Connecting => text("Connecting..."),
-        BannerKind::Reconnecting => text("Reconnecting..."),
+        BannerKind::Connecting => text("auth.banner.connecting"),
+        BannerKind::Reconnecting => text("auth.banner.reconnecting"),
         BannerKind::Offline => BannerText {
             detail: last_sync.map(|time| {
-                format!(
-                    "Last synced {}",
-                    time.with_timezone(&Local)
+                app_base::ui_locale::tr("auth.banner.last_synced").replace(
+                    "%{time}",
+                    &time
+                        .with_timezone(&Local)
                         .format(app_base::format::clock_format())
+                        .to_string(),
                 )
             }),
-            ..text(OFFLINE_TEXT)
+            ..text("auth.banner.offline")
         },
-        BannerKind::SignIn => text("Sign-in required. Sign in to Teams in the window that opened."),
+        BannerKind::SignIn => text("auth.banner.sign_in"),
         BannerKind::LiveUnavailable => BannerText {
             retry: true,
-            ..text("Live updates unavailable")
+            ..text("auth.banner.live_unavailable")
         },
     }
 }
@@ -121,6 +134,8 @@ impl BannerTiming {
 fn show_after(kind: BannerKind) -> Duration {
     match kind {
         BannerKind::Connecting => CONNECTING_SHOW_AFTER,
+        // Show immediately while the managed browser window is the next step.
+        BannerKind::SignIn => Duration::ZERO,
         _ => SHOW_AFTER,
     }
 }
@@ -135,7 +150,7 @@ impl AppState {
             }
             offline.then_some(BannerKind::Offline)
         } else {
-            banner_kind(&self.connection, self.live)
+            banner_kind(&self.connection, self.live, &self.browser_sign_in)
         };
         let before = self.connection_banner.visible();
         let recheck = self.connection_banner.update(wanted, Instant::now());
@@ -252,26 +267,35 @@ mod tests {
     #[test]
     fn live_and_missed_messages_need_no_banner() {
         let online = ConnectionState::Online;
-        assert_eq!(banner_kind(&online, LiveState::Live), None);
-        assert_eq!(banner_kind(&online, LiveState::MessageLoss), None);
+        let idle = crate::browser_sign_in::BrowserSignInState::Idle;
+        assert_eq!(banner_kind(&online, LiveState::Live, &idle), None);
+        assert_eq!(banner_kind(&online, LiveState::MessageLoss, &idle), None);
         assert_eq!(
-            banner_kind(&online, LiveState::Failed),
+            banner_kind(&online, LiveState::Failed, &idle),
             Some(BannerKind::LiveUnavailable)
         );
         assert_eq!(
-            banner_kind(&ConnectionState::LoginRequired, LiveState::Live),
+            banner_kind(&ConnectionState::LoginRequired, LiveState::Live, &idle),
             Some(BannerKind::SignIn)
         );
         assert_eq!(
-            banner_kind(&ConnectionState::Failed("x".into()), LiveState::Off),
+            banner_kind(&ConnectionState::Failed("x".into()), LiveState::Off, &idle),
             Some(BannerKind::Offline)
+        );
+        assert_eq!(
+            banner_kind(
+                &ConnectionState::Connecting,
+                LiveState::Off,
+                &crate::browser_sign_in::BrowserSignInState::AwaitingSignIn
+            ),
+            Some(BannerKind::SignIn)
         );
     }
 
     #[test]
     fn the_offline_banner_names_the_last_sync() {
         let text = banner_text(BannerKind::Offline, Some(Utc::now()));
-        assert!(text.detail.unwrap().starts_with("Last synced "));
+        assert!(text.detail.is_some());
         assert!(banner_text(BannerKind::Offline, None).detail.is_none());
         assert!(banner_text(BannerKind::LiveUnavailable, None).retry);
     }

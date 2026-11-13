@@ -874,12 +874,20 @@ impl AppShell {
             let phase = splash::phase(&StartupFacts {
                 elapsed: self.splash.elapsed(),
                 connection: &state.connection,
+                browser_sign_in: &state.browser_sign_in,
                 has_chats: !state.sidebar.chats.is_empty() || !state.sidebar.teams.is_empty(),
                 synced: state.last_sync.is_some(),
                 demo: state.mode.demo,
                 opening,
             });
-            if phase != Phase::Ready && cx.reduce_motion() && !self.splash.recheck_scheduled {
+            // Poll only when the progress bar is not already driving repaints
+            // (idle/stopped bar or reduced motion); otherwise the sweep animation
+            // wakes the splash often enough for BrowserSignIn status updates.
+            let needs_poll = match &phase {
+                Phase::Loading { running, .. } => !*running || cx.reduce_motion(),
+                Phase::Ready => false,
+            };
+            if needs_poll && !self.splash.recheck_scheduled {
                 self.splash.recheck_scheduled = true;
                 cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(splash::STILL_RECHECK).await;

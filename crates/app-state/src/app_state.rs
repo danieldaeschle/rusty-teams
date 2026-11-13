@@ -12,6 +12,7 @@ use teams_core::{
 };
 
 use crate::backend::{BackendEvent, ConnectionState, Engine, LiveState};
+use crate::browser_sign_in::BrowserSignInState;
 use crate::call::{ActiveCall, CallLauncher, CallMedia, MissedCall, Rings};
 use crate::card_state::{CardState, TaskDialogState};
 use crate::data::{self, Directory};
@@ -123,6 +124,7 @@ pub struct AppState {
     pub new_chat: bool,
     pub new_chat_people: Vec<store::MemberRecord>,
     pub connection: ConnectionState,
+    pub browser_sign_in: BrowserSignInState,
     pub live: LiveState,
     pub last_sync: Option<DateTime<Utc>>,
     pub mode: Mode,
@@ -156,6 +158,10 @@ pub struct AppState {
     pub saved: SavedSet,
     pub call_history: Vec<teams_core::CallLogEntry>,
     pub calendar_events: Vec<chatsvc::CalendarEvent>,
+    /// Authorize URL while Google OAuth waits on the loopback redirect.
+    pub google_connect_pending: Option<String>,
+    /// Bumped on cancel so a late loopback result is discarded.
+    pub google_connect_generation: u64,
     pub calendar_nudge: Option<tokio::sync::mpsc::UnboundedSender<()>>,
     pub calls_list: crate::call::CallsList,
     pub speed_dial: Vec<crate::call::SpeedDialEntry>,
@@ -286,6 +292,7 @@ impl AppState {
             } else {
                 ConnectionState::Connecting
             },
+            browser_sign_in: crate::browser_sign_in::current(),
             live: LiveState::Off,
             last_sync: None,
             mode,
@@ -319,6 +326,8 @@ impl AppState {
             saved: SavedSet::default(),
             call_history: Vec::new(),
             calendar_events: Vec::new(),
+            google_connect_pending: None,
+            google_connect_generation: 0,
             calendar_nudge: None,
             calls_list: crate::call::CallsList::default(),
             speed_dial,
@@ -1140,6 +1149,16 @@ impl AppState {
                 self.connection = connection;
                 self.refresh_connection_banner(cx);
                 cx.emit(AppEvent::Status);
+            }
+            BackendEvent::BrowserSignIn(sign_in) => {
+                crate::browser_sign_in::set(sign_in.clone());
+                if sign_in != self.browser_sign_in {
+                    app_base::diagnostics::record(format!("browser_sign_in: {sign_in:?}"));
+                }
+                self.browser_sign_in = sign_in;
+                self.refresh_connection_banner(cx);
+                cx.emit(AppEvent::Status);
+                cx.notify();
             }
             BackendEvent::LiveRetry(retry) => self.live_retry = Some(retry),
             BackendEvent::Calls(launcher) => {

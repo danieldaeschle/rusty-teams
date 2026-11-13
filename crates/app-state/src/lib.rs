@@ -5,6 +5,7 @@ pub mod agents;
 pub mod app_state;
 pub mod backend;
 pub mod banner_image;
+pub mod browser_sign_in;
 pub mod calendar_accounts_actions;
 pub mod call;
 pub mod call_rows;

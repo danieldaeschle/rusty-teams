@@ -227,6 +227,17 @@ mod tests {
     }
 
     #[test]
+    fn ui_locale_auth_banner_and_splash_keys() {
+        let _guard = locale_test_lock();
+        apply_locale("en");
+        assert_eq!(tr("auth.banner.connecting"), "Connecting...");
+        assert_ne!(tr("auth.banner.connecting"), "auth.banner.connecting");
+        apply_locale("de");
+        assert!(tr("auth.banner.connecting").contains("Verbindung"));
+        assert!(tr("auth.splash.awaiting_browser").contains("Browser"));
+    }
+
+    #[test]
     fn ui_locale_tray_keys_resolve() {
         let _guard = locale_test_lock();
         apply_locale("en");

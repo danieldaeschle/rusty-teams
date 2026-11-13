@@ -945,6 +945,62 @@ auth:
   sign_in:
     en: Sign in
     de: Anmelden
+  splash:
+    starting:
+      en: Starting Rusty Teams
+      de: Rusty Teams wird gestartet
+    signing_in:
+      en: Signing in
+      de: Anmeldung läuft
+    opening_browser:
+      en: Opening the browser for sign-in…
+      de: Browser für die Anmeldung wird geöffnet…
+    awaiting_browser:
+      en: Sign in to Teams in the browser window that opened
+      de: Melde dich in dem geöffneten Browserfenster bei Teams an
+    finishing:
+      en: Finishing sign-in…
+      de: Anmeldung wird abgeschlossen…
+    browser_failed:
+      en: Could not open Chrome or Chromium
+      de: Chrome oder Chromium konnte nicht geöffnet werden
+    browser_still_loading_hint:
+      en: The Teams logo in the browser means the login page is still loading
+      de: Das Teams-Logo im Browser heisst, die Anmeldeseite lädt noch
+    first_start_hint:
+      en: First start can take a little longer once
+      de: Der erste Start kann etwas länger dauern
+    loading_chats:
+      en: Loading your chats
+      de: Chats werden geladen
+    syncing:
+      en: Syncing new messages
+      de: Neue Nachrichten werden synchronisiert
+    opening:
+      en: "Opening %{title}"
+      de: "%{title} wird geöffnet"
+    cannot_reach:
+      en: Cannot reach Teams, trying again
+      de: Teams nicht erreichbar, erneuter Versuch
+  banner:
+    connecting:
+      en: Connecting...
+      de: Verbindung wird hergestellt...
+    reconnecting:
+      en: Reconnecting...
+      de: Verbindung wird wiederhergestellt...
+    offline:
+      en: Something went wrong while connecting to Teams. Reconnect to keep the conversation going.
+      de: Beim Verbinden mit Teams ist etwas schiefgelaufen. Stelle die Verbindung wieder her, um weiterzuschreiben.
+    sign_in:
+      en: Sign-in required. Sign in to Teams in the browser window that opened.
+      de: Anmeldung nötig. Melde dich in dem geöffneten Browserfenster bei Teams an.
+    live_unavailable:
+      en: Live updates unavailable
+      de: Live-Updates nicht verfügbar
+    last_synced:
+      en: "Last synced %{time}"
+      de: "Zuletzt synchronisiert %{time}"
 shell:
   settings_and_more:
     en: Settings and more
