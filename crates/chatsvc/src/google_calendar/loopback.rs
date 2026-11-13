@@ -84,7 +84,7 @@ h1{font-size:1.25rem;margin:0 0 .75rem}p{margin:.5rem 0}</style>
 <body>
 <h1>Signed in</h1>
 <p>You can close this window and return to Rusty Teams.</p>
-<p lang="de">Angemeldet. Sie können dieses Fenster schliessen und zu Rusty Teams zurückkehren.</p>
+<p lang="de">Angemeldet. Sie können dieses Fenster schließen und zu Rusty Teams zurückkehren.</p>
 </body>
 </html>"#;
 
@@ -97,7 +97,7 @@ h1{font-size:1.25rem;margin:0 0 .75rem}p{margin:.5rem 0}</style>
 <body>
 <h1>Sign-in did not finish</h1>
 <p>You can close this window and try again in Rusty Teams.</p>
-<p lang="de">Die Anmeldung ist nicht abgeschlossen. Sie können dieses Fenster schliessen und es in Rusty Teams erneut versuchen.</p>
+<p lang="de">Die Anmeldung ist nicht abgeschlossen. Sie können dieses Fenster schließen und es in Rusty Teams erneut versuchen.</p>
 </body>
 </html>"#;
 

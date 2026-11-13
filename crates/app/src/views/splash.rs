@@ -66,8 +66,8 @@ pub fn phase(facts: &StartupFacts) -> Phase {
     if facts.elapsed >= GIVE_UP_AFTER && !(signing_in && !content_ready) {
         return Phase::Ready;
     }
-    let late_hint = (facts.elapsed >= HINT_AFTER && !content_ready)
-        .then(|| tr("auth.splash.first_start_hint"));
+    let late_hint =
+        (facts.elapsed >= HINT_AFTER && !content_ready).then(|| tr("auth.splash.first_start_hint"));
     let loading = |status: String| Phase::Loading {
         status,
         running: true,
@@ -97,8 +97,8 @@ pub fn phase(facts: &StartupFacts) -> Phase {
 }
 
 fn browser_phase(facts: &StartupFacts) -> Option<Phase> {
-    let late_browser_hint = (facts.elapsed >= HINT_AFTER)
-        .then(|| tr("auth.splash.browser_still_loading_hint"));
+    let late_browser_hint =
+        (facts.elapsed >= HINT_AFTER).then(|| tr("auth.splash.browser_still_loading_hint"));
     match facts.browser_sign_in {
         BrowserSignInState::Idle => None,
         BrowserSignInState::Opening => Some(Phase::Loading {
@@ -336,7 +336,7 @@ mod tests {
             has_chats: true,
             ..facts(100, &online)
         };
-        assert!(status(phase(&warm)).contains("Rusty Teams") || !status(phase(&warm)).is_empty());
+        assert_translated(&status(phase(&warm)));
         let warm = StartupFacts {
             has_chats: true,
             ..facts(450, &online)
@@ -395,8 +395,9 @@ mod tests {
     fn browser_awaiting_sign_in_stops_the_bar() {
         let connecting = ConnectionState::Connecting;
         let awaiting = BrowserSignInState::AwaitingSignIn;
-        let Phase::Loading { running, status, .. } =
-            phase(&facts_with(2_000, &connecting, &awaiting))
+        let Phase::Loading {
+            running, status, ..
+        } = phase(&facts_with(2_000, &connecting, &awaiting))
         else {
             panic!("still loading")
         };
@@ -408,8 +409,9 @@ mod tests {
     fn browser_opening_keeps_the_bar_running() {
         let connecting = ConnectionState::Connecting;
         let opening = BrowserSignInState::Opening;
-        let Phase::Loading { running, status, .. } =
-            phase(&facts_with(2_000, &connecting, &opening))
+        let Phase::Loading {
+            running, status, ..
+        } = phase(&facts_with(2_000, &connecting, &opening))
         else {
             panic!("still loading")
         };
@@ -425,7 +427,10 @@ mod tests {
             has_chats: true,
             ..facts_with(450, &online, &awaiting)
         };
-        let Phase::Loading { running, status, .. } = phase(&warm) else {
+        let Phase::Loading {
+            running, status, ..
+        } = phase(&warm)
+        else {
             panic!("managed browser must keep splash over warm cache")
         };
         assert!(!running);

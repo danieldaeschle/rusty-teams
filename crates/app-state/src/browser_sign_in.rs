@@ -26,10 +26,7 @@ fn slot() -> &'static Mutex<BrowserSignInState> {
 }
 
 pub fn current() -> BrowserSignInState {
-    slot()
-        .lock()
-        .map(|guard| guard.clone())
-        .unwrap_or_default()
+    slot().lock().map(|guard| guard.clone()).unwrap_or_default()
 }
 
 pub fn set(state: BrowserSignInState) {

@@ -44,11 +44,7 @@ fn open_sink() -> Result<rodio::MixerDeviceSink, String> {
             .into_iter()
             .flatten()
             .find(|device| {
-                let id = device
-                    .id()
-                    .ok()
-                    .map(|id| id.1)
-                    .unwrap_or_default();
+                let id = device.id().ok().map(|id| id.1).unwrap_or_default();
                 let name = device
                     .description()
                     .ok()
@@ -57,7 +53,8 @@ fn open_sink() -> Result<rodio::MixerDeviceSink, String> {
                 device_matches_key(&id, &name, key)
             })
         {
-            match rodio::DeviceSinkBuilder::from_device(device).and_then(|builder| builder.open_stream())
+            match rodio::DeviceSinkBuilder::from_device(device)
+                .and_then(|builder| builder.open_stream())
             {
                 Ok(sink) => return Ok(sink),
                 Err(error) => crate::diagnostics::record(format!(
@@ -132,15 +129,27 @@ mod tests {
 
     #[test]
     fn call_output_keys_match_cpal_ids_and_friendly_names() {
-        assert!(device_matches_key("sink-a", "Front Speakers", "Front Speakers"));
+        assert!(device_matches_key(
+            "sink-a",
+            "Front Speakers",
+            "Front Speakers"
+        ));
         assert!(device_matches_key("sink-a", "Front Speakers", "sink-a"));
-        assert!(device_matches_key("sink-a", "Front Speakers", "front speakers"));
+        assert!(device_matches_key(
+            "sink-a",
+            "Front Speakers",
+            "front speakers"
+        ));
         assert!(device_matches_key(
             "alsa_output.pci-0000_00_1f.3.analog-stereo",
             "Built-in Audio Analog Stereo",
             "alsa_output.pci-0000_00_1f.3.analog-stereo"
         ));
-        assert!(!device_matches_key("sink-a", "Front Speakers", "Headphones"));
+        assert!(!device_matches_key(
+            "sink-a",
+            "Front Speakers",
+            "Headphones"
+        ));
         assert!(!device_matches_key("id", "Speaker", ""));
     }
 

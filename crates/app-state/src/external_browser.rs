@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::LazyLock;
 
 use gpui_kit::App;
 use store::Store;
@@ -51,7 +52,9 @@ pub fn open_url(cx: &mut App, store: &Store, url: &str) {
     match load(store) {
         ExternalBrowser::System => cx.open_url(url),
         ExternalBrowser::Program(program) => {
-            let known = available_choices().iter().any(|choice| choice.id == program);
+            let known = available_choices()
+                .iter()
+                .any(|choice| choice.id == program);
             if !known || launch_program(&program, url).is_err() {
                 cx.open_url(url);
             }
@@ -76,7 +79,13 @@ fn looks_like_app_name(program: &str) -> bool {
     !program.contains('/') && program.chars().any(|c| c.is_uppercase() || c == ' ')
 }
 
-pub fn available_choices() -> Vec<BrowserChoice> {
+static CHOICES: LazyLock<Vec<BrowserChoice>> = LazyLock::new(discover_choices);
+
+pub fn available_choices() -> &'static [BrowserChoice] {
+    &CHOICES
+}
+
+fn discover_choices() -> Vec<BrowserChoice> {
     let mut choices = vec![BrowserChoice {
         id: SYSTEM_VALUE.to_owned(),
         label: SYSTEM_VALUE.to_owned(),

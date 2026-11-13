@@ -107,18 +107,18 @@ fn external_browser_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
 
         let selected = external_browser::load(&app.read(cx).store);
         let current_label = external_browser::available_choices()
-            .into_iter()
+            .iter()
             .find(|choice| choice.id == selected.id())
             .map(|choice| {
                 if external_browser::is_system_id(&choice.id) {
                     tr("settings.general.external_browser_system")
                 } else {
-                    choice.label
+                    choice.label.clone()
                 }
             })
             .unwrap_or_else(|| tr("settings.general.external_browser_system"));
         let choices: Vec<Choice> = external_browser::available_choices()
-            .into_iter()
+            .iter()
             .map(|choice| {
                 let label = if external_browser::is_system_id(&choice.id) {
                     tr("settings.general.external_browser_system")
@@ -126,7 +126,7 @@ fn external_browser_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
                     choice.label.clone()
                 };
                 let is_selected = selected.id() == choice.id;
-                let (app, id) = (app.clone(), choice.id);
+                let (app, id) = (app.clone(), choice.id.clone());
                 Choice::new(label, is_selected, move |cx| {
                     app.update(cx, |state, cx| {
                         let browser = if external_browser::is_system_id(&id) {
@@ -145,12 +145,7 @@ fn external_browser_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
             control_row(
                 tr("settings.general.external_browser"),
                 tr("settings.general.external_browser_detail"),
-                select(
-                    "settings-external-browser",
-                    current_label,
-                    false,
-                    choices,
-                ),
+                select("settings-external-browser", current_label, false, choices),
             )
             .into_any_element(),
         ]

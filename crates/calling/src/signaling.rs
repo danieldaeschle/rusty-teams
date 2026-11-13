@@ -1654,7 +1654,10 @@ mod tests {
     fn signaling_failure_detail_keeps_status_and_a_short_body() {
         let detail = signaling_failure_detail(400, &"x".repeat(300));
         assert!(detail.starts_with("HTTP 400 "));
-        assert_eq!(detail.chars().count(), "HTTP 400 ".chars().count() + FAILURE_BODY_CHARS);
+        assert_eq!(
+            detail.chars().count(),
+            "HTTP 400 ".chars().count() + FAILURE_BODY_CHARS
+        );
     }
 
     #[test]

@@ -126,7 +126,11 @@ pub fn create_one_to_one_request(region: &str, member_mris: &[String]) -> Reques
 }
 
 fn created_thread_id(body: &Value) -> Option<String> {
-    if let Some(id) = body.get("id").and_then(Value::as_str).filter(|id| id.starts_with("19:")) {
+    if let Some(id) = body
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| id.starts_with("19:"))
+    {
         return Some(id.to_owned());
     }
     if let Some(id) = body
@@ -229,8 +233,7 @@ impl<T: MessageTransport> ThreadMembers<T> {
         created_thread_id(&answer.body).ok_or_else(|| {
             Error::UnexpectedAnswer(format!(
                 "thread creation has no location (HTTP {} {})",
-                answer.status,
-                answer.body
+                answer.status, answer.body
             ))
         })
     }

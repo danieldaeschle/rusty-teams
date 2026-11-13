@@ -158,10 +158,6 @@ pub struct AppState {
     pub saved: SavedSet,
     pub call_history: Vec<teams_core::CallLogEntry>,
     pub calendar_events: Vec<chatsvc::CalendarEvent>,
-    /// Authorize URL while Google OAuth waits on the loopback redirect.
-    pub google_connect_pending: Option<String>,
-    /// Bumped on cancel so a late loopback result is discarded.
-    pub google_connect_generation: u64,
     pub calendar_nudge: Option<tokio::sync::mpsc::UnboundedSender<()>>,
     pub calls_list: crate::call::CallsList,
     pub speed_dial: Vec<crate::call::SpeedDialEntry>,
@@ -326,8 +322,6 @@ impl AppState {
             saved: SavedSet::default(),
             call_history: Vec::new(),
             calendar_events: Vec::new(),
-            google_connect_pending: None,
-            google_connect_generation: 0,
             calendar_nudge: None,
             calls_list: crate::call::CallsList::default(),
             speed_dial,

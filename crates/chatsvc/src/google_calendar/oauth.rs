@@ -220,8 +220,8 @@ mod tests {
 
     #[test]
     fn resolve_falls_back_to_compile_when_runtime_empty() {
-        let oauth = resolve_oauth(Some("  "), None, Some("compile-id"), Some("compile-secret"))
-            .unwrap();
+        let oauth =
+            resolve_oauth(Some("  "), None, Some("compile-id"), Some("compile-secret")).unwrap();
         assert_eq!(oauth.client_id, "compile-id");
         assert_eq!(oauth.client_secret, "compile-secret");
     }

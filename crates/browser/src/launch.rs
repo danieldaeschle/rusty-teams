@@ -100,14 +100,16 @@ fn is_app_emoji_fontconfig(value: &std::ffi::OsStr) -> bool {
 }
 
 fn strip_app_fontconfig(command: &mut Command) {
-    for key in ["FONTCONFIG_FILE", "FONTCONFIG_PATH"] {
-        let Some(value) = std::env::var_os(key) else {
-            continue;
-        };
-        if is_app_emoji_fontconfig(&value) {
-            command.env_remove(key);
-        }
+    for key in app_fontconfig_keys(|key| std::env::var_os(key)) {
+        command.env_remove(key);
     }
+}
+
+fn app_fontconfig_keys(lookup: impl Fn(&str) -> Option<std::ffi::OsString>) -> Vec<&'static str> {
+    ["FONTCONFIG_FILE", "FONTCONFIG_PATH"]
+        .into_iter()
+        .filter(|key| lookup(key).is_some_and(|value| is_app_emoji_fontconfig(&value)))
+        .collect()
 }
 
 fn chrome_major(platform: Platform, executable: &Path) -> u32 {
@@ -115,13 +117,9 @@ fn chrome_major(platform: Platform, executable: &Path) -> u32 {
         Platform::Linux | Platform::Macos => {
             let mut command = Command::new(executable);
             strip_app_fontconfig(&mut command);
-            command
-                .arg("--version")
-                .output()
-                .ok()
-                .and_then(|output| {
-                    major_from_version_output(&String::from_utf8_lossy(&output.stdout))
-                })
+            command.arg("--version").output().ok().and_then(|output| {
+                major_from_version_output(&String::from_utf8_lossy(&output.stdout))
+            })
         }
         Platform::Windows | Platform::Wsl => executable
             .parent()
@@ -287,36 +285,12 @@ mod tests {
 
     #[test]
     fn chrome_drops_only_app_emoji_fontconfig() {
-        assert!(is_app_emoji_fontconfig(std::ffi::OsStr::new(
-            "/tmp/cache/fontconfig-emoji/fonts.conf"
-        )));
-        assert!(!is_app_emoji_fontconfig(std::ffi::OsStr::new(
-            "/etc/fonts/fonts.conf"
-        )));
-
-        let previous_file = std::env::var_os("FONTCONFIG_FILE");
-        let previous_path = std::env::var_os("FONTCONFIG_PATH");
-        // SAFETY: test-only env mutation around a synchronous strip call.
-        unsafe {
-            std::env::set_var(
-                "FONTCONFIG_FILE",
-                "/tmp/cache/fontconfig-emoji/fonts.conf",
-            );
-            std::env::set_var("FONTCONFIG_PATH", "/etc/fonts");
-        }
-        let mut command = Command::new("true");
-        strip_app_fontconfig(&mut command);
-        // App marker path is removed; user FONTCONFIG_PATH is left alone.
-        let _ = command;
-        unsafe {
-            match previous_file {
-                Some(value) => std::env::set_var("FONTCONFIG_FILE", value),
-                None => std::env::remove_var("FONTCONFIG_FILE"),
-            }
-            match previous_path {
-                Some(value) => std::env::set_var("FONTCONFIG_PATH", value),
-                None => std::env::remove_var("FONTCONFIG_PATH"),
-            }
-        }
+        let keys = app_fontconfig_keys(|key| match key {
+            "FONTCONFIG_FILE" => Some("/tmp/cache/fontconfig-emoji/fonts.conf".into()),
+            "FONTCONFIG_PATH" => Some("/etc/fonts".into()),
+            _ => None,
+        });
+        assert_eq!(keys, vec!["FONTCONFIG_FILE"]);
+        assert!(app_fontconfig_keys(|_| None).is_empty());
     }
 }

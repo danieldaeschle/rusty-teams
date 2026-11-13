@@ -147,7 +147,6 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
     let headless_notify = Arc::new(Notify::new());
     let supervisor_browser = browser.clone();
     let supervisor_notify = headless_notify.clone();
-    publish_sign_in(BrowserSignInState::Opening);
     app_base::runtime::handle().spawn(async move {
         let first_run = !Path::new(&supervisor_browser.config().profile).exists();
         let outcome = if first_run {
