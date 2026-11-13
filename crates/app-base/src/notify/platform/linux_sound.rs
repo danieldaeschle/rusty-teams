@@ -1,4 +1,4 @@
-//! Linux notification and ringtone playback through the system audio output.
+//! Linux and macOS notification and ringtone playback through the system audio output.
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,27 +14,60 @@ pub fn set_sound_output(device_key: Option<String>) {
     *SOUND_OUTPUT.lock().unwrap_or_else(|p| p.into_inner()) = device_key;
 }
 
+/// True when a call-output key names this cpal device (id, friendly name, or Pulse-style id).
+pub(crate) fn device_matches_key(device_id: &str, device_name: &str, key: &str) -> bool {
+    let key = key.trim();
+    if key.is_empty() {
+        return false;
+    }
+    if device_id == key || device_name == key {
+        return true;
+    }
+    let key_lower = key.to_ascii_lowercase();
+    let id_lower = device_id.to_ascii_lowercase();
+    let name_lower = device_name.to_ascii_lowercase();
+    id_lower == key_lower
+        || name_lower == key_lower
+        || (!key_lower.contains(' ') && id_lower.contains(&key_lower))
+        || (key_lower.len() >= 4 && name_lower.contains(&key_lower))
+}
+
 fn open_sink() -> Result<rodio::MixerDeviceSink, String> {
     let chosen = SOUND_OUTPUT
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .clone();
-    let device = chosen.and_then(|key| {
-        rodio::cpal::default_host()
+    if let Some(key) = chosen.as_ref() {
+        if let Some(device) = rodio::cpal::default_host()
             .output_devices()
-            .ok()?
+            .ok()
+            .into_iter()
+            .flatten()
             .find(|device| {
-                device.id().is_ok_and(|id| id.1 == key)
-                    || device
-                        .description()
-                        .is_ok_and(|description| description.name() == key)
+                let id = device
+                    .id()
+                    .ok()
+                    .map(|id| id.1)
+                    .unwrap_or_default();
+                let name = device
+                    .description()
+                    .ok()
+                    .map(|description| description.name().to_owned())
+                    .unwrap_or_default();
+                device_matches_key(&id, &name, key)
             })
-    });
-    if let Some(device) = device {
-        if let Ok(sink) =
-            rodio::DeviceSinkBuilder::from_device(device).and_then(|builder| builder.open_stream())
         {
-            return Ok(sink);
+            match rodio::DeviceSinkBuilder::from_device(device).and_then(|builder| builder.open_stream())
+            {
+                Ok(sink) => return Ok(sink),
+                Err(error) => crate::diagnostics::record(format!(
+                    "sound: selected output {key:?} failed ({error}), using system default"
+                )),
+            }
+        } else {
+            crate::diagnostics::record(format!(
+                "sound: selected output {key:?} not found, using system default"
+            ));
         }
     }
     rodio::DeviceSinkBuilder::open_default_sink()
@@ -95,6 +128,20 @@ mod tests {
     #[test]
     fn cancelled_playback_does_not_open_a_device_or_decode_audio() {
         assert!(play(Vec::new(), true, Arc::new(AtomicBool::new(true))).is_ok());
+    }
+
+    #[test]
+    fn call_output_keys_match_cpal_ids_and_friendly_names() {
+        assert!(device_matches_key("sink-a", "Front Speakers", "Front Speakers"));
+        assert!(device_matches_key("sink-a", "Front Speakers", "sink-a"));
+        assert!(device_matches_key("sink-a", "Front Speakers", "front speakers"));
+        assert!(device_matches_key(
+            "alsa_output.pci-0000_00_1f.3.analog-stereo",
+            "Built-in Audio Analog Stereo",
+            "alsa_output.pci-0000_00_1f.3.analog-stereo"
+        ));
+        assert!(!device_matches_key("sink-a", "Front Speakers", "Headphones"));
+        assert!(!device_matches_key("id", "Speaker", ""));
     }
 
     #[test]

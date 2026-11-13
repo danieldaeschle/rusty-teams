@@ -53,11 +53,11 @@ use crate::notices::{
     CAMERA_SETTING_FAILED_NOTICE, CAMERA_START_NOTICE, CAPTION_LANGUAGE_FAILED_NOTICE,
     CAPTIONS_JOIN_FAILED_NOTICE, CAPTIONS_START_FAILED_NOTICE, CHANGE_ROLE_FAILED_NOTICE,
     CHANGE_RUNNING_NOTICE, CONFIRM_RECORDING_FAILED_NOTICE, CONSENT_FIRST_NOTICE,
-    DENY_FAILED_NOTICE, HOLD_CHANGE_FAILED_NOTICE, HOLD_FAILED_NOTICE, INVITE_PERSON_FAILED_NOTICE,
-    LOWER_ALL_HANDS_FAILED_NOTICE, LOWER_HAND_FAILED_NOTICE, LOWER_THAT_HAND_FAILED_NOTICE,
-    MEETING_LOCK_FAILED_NOTICE, MIC_SETTING_FAILED_NOTICE, MUTE_ALL_FAILED_NOTICE,
-    MUTE_PARTICIPANT_FAILED_NOTICE, NOT_CONNECTED_FOR_VIDEO, ON_HOLD_NOTICE,
-    RAISE_HAND_FAILED_NOTICE, REACTION_FAILED_NOTICE, RECORDING_JOIN_FAILED_NOTICE,
+    DENY_FAILED_NOTICE, ECHO_TEST_FAILED_NOTICE, HOLD_CHANGE_FAILED_NOTICE, HOLD_FAILED_NOTICE,
+    INVITE_PERSON_FAILED_NOTICE, LOWER_ALL_HANDS_FAILED_NOTICE, LOWER_HAND_FAILED_NOTICE,
+    LOWER_THAT_HAND_FAILED_NOTICE, MEETING_LOCK_FAILED_NOTICE, MIC_SETTING_FAILED_NOTICE,
+    MUTE_ALL_FAILED_NOTICE, MUTE_PARTICIPANT_FAILED_NOTICE, NOT_CONNECTED_FOR_VIDEO,
+    ON_HOLD_NOTICE, RAISE_HAND_FAILED_NOTICE, REACTION_FAILED_NOTICE, RECORDING_JOIN_FAILED_NOTICE,
     RECORDING_NOT_STARTED_NOTICE, RECORDING_START_FAILED_NOTICE, RECORDING_STOP_FAILED_NOTICE,
     REMOVE_PARTICIPANT_FAILED_NOTICE, RESUME_FAILED_NOTICE, SHARE_QUEUED_NOTICE,
     SHARE_REFUSED_NOTICE, SHARING_START_NOTICE, SPOTLIGHT_FAILED_NOTICE,
@@ -84,7 +84,7 @@ use crate::send_control::{RequestFilter, parse_request};
 use crate::signaling::{
     Answer, Attached, Callee, Conversation, Invitation, InviteTarget, LeaveReason, MeetingTarget,
     NegotiationFailure, Participant, Signaling, TenantRouting, chat_thread_id,
-    escalation_answer_body, find_echo_bot_thread, one_to_one_thread, renegotiation_body,
+    ensure_echo_bot_thread, escalation_answer_body, one_to_one_thread, renegotiation_body,
 };
 use crate::software_audio::{SoftwareAudio, SoftwareAudioPlan};
 use crate::state::{CallSignal, CallState};
@@ -963,16 +963,13 @@ async fn drive(
 
     let thread_id = if matches!(spec, Some(CallSpec::Echo)) {
         let thread_id = control
-            .until_hangup(find_echo_bot_thread(
+            .until_hangup(ensure_echo_bot_thread(
                 &inner.session,
                 &inner.identity.object_id,
             ))
             .await??;
-        timeline.record(
-            "echo bot chat",
-            if thread_id.is_some() { "found" } else { "none" },
-        );
-        thread_id
+        timeline.record("echo bot chat", thread_id.clone());
+        Some(thread_id)
     } else {
         None
     };
@@ -1150,8 +1147,11 @@ async fn drive(
                 }
                 _ => setup_step(control, signaling.create_conversation(&invitation)).await?,
             };
-            if spec.is_people() {
+            // People and the Echo test call share outgoing ringback while connecting.
+            if spec.is_people() || matches!(spec, CallSpec::Echo) {
                 control.send(CallUpdate::Progress(Progress::Calling));
+            }
+            if spec.is_people() {
                 if threadless {
                     outgoing_limit = DIRECT_OUTGOING_TIMEOUT;
                 }
@@ -1406,6 +1406,8 @@ async fn drive(
     let mut deferred_changes: Vec<Change> = Vec::new();
     let mut remote_direct_share: Option<String> = None;
     let mut sent_replacement: Option<Replacement> = None;
+    let (echo_add_tx, mut echo_add_rx) = mpsc::unbounded_channel::<Result<()>>();
+    let mut echo_add_pending = false;
     loop {
         if start_camera_pending && video_possible(remote_set, layout, negotiator.path()) {
             start_camera_pending = false;
@@ -1555,11 +1557,34 @@ async fn drive(
                                 let remote = remote.clone();
                                 let links = links.clone();
                                 let thread_id = echo_thread.clone();
+                                let echo_add_tx = echo_add_tx.clone();
+                                if is_echo {
+                                    echo_add_pending = true;
+                                }
                                 tokio::spawn(async move {
                                     if is_echo {
-                                        let _ = remote.signaling.add_echo_bot(&remote.conversation, &remote.participant, thread_id.as_deref(), &links).await;
+                                        let result = remote
+                                            .signaling
+                                            .add_echo_bot(
+                                                &remote.conversation,
+                                                &remote.participant,
+                                                thread_id.as_deref(),
+                                                &links,
+                                            )
+                                            .await;
+                                        let ok = result.is_ok();
+                                        let _ = echo_add_tx.send(result);
+                                        if !ok {
+                                            return;
+                                        }
                                     }
-                                    let _ = remote.signaling.update_endpoint_metadata(&remote.conversation, &remote.participant).await;
+                                    let _ = remote
+                                        .signaling
+                                        .update_endpoint_metadata(
+                                            &remote.conversation,
+                                            &remote.participant,
+                                        )
+                                        .await;
                                 });
                             }
                             MediaAction::Escalate => {
@@ -2050,6 +2075,16 @@ async fn drive(
                     Err(error) => {
                         timeline.record("callback not understood", error.to_string());
                     }
+                }
+            }
+            Some(result) = echo_add_rx.recv(), if echo_add_pending => {
+                echo_add_pending = false;
+                if let Err(error) = result {
+                    timeline.record("echo bot add failed", error.to_string());
+                    control.send(CallUpdate::Notice(ECHO_TEST_FAILED_NOTICE.into()));
+                    live.cancel_leave = true;
+                    advance(state, CallSignal::RemoteEnd(EndKind::Unavailable), control);
+                    break;
                 }
             }
             Some(event) = current.events.recv() => match event {
