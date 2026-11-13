@@ -8,9 +8,10 @@
 //! emoji file out. An existing `FONTCONFIG_FILE` is left alone.
 //!
 //! This `FONTCONFIG_FILE` is for the app process only. Chrome must not
-//! inherit it (`browser::launch` strips `FONTCONFIG_FILE` /
-//! `FONTCONFIG_PATH` on spawn) — the dirs-only conf breaks Segoe/Arial
-//! fallback on the Microsoft login page.
+//! inherit the app-generated `fontconfig-emoji` conf (`browser::launch`
+//! strips that path on spawn) — the dirs-only file breaks Segoe/Arial
+//! fallback on the Microsoft login page. A user-provided
+//! `FONTCONFIG_FILE` is left alone for both the app and Chrome.
 
 use std::collections::HashSet;
 use std::fs;

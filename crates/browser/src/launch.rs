@@ -88,14 +88,25 @@ pub(crate) fn major_from_version_output(output: &str) -> Option<u32> {
 
 const FALLBACK_MAJOR: u32 = 150;
 
-/// Env the app sets for GPUI emoji font filtering. Chrome must use the system
-/// fontconfig again — the GPUI file is dirs-only and breaks Segoe/Arial fallback
-/// (Orbitron, Font Awesome, … on the Microsoft login page).
-const APP_ONLY_FONTCONFIG_VARS: &[&str] = &["FONTCONFIG_FILE", "FONTCONFIG_PATH"];
+/// Marker directory used by `app_base::linux_fonts::hide_system_color_emoji`.
+/// Only that app-generated conf must be cleared for Chrome; a user-provided
+/// `FONTCONFIG_FILE` / `FONTCONFIG_PATH` stays inherited.
+const APP_EMOJI_FONTCONFIG_MARKER: &str = "fontconfig-emoji";
+
+fn is_app_emoji_fontconfig(value: &std::ffi::OsStr) -> bool {
+    std::path::Path::new(value)
+        .components()
+        .any(|component| component.as_os_str() == APP_EMOJI_FONTCONFIG_MARKER)
+}
 
 fn strip_app_fontconfig(command: &mut Command) {
-    for key in APP_ONLY_FONTCONFIG_VARS {
-        command.env_remove(*key);
+    for key in ["FONTCONFIG_FILE", "FONTCONFIG_PATH"] {
+        let Some(value) = std::env::var_os(key) else {
+            continue;
+        };
+        if is_app_emoji_fontconfig(&value) {
+            command.env_remove(key);
+        }
     }
 }
 
@@ -275,14 +286,37 @@ mod tests {
     }
 
     #[test]
-    fn chrome_drops_gpui_fontconfig_env() {
-        assert!(APP_ONLY_FONTCONFIG_VARS.contains(&"FONTCONFIG_FILE"));
-        assert!(APP_ONLY_FONTCONFIG_VARS.contains(&"FONTCONFIG_PATH"));
+    fn chrome_drops_only_app_emoji_fontconfig() {
+        assert!(is_app_emoji_fontconfig(std::ffi::OsStr::new(
+            "/tmp/cache/fontconfig-emoji/fonts.conf"
+        )));
+        assert!(!is_app_emoji_fontconfig(std::ffi::OsStr::new(
+            "/etc/fonts/fonts.conf"
+        )));
+
+        let previous_file = std::env::var_os("FONTCONFIG_FILE");
+        let previous_path = std::env::var_os("FONTCONFIG_PATH");
+        // SAFETY: test-only env mutation around a synchronous strip call.
+        unsafe {
+            std::env::set_var(
+                "FONTCONFIG_FILE",
+                "/tmp/cache/fontconfig-emoji/fonts.conf",
+            );
+            std::env::set_var("FONTCONFIG_PATH", "/etc/fonts");
+        }
         let mut command = Command::new("true");
-        command.env("FONTCONFIG_FILE", "/tmp/gpui-fonts.conf");
-        command.env("FONTCONFIG_PATH", "/tmp/gpui-fontconfig");
         strip_app_fontconfig(&mut command);
-        // env_remove is applied; child would not see the GPUI-only vars.
+        // App marker path is removed; user FONTCONFIG_PATH is left alone.
         let _ = command;
+        unsafe {
+            match previous_file {
+                Some(value) => std::env::set_var("FONTCONFIG_FILE", value),
+                None => std::env::remove_var("FONTCONFIG_FILE"),
+            }
+            match previous_path {
+                Some(value) => std::env::set_var("FONTCONFIG_PATH", value),
+                None => std::env::remove_var("FONTCONFIG_PATH"),
+            }
+        }
     }
 }
