@@ -2,29 +2,30 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 84 %** (93 done, 19 partial, 10 missing of 122). Partial counts half.
+**Parity: 87 %** (103 done, 21 partial, 6 missing of 130). Partial counts half.
 
 ## By area
 
 | Area | Parity | Done | Partial | Missing |
 |---|---|---|---|---|
-| [Sign-in and app](#sign-in-and-app) | 92 % | 5 | 1 | 0 |
+| [Sign-in and app](#sign-in-and-app) | 100 % | 7 | 0 | 0 |
 | [Chat list](#chat-list) | 100 % | 10 | 0 | 0 |
-| [Reading](#reading) | 95 % | 18 | 0 | 1 |
-| [Writing](#writing) | 100 % | 14 | 0 | 0 |
+| [Reading](#reading) | 98 % | 19 | 1 | 0 |
+| [Writing](#writing) | 100 % | 15 | 0 | 0 |
 | [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
 | [Channels](#channels) | 100 % | 7 | 0 | 0 |
-| [Notifications](#notifications) | 89 % | 8 | 0 | 1 |
-| [Search and navigation](#search-and-navigation) | 92 % | 5 | 1 | 0 |
+| [Notifications](#notifications) | 94 % | 8 | 1 | 0 |
+| [Search and navigation](#search-and-navigation) | 100 % | 6 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
-| [Look and settings](#look-and-settings) | 50 % | 2 | 0 | 2 |
-| [Calls and meetings](#calls-and-meetings) | 62 % | 15 | 18 | 6 |
+| [Look and settings](#look-and-settings) | 100 % | 5 | 0 | 0 |
+| [Calls and meetings](#calls-and-meetings) | 63 % | 17 | 19 | 6 |
 
 ## Next
 
 | # | Feature | Note |
 |---|---|---|
-| 1 | Sign in on Linux without Chrome on a debug port |  |
+| 1 | Desktop toasts on Linux | Sounds are in, toasts are not |
+| 2 | Incoming and 1:1 calls with a second person | Built, not yet rung live |
 
 ## Sign-in and app
 
@@ -36,6 +37,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Tray icon, close to tray | Done |  |
 | Sign in on Linux without starting Chrome by hand | Done | The app starts Chrome or Chromium headless with its own profile, shows the window for the login and hides it again afterwards; a watchdog restarts a dead or hung Chrome |
 | Single instance, second start brings the window to front | Done |  |
+| Sign in on macOS without starting Chrome by hand | Done | Same managed Chrome as on Linux, profile in Application Support |
 
 ## Chat list
 
@@ -73,7 +75,8 @@ Feature parity with the Microsoft Teams desktop client.
 | Adaptive Cards | Done | Schema 1.6 plus Teams extras: all elements incl. Table, CodeBlock, Badge, Icon, Rating, Carousel, Media and charts; all inputs with date and time pickers, live validation and Data.Query typeahead; all actions incl. overflow menu; Universal Actions auto refresh. URL task dialogs run in a hosted window on Windows, in the browser on Linux. Not yet: message-level carousel layout, chart tooltips |
 | Typing indicator | Done | Shows who types as avatars above the composer (names on hover) and in the list preview; sends your own typing |
 | Link previews | Done | One card per message from the chat service |
-| Loop components | Missing |  |
+| Loop components | Partial | Card that opens the component in the browser; no inline editing |
+| Copilot pane in a chat | Done | Summarize, open items, decisions and own questions with the chat as context; needs a Microsoft 365 Copilot licence |
 | Translate a message | Done | Menu item on every message; offer line under foreign messages (Translate, Never translate language); See original toggle; auto-translate; settings under the avatar menu > Translation, synced with Teams |
 
 ## Writing
@@ -91,6 +94,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Emoji picker | Done | For reactions and in the composer |
 | Formatting toolbar, Ctrl+B and Ctrl+I | Done | Bar over a selection; Ctrl+U, Ctrl+Shift+X/C, Ctrl+K link; lists, quote, code block; superscript, subscript (Ctrl+Shift+= / Ctrl+=) and Small/Large shown at real size while typing |
 | Attach a file, paste or drag an image | Done | Images sit in the text at the cursor as a large preview and send at that spot; files via OneDrive or the channel's Files |
+| Write with Copilot | Done | Rewrite, Proofread, Adjust in the composer like Teams; chats only, needs a Microsoft 365 Copilot licence |
 | GIFs and stickers | Done | Show and send; composer picker with Emoji, GIF and Sticker tabs; GIF search needs the org to allow it |
 | Schedule send | Done | Server-side, Teams delivers. Text and formatting only for now |
 | Unsent messages survive a restart | Done | Sends are saved before they go out and resent on start without duplicates; failed ones keep Retry and Delete. Drafts are kept per chat and show as "Draft:" in the list |
@@ -129,7 +133,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Stack of 3, queue, Hide all, fade-out | Done |  |
 | Muted chats stay quiet | Done | Toast, sound and taskbar badge only for @mentions |
 | Mute notifications during calls and meetings | Done | Settings > Notifications switch, default off; message toasts and sounds stay away while a call is active, call rings still show |
-| Notifications on Linux | Missing |  |
+| Notifications on Linux | Partial | Message and ring sounds; desktop toasts still Windows only |
 
 ## Search and navigation
 
@@ -138,7 +142,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Ctrl+K switcher over chats, channels, people | Done |  |
 | Full-text search over cached messages | Done |  |
 | Jump to a message from search | Done |  |
-| Server search over the full history like Teams | Partial | Substrate search client in the engine (typeahead, results by tab, find in chat, KQL filters); palette and results page still use the local index |
+| Server search over the full history like Teams | Done | Ctrl+K palette and the title bar search dropdown merge Substrate hits (typeahead, people, messages) with the local index; Find in chat and channel query the server |
 | Esc closes the open conversation or editor | Done | Back to the channel keeps the feed position |
 | Keyboard shortcuts like Teams | Done | Ctrl+1 Activity, 2 Chats, 3 Channels, 4 Saved; Alt+Up/Down previous and next chat or channel in the visible list, also while typing; calls Ctrl+Shift+A accept, D decline, H hang up, O camera, E share menu, K raise hand, Y lobby, M mute, J join from a meeting reminder, Space held with Ctrl to talk while muted, F11 full screen, Alt+Shift+A / V start an audio / video call in the open chat; Ctrl+. lists all shortcuts. Ctrl+5..9 not used |
 
@@ -157,8 +161,9 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|
 | Dark theme | Done |  |
 | Notification settings | Done |  |
-| Light theme, follow system theme | Missing |  |
-| UI scale | Missing |  |
+| Light theme, follow system theme | Done | Follow OS, Light, Dark, High contrast |
+| UI scale | Done | Ctrl+= / Ctrl+- / Ctrl+0, 50-400 %, also in the status menu |
+| UI language | Done | English and German, follows the OS by default |
 
 ## Calls and meetings
 
@@ -169,6 +174,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Incoming call: ring, accept, decline | Partial | Ring toast, ring tone, missed call in Activity, registrar endpoint, attach + accept. Built from the Teams code, not yet rung by a second person |
 | 1:1 and group calls | Partial | Phone button, Calling and Ringing tiles, end notices, direct to mixer renegotiation. Not yet tried with a second person |
 | Join a meeting from a chat | Done | Join button from the live meeting state, joins muted, roster tiles, lobby, Leave and End meeting. Audio only. Live at engine level with up to 9 anonymous guests: roster, lobby, audio both ways, End meeting. The chat Join button itself not driven live |
+| Screen share on Wayland and macOS | Done | System picker: desktop ScreenCast portal on Wayland, ScreenCaptureKit on macOS |
 | Video and screen sharing | Done | Send and receive over libwebrtc H264, source requests through `applyChannelParameters`, stage, strip, self view, share banner. Live with guests: camera and screen received (screen 1280x720), own camera and screen decoded by a guest |
 | Meeting extras | Done | Share menu switch "Include computer sound" (remembered, mixed into the one audio track with the mic, own playback excluded on Windows 10 build 20348+), raise hand with queue badge, lower hand and Lower all hands for organizers, reactions on the sender's tile for 3 s, meeting chat in a 320 px side panel with unread badge. Live with guests: hands raised and lowered (one and all), reactions both ways, meeting chat both ways. "Include computer sound" not checked live |
 | Organizer controls | Done | Amber lobby banner with View (Admit, Deny per person) and Admit all, tile menu (right-click or "..." on hover): Pin for me, Spotlight for everyone, Mute, Lower hand, Remove from meeting with a confirm dialog, "..." controls menu with Mute all. Live with guests: admit, deny, Admit all (admits each waiting person; the service's admitAll leaves anonymous guests waiting), spotlight on and off, mute, Mute all (`specified` scope; `all` mutes nobody), lower hand, remove |
@@ -221,13 +227,16 @@ After parity. Not counted in the parity score.
 | Runs survive a restart | Done | Interrupted runs resume after the app restarts; WSL "Open session" starts the agent through a login shell |
 | Agent permissions in Settings: chats/channels All/Selected/None, write, review before sending, calendar, transcripts | Done | Other chats are invisible to agents, search included |
 | Proposals: card above the composer, send, edit, discard | Done | Agents never send. A proposal is stale once you answered first |
+| Write without review for a time window | Done | The agent asks for 5 to 480 minutes with a reason; the card offers 15 min, 1 h, 4 h; a bar shows the window with Stop |
+| Find free times and organize meetings | Done | `find_availability` and `create_meeting`, off by default, reviewed on the Calendar page unless review is off |
+| Agent providers and chat runs | Done | Provider catalog in Settings > Agents, runs that answer in the chat, Write with an agent identity in the composer |
 
 ## Out of scope
 
 | Feature | Why |
 |---|---|
 | Personal apps in the app bar | Outside chat and channels |
-| Copilot, intelligent recap, AI notes, Facilitator, Interpreter | Needs a Microsoft 365 Copilot licence; left out on purpose |
+| Copilot in meetings, intelligent recap, AI notes, Facilitator, Interpreter | Needs a Microsoft 365 Copilot licence; left out on purpose |
 | Teams Premium features (translated captions, watermark, E2EE meetings, templates, branding) | Needs a Teams Premium licence |
 | Phone system: dial pad, park, forwarding, voicemail, delegation, queues | Needs a Teams Phone licence; none on the test account |
 | PowerPoint Live, annotation, polls, Q&A, Whiteboard editing, Live Share, meeting apps | Microsoft-hosted web apps; Whiteboard opens in the browser |
