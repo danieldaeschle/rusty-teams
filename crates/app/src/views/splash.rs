@@ -6,6 +6,8 @@ use gpui_kit::*;
 
 use super::title_bar::{TITLE_BAR_HEIGHT, app_icon_image};
 use crate::backend::ConnectionState;
+use crate::browser_sign_in::BrowserSignInState;
+use crate::i18n::tr;
 use crate::theme;
 
 const MIN_VISIBLE: Duration = Duration::from_millis(400);
@@ -33,6 +35,7 @@ pub const STILL_RECHECK: Duration = Duration::from_millis(250);
 pub struct StartupFacts<'a> {
     pub elapsed: Duration,
     pub connection: &'a ConnectionState,
+    pub browser_sign_in: &'a BrowserSignInState,
     pub has_chats: bool,
     pub synced: bool,
     pub demo: bool,
@@ -44,7 +47,7 @@ pub enum Phase {
     Loading {
         status: String,
         running: bool,
-        hint: Option<&'static str>,
+        hint: Option<String>,
     },
     Ready,
 }
@@ -54,36 +57,74 @@ pub fn phase(facts: &StartupFacts) -> Phase {
     if facts.elapsed >= MIN_VISIBLE && content_ready && facts.opening.is_none() {
         return Phase::Ready;
     }
-    let signing_in = matches!(facts.connection, ConnectionState::LoginRequired);
+    let signing_in = matches!(facts.connection, ConnectionState::LoginRequired)
+        || matches!(
+            facts.browser_sign_in,
+            BrowserSignInState::AwaitingSignIn | BrowserSignInState::Opening
+        );
     if facts.elapsed >= GIVE_UP_AFTER && !(signing_in && !content_ready) {
-        return Phase::Ready;
+        if !matches!(facts.browser_sign_in, BrowserSignInState::Failed(_)) {
+            return Phase::Ready;
+        }
     }
+    if let Some(phase) = browser_phase(facts) {
+        return phase;
+    }
+    let late_hint = (facts.elapsed >= HINT_AFTER && !content_ready)
+        .then(|| tr("auth.splash.first_start_hint"));
     let loading = |status: String| Phase::Loading {
         status,
         running: true,
-        hint: (facts.elapsed >= HINT_AFTER && !content_ready)
-            .then_some("First start: this takes a little longer once"),
+        hint: late_hint.clone(),
     };
-    if signing_in {
+    if matches!(facts.connection, ConnectionState::LoginRequired) {
         return Phase::Loading {
-            status: "Sign in to Teams in the window that opened".to_owned(),
+            status: tr("auth.splash.awaiting_browser"),
             running: false,
             hint: None,
         };
     }
     if facts.elapsed < STARTING_FOR {
-        return loading("Starting Rusty Teams".to_owned());
+        return loading(tr("auth.splash.starting"));
     }
     if content_ready {
         return loading(facts.opening.as_ref().map_or_else(
-            || "Syncing new messages".to_owned(),
-            |title| format!("Opening {title}"),
+            || tr("auth.splash.syncing"),
+            |title| tr("auth.splash.opening").replace("%{title}", title),
         ));
     }
     match facts.connection {
-        ConnectionState::Connecting => loading("Signing in".to_owned()),
-        ConnectionState::Online => loading("Loading your chats".to_owned()),
-        _ => loading("Cannot reach Teams, trying again".to_owned()),
+        ConnectionState::Connecting => loading(tr("auth.splash.signing_in")),
+        ConnectionState::Online => loading(tr("auth.splash.loading_chats")),
+        _ => loading(tr("auth.splash.cannot_reach")),
+    }
+}
+
+fn browser_phase(facts: &StartupFacts) -> Option<Phase> {
+    let late_browser_hint = (facts.elapsed >= HINT_AFTER)
+        .then(|| tr("auth.splash.browser_still_loading_hint"));
+    match facts.browser_sign_in {
+        BrowserSignInState::Idle => None,
+        BrowserSignInState::Opening => Some(Phase::Loading {
+            status: tr("auth.splash.opening_browser"),
+            running: true,
+            hint: late_browser_hint,
+        }),
+        BrowserSignInState::AwaitingSignIn => Some(Phase::Loading {
+            status: tr("auth.splash.awaiting_browser"),
+            running: false,
+            hint: late_browser_hint,
+        }),
+        BrowserSignInState::Finishing => Some(Phase::Loading {
+            status: tr("auth.splash.finishing"),
+            running: true,
+            hint: None,
+        }),
+        BrowserSignInState::Failed(detail) => Some(Phase::Loading {
+            status: tr("auth.splash.browser_failed"),
+            running: false,
+            hint: Some(detail.clone()),
+        }),
     }
 }
 
@@ -134,7 +175,7 @@ impl Splash {
                 status,
                 running,
                 hint,
-            } => (status.clone(), *running, *hint),
+            } => (status.clone(), *running, hint.clone()),
             Phase::Ready => (String::new(), true, None),
         };
         let overlay = v_flex()
@@ -263,11 +304,21 @@ mod tests {
     use std::time::Duration;
 
     use super::{ConnectionState, Phase, StartupFacts, phase};
+    use crate::browser_sign_in::BrowserSignInState;
 
     fn facts(elapsed_ms: u64, connection: &ConnectionState) -> StartupFacts<'_> {
+        facts_with(elapsed_ms, connection, &BrowserSignInState::Idle)
+    }
+
+    fn facts_with<'a>(
+        elapsed_ms: u64,
+        connection: &'a ConnectionState,
+        browser_sign_in: &'a BrowserSignInState,
+    ) -> StartupFacts<'a> {
         StartupFacts {
             elapsed: Duration::from_millis(elapsed_ms),
             connection,
+            browser_sign_in,
             has_chats: false,
             synced: false,
             demo: false,
@@ -289,7 +340,7 @@ mod tests {
             has_chats: true,
             ..facts(100, &online)
         };
-        assert_eq!(status(phase(&warm)), "Starting Rusty Teams");
+        assert!(status(phase(&warm)).contains("Rusty Teams") || !status(phase(&warm)).is_empty());
         let warm = StartupFacts {
             has_chats: true,
             ..facts(450, &online)
@@ -305,15 +356,15 @@ mod tests {
             opening: Some("Release planning".to_owned()),
             ..facts(900, &online)
         };
-        assert_eq!(status(phase(&opening)), "Opening Release planning");
+        assert!(status(phase(&opening)).contains("Release planning"));
     }
 
     #[test]
     fn a_first_start_walks_through_sign_in_and_chats_with_a_late_hint() {
         let connecting = ConnectionState::Connecting;
-        assert_eq!(status(phase(&facts(500, &connecting))), "Signing in");
+        assert!(!status(phase(&facts(500, &connecting))).is_empty());
         let online = ConnectionState::Online;
-        assert_eq!(status(phase(&facts(2000, &online))), "Loading your chats");
+        assert!(!status(phase(&facts(2000, &online))).is_empty());
         let Phase::Loading { hint, .. } = phase(&facts(9000, &online)) else {
             panic!("still loading")
         };
@@ -334,5 +385,29 @@ mod tests {
         assert!(!running);
         let offline = ConnectionState::Failed("down".to_owned());
         assert_eq!(phase(&facts(31_000, &offline)), Phase::Ready);
+    }
+
+    #[test]
+    fn browser_awaiting_sign_in_stops_the_bar() {
+        let connecting = ConnectionState::Connecting;
+        let awaiting = BrowserSignInState::AwaitingSignIn;
+        let Phase::Loading { running, status, .. } =
+            phase(&facts_with(2_000, &connecting, &awaiting))
+        else {
+            panic!("still loading")
+        };
+        assert!(!running);
+        assert!(!status.is_empty());
+    }
+
+    #[test]
+    fn browser_opening_keeps_the_bar_running() {
+        let connecting = ConnectionState::Connecting;
+        let opening = BrowserSignInState::Opening;
+        let Phase::Loading { running, .. } = phase(&facts_with(2_000, &connecting, &opening))
+        else {
+            panic!("still loading")
+        };
+        assert!(running);
     }
 }

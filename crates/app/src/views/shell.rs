@@ -874,12 +874,14 @@ impl AppShell {
             let phase = splash::phase(&StartupFacts {
                 elapsed: self.splash.elapsed(),
                 connection: &state.connection,
+                browser_sign_in: &state.browser_sign_in,
                 has_chats: !state.sidebar.chats.is_empty() || !state.sidebar.teams.is_empty(),
                 synced: state.last_sync.is_some(),
                 demo: state.mode.demo,
                 opening,
             });
-            if phase != Phase::Ready && cx.reduce_motion() && !self.splash.recheck_scheduled {
+            // Poll while splash is up so BrowserSignIn updates rewrite the status line.
+            if phase != Phase::Ready && !self.splash.recheck_scheduled {
                 self.splash.recheck_scheduled = true;
                 cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(splash::STILL_RECHECK).await;

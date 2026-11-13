@@ -13,6 +13,7 @@ use store::Store;
 use teams_core::{ChatsvcFolderSource, CoreEvent, SyncEngine};
 use tokio::sync::{Notify, mpsc, watch};
 
+use crate::browser_sign_in::BrowserSignInState;
 use crate::call::{CallLauncher, fetch_window};
 use crate::presence_link::{self, LinkSignal};
 
@@ -58,6 +59,7 @@ pub enum LiveState {
 
 pub enum BackendEvent {
     Connection(ConnectionState),
+    BrowserSignIn(BrowserSignInState),
     Engine(Arc<Engine>),
     Calls(Arc<CallLauncher>),
     Calendar(Vec<CalendarEvent>),
@@ -76,6 +78,7 @@ impl BackendEvent {
     pub fn kind(&self) -> String {
         match self {
             BackendEvent::Connection(_) => "Connection".into(),
+            BackendEvent::BrowserSignIn(_) => "BrowserSignIn".into(),
             BackendEvent::Engine(_) => "Engine".into(),
             BackendEvent::Calls(_) => "Calls".into(),
             BackendEvent::Calendar(_) => "Calendar".into(),
