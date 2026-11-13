@@ -1,15 +1,19 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use serde_json::Value;
+use serde_json::{Value, json};
 use session::{Scope, Session};
 
+use crate::chat_listing::ChatListing;
+use crate::error::Error;
+use crate::graph_events::graph_event_page;
+use crate::json_id::id_text;
 use crate::messages::encode;
 
 const RECORDING_EVENT: &str = "#microsoft.graph.callRecordingEventMessageDetail";
 const RECORDING_SUCCESS: &str = "success";
-const MESSAGES_SCOPE: &str = "Chat.Read";
 const SITE_SCOPE: &str = ".default";
 const MAX_MESSAGE_PAGES: usize = 40;
+const MESSAGE_PAGE_SIZE: usize = 200;
 const UNKNOWN_SPEAKER: &str = "?";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -97,23 +101,45 @@ impl<'a> Transcripts<'a> {
     }
 
     async fn find_recording(&self, thread_id: &str) -> Result<Recording, TranscriptError> {
-        let scope = Scope::graph(MESSAGES_SCOPE);
-        let mut url = format!(
-            "{}/v1.0/chats/{}/messages?$top=50&$orderby=createdDateTime desc",
-            session::GRAPH,
-            encode(thread_id)
-        );
-        for _ in 0..MAX_MESSAGE_PAGES {
-            let page = self.get(&url, &scope, TranscriptError::NoRecording).await?;
-            if let Some(recording) = find_recording(&page) {
-                return Ok(recording);
+        let mut recording = None;
+        self.visit_message_pages(thread_id, |page| {
+            recording = find_recording(&graph_event_page(thread_id, page));
+            recording.is_some()
+        })
+        .await?;
+        recording.ok_or(TranscriptError::NoRecording)
+    }
+
+    /// Chat service message pages, newest arrival first, until `visit` returns true.
+    pub(crate) async fn visit_message_pages(
+        &self,
+        thread_id: &str,
+        mut visit: impl FnMut(&Value) -> bool,
+    ) -> Result<(), TranscriptError> {
+        let listing = ChatListing::new(self.session);
+        let mut before_ms = None;
+        for page_index in 0..MAX_MESSAGE_PAGES {
+            let page = match listing
+                .messages(thread_id, before_ms, MESSAGE_PAGE_SIZE)
+                .await
+            {
+                Ok(page) => page,
+                Err(error) if page_index == 0 => return Err(chatsvc_failure(error)),
+                Err(_) => break,
+            };
+            if visit(&json!({"messages": page.messages})) {
+                break;
             }
-            match page.get("@odata.nextLink").and_then(Value::as_str) {
-                Some(next) => url = next.to_owned(),
-                None => break,
+            before_ms = page
+                .messages
+                .iter()
+                .filter_map(|message| id_text(&message["id"])?.parse::<i64>().ok())
+                .min();
+            if !page.has_older || before_ms.is_none() {
+                break;
             }
         }
-        Err(TranscriptError::NoRecording)
+        Ok(())
     }
 
     async fn item_url(
@@ -162,6 +188,17 @@ impl<'a> Transcripts<'a> {
             Err(session::Error::Api { status: 404, .. }) => Err(not_found),
             Err(error) => Err(TranscriptError::Request(error)),
         }
+    }
+}
+
+pub(crate) fn chatsvc_failure(error: Error) -> TranscriptError {
+    match error {
+        Error::Session(session::Error::Api {
+            status: 403 | 401, ..
+        }) => TranscriptError::AccessDenied,
+        Error::Session(session::Error::Api { status: 404, .. }) => TranscriptError::NoRecording,
+        Error::Session(error) => TranscriptError::Request(error),
+        _ => TranscriptError::NoRecording,
     }
 }
 

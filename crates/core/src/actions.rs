@@ -17,7 +17,7 @@ use crate::mentions::{MentionInput, apply_mentions, ensure_allowed_in_chat};
 use crate::notes_chat::is_notes_chat;
 use crate::remote::Remote;
 use crate::scheduled::NOTES_CHAT_ID;
-use crate::teams_quote::{chatsvc_mention_html, quote_reply_properties, teams_quote};
+use crate::teams_quote::{mention_entries, teams_quote};
 
 impl<R: Remote> SyncEngine<R> {
     pub async fn send_message(
@@ -60,9 +60,17 @@ impl<R: Remote> SyncEngine<R> {
         let (html, mentions) = outgoing(&conversation, html, mentions)?;
         let sent = match (conversation, thread_root_id) {
             (Conversation::Chat, None) => {
-                self.remote
-                    .send_chat_message(conversation_id, &html, &mentions, extras)
-                    .await?
+                let sent = self
+                    .send_via_chatsvc(
+                        &ConversationRef::chat(conversation_id),
+                        None,
+                        &html,
+                        &mentions,
+                        extras,
+                        None,
+                    )
+                    .await?;
+                return self.cache_sent(conversation_id, &sent.message, &html, extras);
             }
             (Conversation::Channel { team_id }, Some(root_id)) => {
                 self.remote
@@ -171,9 +179,9 @@ impl<R: Remote> SyncEngine<R> {
                     .await?
             }
             _ => {
-                self.remote
-                    .reply_with_quote(conversation_id, message_id, &html, &mentions, extras)
+                self.send_via_chatsvc(&chatsvc_conversation, None, &html, &mentions, extras, None)
                     .await?
+                    .message
             }
         };
         self.cache_sent(conversation_id, &sent, &html, extras)
@@ -447,13 +455,19 @@ impl<R: Remote> SyncEngine<R> {
         if let Conversation::Channel { .. } = self.resolve(conversation_id).await? {
             return self.mark_channel_read(conversation_id).await;
         }
-        let user_id = self.my_user_id().await?;
-        let tenant_id = self.my_tenant_id(conversation_id).await?;
-        self.remote
-            .mark_chat_read(conversation_id, &user_id, &tenant_id)
-            .await?;
         let now = Utc::now();
-        if is_notes_chat(conversation_id) {
+        let last_message_at = self
+            .store
+            .chat(conversation_id)?
+            .and_then(|chat| chat.last_message_at)
+            .unwrap_or(now);
+        self.remote
+            .set_read_horizon(
+                conversation_id,
+                &read_horizon::read_up_to(last_message_at, now),
+            )
+            .await?;
+        if is_notes_chat(conversation_id) || self.has_unread_bookmark(conversation_id) {
             self.remote
                 .set_read_bookmark(conversation_id, &read_horizon::cleared_bookmark(now))
                 .await?;
@@ -510,23 +524,23 @@ impl<R: Remote> SyncEngine<R> {
         message_created_at: DateTime<Utc>,
     ) -> Result<()> {
         let last_read_at = message_created_at - Duration::milliseconds(1);
-        if is_notes_chat(chat_id) {
-            let bookmark = read_horizon::bookmark_at(
-                message_created_at,
-                &self.message_id_at(chat_id, message_created_at)?,
-                Utc::now(),
-            );
-            self.remote.set_read_bookmark(chat_id, &bookmark).await?;
-        } else {
-            let user_id = self.my_user_id().await?;
-            let tenant_id = self.my_tenant_id(chat_id).await?;
-            self.remote
-                .mark_chat_unread(chat_id, &user_id, &tenant_id, last_read_at)
-                .await?;
-        }
+        let bookmark = read_horizon::bookmark_at(
+            message_created_at,
+            &self.message_id_at(chat_id, message_created_at)?,
+            Utc::now(),
+        );
+        self.remote.set_read_bookmark(chat_id, &bookmark).await?;
         self.store.mark_chat_unread(chat_id, last_read_at)?;
         let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
         Ok(())
+    }
+
+    fn has_unread_bookmark(&self, chat_id: &str) -> bool {
+        self.chat_states
+            .lock()
+            .unwrap()
+            .get(chat_id)
+            .is_some_and(|state| state.read.bookmark_message_set)
     }
 
     fn message_id_at(&self, chat_id: &str, created_at: DateTime<Utc>) -> Result<String> {
@@ -569,9 +583,9 @@ impl<R: Remote> SyncEngine<R> {
             let _ = self.events.send(crate::events::CoreEvent::SidebarChanged);
             return Ok(());
         }
-        let user_id = self.my_user_id().await?;
-        let tenant_id = self.my_tenant_id(chat_id).await?;
-        self.remote.hide_chat(chat_id, &user_id, &tenant_id).await?;
+        self.remote
+            .set_chat_hidden_at(chat_id, Some(Utc::now().timestamp_millis()))
+            .await?;
         let hidden_after = self
             .store
             .chat(chat_id)?
@@ -589,11 +603,7 @@ impl<R: Remote> SyncEngine<R> {
             self.refresh_sidebar_full().await?;
             return Ok(());
         }
-        let user_id = self.my_user_id().await?;
-        let tenant_id = self.my_tenant_id(chat_id).await?;
-        self.remote
-            .unhide_chat(chat_id, &user_id, &tenant_id)
-            .await?;
+        self.remote.set_chat_hidden_at(chat_id, None).await?;
         let now = Utc::now();
         self.with_locally_hidden(|locally| locally.unhide(chat_id, now))?;
         self.refresh_sidebar_full().await?;
@@ -846,7 +856,7 @@ impl<R: Remote> SyncEngine<R> {
         self.seed_images(&seeds)
     }
 
-    /// `None` when Teams' shape cannot be written here (images, files, team mentions, no quote).
+    /// `None` when Teams' shape cannot be written here (channel images or files, team mentions, no quote).
     async fn quote_reply_via_chatsvc(
         &self,
         conversation: &ConversationRef,
@@ -856,42 +866,20 @@ impl<R: Remote> SyncEngine<R> {
         mentions: &[OutgoingMention],
         extras: &MessageExtras,
     ) -> Result<Option<(graph::Message, String)>> {
-        if !extras.images.is_empty() || !extras.files.is_empty() {
+        let in_chat = matches!(conversation, ConversationRef::Chat { .. });
+        if !in_chat && (!extras.images.is_empty() || !extras.files.is_empty()) {
             return Ok(None);
         }
         let Some(quote) = teams_quote(quoted) else {
             return Ok(None);
         };
-        let Some(properties) = quote_reply_properties(&quote, mentions, extras.importance) else {
+        if mention_entries(mentions).is_none() {
             return Ok(None);
-        };
-        self.ensure_display_name().await?;
-        let me = self
-            .me()
-            .ok_or(Error::Unsupported("a quote reply before sign-in"))?;
-        let content = format!("{}{}", quote.html, chatsvc_mention_html(html, mentions));
-        let message_id = self
-            .remote
-            .post_chatsvc_message(conversation, &content, &me.display_name, &properties)
+        }
+        let sent = self
+            .send_via_chatsvc(conversation, root_id, html, mentions, extras, Some(&quote))
             .await?;
-        let created_at = message_id
-            .parse::<i64>()
-            .ok()
-            .and_then(DateTime::from_timestamp_millis)
-            .unwrap_or_else(Utc::now);
-        let cached_html = format!("{}{html}", quote.html);
-        let sent = serde_json::from_value(serde_json::json!({
-            "id": message_id,
-            "messageType": "message",
-            "createdDateTime": created_at.to_rfc3339(),
-            "replyToId": root_id,
-            "importance": extras.importance,
-            "from": {"user": {"id": me.user_id, "displayName": me.display_name}},
-            "body": {"contentType": "html", "content": cached_html},
-            "mentions": mentions.iter().map(OutgoingMention::to_json).collect::<Vec<_>>(),
-        }))
-        .map_err(|_| Error::Unsupported("a chatsvc reply without a message shape"))?;
-        Ok(Some((sent, cached_html)))
+        Ok(Some((sent.message, sent.html)))
     }
 
     pub(crate) fn cache_sent(

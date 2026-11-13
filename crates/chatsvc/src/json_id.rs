@@ -1,6 +1,6 @@
 use serde_json::{Number, Value};
 
-pub(crate) fn id_text(value: &Value) -> Option<String> {
+pub fn id_text(value: &Value) -> Option<String> {
     match value {
         Value::String(text) if !text.is_empty() => Some(text.clone()),
         Value::Number(number) => Some(integer_text(number)),

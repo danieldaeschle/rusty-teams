@@ -1,11 +1,8 @@
 use std::borrow::Cow;
 
-use crate::app::App;
-
 pub const GRAPH: &str = "https://graph.microsoft.com";
 pub const IC3: &str = "https://ic3.teams.office.com";
 pub const PRESENCE: &str = "https://presence.teams.microsoft.com";
-pub const OUTLOOK: &str = "https://outlook.office.com";
 pub const SPACES: &str = "https://api.spaces.skype.com";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,15 +48,6 @@ impl Scope {
     pub fn graph(name: impl Into<Cow<'static, str>>) -> Self {
         Scope::new(GRAPH, name)
     }
-
-    /// Tabs to try, best first. The other tab is the fallback, as in the Python client.
-    pub fn tab_order(&self) -> [App; 2] {
-        if self.resource == GRAPH && self.name.starts_with("Chat.") {
-            [App::Outlook, App::Teams]
-        } else {
-            [App::Teams, App::Outlook]
-        }
-    }
 }
 
 impl std::fmt::Display for Scope {
@@ -71,34 +59,6 @@ impl std::fmt::Display for Scope {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn chat_scopes_prefer_outlook() {
-        assert_eq!(
-            Scope::graph("Chat.Read").tab_order(),
-            [App::Outlook, App::Teams]
-        );
-        assert_eq!(
-            Scope::graph("Chat.ReadWrite").tab_order(),
-            [App::Outlook, App::Teams]
-        );
-    }
-
-    #[test]
-    fn other_scopes_prefer_teams() {
-        assert_eq!(
-            Scope::graph("ChannelMessage.Read.All").tab_order(),
-            [App::Teams, App::Outlook]
-        );
-        assert_eq!(
-            Scope::new(IC3, "Teams.AccessAsUser.All").tab_order(),
-            [App::Teams, App::Outlook]
-        );
-        assert_eq!(
-            Scope::new(PRESENCE, "Chat.Read").tab_order(),
-            [App::Teams, App::Outlook]
-        );
-    }
 
     #[test]
     fn displays_resource_and_name() {

@@ -1,5 +1,5 @@
 use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 use session::{Method, Request};
 
@@ -9,6 +9,8 @@ use crate::messages::{ConversationRef, MessageTransport, Messages, encode, ensur
 const URLP_BASE: &str = "https://de-prod.asyncgw.teams.microsoft.com/urlp/v1/url";
 pub const LINK_PROXY_HOST_SUFFIX: &str = ".asyncgw.teams.microsoft.com";
 const LIST_VIEW: &str = "msnp24Equivalent";
+const HOSTED_CONTENTS_SEGMENT: &str = "/hostedContents/";
+const HOSTED_URL_KEY: &str = ",url=";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageLinks {
@@ -37,6 +39,19 @@ pub fn is_link_image_url(url: &str) -> bool {
     url.strip_prefix("https://")
         .and_then(|rest| rest.split(['/', '?', '#']).next())
         .is_some_and(|host| host.ends_with(LINK_PROXY_HOST_SUFFIX))
+}
+
+/// The AMS image behind a Graph chat `hostedContents/{id}/$value` link: the id encodes `id=..,type=..,url=<AMS url>`.
+pub fn hosted_content_image_url(graph_url: &str) -> Option<String> {
+    let after = graph_url.split(HOSTED_CONTENTS_SEGMENT).nth(1)?;
+    let encoded = after.split('/').next()?;
+    let bytes = STANDARD
+        .decode(encoded)
+        .or_else(|_| URL_SAFE_NO_PAD.decode(encoded))
+        .ok()?;
+    let decoded = String::from_utf8(bytes).ok()?;
+    let (_, url) = decoded.split_once(HOSTED_URL_KEY)?;
+    is_link_image_url(url).then(|| url.to_owned())
 }
 
 pub fn parse_message_links(body: &Value) -> Vec<MessageLinks> {
@@ -159,6 +174,23 @@ impl<T: MessageTransport> Messages<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hosted_content_ids_carry_the_ams_url() {
+        let ams = "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-weu-d1-abc/views/imgo";
+        let id = STANDARD.encode(format!("id=x_0-weu-d1-abc,type=1,url={ams}"));
+        let graph = format!(
+            "https://graph.microsoft.com/v1.0/chats/19:a/messages/1/hostedContents/{id}/$value"
+        );
+        assert_eq!(hosted_content_image_url(&graph).as_deref(), Some(ams));
+        let foreign = STANDARD.encode("id=x,type=1,url=https://evil.example/a");
+        assert_eq!(
+            hosted_content_image_url(&format!(
+                "https://graph.microsoft.com/v1.0/chats/c/messages/1/hostedContents/{foreign}/$value"
+            )),
+            None
+        );
+    }
 
     #[test]
     fn parses_link_info_with_target_url_and_thumbnail_size() {

@@ -81,13 +81,8 @@ pub struct Browser {
     inner: Arc<Inner>,
 }
 
-pub(crate) fn start_urls_for(headless: bool) -> Vec<String> {
-    let urls = APPS.iter().map(|app| app.start_url().to_owned());
-    if headless {
-        urls.take(1).collect()
-    } else {
-        urls.collect()
-    }
+pub(crate) fn start_urls() -> Vec<String> {
+    APPS.iter().map(|app| app.start_url().to_owned()).collect()
 }
 
 pub(crate) fn jitter_between(min: Duration, max: Duration, random: u64) -> Duration {
@@ -264,14 +259,9 @@ impl Browser {
         if self.is_visible_managed() && self.is_running().await {
             return Ok(());
         }
-        // Always open Teams alone for login: opening Outlook alongside Teams sends Outlook to
-        // login.microsoftonline.com?prompt=select_account before Teams has an SSO cookie, leaving
-        // that second tab stuck on login even after Teams finishes signing in. Headless mode and
-        // CdpTransport open Outlook silently once Teams is signed in.
         self.inner.wanted.store(true, Ordering::SeqCst);
         self.stop_locked(false).await?;
-        self.launch_with_urls_locked(false, start_urls_for(true))
-            .await
+        self.launch_with_urls_locked(false, start_urls()).await
     }
 
     pub async fn headless(&self) -> Result<(), BrowserError> {
@@ -361,7 +351,7 @@ impl Browser {
         )
         .await?;
         let attached = targets::attached_target_ids(&result);
-        for id in targets::duplicate_app_tab_ids(&tabs, &attached) {
+        for id in targets::closable_tab_ids(&tabs, &attached) {
             let path = format!("/json/close/{id}");
             http::request(self.inner.config.port, "GET", &path, HTTP_TIMEOUT).await?;
         }
@@ -382,8 +372,7 @@ impl Browser {
     }
 
     async fn launch_locked(&self, headless: bool) -> Result<(), BrowserError> {
-        self.launch_with_urls_locked(headless, start_urls_for(headless))
-            .await
+        self.launch_with_urls_locked(headless, start_urls()).await
     }
 
     async fn launch_with_urls_locked(
@@ -411,11 +400,6 @@ impl Browser {
         }
         std::fs::write(&config.mode_file, mode.file_content())?;
         self.wait_until_running().await?;
-        if headless {
-            for app in APPS.into_iter().skip(1) {
-                self.open_tab(app).await?;
-            }
-        }
         Ok(())
     }
 
@@ -547,14 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn headless_gets_one_start_url_visible_gets_both() {
-        assert_eq!(start_urls_for(true), ["https://teams.cloud.microsoft/"]);
-        assert_eq!(
-            start_urls_for(false),
-            [
-                "https://teams.cloud.microsoft/",
-                "https://outlook.office.com/mail/"
-            ]
-        );
+    fn only_teams_starts() {
+        assert_eq!(start_urls(), ["https://teams.cloud.microsoft/"]);
     }
 }

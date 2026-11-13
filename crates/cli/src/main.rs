@@ -54,7 +54,11 @@ async fn run(arguments: Arguments) -> BoxedResult<()> {
         }
         Command::Chats { limit } => {
             let me = graph.me().await?;
-            for chat in graph.list_chats(limit).await? {
+            let chats = teams_core::native::NativeChats::new(graph.session())
+                .first_page(limit)
+                .await?
+                .items;
+            for chat in chats {
                 let last = chat
                     .last_message_time()
                     .map(|time| time.format("%Y-%m-%d %H:%M UTC").to_string())

@@ -63,20 +63,20 @@ async fn status_reports_login_required() {
 }
 
 #[tokio::test]
-async fn ensure_running_starts_headless_with_one_url_and_opens_the_second_tab() {
+async fn ensure_running_starts_headless_with_the_teams_tab_only() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();
     let launches = harness.launcher.requests.lock().unwrap().clone();
     assert_eq!(launches.len(), 1);
     assert!(launches[0].headless);
     assert_eq!(launches[0].start_urls, [TEAMS]);
-    assert_eq!(harness.mock.urls(), [TEAMS, OUTLOOK]);
+    assert_eq!(harness.mock.urls(), [TEAMS]);
     assert_eq!(
         std::fs::read_to_string(&harness.mode_file).unwrap(),
         "headless"
     );
     assert!(
-        harness
+        !harness
             .mock
             .requests()
             .contains(&"PUT /json/new".to_owned())
@@ -86,10 +86,10 @@ async fn ensure_running_starts_headless_with_one_url_and_opens_the_second_tab() 
 #[tokio::test]
 async fn ensure_running_on_a_running_browser_opens_only_missing_tabs() {
     let harness = harness().await;
-    harness.mock.start(&[TEAMS]).await;
+    harness.mock.start(&[OUTLOOK]).await;
     harness.browser.ensure_running().await.unwrap();
     assert!(harness.launcher.requests.lock().unwrap().is_empty());
-    assert_eq!(harness.mock.urls(), [TEAMS, OUTLOOK]);
+    assert_eq!(harness.mock.urls(), [OUTLOOK, TEAMS]);
     harness.browser.ensure_tabs().await.unwrap();
     assert_eq!(harness.mock.urls().len(), 2);
 }
@@ -329,7 +329,7 @@ async fn watchdog_ignores_the_gap_during_a_login_window_restart() {
 #[tokio::test]
 async fn parked_tabs_are_the_app_tab_not_missing_and_not_login() {
     let harness = harness().await;
-    harness.mock.start(&[PARKED_TEAMS, PARKED_OUTLOOK]).await;
+    harness.mock.start(&[PARKED_TEAMS]).await;
     let status = harness.browser.status().await.unwrap();
     assert!(
         status
@@ -339,7 +339,7 @@ async fn parked_tabs_are_the_app_tab_not_missing_and_not_login() {
     );
     assert_eq!(status.login_state, LoginState::NotRequired);
     harness.browser.ensure_running().await.unwrap();
-    assert_eq!(harness.mock.urls(), [PARKED_TEAMS, PARKED_OUTLOOK]);
+    assert_eq!(harness.mock.urls(), [PARKED_TEAMS]);
 }
 
 #[tokio::test]
@@ -354,18 +354,21 @@ async fn wake_navigates_the_parked_app_tab_to_its_start_url() {
             .requests()
             .contains(&"CDP Page.navigate".to_owned())
     );
-    harness.browser.wake(App::Outlook).await.unwrap();
-    assert_eq!(harness.mock.urls(), [TEAMS, OUTLOOK]);
     let status = harness.browser.status().await.unwrap();
-    assert!(status.tabs.iter().all(|tab| !tab.parked));
+    assert!(
+        status
+            .tabs
+            .iter()
+            .all(|tab| tab.app.is_none() || !tab.parked)
+    );
 }
 
 #[tokio::test]
 async fn wake_opens_the_tab_when_the_app_has_none() {
     let harness = harness().await;
-    harness.mock.start(&[TEAMS]).await;
-    harness.browser.wake(App::Outlook).await.unwrap();
-    assert_eq!(harness.mock.urls(), [TEAMS, OUTLOOK]);
+    harness.mock.start(&[OUTLOOK]).await;
+    harness.browser.wake(App::Teams).await.unwrap();
+    assert_eq!(harness.mock.urls(), [OUTLOOK, TEAMS]);
 }
 
 #[tokio::test]
@@ -378,7 +381,7 @@ async fn jittered_recheck_adopts_a_chrome_another_launcher_started() {
     mock.start(&[TEAMS, OUTLOOK]).await;
     ensure.await.unwrap().unwrap();
     assert!(harness.launcher.requests.lock().unwrap().is_empty());
-    assert_eq!(harness.mock.urls(), [TEAMS, OUTLOOK]);
+    assert_eq!(harness.mock.urls(), [TEAMS]);
 }
 
 #[tokio::test]
@@ -387,17 +390,17 @@ async fn a_foreign_chrome_taking_the_port_during_launch_is_adopted_and_deduped()
     harness.mock.set_attached(&["P0"]);
     *harness.launcher.foreign.lock().unwrap() = Some(vec![TEAMS, TEAMS, OUTLOOK]);
     harness.browser.ensure_running().await.unwrap();
-    assert_eq!(harness.mock.tab_ids(), ["P0", "P2"]);
-    assert_eq!(harness.mock.urls(), [TEAMS, OUTLOOK]);
+    assert_eq!(harness.mock.tab_ids(), ["P0"]);
+    assert_eq!(harness.mock.urls(), [TEAMS]);
 }
 
 #[tokio::test]
 async fn dedupe_closes_unattached_duplicates_after_a_launch() {
     let harness = harness().await;
-    *harness.launcher.foreign.lock().unwrap() = Some(vec![TEAMS, TEAMS, OUTLOOK, OUTLOOK]);
+    *harness.launcher.foreign.lock().unwrap() = Some(vec![TEAMS, TEAMS, PARKED_TEAMS]);
     harness.mock.set_attached(&["P1"]);
     harness.browser.ensure_running().await.unwrap();
-    assert_eq!(harness.mock.tab_ids(), ["P1", "P2"]);
+    assert_eq!(harness.mock.tab_ids(), ["P1"]);
 }
 
 #[tokio::test]
@@ -405,7 +408,7 @@ async fn dedupe_never_closes_login_or_foreign_tabs() {
     let harness = harness().await;
     *harness.launcher.foreign.lock().unwrap() = Some(vec![TEAMS, LOGIN, "about:blank"]);
     harness.browser.ensure_running().await.unwrap();
-    assert_eq!(harness.mock.urls(), [TEAMS, LOGIN, "about:blank", OUTLOOK]);
+    assert_eq!(harness.mock.urls(), [TEAMS, LOGIN, "about:blank"]);
 }
 
 #[tokio::test]

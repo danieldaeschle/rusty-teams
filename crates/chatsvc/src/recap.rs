@@ -6,19 +6,17 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use session::{Method, Request, Scope, Session};
 
+use crate::graph_events::graph_event_page;
 use crate::messages::encode;
-use crate::pins::DEFAULT_REGION;
 use crate::transcripts::{
-    TranscriptError, TranscriptTurn, Transcripts, newest_transcript, parse_transcript_list,
-    parse_turns, share_id, site_origin,
+    TranscriptError, TranscriptTurn, Transcripts, chatsvc_failure, newest_transcript,
+    parse_transcript_list, parse_turns, share_id, site_origin,
 };
 
 const RECORDING_EVENT: &str = "#microsoft.graph.callRecordingEventMessageDetail";
 const RECORDING_SUCCESS: &str = "success";
-const MESSAGES_SCOPE: &str = "Chat.Read";
 const SITE_SCOPE: &str = ".default";
 const ATTENDANCE_SCOPE: &str = "OnlineMeetingArtifact.Read.All";
-const MAX_MESSAGE_PAGES: usize = 40;
 const AUDIO_ONLY_MARKER: &str = "videoContent=\"CurtainOnly\"";
 const ORIGINAL_NAME_OPEN: &str = "<OriginalName v=\"";
 
@@ -86,56 +84,18 @@ impl<'a> Recap<'a> {
     }
 
     pub async fn occurrences(&self, thread_id: &str) -> Result<Vec<Occurrence>, TranscriptError> {
-        let scope = Scope::graph(MESSAGES_SCOPE);
-        let mut url = format!(
-            "{}/v1.0/chats/{}/messages?$top=50&$orderby=createdDateTime desc",
-            session::GRAPH,
-            encode(thread_id)
-        );
         let mut found = Vec::new();
-        for _ in 0..MAX_MESSAGE_PAGES {
-            let page = self
-                .transcripts
-                .get(&url, &scope, TranscriptError::NoRecording)
-                .await?;
-            found.extend(parse_occurrences(&page));
-            match page.get("@odata.nextLink").and_then(Value::as_str) {
-                Some(next) => url = next.to_owned(),
-                None => break,
-            }
-        }
-        let audio_only_names = self.audio_only_names(thread_id).await;
+        let mut audio_only_names = HashSet::new();
+        self.transcripts
+            .visit_message_pages(thread_id, |page| {
+                found.extend(parse_occurrences(&graph_event_page(thread_id, page)));
+                audio_only_names.extend(parse_audio_only_names(page));
+                false
+            })
+            .await?;
         let occurrences = sorted_occurrences(with_audio_only(found, &audio_only_names));
         let deleted = self.deleted_recordings(&occurrences).await;
         Ok(without_deleted(occurrences, &deleted))
-    }
-
-    async fn audio_only_names(&self, thread_id: &str) -> HashSet<String> {
-        let scope = Scope::new(session::IC3, "Teams.AccessAsUser.All");
-        let mut url = format!(
-            "https://teams.cloud.microsoft/api/chatsvc/{DEFAULT_REGION}/v1/users/ME/conversations/{}/messages?view=msnp24Equivalent&pageSize=200",
-            encode(thread_id)
-        );
-        let mut names = HashSet::new();
-        for _ in 0..MAX_MESSAGE_PAGES {
-            let Ok(page) = self
-                .transcripts
-                .get(&url, &scope, TranscriptError::NoRecording)
-                .await
-            else {
-                break;
-            };
-            names.extend(parse_audio_only_names(&page));
-            match page
-                .pointer("/_metadata/backwardLink")
-                .and_then(Value::as_str)
-                .filter(|link| !link.is_empty() && *link != url)
-            {
-                Some(next) => url = next.to_owned(),
-                None => break,
-            }
-        }
-        names
     }
 
     async fn deleted_recordings(&self, occurrences: &[Occurrence]) -> HashSet<String> {
@@ -281,28 +241,17 @@ impl<'a> Recap<'a> {
     }
 
     pub async fn attendance(&self, thread_id: &str) -> Result<Attendance, TranscriptError> {
-        let graph_scope = Scope::graph(MESSAGES_SCOPE);
-        let chat = match self
-            .transcripts
-            .get(
-                &format!(
-                    "{}/v1.0/chats/{}?$select=onlineMeetingInfo",
-                    session::GRAPH,
-                    encode(thread_id)
-                ),
-                &graph_scope,
-                TranscriptError::NoRecording,
-            )
-            .await
-        {
+        let chat = match crate::chat_listing::aggregator_chat(self.session, thread_id).await {
             Ok(chat) => chat,
-            Err(TranscriptError::NoRecording | TranscriptError::AccessDenied) => {
-                return Ok(Attendance::TurnedOff);
-            }
-            Err(error) => return Err(error),
+            Err(error) => match chatsvc_failure(error) {
+                TranscriptError::NoRecording | TranscriptError::AccessDenied => {
+                    return Ok(Attendance::TurnedOff);
+                }
+                error => return Err(error),
+            },
         };
         let Some(join_url) = chat
-            .pointer("/onlineMeetingInfo/joinWebUrl")
+            .pointer("/meetingInformation/meetingJoinUrl")
             .and_then(Value::as_str)
         else {
             return Ok(Attendance::TurnedOff);

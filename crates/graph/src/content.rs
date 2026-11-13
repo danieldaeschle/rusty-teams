@@ -5,11 +5,10 @@ use crate::error::{Error, Result};
 use crate::models::Photo;
 use crate::people::decode_binary;
 
-const CHAT_PATH: &str = "/v1.0/chats/";
 const CHANNEL_PATH: &str = "/v1.0/teams/";
 const SHARES_PATH: &str = "/v1.0/shares/";
 const SHARES_SCOPE: &str = "Files.ReadWrite.All";
-const EXTERNAL_IMAGE_SCOPE: &str = "Chat.Read";
+const EXTERNAL_IMAGE_SCOPE: &str = "User.ReadBasic.All";
 
 impl Graph {
     /// Binary GET of a Graph hosted content URL (`.../hostedContents/{id}/$value`).
@@ -38,9 +37,7 @@ impl Graph {
 
 pub fn hosted_content_scope(url: &str) -> Option<Scope> {
     let path = url.strip_prefix(GRAPH)?;
-    if path.starts_with(CHAT_PATH) {
-        Some(Scope::graph("Chat.Read"))
-    } else if path.starts_with(CHANNEL_PATH) {
+    if path.starts_with(CHANNEL_PATH) {
         Some(Scope::graph("ChannelMessage.Read.All"))
     } else if path.starts_with(SHARES_PATH) {
         Some(Scope::graph(SHARES_SCOPE))
@@ -58,7 +55,7 @@ mod tests {
         let chat =
             "https://graph.microsoft.com/v1.0/chats/19%3Aa/messages/1/hostedContents/2/$value";
         let channel = "https://graph.microsoft.com/v1.0/teams/t/channels/c/messages/1/hostedContents/2/$value";
-        assert_eq!(hosted_content_scope(chat).unwrap().name, "Chat.Read");
+        assert!(hosted_content_scope(chat).is_none());
         assert_eq!(
             hosted_content_scope(channel).unwrap().name,
             "ChannelMessage.Read.All"

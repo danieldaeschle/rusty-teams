@@ -93,7 +93,6 @@ struct Fake {
     teams: Mutex<Vec<Team>>,
     failing_team: Mutex<Option<String>>,
     failing_cards: Mutex<bool>,
-    sent: Mutex<Vec<String>>,
     chat_calls: Mutex<usize>,
     chat_page_calls: Mutex<usize>,
     team_calls: Mutex<usize>,
@@ -110,7 +109,6 @@ struct Fake {
     mentions_sent: Mutex<Vec<Vec<OutgoingMention>>>,
     extras_sent: Mutex<Vec<MessageExtras>>,
     chatsvc_posts: Mutex<Vec<(String, String, String, serde_json::Value)>>,
-    send_answer_body: Mutex<Option<String>>,
     folder_requests: Mutex<usize>,
     directory_users: Mutex<Vec<User>>,
     horizons: Mutex<Vec<chatsvc::MemberHorizon>>,
@@ -479,25 +477,6 @@ impl Remote for Handle {
             .collect())
     }
 
-    async fn send_chat_message(
-        &self,
-        _chat_id: &str,
-        html: &str,
-        mentions: &[OutgoingMention],
-        extras: &MessageExtras,
-    ) -> Result<Message> {
-        self.sent.lock().unwrap().push(html.to_owned());
-        self.mentions_sent.lock().unwrap().push(mentions.to_vec());
-        self.extras_sent.lock().unwrap().push(extras.clone());
-        let body = self
-            .send_answer_body
-            .lock()
-            .unwrap()
-            .clone()
-            .unwrap_or_else(|| html.to_owned());
-        Ok(message(9000, 500, &body))
-    }
-
     async fn send_channel_message(
         &self,
         _team_id: &str,
@@ -577,35 +556,6 @@ impl Remote for Handle {
         if *self.failing_cards.lock().unwrap() {
             return Err(teams_core::Error::Folders("cards refused".to_owned()));
         }
-        Ok(())
-    }
-
-    async fn mark_chat_read(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
-        self.record(format!("mark_read {chat_id} {user_id} {tenant_id}"));
-        Ok(())
-    }
-
-    async fn mark_chat_unread(
-        &self,
-        chat_id: &str,
-        user_id: &str,
-        tenant_id: &str,
-        last_read_at: DateTime<Utc>,
-    ) -> Result<()> {
-        self.record(format!(
-            "mark_unread {chat_id} {user_id} {tenant_id} {}",
-            last_read_at.timestamp_millis()
-        ));
-        Ok(())
-    }
-
-    async fn hide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
-        self.record(format!("hide {chat_id} {user_id} {tenant_id}"));
-        Ok(())
-    }
-
-    async fn unhide_chat(&self, chat_id: &str, user_id: &str, tenant_id: &str) -> Result<()> {
-        self.record(format!("unhide {chat_id} {user_id} {tenant_id}"));
         Ok(())
     }
 
@@ -782,20 +732,6 @@ impl Remote for Handle {
             user_ids.join(",")
         ));
         Ok(chat("19:group@thread.v2", topic, 41, 41, ME, false))
-    }
-
-    async fn reply_with_quote(
-        &self,
-        chat_id: &str,
-        quoted_message_id: &str,
-        html: &str,
-        mentions: &[OutgoingMention],
-        extras: &MessageExtras,
-    ) -> Result<Message> {
-        self.record(format!("quote_reply {chat_id} {quoted_message_id} {html}"));
-        self.mentions_sent.lock().unwrap().push(mentions.to_vec());
-        self.extras_sent.lock().unwrap().push(extras.clone());
-        Ok(message(9003, 503, html))
     }
 
     async fn channel_files_folder(&self, team_id: &str, channel_id: &str) -> Result<DriveFolder> {
@@ -1560,13 +1496,10 @@ async fn chat_state_actions_call_remote_and_update_the_store() {
 
     engine.mark_unread(CHAT).await.unwrap();
     let last_message_millis = (base() + Duration::minutes(5)).timestamp_millis();
-    assert_eq!(
-        fake.calls().last().unwrap(),
-        &format!(
-            "mark_unread {CHAT} {ME} tenant-1 {}",
-            last_message_millis - 1
-        )
-    );
+    assert!(fake.calls().last().unwrap().starts_with(&format!(
+        "read bookmark {CHAT} {};",
+        last_message_millis - 1
+    )));
     let unread = engine.sidebar().unwrap().chats[0].clone();
     assert!(unread.unread);
     assert_eq!(
@@ -1592,7 +1525,7 @@ async fn hide_removes_the_chat_and_unhide_brings_it_back() {
     engine.hide_chat(CHAT).await.unwrap();
     assert_eq!(
         fake.calls().last().unwrap(),
-        &format!("hide {CHAT} {ME} tenant-1")
+        &format!("hidden at {CHAT} now")
     );
     assert!(engine.sidebar().unwrap().chats.is_empty());
     assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
@@ -1600,7 +1533,7 @@ async fn hide_removes_the_chat_and_unhide_brings_it_back() {
     engine.unhide_chat(CHAT).await.unwrap();
     assert_eq!(
         fake.calls().last().unwrap(),
-        &format!("unhide {CHAT} {ME} tenant-1")
+        &format!("hidden at {CHAT} none")
     );
     assert_eq!(engine.sidebar().unwrap().chats.len(), 1);
     assert_eq!(events.try_recv().unwrap(), CoreEvent::SidebarChanged);
@@ -1831,10 +1764,10 @@ async fn send_message_converts_markdown_and_caches_the_answer() {
         .await
         .unwrap();
     assert_eq!(
-        fake.sent.lock().unwrap().as_slice(),
-        ["hi <b>there</b> &lt;x&gt;"]
+        fake.chatsvc_posts.lock().unwrap()[0].1,
+        "hi <b>there</b> &lt;x&gt;"
     );
-    assert_eq!(record.message_id, "m9000");
+    assert_eq!(record.message_id, "1727203440000");
     assert_eq!(engine.store().message_count(CHAT).unwrap(), 4);
     assert_eq!(
         events.try_recv().unwrap(),
@@ -2555,7 +2488,9 @@ async fn the_notes_chat_takes_every_write_without_a_graph_chat_lookup() {
         .send_message_with_extras(NOTES_CHAT_ID, "note to self", None, &[], &extras)
         .await
         .unwrap();
-    fake.set_chat_messages(vec![message(9000, 500, "<p>note to self</p>")]);
+    let mut sent_note = message(9000, 500, "<p>note to self</p>");
+    sent_note.id = sent.message_id.clone();
+    fake.set_chat_messages(vec![sent_note]);
     engine
         .reply_to_with_extras(
             NOTES_CHAT_ID,
@@ -2588,15 +2523,19 @@ async fn the_notes_chat_takes_every_write_without_a_graph_chat_lookup() {
         .unwrap();
 
     assert_eq!(*fake.single_chat_calls.lock().unwrap(), 0);
-    assert_eq!(fake.sent.lock().unwrap().as_slice(), ["note to self"]);
+    assert!(
+        fake.chatsvc_posts.lock().unwrap()[0]
+            .1
+            .starts_with("note to self")
+    );
     let calls = fake.calls();
     for expected in [
         "chatsvc post 48:notes",
-        "edit m9000 edited",
-        "set_reaction m9000 \u{1f44d}",
-        "unset_reaction m9000 \u{1f44d}",
+        "edit 1727203440000 edited",
+        "set_reaction 1727203440000 \u{1f44d}",
+        "unset_reaction 1727203440000 \u{1f44d}",
         "upload chat-files plan.txt 4",
-        "soft_delete user-me m9000",
+        "soft_delete user-me 1727203440000",
     ] {
         assert!(
             calls.iter().any(|call| call == expected),
@@ -2631,9 +2570,14 @@ async fn send_with_extras_hands_images_and_files_to_the_remote() {
         .unwrap();
     engine.send_message(CHAT, "plain", None).await.unwrap();
 
-    let sent = fake.extras_sent.lock().unwrap();
-    assert_eq!(sent[0], extras);
-    assert!(sent[1].is_empty());
+    let calls = fake.calls();
+    assert!(
+        calls.contains(&format!("ams upload {CHAT} image.png 1")),
+        "{calls:?}"
+    );
+    let posts = fake.chatsvc_posts.lock().unwrap();
+    assert!(posts[0].1.contains("0-ams"));
+    assert_eq!(posts[1].1, "plain");
 }
 
 #[tokio::test]
@@ -2641,7 +2585,6 @@ async fn a_sent_image_is_cached_under_the_server_url_without_a_download() {
     let directory = tempfile::tempdir().unwrap();
     let fake = Arc::new(Fake::default());
     *fake.chats.lock().unwrap() = vec![chat(CHAT, Some("Planning"), 5, 5, ME, false)];
-    *fake.send_answer_body.lock().unwrap() = Some(format!("<p>look</p><img src=\"{HOSTED}\">"));
     let engine = engine_with(&fake, small_pages())
         .with_image_dir(directory.path(), 1024 * 1024)
         .unwrap();
@@ -2662,12 +2605,11 @@ async fn a_sent_image_is_cached_under_the_server_url_without_a_download() {
         .await
         .unwrap();
 
-    assert_eq!(engine.image(HOSTED).unwrap().bytes, vec![9, 8, 7]);
+    assert_eq!(engine.image(SENT_AMS_IMAGE).unwrap().bytes, vec![9, 8, 7]);
     assert!(fake.hosted_requests.lock().unwrap().is_empty());
     let mut seeded = false;
     while let Ok(event) = events.try_recv() {
-        seeded |=
-            matches!(event, CoreEvent::ImagesChanged { keys } if keys == vec![HOSTED.to_owned()]);
+        seeded |= matches!(event, CoreEvent::ImagesChanged { keys } if keys == vec![SENT_AMS_IMAGE.to_owned()]);
     }
     assert!(seeded);
 }
@@ -2821,7 +2763,7 @@ async fn send_typing_addresses_chats_channels_and_threads() {
 }
 
 #[tokio::test]
-async fn chat_actions_call_graph_with_the_right_ids() {
+async fn chat_actions_call_the_remote_with_the_right_ids() {
     let fake = Arc::new(Fake::default());
     fake.set_chat_messages(numbered(3));
     let engine = chat_engine(&fake, small_pages()).await;
@@ -2840,7 +2782,7 @@ async fn chat_actions_call_graph_with_the_right_ids() {
         .await
         .unwrap();
     let calls = fake.calls();
-    assert_eq!(calls[0], format!("mark_read {CHAT} {ME} tenant-1"));
+    assert!(calls[0].starts_with(&format!("read horizon {CHAT} ")));
     assert!(calls.contains(&"set_reaction m0001 like".to_owned()));
     assert!(calls.contains(&"unset_reaction m0001 like".to_owned()));
     assert!(calls.contains(&"edit m0002 new <b>text</b>".to_owned()));
@@ -4034,6 +3976,8 @@ async fn folders_without_a_source_are_unsupported() {
     ));
 }
 
+const SENT_AMS_IMAGE: &str =
+    "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-ams/views/imgpsh_fullsize";
 const HOSTED: &str =
     "https://graph.microsoft.com/v1.0/chats/c/messages/m0001/hostedContents/h1/$value";
 
@@ -4274,19 +4218,13 @@ async fn chat_mentions_become_at_tags_and_a_mentions_array() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        fake.sent.lock().unwrap()[0],
-        "hi <at id=\"0\">Ada Example</at> &amp; co"
-    );
-    let mentions = fake.mentions_sent.lock().unwrap()[0].clone();
-    assert_eq!(mentions.len(), 1);
-    assert_eq!(mentions[0].id, 0);
-    assert_eq!(
-        mentions[0].target,
-        MentionTarget::User {
-            user_id: "user-ada".to_owned()
-        }
-    );
+    let posts = fake.chatsvc_posts.lock().unwrap().clone();
+    assert!(posts[0].1.contains("Ada Example</span>"), "{}", posts[0].1);
+    assert!(posts[0].1.ends_with(" &amp; co"), "{}", posts[0].1);
+    let mentions: serde_json::Value =
+        serde_json::from_str(posts[0].3["mentions"].as_str().unwrap()).unwrap();
+    assert_eq!(mentions.as_array().unwrap().len(), 1);
+    assert_eq!(mentions[0]["mri"], "8:orgid:user-ada");
     assert!(
         engine
             .send_message_with_mentions(CHAT, "@Squad", None, &[MentionInput::team("t", "Squad")])
@@ -5228,13 +5166,10 @@ async fn mark_unread_from_a_message_backs_up_one_millisecond() {
     let engine = chat_engine(&fake, small_pages()).await;
     let created_at = base() + Duration::minutes(2);
     engine.mark_unread_from(CHAT, created_at).await.unwrap();
-    assert_eq!(
-        fake.calls().last().unwrap(),
-        &format!(
-            "mark_unread {CHAT} {ME} tenant-1 {}",
-            created_at.timestamp_millis() - 1
-        )
-    );
+    assert!(fake.calls().last().unwrap().starts_with(&format!(
+        "read bookmark {CHAT} {};",
+        created_at.timestamp_millis() - 1
+    )));
 }
 
 #[tokio::test]
@@ -5965,7 +5900,9 @@ async fn marking_the_notes_chat_read_takes_the_tenant_from_another_chat() {
 
     let calls = fake.calls();
     assert!(
-        calls.contains(&format!("mark_read {NOTES_CHAT_ID} {ME} tenant-1")),
+        calls
+            .iter()
+            .any(|call| call.starts_with(&format!("read horizon {NOTES_CHAT_ID} "))),
         "{calls:?}"
     );
     let member_requests = fake.member_requests.lock().unwrap();
@@ -6043,7 +5980,7 @@ async fn a_quoted_chat_reply_is_written_through_chatsvc_in_the_teams_shape() {
 }
 
 #[tokio::test]
-async fn a_quoted_chat_reply_with_an_image_stays_on_graph() {
+async fn a_quoted_chat_reply_with_an_image_goes_through_chatsvc() {
     let fake = Arc::new(Fake::default());
     fake.set_chat_messages(numbered(2));
     let engine = chat_engine(&fake, small_pages()).await;
@@ -6059,25 +5996,19 @@ async fn a_quoted_chat_reply_with_an_image_stays_on_graph() {
         .reply_to_with_extras(CHAT, "m0001", "look", &[], &extras)
         .await
         .unwrap();
-    assert!(fake.chatsvc_posts.lock().unwrap().is_empty());
-    assert!(
-        fake.calls()
-            .contains(&format!("quote_reply {CHAT} m0001 look"))
-    );
+    let posts = fake.chatsvc_posts.lock().unwrap();
+    assert!(posts[0].1.starts_with("<blockquote"), "{}", posts[0].1);
+    assert!(posts[0].1.contains("0-ams"));
 }
 
 #[tokio::test]
-async fn a_quoted_reply_to_an_unknown_message_stays_on_graph() {
+async fn a_reply_to_an_unknown_message_is_sent_without_a_quote() {
     let fake = Arc::new(Fake::default());
     fake.set_chat_messages(numbered(2));
     let engine = chat_engine(&fake, small_pages()).await;
     engine.fetch_newer(CHAT).await.unwrap();
     engine.reply_to(CHAT, "m7777", "hi").await.unwrap();
-    assert!(fake.chatsvc_posts.lock().unwrap().is_empty());
-    assert!(
-        fake.calls()
-            .contains(&format!("quote_reply {CHAT} m7777 hi"))
-    );
+    assert_eq!(fake.chatsvc_posts.lock().unwrap()[0].1, "hi");
 }
 
 #[tokio::test]

@@ -252,11 +252,13 @@ mod tests {
         assert!(!sleep.wake());
         assert_eq!(sleep.admit(App::Teams, 1), None);
         assert_eq!(sleep.admit(App::Teams, 2), None);
-        assert_eq!(sleep.admit(App::Outlook, 3), None);
         assert!(!sleep.should_sleep(idle(), sleep.last_use + SLEEP_AFTER));
         assert_eq!(sleep.loaded(App::Teams), vec![1, 2]);
         assert_eq!(sleep.admit(App::Teams, 4), Some(4));
+        sleep.fall_asleep();
+        assert!(sleep.wake());
+        assert_eq!(sleep.admit(App::Teams, 3), None);
         assert_eq!(sleep.reset(), vec![3]);
-        assert_eq!(sleep.admit(App::Outlook, 5), Some(5));
+        assert_eq!(sleep.admit(App::Teams, 5), Some(5));
     }
 }

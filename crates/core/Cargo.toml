@@ -12,6 +12,7 @@ name = "teams_core"
 chatsvc.workspace = true
 chrono.workspace = true
 iana-time-zone = "0.1"
+base64.workspace = true
 futures-util.workspace = true
 graph.workspace = true
 percent-encoding.workspace = true

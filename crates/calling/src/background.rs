@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 
 pub const CATALOG_URL: &str = chatsvc::teams_cdn::BACKGROUND_CATALOG_URL;
 pub const CDN_ROOT: &str = chatsvc::teams_cdn::ROOT;
-const FETCH_SCOPE: &str = "Chat.Read";
+const FETCH_SCOPE: &str = "User.ReadBasic.All";
 const MAX_SIDE: u32 = 1920;
 const CATALOG_FILE: &str = "config.json";
 const THUMBNAIL_DIR: &str = "thumbnails";

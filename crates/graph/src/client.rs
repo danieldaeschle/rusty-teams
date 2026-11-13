@@ -4,7 +4,7 @@ use serde_json::Value;
 use session::{ApiResponse, GRAPH, Method, Request, Scope, Session};
 
 use crate::error::{Error, Result};
-use crate::models::{Channel, Chat, Member, Message, Tag, Team, User};
+use crate::models::{Channel, Message, Tag, Team, User};
 use crate::page::Page;
 use crate::urls;
 
@@ -31,85 +31,6 @@ impl Graph {
             .get(&urls::me(), &Scope::graph("User.ReadBasic.All"))
             .await?;
         Ok(serde_json::from_value(body)?)
-    }
-
-    pub async fn chats_page(&self, top: usize) -> Result<Page<Chat>> {
-        self.get_page(&urls::chats(top), Scope::graph("Chat.Read"))
-            .await
-    }
-
-    pub async fn chats_at(&self, next_link: &str) -> Result<Page<Chat>> {
-        self.get_page(next_link, Scope::graph("Chat.Read")).await
-    }
-
-    pub async fn chat(&self, chat_id: &str) -> Result<Chat> {
-        let body = self
-            .get(&urls::chat(chat_id), &Scope::graph("Chat.Read"))
-            .await?;
-        Ok(serde_json::from_value(body)?)
-    }
-
-    pub async fn chat_members(&self, chat_id: &str) -> Result<Vec<Member>> {
-        self.get_all(&urls::chat_members(chat_id), Scope::graph("Chat.Read"))
-            .await
-    }
-
-    pub async fn chat_message(&self, chat_id: &str, message_id: &str) -> Result<Message> {
-        let body = self
-            .get(
-                &urls::chat_message(chat_id, message_id),
-                &Scope::graph("Chat.Read"),
-            )
-            .await?;
-        Ok(serde_json::from_value(body)?)
-    }
-
-    pub async fn chat_messages_by_id(
-        &self,
-        chat_id: &str,
-        message_ids: &[String],
-    ) -> Result<Vec<Result<Message>>> {
-        let scope = Scope::graph("Chat.Read");
-        let mut messages = Vec::with_capacity(message_ids.len());
-        for chunk in message_ids.chunks(BATCH_SIZE) {
-            let requests: Vec<Request> = chunk
-                .iter()
-                .map(|message_id| Request::get(urls::chat_message(chat_id, message_id)))
-                .collect();
-            let answers = self.session.batch(&requests, &scope).await?;
-            for (request, answer) in requests.iter().zip(answers) {
-                messages.push(if answer.is_success() {
-                    serde_json::from_value(answer.body).map_err(Into::into)
-                } else {
-                    Err(session::Error::api(answer.status, &request.url, answer.body).into())
-                });
-            }
-        }
-        Ok(messages)
-    }
-
-    pub async fn list_chats(&self, limit: usize) -> Result<Vec<Chat>> {
-        let mut page = self.chats_page(limit.clamp(1, CHAT_PAGE_SIZE)).await?;
-        let mut chats = std::mem::take(&mut page.items);
-        while chats.len() < limit {
-            let Some(mut next) = self.next_page(&page).await? else {
-                break;
-            };
-            chats.append(&mut std::mem::take(&mut next.items));
-            page = next;
-        }
-        chats.truncate(limit);
-        Ok(chats)
-    }
-
-    pub async fn chat_messages(
-        &self,
-        chat_id: &str,
-        before: Option<DateTime<Utc>>,
-        top: usize,
-    ) -> Result<Page<Message>> {
-        let url = urls::chat_messages(chat_id, before, top.clamp(1, MESSAGE_PAGE_SIZE));
-        self.get_page(&url, Scope::graph("Chat.Read")).await
     }
 
     pub async fn joined_teams(&self) -> Result<Vec<Team>> {

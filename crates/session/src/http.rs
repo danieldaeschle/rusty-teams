@@ -95,17 +95,6 @@ pub async fn list_targets(endpoint: &str) -> Result<Vec<Target>> {
     serde_json::from_slice(&body).map_err(|error| no_browser(error.to_string()))
 }
 
-/// Opens a background tab; Chrome 111+ only accepts PUT here.
-pub async fn new_tab(endpoint: &str, url: &str) -> Result<()> {
-    exchange(endpoint, "PUT", &format!("/json/new?{url}"))
-        .await
-        .map(drop)
-        .map_err(|reason| Error::NoBrowser {
-            endpoint: endpoint.to_owned(),
-            reason,
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

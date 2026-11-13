@@ -238,17 +238,12 @@ mod tests {
     async fn calls_reach_the_ui_thread_and_answers_come_back() {
         let ui = fake_ui();
         ui.state.send_replace(ready(&[]));
-        let (control, events) = ui
-            .transport
-            .open(App::Outlook, false)
-            .await
-            .unwrap()
-            .unwrap();
+        let (control, events) = ui.transport.open(App::Teams, false).await.unwrap().unwrap();
         assert!(events.is_none());
         let requests = ui.requests;
         let answer = tokio::task::spawn_blocking(move || match requests.recv().unwrap() {
             UiRequest::Call { app, command } => {
-                assert_eq!(app, App::Outlook);
+                assert_eq!(app, App::Teams);
                 assert_eq!(command.method, "Page.reload");
                 command.respond(Ok(json!({"done": true})));
             }
@@ -280,13 +275,10 @@ mod tests {
     #[tokio::test]
     async fn diagnose_sees_a_login_page() {
         let ui = fake_ui();
-        ui.state.send_replace(ready(&[
-            (
-                App::Teams,
-                "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
-            ),
-            (App::Outlook, "https://outlook.cloud.microsoft/mail/"),
-        ]));
+        ui.state.send_replace(ready(&[(
+            App::Teams,
+            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        )]));
         let diagnosis = ui.transport.diagnose().await.unwrap();
         assert!(diagnosis.login_pending);
         assert!(diagnosis.app_tab_open);

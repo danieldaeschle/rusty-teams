@@ -66,24 +66,6 @@ pub fn get_schedule() -> String {
     format!("{GRAPH}/v1.0/me/calendar/getSchedule")
 }
 
-pub fn chats(top: usize) -> String {
-    format!(
-        "{GRAPH}/v1.0/me/chats?$expand=members,lastMessagePreview\
-         &$orderby=lastMessagePreview/createdDateTime%20desc&$top={top}"
-    )
-}
-
-pub fn chat(chat_id: &str) -> String {
-    format!(
-        "{GRAPH}/v1.0/chats/{}?$expand=members,lastMessagePreview",
-        segment(chat_id)
-    )
-}
-
-pub fn chat_members(chat_id: &str) -> String {
-    format!("{GRAPH}/v1.0/chats/{}/members", segment(chat_id))
-}
-
 pub fn chat_message(chat_id: &str, message_id: &str) -> String {
     format!(
         "{GRAPH}/v1.0/chats/{}/messages/{}",
@@ -111,36 +93,6 @@ fn user_chat_message_action(
         segment(user_id),
         segment(chat_id),
         segment(message_id)
-    )
-}
-
-pub fn create_chat() -> String {
-    format!("{GRAPH}/v1.0/chats")
-}
-
-pub fn chat_messages(chat_id: &str, before: Option<DateTime<Utc>>, top: usize) -> String {
-    let mut url = format!(
-        "{GRAPH}/v1.0/chats/{}/messages?$top={top}&$orderby=createdDateTime%20desc",
-        segment(chat_id)
-    );
-    if let Some(before) = before {
-        let stamp = before.to_rfc3339_opts(SecondsFormat::Millis, true);
-        url.push_str(&format!(
-            "&$filter=createdDateTime%20lt%20{}",
-            segment(&stamp)
-        ));
-    }
-    url
-}
-
-pub fn chat_message_collection(chat_id: &str) -> String {
-    format!("{GRAPH}/v1.0/chats/{}/messages", segment(chat_id))
-}
-
-pub fn reply_with_quote(chat_id: &str) -> String {
-    format!(
-        "{GRAPH}/beta/chats/{}/messages/replyWithQuote",
-        segment(chat_id)
     )
 }
 
@@ -274,36 +226,6 @@ pub fn drive_item_invite(drive_id: &str, item_id: &str) -> String {
     )
 }
 
-pub fn mark_chat_read(chat_id: &str) -> String {
-    format!(
-        "{GRAPH}/v1.0/chats/{}/markChatReadForUser",
-        segment(chat_id)
-    )
-}
-
-pub fn mark_chat_unread(chat_id: &str) -> String {
-    format!(
-        "{GRAPH}/v1.0/chats/{}/markChatUnreadForUser",
-        segment(chat_id)
-    )
-}
-
-pub fn hide_chat(chat_id: &str) -> String {
-    format!("{GRAPH}/v1.0/chats/{}/hideForUser", segment(chat_id))
-}
-
-pub fn unhide_chat(chat_id: &str) -> String {
-    format!("{GRAPH}/v1.0/chats/{}/unhideForUser", segment(chat_id))
-}
-
-pub fn chat_member(chat_id: &str, membership_id: &str) -> String {
-    format!(
-        "{GRAPH}/v1.0/chats/{}/members/{}",
-        segment(chat_id),
-        segment(membership_id)
-    )
-}
-
 pub fn joined_teams() -> String {
     format!("{GRAPH}/v1.0/me/joinedTeams?$select=id,displayName")
 }
@@ -421,8 +343,6 @@ pub fn user_by_address(address: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
-
     use super::*;
 
     #[test]
@@ -453,14 +373,6 @@ mod tests {
     }
 
     #[test]
-    fn reply_with_quote_uses_the_beta_endpoint() {
-        assert_eq!(
-            reply_with_quote("19:abc@thread.v2"),
-            "https://graph.microsoft.com/beta/chats/19%3Aabc%40thread.v2/messages/replyWithQuote"
-        );
-    }
-
-    #[test]
     fn upload_session_urls_encode_the_file_name() {
         assert_eq!(
             chat_files_upload_session("Q3 plan (1).docx"),
@@ -469,54 +381,6 @@ mod tests {
         assert_eq!(
             folder_upload_session("b!d", "01F", "a.pdf"),
             "https://graph.microsoft.com/v1.0/drives/b%21d/items/01F:/a.pdf:/createUploadSession"
-        );
-    }
-
-    #[test]
-    fn chat_state_write_urls() {
-        assert_eq!(
-            mark_chat_unread("19:abc@thread.v2"),
-            "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.v2/markChatUnreadForUser"
-        );
-        assert_eq!(
-            hide_chat("19:abc@thread.v2"),
-            "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.v2/hideForUser"
-        );
-        assert_eq!(
-            unhide_chat("19:abc@thread.v2"),
-            "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.v2/unhideForUser"
-        );
-        assert_eq!(
-            chat_member("19:abc@thread.v2", "MTox"),
-            "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.v2/members/MTox"
-        );
-    }
-
-    #[test]
-    fn chats_url_orders_newest_first() {
-        let url = chats(50);
-        assert!(url.starts_with("https://graph.microsoft.com/v1.0/me/chats?"));
-        assert!(url.contains("$expand=members,lastMessagePreview"));
-        assert!(url.contains("$orderby=lastMessagePreview/createdDateTime%20desc"));
-        assert!(url.ends_with("$top=50"));
-    }
-
-    #[test]
-    fn messages_url_without_cursor() {
-        let url = chat_messages("19:abc@thread.v2", None, 30);
-        assert_eq!(
-            url,
-            "https://graph.microsoft.com/v1.0/chats/19%3Aabc%40thread.v2/messages?$top=30&$orderby=createdDateTime%20desc"
-        );
-    }
-
-    #[test]
-    fn messages_url_with_cursor_filters_older() {
-        let before = Utc.with_ymd_and_hms(2026, 10, 6, 9, 0, 0).unwrap();
-        let url = chat_messages("c", Some(before), 50);
-        assert!(
-            url.ends_with("&$filter=createdDateTime%20lt%202026-10-06T09%3A00%3A00.000Z"),
-            "{url}"
         );
     }
 

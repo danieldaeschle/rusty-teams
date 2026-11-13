@@ -6,42 +6,39 @@ use url::Url;
 use crate::error::BrowserError;
 
 const LOGIN_HOSTS: [&str; 2] = ["login.microsoftonline.com", "login.live.com"];
+/// Outlook tabs earlier versions opened next to Teams; nothing uses them any more.
+const RETIRED_HOSTS: [&str; 2] = ["outlook.office.com", "outlook.cloud.microsoft"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum App {
     Teams,
-    Outlook,
 }
 
-pub const APPS: [App; 2] = [App::Teams, App::Outlook];
+pub const APPS: [App; 1] = [App::Teams];
 
 impl App {
     pub fn start_url(self) -> &'static str {
         match self {
             App::Teams => "https://teams.cloud.microsoft/",
-            App::Outlook => "https://outlook.office.com/mail/",
         }
     }
 
     fn park_path(self) -> &'static str {
         match self {
             App::Teams => "/robots.txt",
-            App::Outlook => "/owa/favicon.ico",
         }
     }
 
     fn hosts(self) -> &'static [&'static str] {
         match self {
             App::Teams => &["teams.cloud.microsoft", "teams.microsoft.com"],
-            App::Outlook => &["outlook.office.com", "outlook.cloud.microsoft"],
         }
     }
 
     pub fn name(self) -> &'static str {
         match self {
             App::Teams => "teams",
-            App::Outlook => "outlook",
         }
     }
 }
@@ -167,8 +164,17 @@ pub(crate) fn attached_target_ids(result: &serde_json::Value) -> HashSet<String>
         .collect()
 }
 
-pub(crate) fn duplicate_app_tab_ids(tabs: &[Tab], attached: &HashSet<String>) -> Vec<String> {
-    let mut duplicates = Vec::new();
+pub(crate) fn closable_tab_ids(tabs: &[Tab], attached: &HashSet<String>) -> Vec<String> {
+    let mut duplicates: Vec<String> = tabs
+        .iter()
+        .filter(|tab| !attached.contains(&tab.id))
+        .filter(|tab| {
+            tab.host
+                .as_deref()
+                .is_some_and(|host| RETIRED_HOSTS.contains(&host))
+        })
+        .map(|tab| tab.id.clone())
+        .collect();
     for app in APPS {
         let mut candidates: Vec<&Tab> = tabs.iter().filter(|tab| tab.app == Some(app)).collect();
         candidates.sort_by_key(|tab| (!attached.contains(&tab.id), tab.parked));
@@ -206,7 +212,7 @@ mod tests {
     fn keeps_pages_only_and_hosts_only() {
         let tabs = parse_tabs(LIST.as_bytes()).unwrap();
         assert_eq!(tabs.len(), 2);
-        assert_eq!(tabs[0].app, Some(App::Outlook));
+        assert_eq!(tabs[0].app, None);
         assert_eq!(tabs[0].host.as_deref(), Some("outlook.cloud.microsoft"));
         assert_eq!(tabs[1].app, Some(App::Teams));
         assert_eq!(login_state(&tabs), LoginState::NotRequired);
@@ -249,7 +255,6 @@ mod tests {
             app_tab(&tabs, App::Teams).map(|tab| tab.id.as_str()),
             Some("T")
         );
-        assert!(app_tab(&tabs, App::Outlook).is_none());
     }
 
     fn page(id: &str, url: &str) -> Tab {
@@ -268,11 +273,11 @@ mod tests {
         )
         .unwrap();
         assert!(tabs[0].parked && tabs[0].app == Some(App::Teams));
-        assert!(tabs[1].parked && tabs[1].app == Some(App::Outlook));
+        assert!(tabs[1].app.is_none());
         assert!(!tabs[2].parked && tabs[2].app == Some(App::Teams));
         assert!(!tabs[3].parked && tabs[3].app.is_none());
-        assert!(tabs[..2].iter().all(|tab| !tab.login));
-        assert_eq!(login_state(&tabs[..2]), LoginState::NotRequired);
+        assert!(tabs[..1].iter().all(|tab| !tab.login));
+        assert_eq!(login_state(&tabs[..1]), LoginState::NotRequired);
         assert_eq!(
             app_tab(&tabs[..1], App::Teams).map(|tab| tab.id.as_str()),
             Some("T")
@@ -289,9 +294,9 @@ mod tests {
             page("l", "https://login.microsoftonline.com/"),
         ];
         let attached: HashSet<String> = ["b".to_owned()].into();
-        assert_eq!(duplicate_app_tab_ids(&tabs, &attached), ["a", "c"]);
-        let both: HashSet<String> = ["a".to_owned(), "b".to_owned()].into();
-        assert_eq!(duplicate_app_tab_ids(&tabs, &both), ["c"]);
+        assert_eq!(closable_tab_ids(&tabs, &attached), ["o", "a", "c"]);
+        let both: HashSet<String> = ["a".to_owned(), "b".to_owned(), "o".to_owned()].into();
+        assert_eq!(closable_tab_ids(&tabs, &both), ["c"]);
     }
 
     #[test]
@@ -301,7 +306,7 @@ mod tests {
             page("a", "https://teams.cloud.microsoft/v2/"),
             page("b", "https://teams.cloud.microsoft/v2/"),
         ];
-        assert_eq!(duplicate_app_tab_ids(&tabs, &HashSet::new()), ["b", "p"]);
+        assert_eq!(closable_tab_ids(&tabs, &HashSet::new()), ["b", "p"]);
     }
 
     #[test]

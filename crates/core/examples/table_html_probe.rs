@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use chatsvc::{ConversationRef, Messages};
 use chrono::Utc;
-use graph::{Graph, MessageExtras};
 use serde_json::{Value, json};
 use session::{DEFAULT_ENDPOINT, IC3, Method, Request, Scope, Session};
 use teams_core::{Draft, NOTES_CHAT_ID, Table};
@@ -26,17 +25,7 @@ async fn main() {
     let html = draft.to_html();
     println!("# composer html\n{html}\n");
 
-    let via_chatsvc = std::env::args().any(|argument| argument == "--chatsvc");
-    let message_id = if via_chatsvc {
-        send_via_chatsvc(&session, &html).await
-    } else {
-        let sent = Graph::new(session.clone())
-            .send_chat_message(NOTES_CHAT_ID, &html, &[], &MessageExtras::default())
-            .await
-            .expect("graph send to 48:notes");
-        println!("# sent via graph");
-        sent.id
-    };
+    let message_id = send_via_chatsvc(&session, &html).await;
     println!("# sent id {message_id}");
 
     tokio::time::sleep(Duration::from_secs(2)).await;

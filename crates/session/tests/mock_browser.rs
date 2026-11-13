@@ -100,16 +100,13 @@ fn fast_config() -> SessionConfig {
     }
 }
 
-const BOTH_TABS: [&str; 2] = [
-    "https://teams.cloud.microsoft/v2/",
-    "https://outlook.cloud.microsoft/mail/",
-];
+const TEAMS_TAB: [&str; 1] = ["https://teams.cloud.microsoft/v2/"];
 
 #[tokio::test]
 async fn request_returns_body() {
     let browser = start_browser(
         vec![json!({"results": [{"status": 200, "body": {"id": "u1"}}]})],
-        BOTH_TABS.to_vec(),
+        TEAMS_TAB.to_vec(),
     )
     .await;
     let session = Session::connect_with(&browser.endpoint, fast_config())
@@ -137,7 +134,7 @@ async fn throttled_request_is_retried_after_retry_after() {
             json!({"results": [{"status": 429, "retryAfter": "0", "body": "slow down"}]}),
             json!({"results": [{"status": 200, "body": {"ok": true}}]}),
         ],
-        BOTH_TABS.to_vec(),
+        TEAMS_TAB.to_vec(),
     )
     .await;
     let session = Session::connect_with(&browser.endpoint, fast_config())
@@ -147,7 +144,7 @@ async fn throttled_request_is_retried_after_retry_after() {
         .request(
             Method::Get,
             "https://graph.microsoft.com/v1.0/me/chats",
-            &Scope::graph("Chat.Read"),
+            &Scope::graph("ChannelMessage.Read.All"),
             None,
         )
         .await
@@ -163,7 +160,7 @@ async fn batch_retries_only_throttled_requests() {
             json!({"results": [{"status": 200, "body": "a"}, {"status": 429, "retryAfter": "0", "body": null}]}),
             json!({"results": [{"status": 200, "body": "b"}]}),
         ],
-        BOTH_TABS.to_vec(),
+        TEAMS_TAB.to_vec(),
     )
     .await;
     let session = Session::connect_with(&browser.endpoint, fast_config())
@@ -174,7 +171,7 @@ async fn batch_retries_only_throttled_requests() {
         Request::get("https://graph.microsoft.com/v1.0/b"),
     ];
     let responses = session
-        .batch(&requests, &Scope::graph("Chat.Read"))
+        .batch(&requests, &Scope::graph("ChannelMessage.Read.All"))
         .await
         .unwrap();
     assert_eq!(responses[0].body, "a");
@@ -185,7 +182,7 @@ async fn batch_retries_only_throttled_requests() {
 async fn api_error_is_typed() {
     let browser = start_browser(
         vec![json!({"results": [{"status": 404, "body": {"error": {"message": "gone"}}}]})],
-        BOTH_TABS.to_vec(),
+        TEAMS_TAB.to_vec(),
     )
     .await;
     let session = Session::connect_with(&browser.endpoint, fast_config())
@@ -195,7 +192,7 @@ async fn api_error_is_typed() {
         .request(
             Method::Get,
             "https://graph.microsoft.com/v1.0/chats/x",
-            &Scope::graph("Chat.Read"),
+            &Scope::graph("ChannelMessage.Read.All"),
             None,
         )
         .await
@@ -204,9 +201,10 @@ async fn api_error_is_typed() {
 }
 
 #[tokio::test]
-async fn ungranted_scope_in_both_tabs_is_login_required() {
-    let denied = json!({"noToken": true, "refreshError": "the app is not granted Chat.Read"});
-    let browser = start_browser(vec![denied.clone(), denied], BOTH_TABS.to_vec()).await;
+async fn ungranted_scope_is_login_required() {
+    let denied =
+        json!({"noToken": true, "refreshError": "the app is not granted ChannelMessage.Read.All"});
+    let browser = start_browser(vec![denied], TEAMS_TAB.to_vec()).await;
     let session = Session::connect_with(&browser.endpoint, fast_config())
         .await
         .unwrap();
@@ -214,7 +212,7 @@ async fn ungranted_scope_in_both_tabs_is_login_required() {
         .request(
             Method::Get,
             "https://graph.microsoft.com/v1.0/me/chats",
-            &Scope::graph("Chat.Read"),
+            &Scope::graph("ChannelMessage.Read.All"),
             None,
         )
         .await
@@ -225,7 +223,7 @@ async fn ungranted_scope_in_both_tabs_is_login_required() {
 #[tokio::test]
 async fn missing_token_without_login_tab_is_no_fresh_token() {
     let missing = json!({"noToken": true, "refreshError": "invalid_grant"});
-    let browser = start_browser(vec![missing; 40], BOTH_TABS.to_vec()).await;
+    let browser = start_browser(vec![missing; 40], TEAMS_TAB.to_vec()).await;
     let session = Session::connect_with(&browser.endpoint, fast_config())
         .await
         .unwrap();

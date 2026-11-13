@@ -82,7 +82,6 @@ mod tests {
         let mut gate = ParkGate::default();
         gate.command_started(App::Teams);
         assert_eq!(gate.decide(App::Teams), ParkDecision::Wait);
-        assert_eq!(gate.decide(App::Outlook), ParkDecision::Park);
         gate.command_finished(App::Teams);
         assert_eq!(gate.decide(App::Teams), ParkDecision::Park);
     }
@@ -120,10 +119,11 @@ mod tests {
     #[test]
     fn a_restart_forgets_unanswered_commands_but_keeps_holds() {
         let mut gate = ParkGate::default();
-        gate.command_started(App::Outlook);
+        gate.command_started(App::Teams);
+        gate.forget_commands();
+        assert_eq!(gate.decide(App::Teams), ParkDecision::Park);
         gate.hold(App::Teams, true);
         gate.forget_commands();
-        assert_eq!(gate.decide(App::Outlook), ParkDecision::Park);
         assert_eq!(gate.decide(App::Teams), ParkDecision::Wait);
     }
 }

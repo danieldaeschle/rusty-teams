@@ -47,18 +47,15 @@ mod tests {
     }
 
     #[test]
-    fn publishes_to_the_app_only_and_drops_closed_sinks() {
+    fn publishes_to_the_app_and_drops_closed_sinks() {
         let mut subscribers = Subscribers::default();
         let (teams, mut teams_events) = unbounded_channel();
         let (closed, closed_events) = unbounded_channel();
-        let (outlook, mut outlook_events) = unbounded_channel();
         subscribers.add(App::Teams, teams);
         subscribers.add(App::Teams, closed);
-        subscribers.add(App::Outlook, outlook);
         drop(closed_events);
         subscribers.publish(App::Teams, &event());
         assert_eq!(teams_events.try_recv().unwrap(), event());
-        assert!(outlook_events.try_recv().is_err());
         assert_eq!(subscribers.sinks[&App::Teams].len(), 1);
     }
 

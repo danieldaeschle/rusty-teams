@@ -3,11 +3,10 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum App {
     Teams,
-    Outlook,
 }
 
 impl App {
-    pub const ALL: [App; 2] = [App::Teams, App::Outlook];
+    pub const ALL: [App; 1] = [App::Teams];
 
     pub fn origins(self) -> &'static [&'static str] {
         match self {
@@ -15,17 +14,12 @@ impl App {
                 "https://teams.cloud.microsoft",
                 "https://teams.microsoft.com",
             ],
-            App::Outlook => &[
-                "https://outlook.office.com",
-                "https://outlook.cloud.microsoft",
-            ],
         }
     }
 
     pub fn start_url(self) -> &'static str {
         match self {
             App::Teams => "https://teams.cloud.microsoft/",
-            App::Outlook => "https://outlook.cloud.microsoft/mail/",
         }
     }
 
@@ -33,7 +27,6 @@ impl App {
     pub fn park_url(self) -> &'static str {
         match self {
             App::Teams => "https://teams.cloud.microsoft/robots.txt",
-            App::Outlook => "https://outlook.cloud.microsoft/owa/favicon.ico",
         }
     }
 
@@ -46,7 +39,6 @@ impl std::fmt::Display for App {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             App::Teams => "teams",
-            App::Outlook => "outlook",
         })
     }
 }
@@ -113,13 +105,6 @@ mod tests {
                 .as_deref(),
             Some("ws://x/3")
         );
-        assert_eq!(
-            find_app_tab(&targets, App::Outlook)
-                .unwrap()
-                .websocket_url
-                .as_deref(),
-            Some("ws://x/2")
-        );
     }
 
     #[test]
@@ -137,7 +122,6 @@ mod tests {
         .unwrap();
         let teams = find_app_tab(&parked, App::Teams).unwrap();
         assert!(App::Teams.is_park_url(&teams.url));
-        assert!(App::Outlook.is_park_url(&find_app_tab(&parked, App::Outlook).unwrap().url));
         assert!(!App::Teams.is_park_url("https://teams.cloud.microsoft/v2/"));
     }
 

@@ -141,8 +141,23 @@ impl<T: MessageTransport> Messages<T> {
         message_id: &str,
         html: &str,
     ) -> Result<()> {
+        self.edit_message_with_mentions(conversation, message_id, html, None)
+            .await
+    }
+
+    /// `mentions` is the JSON text of the chatsvc mention entries for the spans in `html`.
+    pub async fn edit_message_with_mentions(
+        &self,
+        conversation: &ConversationRef,
+        message_id: &str,
+        html: &str,
+        mentions: Option<&str>,
+    ) -> Result<()> {
         let url = self.message_url(conversation, message_id);
-        let body = edit_body(message_id, html);
+        let mut body = edit_body(message_id, html);
+        if let Some(mentions) = mentions {
+            body["properties"]["mentions"] = json!(mentions);
+        }
         let mut answer = self.put(&url, &body).await?;
         if answer.status == 404 {
             tokio::time::sleep(self.retry_delay).await;
