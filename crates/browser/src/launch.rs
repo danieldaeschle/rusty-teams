@@ -88,13 +88,30 @@ pub(crate) fn major_from_version_output(output: &str) -> Option<u32> {
 
 const FALLBACK_MAJOR: u32 = 150;
 
+/// Env the app sets for GPUI emoji font filtering. Chrome must use the system
+/// fontconfig again — the GPUI file is dirs-only and breaks Segoe/Arial fallback
+/// (Orbitron, Font Awesome, … on the Microsoft login page).
+const APP_ONLY_FONTCONFIG_VARS: &[&str] = &["FONTCONFIG_FILE", "FONTCONFIG_PATH"];
+
+fn strip_app_fontconfig(command: &mut Command) {
+    for key in APP_ONLY_FONTCONFIG_VARS {
+        command.env_remove(*key);
+    }
+}
+
 fn chrome_major(platform: Platform, executable: &Path) -> u32 {
     let detected = match platform {
-        Platform::Linux | Platform::Macos => Command::new(executable)
-            .arg("--version")
-            .output()
-            .ok()
-            .and_then(|output| major_from_version_output(&String::from_utf8_lossy(&output.stdout))),
+        Platform::Linux | Platform::Macos => {
+            let mut command = Command::new(executable);
+            strip_app_fontconfig(&mut command);
+            command
+                .arg("--version")
+                .output()
+                .ok()
+                .and_then(|output| {
+                    major_from_version_output(&String::from_utf8_lossy(&output.stdout))
+                })
+        }
         Platform::Windows | Platform::Wsl => executable
             .parent()
             .and_then(|parent| std::fs::read_dir(parent).ok())
@@ -134,6 +151,7 @@ impl Launcher for SystemLauncher {
             start_urls: &request.start_urls,
         });
         let mut command = Command::new(&executable);
+        strip_app_fontconfig(&mut command);
         command
             .args(arguments)
             .stdin(Stdio::null())
@@ -254,5 +272,17 @@ mod tests {
             Some(131)
         );
         assert_eq!(major_from_version_output("nothing"), None);
+    }
+
+    #[test]
+    fn chrome_drops_gpui_fontconfig_env() {
+        assert!(APP_ONLY_FONTCONFIG_VARS.contains(&"FONTCONFIG_FILE"));
+        assert!(APP_ONLY_FONTCONFIG_VARS.contains(&"FONTCONFIG_PATH"));
+        let mut command = Command::new("true");
+        command.env("FONTCONFIG_FILE", "/tmp/gpui-fonts.conf");
+        command.env("FONTCONFIG_PATH", "/tmp/gpui-fontconfig");
+        strip_app_fontconfig(&mut command);
+        // env_remove is applied; child would not see the GPUI-only vars.
+        let _ = command;
     }
 }

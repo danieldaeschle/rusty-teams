@@ -49,13 +49,14 @@ pub async fn wait_for_code(pending: &AuthPending, listener: TcpListener) -> Resu
             _ => {}
         }
     }
-    let body = if state.as_deref() == Some(pending.state.as_str()) && code.is_some() {
-        "You can close this window and return to Rusty Teams."
+    let ok = state.as_deref() == Some(pending.state.as_str()) && code.is_some();
+    let body = if ok {
+        LOOPBACK_OK_HTML
     } else {
-        "Sign-in failed. You can close this window."
+        LOOPBACK_FAIL_HTML
     };
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     let _ = stream.write_all(response.as_bytes()).await;
@@ -73,6 +74,32 @@ fn urlencoding_decode(value: &str) -> String {
         .decode_utf8_lossy()
         .into_owned()
 }
+
+const LOOPBACK_OK_HTML: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Rusty Teams</title>
+<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.5;color:#222}
+h1{font-size:1.25rem;margin:0 0 .75rem}p{margin:.5rem 0}</style>
+</head>
+<body>
+<h1>Signed in</h1>
+<p>You can close this window and return to Rusty Teams.</p>
+<p lang="de">Angemeldet. Sie können dieses Fenster schliessen und zu Rusty Teams zurückkehren.</p>
+</body>
+</html>"#;
+
+const LOOPBACK_FAIL_HTML: &str = r#"<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Rusty Teams</title>
+<style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:3rem auto;padding:0 1rem;line-height:1.5;color:#222}
+h1{font-size:1.25rem;margin:0 0 .75rem}p{margin:.5rem 0}</style>
+</head>
+<body>
+<h1>Sign-in did not finish</h1>
+<p>You can close this window and try again in Rusty Teams.</p>
+<p lang="de">Die Anmeldung ist nicht abgeschlossen. Sie können dieses Fenster schliessen und es in Rusty Teams erneut versuchen.</p>
+</body>
+</html>"#;
 
 #[cfg(test)]
 mod tests {
