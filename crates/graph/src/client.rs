@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU8;
 use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -15,11 +16,12 @@ const PEOPLE_PAGE_SIZE: usize = 10;
 
 pub struct Graph {
     session: Session,
+    pub(crate) chat_transport: AtomicU8,
 }
 
 impl Graph {
     pub fn new(session: Session) -> Self {
-        Graph { session }
+        Graph { session, chat_transport: AtomicU8::new(0) }
     }
 
     pub fn session(&self) -> &Session {
@@ -27,20 +29,31 @@ impl Graph {
     }
 
     pub async fn me(&self) -> Result<User> {
-        let body = self.get(&urls::me(), &Scope::graph("User.Read")).await?;
+        let basic = Scope::graph("User.ReadBasic.All");
+        let scope = if self.session.has_access_token(&basic).await { basic } else { Scope::graph("User.Read") };
+        let body = self.get(&urls::me(), &scope).await?;
         Ok(serde_json::from_value(body)?)
     }
 
     pub async fn chats_page(&self, top: usize) -> Result<Page<Chat>> {
+        if self.use_teams_chat().await {
+            return self.teams_chats_page(&crate::teams_chat::chats_url(top)).await;
+        }
         self.get_page(&urls::chats(top), Scope::graph("Chat.Read"))
             .await
     }
 
     pub async fn chats_at(&self, next_link: &str) -> Result<Page<Chat>> {
+        if crate::teams_chat::is_chat_url(next_link) {
+            return self.teams_chats_page(next_link).await;
+        }
         self.get_page(next_link, Scope::graph("Chat.Read")).await
     }
 
     pub async fn chat(&self, chat_id: &str) -> Result<Chat> {
+        if self.use_teams_chat().await {
+            return self.teams_chat(chat_id).await;
+        }
         let body = self
             .get(&urls::chat(chat_id), &Scope::graph("Chat.Read"))
             .await?;
@@ -48,11 +61,14 @@ impl Graph {
     }
 
     pub async fn chat_members(&self, chat_id: &str) -> Result<Vec<Member>> {
-        self.get_all(&urls::chat_members(chat_id), Scope::graph("Chat.Read"))
+        self.get_all(&urls::chat_members(chat_id), Scope::graph("ChatMember.Read"))
             .await
     }
 
     pub async fn chat_message(&self, chat_id: &str, message_id: &str) -> Result<Message> {
+        if self.use_teams_chat().await {
+            return self.teams_message(chat_id, message_id).await;
+        }
         let body = self
             .get(
                 &urls::chat_message(chat_id, message_id),
@@ -67,6 +83,13 @@ impl Graph {
         chat_id: &str,
         message_ids: &[String],
     ) -> Result<Vec<Result<Message>>> {
+        if self.use_teams_chat().await {
+            let mut messages = Vec::with_capacity(message_ids.len());
+            for id in message_ids {
+                messages.push(self.teams_message(chat_id, id).await);
+            }
+            return Ok(messages);
+        }
         let scope = Scope::graph("Chat.Read");
         let mut messages = Vec::with_capacity(message_ids.len());
         for chunk in message_ids.chunks(BATCH_SIZE) {
@@ -90,9 +113,10 @@ impl Graph {
         let mut page = self.chats_page(limit.clamp(1, CHAT_PAGE_SIZE)).await?;
         let mut chats = std::mem::take(&mut page.items);
         while chats.len() < limit {
-            let Some(mut next) = self.next_page(&page).await? else {
+            let Some(link) = page.next_link.as_deref() else {
                 break;
             };
+            let mut next = self.chats_at(link).await?;
             chats.append(&mut std::mem::take(&mut next.items));
             page = next;
         }
@@ -106,6 +130,9 @@ impl Graph {
         before: Option<DateTime<Utc>>,
         top: usize,
     ) -> Result<Page<Message>> {
+        if self.use_teams_chat().await {
+            return self.teams_messages(chat_id, before, top).await;
+        }
         let url = urls::chat_messages(chat_id, before, top.clamp(1, MESSAGE_PAGE_SIZE));
         self.get_page(&url, Scope::graph("Chat.Read")).await
     }

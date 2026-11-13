@@ -275,3 +275,22 @@ async fn no_browser_is_typed() {
         .unwrap();
     assert!(matches!(error, Error::NoBrowser { .. }));
 }
+
+#[tokio::test]
+async fn capability_probe_uses_the_other_signed_in_tab_when_a_scope_is_missing() {
+    let browser = start_browser(vec![
+        json!({"noToken": true, "refreshError": "the app is not granted Chat.Read"}),
+        json!(true),
+    ], BOTH_TABS.to_vec()).await;
+    let session = Session::connect_with(&browser.endpoint, fast_config()).await.unwrap();
+    assert!(session.has_access_token(&Scope::graph("Chat.Read")).await);
+    assert_eq!(browser.expressions.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn missing_scope_is_not_reported_as_a_usable_capability() {
+    let missing = json!({"noToken": true, "refreshError": "the app is not granted Chat.Read"});
+    let browser = start_browser(vec![missing.clone(), missing], BOTH_TABS.to_vec()).await;
+    let session = Session::connect_with(&browser.endpoint, fast_config()).await.unwrap();
+    assert!(!session.has_access_token(&Scope::graph("Chat.Read")).await);
+}

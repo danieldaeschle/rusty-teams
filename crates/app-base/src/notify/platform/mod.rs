@@ -3,6 +3,8 @@ mod windows_impl;
 #[cfg(windows)]
 pub use windows_impl::*;
 
+#[cfg(target_os = "linux")]
+mod linux_sound;
 #[cfg(not(windows))]
 mod stub;
 #[cfg(target_os = "linux")]

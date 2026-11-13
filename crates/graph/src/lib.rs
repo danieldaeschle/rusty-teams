@@ -11,6 +11,7 @@ mod people;
 mod profile;
 mod tabs;
 mod target;
+mod teams_chat;
 mod urls;
 mod writes;
 

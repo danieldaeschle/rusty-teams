@@ -93,6 +93,9 @@ impl NativeHttp {
             }
             answers.extend(join_all(pending).await);
         }
+        if retry_reads_in_page(requests, &answers) {
+            return None;
+        }
         if answers.iter().any(|answer| answer.status == 401) {
             self.forget(scope);
         }
@@ -214,6 +217,13 @@ impl NativeHttp {
     }
 }
 
+// A browser may have a working proxy/session route when the native connection fails.
+// Replay only reads: a mixed batch could already have completed a write.
+fn retry_reads_in_page(requests: &[&Request], answers: &[ApiResponse]) -> bool {
+    requests.iter().all(|request| request.method == Method::Get)
+        && answers.iter().any(|answer| answer.status == 0)
+}
+
 const TEAMS_BEARER_PATHS: [&str; 2] = ["/api/", "/registrar/"];
 
 /// Both rustls providers end up compiled in through dependencies, and then rustls refuses to pick one on its own.
@@ -278,6 +288,17 @@ fn usable_until(token: &str, margin: Duration) -> Option<Instant> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn network_failures_fall_back_only_for_read_batches() {
+        let read = Request::get("https://graph.microsoft.com/v1.0/me");
+        let write = Request::with_body(Method::Post, "https://graph.microsoft.com/v1.0/chats/x/messages", serde_json::json!({}));
+        let failed = || ApiResponse { status: 0, body: Value::Null, retry_after: None };
+        assert!(retry_reads_in_page(&[&read], &[failed()]));
+        assert!(!retry_reads_in_page(&[&read, &write], &[failed(), failed()]));
+        assert!(!retry_reads_in_page(&[&write], &[failed()]));
+        assert!(!retry_reads_in_page(&[&read], &[ApiResponse {status: 403, body: Value::Null, retry_after: None}]));
+    }
 
     fn token_expiring_at(exp: u64) -> String {
         format!(

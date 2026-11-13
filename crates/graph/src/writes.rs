@@ -46,7 +46,7 @@ impl Graph {
         self.write_for_message(
             Method::Post,
             &urls::chat_message_collection(chat_id),
-            "Chat.ReadWrite",
+            "ChatMessage.Send",
             Some(message_body(html, mentions, extras)),
         )
         .await

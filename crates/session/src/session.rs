@@ -109,6 +109,24 @@ impl Session {
         })
     }
 
+    /// Checks the existing browser session without returning its token to the caller.
+    /// Used to select an already-authorized service when Graph scopes are unavailable.
+    pub async fn has_access_token(&self, scope: &Scope) -> bool {
+        for app in scope.tab_order() {
+            if matches!(
+                tokio::time::timeout(
+                    Duration::from_secs(5),
+                    self.run_with_token(app, scope, "return true;", &json!({}), false)
+                )
+                .await,
+                Ok(Ok(Value::Bool(true)))
+            ) {
+                return true;
+            }
+        }
+        false
+    }
+
     pub async fn request(
         &self,
         method: Method,

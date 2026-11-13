@@ -1459,11 +1459,13 @@ pub struct SelfIdentity {
 }
 
 pub async fn fetch_self(session: &Session) -> Result<SelfIdentity> {
+    let basic = Scope::graph("User.ReadBasic.All");
+    let scope = if session.has_access_token(&basic).await { basic } else { Scope::graph("User.Read") };
     let response = session
         .request(
             Method::Get,
             &format!("{GRAPH}/v1.0/me?$select=id,displayName"),
-            &Scope::graph("User.Read"),
+            &scope,
             None,
         )
         .await?;

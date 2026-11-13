@@ -34,6 +34,7 @@ rust-i18n = "4.2"
 resvg = { version = "0.46", default-features = false, features = ["text"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+rodio = { version = "0.22", default-features = false, features = ["playback", "mp3"] }
 x11rb = { version = "0.13", features = ["shape"] }
 
 [target.'cfg(windows)'.dependencies]
