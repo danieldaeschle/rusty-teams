@@ -388,6 +388,109 @@ tray:
   mute_sound:
     en: Mute sound
     de: Ton stumm schalten
+install:
+  title:
+    en: Install Rusty Teams?
+    de: Rusty Teams installieren?
+  body:
+    en: "Put Rusty Teams into %{folder} and add it to the application menu?"
+    de: "Rusty Teams nach %{folder} legen und ins Anwendungsmenü aufnehmen?"
+  move:
+    en: Install
+    de: Installieren
+  not_now:
+    en: Not now
+    de: Nicht jetzt
+  dont_ask:
+    en: Don't ask again
+    de: Nicht mehr fragen
+  failed:
+    en: "Could not install: %{detail}"
+    de: "Installation fehlgeschlagen: %{detail}"
+  removed:
+    en: Removed from the application menu
+    de: Aus dem Anwendungsmenü entfernt
+  remove_failed:
+    en: "Could not remove: %{detail}"
+    de: "Entfernen fehlgeschlagen: %{detail}"
+  menu_title:
+    en: Application menu
+    de: Anwendungsmenü
+  installed_detail:
+    en: "Installed in %{folder}"
+    de: "Installiert in %{folder}"
+  other_copy_detail:
+    en: "Another build is installed in %{folder}"
+    de: "In %{folder} ist ein anderer Build installiert"
+  not_installed_detail:
+    en: Not installed. Install puts Rusty Teams into the application menu
+    de: Nicht installiert. Installieren nimmt Rusty Teams ins Anwendungsmenü auf
+  replace:
+    en: Replace with this build
+    de: Durch diesen Build ersetzen
+  remove:
+    en: Remove
+    de: Entfernen
+  ask_on_start:
+    en: Ask to install on start
+    de: Beim Start nach Installation fragen
+  updates_title:
+    en: Updates
+    de: Updates
+  updates_detail:
+    en: "%{version}, updates from GitHub releases"
+    de: "%{version}, Updates über GitHub-Releases"
+  updates_detail_not_installed:
+    en: "%{version}. Install Rusty Teams above to get updates"
+    de: "%{version}. Installiere Rusty Teams oben, um Updates zu erhalten"
+  updates_need_install:
+    en: Install Rusty Teams first (Application menu > Install), then it can update itself
+    de: Installiere Rusty Teams zuerst (Anwendungsmenü > Installieren), dann kann es sich selbst aktualisieren
+  check_now:
+    en: Check now
+    de: Jetzt prüfen
+  update_checking:
+    en: Checking for updates...
+    de: Suche nach Updates...
+  auto_updates:
+    en: Automatic updates
+    de: Automatische Updates
+  auto_updates_detail:
+    en: Look for new releases and ask before installing
+    de: Nach neuen Releases suchen und vor der Installation fragen
+  update_available_title:
+    en: Update available
+    de: Update verfügbar
+  update_available_body:
+    en: "Rusty Teams %{version} is available. You have %{current}. Update now?"
+    de: "Rusty Teams %{version} ist verfügbar. Installiert ist %{current}. Jetzt aktualisieren?"
+  update_now:
+    en: Update
+    de: Aktualisieren
+  update_downloading:
+    en: "Downloading %{version}... %{percent}%"
+    de: "%{version} wird heruntergeladen... %{percent} %"
+  hide:
+    en: Hide
+    de: Ausblenden
+  update_ready_title:
+    en: Update ready
+    de: Update bereit
+  update_ready_body:
+    en: "%{version} is downloaded. Restart Rusty Teams to finish the update."
+    de: "%{version} ist heruntergeladen. Starte Rusty Teams neu, um das Update abzuschließen."
+  later:
+    en: Later
+    de: Später
+  restart_now:
+    en: Restart now
+    de: Jetzt neu starten
+  up_to_date:
+    en: Rusty Teams is up to date
+    de: Rusty Teams ist aktuell
+  update_failed:
+    en: "Update check failed: %{detail}"
+    de: "Update-Prüfung fehlgeschlagen: %{detail}"
 calls:
   notice:
     not_connected:

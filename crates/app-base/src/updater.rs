@@ -1,4 +1,4 @@
-#![cfg_attr(not(windows), allow(dead_code))]
+#![cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -8,8 +8,14 @@ use std::time::Duration;
 pub const POLL_INTERVAL: Duration = Duration::from_secs(15);
 
 const UPDATE_DIRECTORY: &str = "update";
+#[cfg(windows)]
 const EXE_NAME: &str = "teams.exe";
+#[cfg(windows)]
 const OLD_EXE_NAME: &str = "teams.old.exe";
+#[cfg(not(windows))]
+const EXE_NAME: &str = "teams";
+#[cfg(not(windows))]
+const OLD_EXE_NAME: &str = "teams.old";
 const PDB_NAME: &str = "teams.pdb";
 const VERSION_FILE_NAME: &str = "version.txt";
 pub const RELAUNCH_ENV: &str = "RUSTY_TEAMS_RELAUNCH";
@@ -254,6 +260,19 @@ mod platform {
     pub fn terminate_current() {}
 }
 
+/// Whether this build may replace itself from GitHub releases. On Linux only the copy
+/// installed in `~/.local/share/applications/teams` updates; a binary run from a
+/// build folder or a package location is left alone.
+pub fn self_update_allowed() -> bool {
+    #[cfg(target_os = "linux")]
+    return std::env::current_exe().is_ok_and(|executable| {
+        crate::linux_desktop::Layout::current()
+            .is_some_and(|layout| crate::linux_desktop::is_installed(&executable, &layout))
+    });
+    #[cfg(not(target_os = "linux"))]
+    true
+}
+
 /// Reading the new exe once lets the virus scanner finish before the restart, which otherwise blocks process start for seconds.
 pub fn prescan(update_exe: &Path) {
     if let Ok(mut file) = std::fs::File::open(update_exe) {
@@ -319,8 +338,8 @@ mod tests {
 
     #[test]
     fn plan_lists_the_operations_in_order() {
-        let paths = UpdatePaths::beside(Path::new("/app/teams.exe"));
-        assert_eq!(paths.update_exe, Path::new("/app/update/teams.exe"));
+        let paths = UpdatePaths::beside(&Path::new("/app").join(EXE_NAME));
+        assert_eq!(paths.update_exe, Path::new("/app/update").join(EXE_NAME));
         let plan = swap_plan(&paths);
         assert_eq!(plan.len(), 5);
         assert_eq!(
@@ -340,7 +359,7 @@ mod tests {
     }
 
     fn install(directory: &Path) -> UpdatePaths {
-        let paths = UpdatePaths::beside(&directory.join("teams.exe"));
+        let paths = UpdatePaths::beside(&directory.join(EXE_NAME));
         fs::create_dir_all(paths.update_exe.parent().unwrap()).unwrap();
         fs::write(&paths.exe, "old").unwrap();
         fs::write(&paths.update_exe, "new").unwrap();

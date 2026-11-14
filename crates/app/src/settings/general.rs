@@ -79,6 +79,7 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
             }),
         )
         .children(external_browser_rows(app, cx))
+        .children(install_rows(cx))
         .child(caption(tr("settings.caption.compose_box")))
         .child(account_select(
             app,
@@ -93,6 +94,97 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
         ))
         .child(caption(tr("settings.caption.translation")))
         .children(translation_rows(app, cx))
+}
+
+/// Linux only: the application menu install, the install question and updates.
+fn install_rows(cx: &App) -> Vec<AnyElement> {
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = cx;
+        Vec::new()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::collections::HashMap;
+
+        use super::rows::{control_row, text_button};
+        use crate::i18n::tr_args;
+        use crate::linux_install::{self, Installation};
+
+        let with = |key: &str, name: &str, value: String| {
+            let mut args = HashMap::new();
+            args.insert(name.to_owned(), value);
+            tr_args(key, &args)
+        };
+        let folder = linux_install::install_folder();
+        let installation = linux_install::installation();
+        let detail = match installation {
+            Installation::Running => with("install.installed_detail", "folder", folder),
+            Installation::OtherCopy => with("install.other_copy_detail", "folder", folder),
+            Installation::NotInstalled => tr("install.not_installed_detail"),
+        };
+        let mut buttons = h_flex().gap(px(8.)).flex_none();
+        if installation != Installation::Running {
+            let label = match installation {
+                Installation::OtherCopy => tr("install.replace"),
+                _ => tr("install.move"),
+            };
+            buttons = buttons.child(
+                text_button("settings-install", label)
+                    .on_click(|_, _, cx| linux_install::install_now(cx)),
+            );
+        }
+        if installation != Installation::NotInstalled {
+            buttons = buttons.child(
+                text_button("settings-install-remove", tr("install.remove"))
+                    .on_click(|_, _, cx| linux_install::remove(cx)),
+            );
+        }
+        let mut rows =
+            vec![control_row(tr("install.menu_title"), detail, buttons).into_any_element()];
+        if installation != Installation::Running {
+            let asks = linux_install::asks_on_start(cx);
+            rows.push(
+                toggle_row(
+                    "settings-install-ask",
+                    tr("install.ask_on_start"),
+                    "",
+                    theme::text_muted(),
+                    asks,
+                )
+                .on_click(move |_, _, cx| linux_install::set_asks_on_start(!asks, cx))
+                .into_any_element(),
+            );
+        }
+        let automatic = crate::linux_update::enabled(cx);
+        rows.push(
+            toggle_row(
+                "settings-auto-updates",
+                tr("install.auto_updates"),
+                tr("install.auto_updates_detail"),
+                theme::text_muted(),
+                automatic,
+            )
+            .on_click(move |_, _, cx| crate::linux_update::set_enabled(!automatic, cx))
+            .into_any_element(),
+        );
+        let version = linux_install::running_release().to_owned();
+        let updates_detail = if linux_install::updatable_release().is_some() {
+            with("install.updates_detail", "version", version)
+        } else {
+            with("install.updates_detail_not_installed", "version", version)
+        };
+        rows.push(
+            control_row(
+                tr("install.updates_title"),
+                updates_detail,
+                text_button("settings-check-updates", tr("install.check_now"))
+                    .on_click(|_, _, cx| crate::linux_update::check(true, cx)),
+            )
+            .into_any_element(),
+        );
+        rows
+    }
 }
 
 fn external_browser_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {

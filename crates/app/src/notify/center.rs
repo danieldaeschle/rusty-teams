@@ -1223,10 +1223,18 @@ impl NotificationCenter {
             .ok();
     }
 
+    /// Applies the icon again even if the choice is unchanged: its image changed.
+    pub fn reapply_app_icon(&mut self, cx: &mut Context<Self>) {
+        self.show_app_icon(active_appearance::current(cx).app_icon, cx);
+    }
+
     fn apply_app_icon(&mut self, icon: AppIcon, cx: &mut Context<Self>) {
-        if icon == self.app_icon {
-            return;
+        if icon != self.app_icon {
+            self.show_app_icon(icon, cx);
         }
+    }
+
+    fn show_app_icon(&mut self, icon: AppIcon, cx: &mut Context<Self>) {
         self.app_icon = icon;
         let mention = !self.unread_mentions.is_empty();
         if let Some(tray) = &mut self.tray {

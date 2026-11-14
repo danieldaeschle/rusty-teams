@@ -127,6 +127,8 @@ jobs:
           mkdir release
           chmod +x dist/teams-linux-amd64/teams
           tar -czf "release/rusty-teams-$TAG-linux-amd64.tar.gz" -C dist/teams-linux-amd64 teams
+          # The bare binary is what the Linux self-update downloads (release_feed.rs).
+          cp dist/teams-linux-amd64/teams "release/rusty-teams-$TAG-linux-amd64"
           cp dist/teams-windows-amd64/teams.exe "release/rusty-teams-$TAG-windows-amd64.exe"
           cp dist/teams-macos/teams-macos.zip "release/rusty-teams-$TAG-macos-universal.zip"
 

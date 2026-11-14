@@ -9,9 +9,7 @@ use ksni::menu::{CheckmarkItem, StandardItem};
 use ksni::{Category, Icon, MenuItem, ToolTip};
 
 use super::TrayCommand;
-
-/// The window and desktop entry id (`rusty-teams.desktop`).
-const DESKTOP_ID: &str = "rusty-teams";
+use crate::linux_desktop::DESKTOP_ID;
 
 const TRAY_ICON_SIZES: [u32; 3] = [22, 32, 64];
 const DOT_COLOR: [u8; 4] = [0xef, 0x44, 0x44, 0xff];

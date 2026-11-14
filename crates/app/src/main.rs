@@ -14,6 +14,10 @@ mod inline_video;
 mod layout_guard;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod linux_browser;
+#[cfg(target_os = "linux")]
+mod linux_install;
+#[cfg(target_os = "linux")]
+mod linux_update;
 mod main_window;
 pub mod notify;
 mod settings;
@@ -194,6 +198,8 @@ fn main() {
     diagnostics::install(data_path(diagnostics::DIAGNOSTICS_FILE));
     #[cfg(target_os = "linux")]
     app_base::linux_fonts::hide_system_color_emoji();
+    #[cfg(target_os = "linux")]
+    linux_install::load_icon();
     let arguments = parse_arguments();
     if !arguments.demo && arguments.database.is_none() {
         let relaunch_value = std::env::var(updater::RELAUNCH_ENV).ok();
@@ -212,7 +218,7 @@ fn main() {
             return;
         }
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     updater::clean_up_old_binary();
     let mode = Mode {
         demo: arguments.demo,
@@ -356,6 +362,11 @@ fn main() {
                 }
             })
             .detach();
+            #[cfg(target_os = "linux")]
+            if !arguments.demo {
+                linux_install::start(cx);
+                linux_update::start(cx);
+            }
             if !arguments.autostart {
                 cx.activate(true);
             }

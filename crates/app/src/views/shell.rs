@@ -176,6 +176,14 @@ struct KeptParts {
 
 impl Global for KeptParts {}
 
+/// Re-applies the app icon to the tray and window, e.g. after the Teams icon arrived.
+pub fn refresh_app_icon(cx: &mut App) {
+    if let Some(kept) = cx.try_global::<KeptParts>().cloned() {
+        kept.notifications
+            .update(cx, |notifications, cx| notifications.reapply_app_icon(cx));
+    }
+}
+
 pub struct AppShell {
     state: Entity<AppState>,
     rail: Entity<RailView>,
@@ -505,7 +513,7 @@ impl AppShell {
                 });
             });
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(updater::POLL_INTERVAL).await;
@@ -518,6 +526,7 @@ impl AppShell {
             }
         })
         .detach();
+        // Linux asks before downloading (`linux_update`); Windows downloads quietly.
         #[cfg(windows)]
         if let Some(running_tag) = app_base::version::release_tag() {
             watch_releases(running_tag, cx);
@@ -525,7 +534,7 @@ impl AppShell {
         shell
     }
 
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     fn poll_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(
             self.update,
@@ -551,7 +560,8 @@ impl AppShell {
             composer_empty: conversation.composer_is_empty(cx),
             send_in_flight: conversation.send_in_flight(),
         });
-        if idle {
+        // On Linux only the user restarts: the update dialog or the title bar button.
+        if idle && cfg!(not(target_os = "linux")) {
             self.restart_into_update(cx);
         }
         cx.notify();
