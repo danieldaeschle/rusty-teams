@@ -3,7 +3,10 @@ target/
 # Local research under docs/; track design SoT and ADRs.
 docs/*
 !docs/design/
-!docs/design/**
+docs/design/*
+!docs/design/islands/
+docs/design/islands/*
+!docs/design/islands/SPEC.md
 !docs/decisions/
 !docs/decisions/**
 !docs/agents.md
