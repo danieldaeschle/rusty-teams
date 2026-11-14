@@ -104,12 +104,12 @@ pub fn record(message: impl AsRef<str>) {
     }
 }
 
-/// Chronological merge of `.1` then current (capped), for support packages.
+/// Chronological merge of rotated slots then current (capped), for support packages.
 pub fn read_merged(max_bytes: u64) -> String {
     let Some(path) = PATH.get() else {
         return String::new();
     };
-    read_ring_merged(path, 1, max_bytes.min(MERGE_CAP_BYTES).max(1))
+    read_ring_merged(path, RING_SLOTS, max_bytes.min(MERGE_CAP_BYTES).max(1))
 }
 
 pub fn clear_logs() -> std::io::Result<()> {

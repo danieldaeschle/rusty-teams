@@ -294,8 +294,10 @@ impl AppState {
         ));
         if let Some(call) = self.call.as_ref() {
             crate::diagnostics::record(format!(
-                "calls: start kind={:?} incoming={} peer={}",
-                call.model.kind, call.model.incoming, call.model.peer_name
+                "calls: start kind={:?} incoming={} peer_chars={}",
+                call.model.kind,
+                call.model.incoming,
+                call.model.peer_name.chars().count()
             ));
         }
         if self.call_share_sound {
