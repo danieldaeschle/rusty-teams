@@ -18,6 +18,39 @@ pub fn merge_calendar_events(events: Vec<CalendarEvent>) -> Vec<CalendarEvent> {
             if existing.thread_id.is_none() {
                 existing.thread_id = event.thread_id.clone();
             }
+            if existing.location.is_none() {
+                existing.location = event.location.clone();
+            }
+            if existing.body_preview.is_none() {
+                existing.body_preview = event.body_preview.clone();
+            }
+            if existing.body_html.is_none() {
+                existing.body_html = event.body_html.clone();
+            }
+            if existing.response_counts.is_none() {
+                existing.response_counts = event.response_counts;
+            }
+            if existing.attendees.is_empty() {
+                existing.attendees = event.attendees.clone();
+            }
+            if existing.reminders.is_empty() {
+                existing.reminders = event.reminders.clone();
+            }
+            if existing.source_link.is_none() {
+                existing.source_link = event.source_link.clone();
+            }
+            if existing.web_link.is_none() {
+                existing.web_link = event.web_link.clone();
+            }
+            if existing.calendar_name.is_none() {
+                existing.calendar_name = event.calendar_name.clone();
+            }
+            if event.series {
+                existing.series = true;
+            }
+            if existing.series_master_id.is_none() {
+                existing.series_master_id = event.series_master_id.clone();
+            }
             // Prefer Outlook object id when both sides contribute.
             if existing.source == CalendarSource::Google && event.source == CalendarSource::Outlook
             {

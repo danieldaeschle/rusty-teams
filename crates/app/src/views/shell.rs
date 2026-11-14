@@ -7,6 +7,7 @@ use gpui_kit::*;
 
 use super::actions::{NewChat, OpenSwitcher, ReplyToHovered, ToggleCallMute};
 use super::activity_panel::{ActivityPanel, ActivityPanelEvent};
+use super::calendar_event_dialog::{EventPeek, EventPeekEvent};
 use super::calendar_view::CalendarView;
 use super::call_pop_out::zoom_listener;
 use super::calls_page::CallsPage;
@@ -192,6 +193,7 @@ pub struct AppShell {
     forward_dialog: Option<Entity<ForwardDialog>>,
     image_viewer: Option<Entity<ImageViewer>>,
     status_dialog: Option<Entity<StatusMessageDialog>>,
+    calendar_event_peek: Option<Entity<EventPeek>>,
     shortcuts_dialog: Option<Entity<ShortcutsDialog>>,
     agent_dialog: Option<Entity<StartDialog>>,
     settings_dialog: Option<Entity<SettingsDialog>>,
@@ -372,6 +374,9 @@ impl AppShell {
                 if matches!(event, AppEvent::StatusMessage) {
                     this.open_status_dialog(window, cx);
                 }
+                if matches!(event, AppEvent::CalendarEventPeek) {
+                    this.open_calendar_event_peek(window, cx);
+                }
                 if let AppEvent::Settings(section) = event {
                     this.open_settings(*section, window, cx);
                 }
@@ -445,6 +450,7 @@ impl AppShell {
             forward_dialog: None,
             image_viewer: None,
             status_dialog: None,
+            calendar_event_peek: None,
             shortcuts_dialog: None,
             agent_dialog: None,
             settings_dialog: None,
@@ -700,6 +706,31 @@ impl AppShell {
         )
         .detach();
         self.status_dialog = Some(dialog);
+        cx.notify();
+    }
+
+
+    fn open_calendar_event_peek(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(event) = self
+            .state
+            .update(cx, |state, _| state.take_calendar_event_peek_request())
+        else {
+            return;
+        };
+        self.switcher = None;
+        let app = self.state.clone();
+        let peek = cx.new(|cx| EventPeek::new(app, event, window, cx));
+        cx.subscribe_in(
+            &peek,
+            window,
+            |this, _, _: &EventPeekEvent, window, cx| {
+                this.calendar_event_peek = None;
+                this.restore_focus(window, cx);
+                cx.notify();
+            },
+        )
+        .detach();
+        self.calendar_event_peek = Some(peek);
         cx.notify();
     }
 
@@ -1326,6 +1357,7 @@ impl Render for AppShell {
             .children(render_task_dialog(self.state.read(cx), cx))
             .children(self.forward_dialog.clone())
             .children(self.status_dialog.clone())
+            .children(self.calendar_event_peek.clone())
             .children(self.shortcuts_dialog.clone())
             .children(self.agent_dialog.clone())
             .children(self.settings_dialog.clone())

@@ -92,6 +92,7 @@ pub enum AppEvent {
     ForwardSelection,
     ImageViewer,
     StatusMessage,
+    CalendarEventPeek,
     Settings(crate::settings_section::SettingsSection),
     Profile,
     Call,
@@ -158,6 +159,7 @@ pub struct AppState {
     pub saved: SavedSet,
     pub call_history: Vec<teams_core::CallLogEntry>,
     pub calendar_events: Vec<chatsvc::CalendarEvent>,
+    pub calendar_event_peek_request: Option<chatsvc::CalendarEvent>,
     pub calendar_nudge: Option<tokio::sync::mpsc::UnboundedSender<()>>,
     pub calls_list: crate::call::CallsList,
     pub speed_dial: Vec<crate::call::SpeedDialEntry>,
@@ -208,6 +210,8 @@ pub struct AppState {
     pub rsvp_send_response: bool,
     pub meeting_toasts: crate::call::MeetingToasts,
     pub demo_meetings: Vec<chatsvc::CalendarEvent>,
+    /// Google week-load failure already surfaced as a notice this session.
+    pub google_sync_notice_shown: bool,
     pub calendar_week: crate::call::week::CalendarWeek,
     /// Bumped when the hour grid should align to local «now» (open / Today / day-week span).
     pub calendar_scroll_to_now: u64,
@@ -322,6 +326,7 @@ impl AppState {
             saved: SavedSet::default(),
             call_history: Vec::new(),
             calendar_events: Vec::new(),
+            calendar_event_peek_request: None,
             calendar_nudge: None,
             calls_list: crate::call::CallsList::default(),
             speed_dial,
@@ -372,6 +377,7 @@ impl AppState {
             rsvp_send_response: true,
             meeting_toasts: crate::call::MeetingToasts::default(),
             demo_meetings: Vec::new(),
+            google_sync_notice_shown: false,
             calendar_week: crate::call::week::CalendarWeek::default(),
             calendar_scroll_to_now: 0,
             call_backgrounds: if mode.demo {

@@ -17,7 +17,7 @@ fn rsvp_menu_item(
         .checked(chosen)
         .on_click(move |_, _, cx| {
             state.update(cx, |state, cx| {
-                state.respond_to_event(&event_key, reply, cx)
+                state.respond_to_event(&event_key, reply, "", cx)
             });
         })
 }

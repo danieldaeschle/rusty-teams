@@ -334,7 +334,164 @@ impl AppState {
         .detach();
     }
 
-    pub fn respond_to_event(&mut self, event_key: &str, reply: Reply, cx: &mut Context<Self>) {
+    pub fn request_calendar_event_peek(
+        &mut self,
+        event: CalendarEvent,
+        cx: &mut Context<Self>,
+    ) {
+        self.calendar_event_peek_request = Some(event);
+        cx.emit(crate::app_state::AppEvent::CalendarEventPeek);
+        cx.notify();
+    }
+
+    pub fn take_calendar_event_peek_request(&mut self) -> Option<CalendarEvent> {
+        self.calendar_event_peek_request.take()
+    }
+
+    pub fn needs_event_details(event: &CalendarEvent) -> bool {
+        event.source == chatsvc::CalendarSource::Outlook
+            && (event.location.is_none()
+                || event.body_html.is_none()
+                || event.attendees.is_empty()
+                || event.response_counts.is_none()
+                || (event.series && event.series_master_id.is_none()))
+    }
+
+    pub fn apply_calendar_event_details(
+        &mut self,
+        event_key: &str,
+        details: &serde_json::Value,
+        cx: &mut Context<Self>,
+    ) {
+        for event in self
+            .calendar_week
+            .events
+            .iter_mut()
+            .chain(self.calendar_events.iter_mut())
+        {
+            if event.object_id == event_key {
+                chatsvc::apply_event_details(event, details);
+            }
+        }
+        cx.notify();
+    }
+
+    pub fn enrich_calendar_event(&mut self, event_key: &str, cx: &mut Context<Self>) {
+        let Some(event) = self
+            .calendar_events
+            .iter()
+            .chain(&self.calendar_week.events)
+            .find(|event| event.object_id == event_key)
+            .cloned()
+        else {
+            return;
+        };
+        if !Self::needs_event_details(&event) {
+            return;
+        }
+        let launcher = self.call_launcher.clone().filter(|_| !self.mode.demo);
+        let Some(launcher) = launcher else {
+            return;
+        };
+        let (event_id, ical_uid) = (event.object_id.clone(), event.ical_uid.clone());
+        let fetched = runtime::spawn({
+            let event_id = event_id.clone();
+            async move {
+                launcher
+                    .calendar_event_details(&event_id, ical_uid.as_deref())
+                    .await
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let details = match fetched.await {
+                Ok(Ok(details)) => details,
+                Ok(Err(error)) => {
+                    crate::diagnostics::record(format!(
+                        "calendar peek: details failed for {event_id}: {error}"
+                    ));
+                    return;
+                }
+                Err(_) => {
+                    crate::diagnostics::record(format!(
+                        "calendar peek: details task join failed for {event_id}"
+                    ));
+                    return;
+                }
+            };
+            let preview_chars = details
+                .get("bodyPreview")
+                .and_then(|value| value.as_str())
+                .map(str::len)
+                .or_else(|| {
+                    details
+                        .pointer("/body/content")
+                        .and_then(|value| value.as_str())
+                        .map(str::len)
+                })
+                .or_else(|| {
+                    details
+                        .get("bodyContent")
+                        .and_then(|value| value.as_str())
+                        .map(str::len)
+                })
+                .unwrap_or(0);
+            crate::diagnostics::record(format!(
+                "calendar peek: details ok for {event_id}, preview_chars={preview_chars}"
+            ));
+            this.update(cx, |state, cx| {
+                state.apply_calendar_event_details(&event_id, &details, cx);
+            })
+            .ok();
+            // Series occurrences often ship empty body/bodyPreview; pull the master agenda.
+            let master_id = this
+                .update(cx, |state, _| {
+                    state
+                        .calendar_week
+                        .events
+                        .iter()
+                        .chain(state.calendar_events.iter())
+                        .find(|event| event.object_id == event_id)
+                        .and_then(|event| {
+                            event
+                                .body_html
+                                .is_none()
+                                .then(|| event.series_master_id.clone())
+                                .flatten()
+                        })
+                })
+                .ok()
+                .flatten();
+            let Some(master_id) = master_id else {
+                return;
+            };
+            let Some(launcher) = this
+                .update(cx, |state, _| state.call_launcher.clone())
+                .ok()
+                .flatten()
+            else {
+                return;
+            };
+            let master = runtime::spawn(async move {
+                launcher.calendar_event_details(&master_id, None).await
+            });
+            let Ok(Ok(master_details)) = master.await else {
+                return;
+            };
+            this.update(cx, |state, cx| {
+                state.apply_calendar_event_details(&event_id, &master_details, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub fn respond_to_event(
+        &mut self,
+        event_key: &str,
+        reply: Reply,
+        comment: &str,
+        cx: &mut Context<Self>,
+    ) {
         if self.mode.read_only {
             self.raise_notice(RESPONSE_FAILED_NOTICE.to_owned(), None, cx);
             return;
@@ -359,6 +516,7 @@ impl AppState {
             return;
         };
         let send_response = self.rsvp_send_response;
+        let comment = comment.to_owned();
         let store = self.store.clone();
         let answered = runtime::spawn({
             let event_id = event_id.clone();
@@ -366,7 +524,13 @@ impl AppState {
                 match source {
                     chatsvc::CalendarSource::Outlook => {
                         launcher
-                            .respond_to_event(&event_id, ical_uid.as_deref(), reply, send_response)
+                            .respond_to_event(
+                                &event_id,
+                                ical_uid.as_deref(),
+                                reply,
+                                send_response,
+                                &comment,
+                            )
                             .await
                     }
                     chatsvc::CalendarSource::Google => {

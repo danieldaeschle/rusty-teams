@@ -505,11 +505,15 @@ async fn calendar_loop(session: Session, store: Arc<Store>, events: EventSender)
                 }
             }
         }
-        if let Ok(google_events) =
-            crate::google_calendar_sync::fetch_google_events(&mut accounts, start, end).await
-        {
-            let _ = store::save_calendar_accounts(&store, &accounts);
-            combined.extend(google_events);
+        match crate::google_calendar_sync::fetch_google_events(&mut accounts, start, end).await {
+            Ok(google_events) => {
+                let _ = store::save_calendar_accounts(&store, &accounts);
+                combined.extend(google_events);
+            }
+            Err(error) => crate::diagnostics::record(format!(
+                "calls: google calendar not loaded: {}",
+                shorten(&error)
+            )),
         }
         if combined.is_empty() && outlook_failed && !accounts.has_google() {
             continue;

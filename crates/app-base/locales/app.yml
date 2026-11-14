@@ -8,7 +8,7 @@ common:
     de: Speichern
   close:
     en: Close
-    de: Schließen
+    de: Schliessen
   delete:
     en: Delete
     de: Löschen
@@ -255,6 +255,85 @@ settings:
     sound:
       en: SOUND
       de: TON
+  calendar:
+    section_google:
+      en: GOOGLE
+      de: GOOGLE
+    section_home:
+      en: HOME CALENDAR
+      de: HAUPTKALENDER
+    section_write:
+      en: ALSO WRITE TO
+      de: AUCH SCHREIBEN NACH
+    google_title:
+      en: Google Calendar
+      de: Google Kalender
+    connect_button:
+      en: Connect Google
+      de: Google verbinden
+    connect_hint:
+      en: Opens a browser for sign-in. If Google says the app is not verified, choose Advanced, then continue.
+      de: Öffnet einen Browser zur Anmeldung. Meldet Google, die App sei nicht verifiziert, wählen Sie Advanced und dann Weiter.
+    finish_in_browser:
+      en: Finish sign-in in your browser.
+      de: Schliessen Sie die Anmeldung im Browser ab.
+    open_browser_again:
+      en: Open browser again
+      de: Browser erneut öffnen
+    copy_link:
+      en: Copy link
+      de: Link kopieren
+    connected_detail:
+      en: Connected accounts appear below. Disconnect removes tokens from this device.
+      de: Verbundene Konten erscheinen unten. Trennen entfernt die Tokens von diesem Gerät.
+    google_account:
+      en: Google account
+      de: Google-Konto
+    disconnect:
+      en: Disconnect
+      de: Trennen
+    primary:
+      en: Primary calendar
+      de: Hauptkalender
+    show_in_grid:
+      en: Show in calendar grid
+      de: Im Kalendergitter anzeigen
+    also_write_to:
+      en: Also write new meetings to %{name}
+      de: Neue Besprechungen auch nach %{name} schreiben
+    outlook_mailbox:
+      en: Outlook (Microsoft mailbox)
+      de: Outlook (Microsoft-Postfach)
+    dual_write_when_google_home:
+      en: Dual-write when home is Google
+      de: Zusätzlich schreiben, wenn der Hauptkalender Google ist
+    outlook_home_detail:
+      en: Default when no Google home is chosen
+      de: Standard, wenn kein Google-Hauptkalender gewählt ist
+    no_extra_targets:
+      en: No extra write targets
+      de: Keine weiteren Schreibziele
+    connect_then_dual_write:
+      en: Connect Google, then enable dual-write on a calendar above.
+      de: Google verbinden, dann oben Dual-Write für einen Kalender einschalten.
+    google_label:
+      en: Google
+      de: Google
+    not_in_build:
+      en: Google Calendar is not included in this build.
+      de: Google Kalender ist in diesem Build nicht enthalten.
+    sign_in_start_failed:
+      en: Could not start Google sign-in.
+      de: Google-Anmeldung konnte nicht gestartet werden.
+    sign_in_cancelled:
+      en: Google sign-in was cancelled.
+      de: Google-Anmeldung wurde abgebrochen.
+    connected:
+      en: Google Calendar connected (%{email}).
+      de: Google Kalender verbunden (%{email}).
+    picker_connect_hint:
+      en: Connect Google in Settings › Calendar
+      de: Google in Einstellungen › Kalender verbinden
   general:
     auto_start:
       en: Auto-start Teams
@@ -264,10 +343,19 @@ settings:
       de: Anwendung im Hintergrund starten
     close_to_tray:
       en: On close, keep the application running
-      de: Beim Schließen Anwendung weiterlaufen lassen
+      de: Beim Schliessen Anwendung weiterlaufen lassen
     close_to_tray_detail:
       en: The title bar X hides the window to the tray
       de: Das X in der Titelleiste blendet das Fenster ins Infobereich-Symbol aus
+    external_browser:
+      en: Open links and Google sign-in with
+      de: Links und Google-Anmeldung öffnen mit
+    external_browser_detail:
+      en: Does not change the Teams session browser (Chrome/Chromium is required for that).
+      de: Ändert nicht den Browser der Teams-Sitzung (dafür bleibt Chrome/Chromium nötig).
+    external_browser_system:
+      en: System default
+      de: Systemstandard
     up_arrow:
       en: Up arrow key behaviour in compose box
       de: Verhalten der Aufwärtspfeil-Taste im Eingabefeld
@@ -298,15 +386,6 @@ settings:
     never_translate:
       en: Never translate messages in these languages
       de: Nachrichten in diesen Sprachen nie übersetzen
-    external_browser:
-      en: Open links and Google sign-in with
-      de: Links und Google-Anmeldung öffnen mit
-    external_browser_detail:
-      en: Does not change the Teams session browser (Chrome/Chromium is required for that).
-      de: Ändert nicht den Browser der Teams-Sitzung (dafür bleibt Chrome/Chromium nötig).
-    external_browser_system:
-      en: System default
-      de: Systemstandard
   notifications:
     flash_taskbar:
       en: Flash taskbar when notifications are received
@@ -867,7 +946,7 @@ calls:
       de: Chat öffnen
     close_chat:
       en: Close the chat
-      de: Chat schließen
+      de: Chat schliessen
     share_entire_screen:
       en: Share entire screen
       de: Gesamten Bildschirm freigeben
@@ -1081,6 +1160,110 @@ calls:
     teams_link_added:
       en: Teams meeting link is added
       de: Teams-Besprechungslink wird hinzugefügt
+calendar:
+  peek:
+    all_day:
+      en: All day
+      de: Ganztägig
+    teams_meeting:
+      en: Microsoft Teams meeting
+      de: Microsoft Teams-Besprechung
+    google_meet:
+      en: Google Meet
+      de: Google Meet
+    series:
+      en: Series
+      de: Serie
+    invited_you:
+      en: "%{name} invited you."
+      de: "%{name} hat dich eingeladen."
+    accepted:
+      en: Accepted
+      de: Angenommen
+    declined:
+      en: Declined
+      de: Abgelehnt
+    tentative:
+      en: Tentative
+      de: Mit Vorbehalt
+    no_response:
+      en: Didn't respond
+      de: Keine Antwort
+    email_organizer:
+      en: Email organizer
+      de: E-Mail an den Organisator
+    message_placeholder:
+      en: Add a message (optional)
+      de: Nachricht hinzufügen (optional)
+    accept:
+      en: Accept
+      de: Annehmen
+    decline:
+      en: Decline
+      de: Ablehnen
+    tentative_action:
+      en: Tentative
+      de: Mit Vorbehalt
+    this_occurrence:
+      en: This occurrence
+      de: Nur dieser Termin
+    entire_series:
+      en: Entire series
+      de: Ganze Serie
+    join_link:
+      en: Join link
+      de: Beitrittslink
+    tracking:
+      en: Tracking
+      de: Nachverfolgung
+    organizer:
+      en: Organizer
+      de: Organisator
+    required:
+      en: Required
+      de: Erforderlich
+    optional:
+      en: Optional
+      de: Optional
+    attendees_unknown:
+      en: Attendee list not available.
+      de: Teilnehmerliste nicht verfügbar.
+    when_starts:
+      en: When the event starts
+      de: Zum Beginn des Termins
+    minute_before:
+      en: "%{count} minute before"
+      de: "%{count} Minute vorher"
+    minutes_before:
+      en: "%{count} minutes before"
+      de: "%{count} Minuten vorher"
+    hour_before:
+      en: "%{count} hour before"
+      de: "%{count} Stunde vorher"
+    hours_before:
+      en: "%{count} hours before"
+      de: "%{count} Stunden vorher"
+    day_before:
+      en: "%{count} day before"
+      de: "%{count} Tag vorher"
+    days_before:
+      en: "%{count} days before"
+      de: "%{count} Tage vorher"
+    view_source:
+      en: View source
+      de: Quelle anzeigen
+    open_in_google:
+      en: Open in Google Calendar
+      de: In Google Kalender öffnen
+    email_guests:
+      en: Email guests
+      de: Gäste per E-Mail
+    canceled_prefix:
+      en: "Canceled: "
+      de: "Abgesagt: "
+    no_title:
+      en: (No title)
+      de: (Kein Titel)
 agents:
   start:
     new_session:
@@ -1368,7 +1551,7 @@ sidebar:
     de: Aus
   include_thread_replies:
     en: Include thread replies
-    de: Thread-Antworten einschließen
+    de: Thread-Antworten einschliessen
   filter:
     placeholder:
       en: Filter by person or chat name
@@ -1390,7 +1573,7 @@ sidebar:
       de: Filterfeld anzeigen
     close_box:
       en: Close filter text box
-      de: Filterfeld schließen
+      de: Filterfeld schliessen
     show_shortcut:
       en: "%{label} (Ctrl+Shift+F)"
       de: "%{label} (Strg+Umschalt+F)"

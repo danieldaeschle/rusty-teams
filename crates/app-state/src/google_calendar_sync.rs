@@ -13,6 +13,10 @@ pub async fn fetch_google_events(
     end: DateTime<Utc>,
 ) -> Result<Vec<CalendarEvent>, String> {
     let Some(oauth) = client_id_from_env() else {
+        // Connected accounts but no client id compiled in: say so instead of an empty week.
+        if accounts.has_google() {
+            return Err(missing_client_id());
+        }
         return Ok(Vec::new());
     };
     let mut all = Vec::new();
@@ -23,24 +27,28 @@ pub async fn fetch_google_events(
         let account = &accounts.google_accounts[index];
         let access = account.tokens.access_token.clone();
         let account_id = account.id.clone();
-        let calendars: Vec<_> = account
+        let calendars: Vec<(String, String)> = account
             .calendars
             .iter()
             .filter(|calendar| calendar.selected)
-            .map(|calendar| calendar.id.clone())
+            .map(|calendar| (calendar.id.clone(), calendar.summary.clone()))
             .collect();
         let calendars = if calendars.is_empty() {
-            vec!["primary".to_owned()]
+            vec![(
+                "primary".to_owned(),
+                app_base::ui_locale::tr("settings.calendar.primary"),
+            )]
         } else {
             calendars
         };
         let client = GoogleCalendar::new(access);
-        for calendar_id in calendars {
+        for (calendar_id, calendar_name) in calendars {
             match client.events(&calendar_id, start, end).await {
                 Ok(mut events) => {
                     for event in &mut events {
                         event.account_id = Some(account_id.clone());
                         event.calendar_id = Some(calendar_id.clone());
+                        event.calendar_name = Some(calendar_name.clone());
                     }
                     all.extend(events);
                 }
@@ -161,5 +169,5 @@ async fn ensure_access_token(
 }
 
 fn missing_client_id() -> String {
-    "Set TEAMS_GOOGLE_CLIENT_ID to connect Google Calendar".into()
+    app_base::ui_locale::tr("settings.calendar.not_in_build")
 }
