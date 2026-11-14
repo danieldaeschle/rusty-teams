@@ -76,7 +76,6 @@ pub struct Settings {
     pub corner: Corner,
     pub flash: bool,
     pub close_to_tray: bool,
-    pub do_not_disturb: bool,
     pub mute_in_calls: bool,
     pub sounds: SoundSettings,
 }
@@ -88,7 +87,6 @@ impl Default for Settings {
             corner: Corner::BottomRight,
             flash: true,
             close_to_tray: true,
-            do_not_disturb: false,
             mute_in_calls: false,
             sounds: SoundSettings::default(),
         }
@@ -262,7 +260,6 @@ pub fn decide(settings: &Settings, incoming: &Incoming, environment: Environment
         || environment.system_quiet
         || (environment.own_do_not_disturb && !urgent)
         || environment.paused
-        || settings.do_not_disturb
         || (settings.mute_in_calls && environment.in_call)
         || (!urgent && !account_toasts(&settings.account, incoming));
     if suppressed {
@@ -287,7 +284,6 @@ pub fn decide_proposal(
         || environment.system_quiet
         || environment.own_do_not_disturb
         || environment.paused
-        || settings.do_not_disturb
         || (settings.mute_in_calls && environment.in_call);
     if suppressed {
         return SILENT;
@@ -431,18 +427,6 @@ mod tests {
             decide_proposal(&settings, DesktopNotifications::Off, Environment::default()),
             SILENT
         );
-        let quiet = Settings {
-            do_not_disturb: true,
-            ..Default::default()
-        };
-        assert_eq!(
-            decide_proposal(
-                &quiet,
-                DesktopNotifications::default(),
-                Environment::default()
-            ),
-            SILENT
-        );
     }
 
     #[test]
@@ -468,11 +452,6 @@ mod tests {
         ] {
             assert_eq!(decide(&Settings::default(), &group(), environment), SILENT);
         }
-        let settings = Settings {
-            do_not_disturb: true,
-            ..Default::default()
-        };
-        assert_eq!(decide(&settings, &group(), Environment::default()), SILENT);
     }
 
     fn urgent() -> Incoming {

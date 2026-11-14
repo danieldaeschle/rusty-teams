@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use store::Sidebar;
+use teams_core::{ForcedAvailability, ForcedKind};
 
 use super::badge::{Badge, badge_for};
 use super::incoming::IncomingTracker;
@@ -105,6 +106,7 @@ pub struct NotificationCenter {
     hover_hold: bool,
     unread_mentions: HashSet<String>,
     tray: Option<Tray>,
+    tray_do_not_disturb: bool,
     app_icon: AppIcon,
     shown_badge: Option<Badge>,
     shown_mention_dot: bool,
@@ -129,12 +131,13 @@ impl NotificationCenter {
         let mut settings = settings::load(&app.read(cx).store);
         settings.account = app.read(cx).account_chat_settings().notifications;
         let app_icon = active_appearance::current(cx).app_icon;
+        let tray_do_not_disturb = own_do_not_disturb(app.read(cx));
         let tray = if app.read(cx).mode.demo {
             None
         } else {
             Tray::new(
                 settings.sounds.notification_sound,
-                settings.do_not_disturb,
+                tray_do_not_disturb,
                 app_icon.png(),
             )
         };
@@ -186,6 +189,7 @@ impl NotificationCenter {
             hover_hold: false,
             unread_mentions: HashSet::new(),
             tray,
+            tray_do_not_disturb,
             app_icon,
             shown_badge: None,
             shown_mention_dot: false,
@@ -356,7 +360,7 @@ impl NotificationCenter {
         let previous = self.settings.sounds.clone();
         change(&mut self.settings);
         settings::save(&self.app.read(cx).store, &self.settings);
-        self.sync_tray();
+        self.sync_tray(cx);
         if self.settings.sounds != previous {
             let updated = self.settings.sounds.clone();
             self.app.update(cx, |state, cx| {
@@ -381,7 +385,7 @@ impl NotificationCenter {
         }
         self.settings.sounds = account;
         settings::save(&self.app.read(cx).store, &self.settings);
-        self.sync_tray();
+        self.sync_tray(cx);
         if !self.demo_mode {
             self.prefetch_sounds(cx);
         }
@@ -420,6 +424,7 @@ impl NotificationCenter {
             AppEvent::Messages(conversation_id) => self.on_messages(conversation_id, cx),
             AppEvent::Selection => self.on_selection(cx),
             AppEvent::Sidebar => self.refresh_badge(cx),
+            AppEvent::Directory => self.sync_tray_presence(cx),
             AppEvent::Ring => self.on_rings_changed(cx),
             AppEvent::MeetingReminder => self.on_meeting_reminder(cx),
             AppEvent::MeetingChime => self.on_meeting_chime(cx),
@@ -920,9 +925,7 @@ impl NotificationCenter {
     }
 
     fn reminders_quiet(&self, cx: &App) -> bool {
-        self.settings.do_not_disturb
-            || platform::system_quiet()
-            || own_do_not_disturb(self.app.read(cx))
+        platform::system_quiet() || own_do_not_disturb(self.app.read(cx))
     }
 
     fn on_rings_changed(&mut self, cx: &mut Context<Self>) {
@@ -1176,17 +1179,31 @@ impl NotificationCenter {
                 TrayCommand::ToggleSound => self.update_settings(cx, |settings| {
                     settings.sounds.notification_sound = !settings.sounds.notification_sound
                 }),
-                TrayCommand::ToggleDoNotDisturb => self.update_settings(cx, |settings| {
-                    settings.do_not_disturb = !settings.do_not_disturb
-                }),
+                TrayCommand::ToggleDoNotDisturb => self.toggle_own_do_not_disturb(cx),
                 TrayCommand::Settings => {
                     self.raise_main_window(cx);
                     self.app.update(cx, |state, cx| {
-                        state.open_settings(SettingsSection::General, cx)
+                        state.open_settings(SettingsSection::Notifications, cx)
                     });
                 }
                 TrayCommand::Quit => cx.quit(),
             }
+        }
+    }
+
+    fn toggle_own_do_not_disturb(&mut self, cx: &mut Context<Self>) {
+        let forced = (!own_do_not_disturb(self.app.read(cx))).then_some(ForcedAvailability {
+            kind: ForcedKind::DoNotDisturb,
+            expires_at: None,
+        });
+        self.app
+            .update(cx, |state, cx| state.set_own_availability(forced, cx));
+        self.sync_tray(cx);
+    }
+
+    fn sync_tray_presence(&mut self, cx: &App) {
+        if self.tray_do_not_disturb != own_do_not_disturb(self.app.read(cx)) {
+            self.sync_tray(cx);
         }
     }
 
@@ -1246,11 +1263,12 @@ impl NotificationCenter {
         }
     }
 
-    fn sync_tray(&self) {
+    fn sync_tray(&mut self, cx: &App) {
+        self.tray_do_not_disturb = own_do_not_disturb(self.app.read(cx));
         if let Some(tray) = &self.tray {
             tray.sync(
                 self.settings.sounds.notification_sound,
-                self.settings.do_not_disturb,
+                self.tray_do_not_disturb,
                 !self.unread_mentions.is_empty(),
             );
         }
@@ -1281,7 +1299,7 @@ impl NotificationCenter {
             }
         }
         self.shown_badge = badge;
-        self.sync_tray();
+        self.sync_tray(cx);
     }
 
     pub fn set_hover(&mut self, id: u64, hovered: bool, cx: &mut Context<Self>) {

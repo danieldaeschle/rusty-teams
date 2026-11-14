@@ -53,10 +53,6 @@ fn serialize(settings: &Settings) -> String {
             settings.close_to_tray.to_string(),
         ),
         (
-            "do_not_disturb".to_owned(),
-            settings.do_not_disturb.to_string(),
-        ),
-        (
             "mute_in_calls".to_owned(),
             settings.mute_in_calls.to_string(),
         ),
@@ -86,7 +82,6 @@ fn parse(text: &str) -> Settings {
             "corner" => settings.corner = Corner::from_key(value).unwrap_or_default(),
             "taskbar_flash" => settings.flash = flag,
             "close_to_tray" => settings.close_to_tray = flag,
-            "do_not_disturb" => settings.do_not_disturb = flag,
             "mute_in_calls" => settings.mute_in_calls = flag,
             _ => set_ringtone(&mut sounds.ringtones, key, value),
         }
@@ -121,7 +116,6 @@ mod tests {
             corner: Corner::TopLeft,
             flash: false,
             close_to_tray: false,
-            do_not_disturb: true,
             mute_in_calls: true,
             sounds: SoundSettings {
                 notification_sound: false,
