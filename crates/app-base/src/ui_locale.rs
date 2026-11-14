@@ -256,12 +256,18 @@ mod tests {
         assert_eq!(tr("notify.mark_read"), "Mark as read");
         assert_eq!(tr("notify.reply"), "Reply");
         assert_eq!(tr("notify.decline"), "Decline");
+        assert_eq!(tr("notify.accept"), "Accept");
+        assert_eq!(tr("notify.audio"), "Audio");
+        assert_eq!(tr("notify.video"), "Video");
         assert_eq!(tr("notify.join"), "Join");
         assert_eq!(tr("notify.snooze"), "Snooze");
         apply_locale("de");
         assert_eq!(tr("notify.mark_read"), "Als gelesen markieren");
         assert_eq!(tr("notify.reply"), "Antworten");
         assert_eq!(tr("notify.decline"), "Ablehnen");
+        assert_eq!(tr("notify.accept"), "Annehmen");
+        assert_eq!(tr("notify.audio"), "Audio");
+        assert_eq!(tr("notify.video"), "Video");
         assert_eq!(tr("notify.join"), "Teilnehmen");
         assert_eq!(tr("notify.snooze"), "Schlummern");
     }

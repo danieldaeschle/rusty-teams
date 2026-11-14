@@ -1,7 +1,7 @@
 //! Desktop notifications on Linux through `org.freedesktop.Notifications`.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::thread;
@@ -477,12 +477,23 @@ fn parse_closed(
     })
 }
 
+fn inhibit_runtime() -> Option<&'static tokio::runtime::Runtime> {
+    static RUNTIME: OnceLock<Option<tokio::runtime::Runtime>> = OnceLock::new();
+    RUNTIME
+        .get_or_init(|| {
+            // Multi-thread so `block_on` is safe from the UI thread and tests.
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .ok()
+        })
+        .as_ref()
+}
+
 /// Reads the optional `Inhibited` property (Plasma / modern GNOME). Missing → false.
 pub fn notifications_inhibited() -> bool {
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    else {
+    let Some(runtime) = inhibit_runtime() else {
         return false;
     };
     runtime.block_on(async {

@@ -124,6 +124,9 @@ pub struct NotificationCenter {
     desktop_close: Vec<String>,
     #[cfg(target_os = "linux")]
     desktop_published: HashSet<String>,
+    /// Decoded 64×64 notification avatars, keyed by user id and source fingerprint.
+    #[cfg(target_os = "linux")]
+    desktop_avatar_cache: HashMap<String, (u64, NotificationImage)>,
     app_icon: AppIcon,
     shown_badge: Option<Badge>,
     shown_mention_dot: bool,
@@ -217,6 +220,8 @@ impl NotificationCenter {
             desktop_close: Vec::new(),
             #[cfg(target_os = "linux")]
             desktop_published: HashSet::new(),
+            #[cfg(target_os = "linux")]
+            desktop_avatar_cache: HashMap::new(),
             app_icon,
             shown_badge: None,
             shown_mention_dot: false,
@@ -812,7 +817,7 @@ impl NotificationCenter {
     fn sync_windows(&mut self, cx: &mut Context<Self>) {
         #[cfg(target_os = "linux")]
         {
-            self.poll_desktop(cx);
+            // `tick` polls desktop events once per frame; sync only publishes.
             self.sync_desktop(cx);
             return;
         }
@@ -1174,13 +1179,14 @@ impl NotificationCenter {
         let needs_sync = needs_sync
             || !self.desktop_close.is_empty()
             || !self.desktop_published.is_empty();
-        if needs_sync {
-            self.sync_windows(cx);
-            cx.notify();
-        }
+        // Poll desktop actions before sync so dismiss/reply land in the same tick.
         #[cfg(target_os = "linux")]
         if self.desktop.is_some() {
             self.poll_desktop(cx);
+        }
+        if needs_sync {
+            self.sync_windows(cx);
+            cx.notify();
         }
         self.poll_tray(cx);
         if single_instance::take_activation() {
@@ -1270,63 +1276,110 @@ impl NotificationCenter {
     }
 
     #[cfg(target_os = "linux")]
-    fn avatar_notification_image(state: &AppState, user_id: Option<&str>) -> Option<NotificationImage> {
+    fn avatar_notification_image(
+        &mut self,
+        state: &AppState,
+        user_id: Option<&str>,
+    ) -> Option<NotificationImage> {
         use crate::data::AvatarState;
         use image::imageops::FilterType;
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
         let user_id = user_id?;
         let AvatarState::Ready(photo) = state.directory.avatar(user_id)? else {
             return None;
         };
-        let decoded = image::load_from_memory(photo.source_bytes()).ok()?;
+        let bytes = photo.source_bytes();
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        let fingerprint = hasher.finish();
+        if let Some((cached_fp, image)) = self.desktop_avatar_cache.get(user_id)
+            && *cached_fp == fingerprint
+        {
+            return Some(image.clone());
+        }
+        let decoded = image::load_from_memory(bytes).ok()?;
         let rgba = decoded
             .resize_exact(64, 64, FilterType::Lanczos3)
             .into_rgba8();
-        Some(NotificationImage {
+        let image = NotificationImage {
             width: rgba.width(),
             height: rgba.height(),
             rgba: rgba.into_raw(),
-        })
+        };
+        self.desktop_avatar_cache
+            .insert(user_id.to_owned(), (fingerprint, image.clone()));
+        Some(image)
     }
 
     #[cfg(target_os = "linux")]
     fn sync_desktop(&mut self, cx: &mut Context<Self>) {
-        let Some(desktop) = &self.desktop else {
+        if self.desktop.is_none() {
             return;
-        };
+        }
         let preview_on = shows_preview(&self.settings);
         let message_labels = Self::message_labels();
         let ring_labels = Self::ring_labels();
         let meeting_labels = Self::meeting_labels();
-        let state = self.app.read(cx);
         let mut visible = Vec::new();
         let mut visible_logical = HashSet::new();
-        for toast in self.stack.visible() {
-            let image = Self::avatar_notification_image(state, toast.sender_id.as_deref());
+        let mut used_avatars = HashSet::new();
+        let message_toasts: Vec<_> = self.stack.visible().to_vec();
+        let (ring_payloads, meeting_payloads) = {
+            let state = self.app.read(cx);
+            let rings: Vec<_> = state
+                .rings
+                .ringing()
+                .map(|entry| {
+                    (
+                        desktop_payload::ring_payload(
+                            entry.ring.ring_id,
+                            entry.caller_name(),
+                            entry.subtitle(),
+                            entry.ring.video,
+                            &ring_labels,
+                        ),
+                        entry.caller_user_id(),
+                    )
+                })
+                .collect();
+            let now = Utc::now();
+            let offset = Local::now().offset().fix();
+            let meetings: Vec<_> = state
+                .meeting_toasts
+                .entries()
+                .iter()
+                .map(|toast| {
+                    let body = crate::call::meeting_subtitle(toast, now, offset);
+                    desktop_payload::meeting_payload(toast, &body, &meeting_labels)
+                })
+                .collect();
+            (rings, meetings)
+        };
+        for toast in &message_toasts {
+            if let Some(user_id) = toast.sender_id.as_deref() {
+                used_avatars.insert(user_id.to_owned());
+            }
+            let image = self.avatar_notification_image(self.app.read(cx), toast.sender_id.as_deref());
             let payload = desktop_payload::message_payload(toast, preview_on, &message_labels);
             visible_logical.insert(payload.key.replace_token());
             visible.push(Self::to_bus(payload, image));
         }
-        for entry in state.rings.ringing() {
-            let payload = desktop_payload::ring_payload(
-                entry.ring.ring_id,
-                entry.caller_name(),
-                entry.subtitle(),
-                entry.ring.video,
-                &ring_labels,
-            );
-            let image = Self::avatar_notification_image(state, entry.caller_user_id().as_deref());
+        for (payload, caller_id) in ring_payloads {
+            if let Some(user_id) = caller_id.as_deref() {
+                used_avatars.insert(user_id.to_owned());
+            }
+            let image = self.avatar_notification_image(self.app.read(cx), caller_id.as_deref());
             visible_logical.insert(payload.key.replace_token());
             visible.push(Self::to_bus(payload, image));
         }
-        let now = Utc::now();
-        let offset = Local::now().offset().fix();
-        for toast in state.meeting_toasts.entries() {
-            let body = crate::call::meeting_subtitle(toast, now, offset);
-            let payload = desktop_payload::meeting_payload(toast, &body, &meeting_labels);
+        for payload in meeting_payloads {
             visible_logical.insert(payload.key.replace_token());
             visible.push(Self::to_bus(payload, None));
         }
+        self.desktop_avatar_cache
+            .retain(|user_id, _| used_avatars.contains(user_id));
         let mut close = std::mem::take(&mut self.desktop_close);
         for previous in &self.desktop_published {
             if visible_logical.contains(previous) {
@@ -1339,7 +1392,9 @@ impl NotificationCenter {
         }
         close.sort();
         close.dedup();
-        desktop.sync(visible, close);
+        if let Some(desktop) = &self.desktop {
+            desktop.sync(visible, close);
+        }
         self.desktop_published = visible_logical;
     }
 
