@@ -9,7 +9,7 @@ docs/design/islands/*
 !docs/design/islands/SPEC.md
 !docs/decisions/
 !docs/decisions/**
-!docs/agents.md
+!docs/agent-actions.md
 !docs/build-windows.md
 !docs/research/
 docs/research/*

@@ -1,4 +1,4 @@
-# Agents
+# Agent actions
 
 Delegate a message to a coding-agent CLI. Hover a message, click the robot button, pick an action.
 
