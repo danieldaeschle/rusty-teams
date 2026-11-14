@@ -155,6 +155,11 @@ impl ActivityCenter {
             .map(|selection| selection.conversation_id().to_owned())
     }
 
+    /// Points at a main window reopened from the tray.
+    pub fn attach_main_window(&mut self, window: &Window) {
+        self.main_window = window.window_handle();
+    }
+
     fn in_foreground(&self, conversation_id: &str, cx: &mut Context<Self>) -> bool {
         self.selected_conversation(cx).as_deref() == Some(conversation_id)
             && self

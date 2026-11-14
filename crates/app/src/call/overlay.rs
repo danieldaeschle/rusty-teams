@@ -169,6 +169,11 @@ fn overlay_options(role: Role, rect: ScreenRect, scale: f32) -> WindowOptions {
 }
 
 impl CallWindows {
+    /// Points at a main window reopened from the tray.
+    pub fn attach_main_window(&mut self, window: &Window) {
+        self.main_native = platform::native_handle(window);
+    }
+
     pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let saved_position = |key: &str, cx: &App| {
             app.read(cx)
