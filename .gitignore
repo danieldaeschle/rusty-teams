@@ -3,3 +3,8 @@ target/
 docs/*
 !docs/decisions/
 !docs/decisions/**
+!docs/agents.md
+!docs/build-windows.md
+!docs/research/
+docs/research/*
+!docs/research/internal-endpoints.md
