@@ -60,6 +60,8 @@ mod sidebar_load;
 pub mod sidebar_model;
 pub mod sound_actions;
 pub mod stored_outgoing;
+pub mod support_actions;
+pub mod support_bundle;
 pub mod task_dialog;
 pub mod team_admin;
 pub mod translation_actions;
@@ -72,6 +74,6 @@ pub use app_base::{
     demo_chart_cards, demo_gifs, demo_input_cards, demo_library, demo_recap, diagnostics,
     downloads, emoticons, format, frame_log, fuzzy, image_clipboard, image_view_math, inline_image,
     presence_link, read_state, recap, remote_image, runtime, schedule_time, single_instance,
-    stickers, theme, translation, updater, user_activity, zoom,
+    stickers, support, theme, translation, updater, user_activity, zoom,
 };
 pub use app_ui_kit::render;

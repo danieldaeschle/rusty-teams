@@ -23,7 +23,6 @@ const START_RETRY_STEADY: Duration = Duration::from_secs(10);
 pub(super) const NOT_READY: &str =
     "Could not reach the Teams calling service. Check your connection and try again.";
 const READY_WAIT: Duration = Duration::from_secs(30);
-const CALL_DUMPS_DIR: &str = "call-dumps";
 
 pub struct CallLauncher {
     engine: watch::Sender<Option<CallEngine>>,
@@ -368,9 +367,12 @@ async fn start_engine(
 )> {
     let session = Session::with_transport(transport.clone(), SessionConfig::for_app()).await?;
     let poll_session = Session::with_transport(transport, SessionConfig::for_app()).await?;
+    let dump_dir = app_base::diagnostics::is_enabled()
+        .then(|| crate::support::call_dumps_dir())
+        .flatten();
     let config = EngineConfig {
         ringable,
-        dump_dir: crate::diagnostics::directory().map(|directory| directory.join(CALL_DUMPS_DIR)),
+        dump_dir,
         ..EngineConfig::default()
     };
     CallEngine::start(session, poll_session, config).await

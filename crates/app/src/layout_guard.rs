@@ -322,6 +322,7 @@ mod frames {
     const SETTINGS_TAGS: &[&str] = &[
         "settings",
         "settings/nav",
+        "settings/nav/help",
         "settings/nav/about",
         "settings/main",
         "settings/main/header",
@@ -330,6 +331,7 @@ mod frames {
     ];
     const SETTINGS_BODY: &str = "settings/main/body";
     const SETTINGS_NAV: &str = "settings/nav";
+    const SETTINGS_NAV_HELP: &str = "settings/nav/help";
     const SETTINGS_NAV_ABOUT: &str = "settings/nav/about";
     const NAV_LABEL_SIZE: f32 = 14.;
     const NAV_LINE_HEIGHT: f32 = 20.;
@@ -349,6 +351,11 @@ mod frames {
             edges: &[Edge::Left, Edge::Right, Edge::Bottom],
         },
         InsetRule {
+            panel: "settings/nav",
+            content: "settings/nav/help",
+            edges: &[Edge::Left, Edge::Right],
+        },
+        InsetRule {
             panel: "settings/main",
             content: "settings/main/header/close",
             edges: &[Edge::Top, Edge::Right],
@@ -363,7 +370,7 @@ mod frames {
         SettingsSection::Agents,
         "Agents pages carry their own PAGE_PADDING side inset, the body narrows its side padding to keep the text edge",
     )];
-    const SETTINGS_SECTIONS: [SettingsSection; 10] = [
+    const SETTINGS_SECTIONS: [SettingsSection; 11] = [
         SettingsSection::General,
         SettingsSection::Notifications,
         SettingsSection::Appearance,
@@ -373,6 +380,7 @@ mod frames {
         SettingsSection::Devices,
         SettingsSection::Agents,
         SettingsSection::Mcp,
+        SettingsSection::Help,
         SettingsSection::About,
     ];
     const SIZES: [(f32, f32); 3] = [(640., 480.), (1280., 800.), (1920., 1080.)];
@@ -1622,6 +1630,8 @@ mod frames {
             let label_path: &'static str = Box::leak(label_selector(section).into_boxed_str());
             let item_path: &'static str = if section == SettingsSection::About {
                 SETTINGS_NAV_ABOUT
+            } else if section == SettingsSection::Help {
+                SETTINGS_NAV_HELP
             } else {
                 Box::leak(item_selector(section).into_boxed_str())
             };

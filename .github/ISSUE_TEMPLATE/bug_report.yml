@@ -1,0 +1,39 @@
+name: Bug report
+description: Report a bug with client data and a local support package
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        File bugs on [danieldaeschle/rusty-teams](https://github.com/danieldaeschle/rusty-teams/issues). Prefer **Settings → Help → Create support package**, then attach those files. Do not paste tokens, cookies, or passwords.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Steps to reproduce and what you saw.
+      placeholder: 1. Open … 2. Click … 3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should have happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: client
+    attributes:
+      label: Client data
+      description: Paste the Client block from Help (or leave blank if you attach client.md).
+      render: markdown
+    validations:
+      required: false
+  - type: checkboxes
+    id: attachments
+    attributes:
+      label: Support package
+      options:
+        - label: I attached the support package files (client.md, scrubbed diagnostics.log, call reports) or explained why not
+          required: false
