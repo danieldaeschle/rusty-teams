@@ -1,6 +1,9 @@
 target/
 .claude/
+# Local research under docs/; track design SoT and ADRs.
 docs/*
+!docs/design/
+!docs/design/**
 !docs/decisions/
 !docs/decisions/**
 !docs/agents.md
