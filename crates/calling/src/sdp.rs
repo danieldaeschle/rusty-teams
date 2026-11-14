@@ -471,34 +471,38 @@ fn signal_rtp_line(
         .collect();
     let simulcast = source.has("simulcast");
     let receive_only = source.direction() == Some("recvonly");
-    let (range, ssrc_lines) = if multi_stream.is_some() {
+    let (range, ssrc_lines, copy_ssrc_groups) = if multi_stream.is_some() {
+        // Teams rejects x-ssrc-range / ssrc-group on x-multi-stream lines with SdpParsingFailure (301000).
         (
             None,
             vec![Attribute::new("ssrc", format!("1 cname:{cname}"))],
+            false,
         )
     } else if let Some(&first) = browser_ssrcs.first() {
         let lines = source
             .values("ssrc")
             .map(|value| Attribute::new("ssrc", rewrite_ssrc_msid(value, &mid)))
             .collect();
-        (Some((first, first)), lines)
+        (Some((first, first)), lines, true)
     } else if simulcast {
         let base = numbers.next_u32();
         let lines = vec![Attribute::new(
             "ssrc",
             format!("{base} fake_attribute:fake_value"),
         )];
-        (Some((base, base + SSRC_RANGE_SIZE - 1)), lines)
+        (Some((base, base + SSRC_RANGE_SIZE - 1)), lines, false)
     } else if receive_only && role != LineRole::MainAudio {
         (
             Some((1, 1)),
             vec![Attribute::new("ssrc", format!("1 cname:{cname}"))],
+            false,
         )
     } else {
         let base = numbers.next_u32();
         (
             Some((base, base)),
             vec![Attribute::new("ssrc", format!("{base} cname:{cname}"))],
+            false,
         )
     };
     if let Some((first, last)) = range {
@@ -563,13 +567,15 @@ fn signal_rtp_line(
         attributes.push(Attribute::new("candidate", PLACEHOLDER_CANDIDATE));
     }
     attributes.extend(ssrc_lines);
-    attributes.extend(
-        source
-            .attributes
-            .iter()
-            .filter(|attribute| attribute.name == "ssrc-group")
-            .cloned(),
-    );
+    if copy_ssrc_groups {
+        attributes.extend(
+            source
+                .attributes
+                .iter()
+                .filter(|attribute| attribute.name == "ssrc-group")
+                .cloned(),
+        );
+    }
     attributes.push(Attribute::new("label", role.label()));
     if !source.has("rtcp-mux") {
         attributes.push(Attribute::flag("rtcp-mux"));
@@ -754,12 +760,19 @@ pub fn stream_lines(teams_sdp: &str, lines: &[SignaledLine]) -> Result<Vec<Strea
                 role: line.role,
                 source_stream_id,
             }),
-            folded => streams.extend(folded.iter().map(|browser_mid| StreamLine {
-                mid: mid.clone(),
-                browser_mid: browser_mid.clone(),
-                role: line.role,
-                source_stream_id: None,
-            })),
+            folded => {
+                let last = folded.len().saturating_sub(1);
+                streams.extend(folded.iter().enumerate().map(|(index, browser_mid)| {
+                    StreamLine {
+                        mid: mid.clone(),
+                        browser_mid: browser_mid.clone(),
+                        role: line.role,
+                        source_stream_id: (line.role == LineRole::ScreenShare && index == last)
+                            .then_some(source_stream_id)
+                            .flatten(),
+                    }
+                }))
+            }
         }
     }
     Ok(streams)

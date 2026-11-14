@@ -40,13 +40,16 @@ impl Drop for Capture {
             Capture::Thread { stop, thread } => {
                 stop.store(true, Ordering::SeqCst);
                 let Some(thread) = thread.take() else { return };
-                let started = Instant::now();
-                while !thread.is_finished() && started.elapsed() < STOP_WAIT {
-                    std::thread::sleep(STOP_POLL);
-                }
-                if thread.is_finished() {
-                    let _ = thread.join();
-                }
+                // Join off the call task so stop_camera / hangup stay responsive.
+                std::thread::spawn(move || {
+                    let started = Instant::now();
+                    while !thread.is_finished() && started.elapsed() < STOP_WAIT {
+                        std::thread::sleep(STOP_POLL);
+                    }
+                    if thread.is_finished() {
+                        let _ = thread.join();
+                    }
+                });
             }
             Capture::Task(task) => task.abort(),
         }

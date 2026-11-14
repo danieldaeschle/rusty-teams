@@ -186,6 +186,12 @@ impl VideoReceive {
         self.table = table;
     }
 
+    pub fn replace_requester(&mut self, requester: SourceRequester) {
+        self.requester = Some(requester);
+        self.held.fill(None);
+        self.screen_held = None;
+    }
+
     pub fn is_ready(&self) -> bool {
         self.requester.is_some() && !self.table.is_empty()
     }

@@ -294,7 +294,10 @@ impl Drop for EffectsThread {
     fn drop(&mut self) {
         self.frames.close();
         if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+            // Join off the call task; a stuck effects worker must not block hangup.
+            std::thread::spawn(move || {
+                let _ = worker.join();
+            });
         }
     }
 }

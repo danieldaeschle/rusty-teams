@@ -138,6 +138,12 @@ pub struct Renegotiation {
     pub links: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediaAcknowledgement {
+    pub links: BTreeMap<String, String>,
+    pub keys: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallEvent {
     ConversationUpdate(Value),
@@ -145,6 +151,7 @@ pub enum CallEvent {
     Acceptance(Acceptance),
     Progress(ProgressStatus),
     MediaAnswer(MediaAnswer),
+    MediaAcknowledgement(MediaAcknowledgement),
     MediaRenegotiation(Renegotiation),
     Speakers(Vec<u32>),
     ControlVideoStreaming(Value),
@@ -171,6 +178,7 @@ impl CallEvent {
             CallEvent::Acceptance(_) => "call/acceptance".into(),
             CallEvent::Progress(_) => "call/progress".into(),
             CallEvent::MediaAnswer(_) => "call/mediaAnswer".into(),
+            CallEvent::MediaAcknowledgement(_) => "call/mediaAcknowledgement".into(),
             CallEvent::MediaRenegotiation(_) => "call/mediaRenegotiation".into(),
             CallEvent::Speakers(_) => "call/speakers".into(),
             CallEvent::ControlVideoStreaming(_) => "call/controlVideoStreaming".into(),
@@ -212,6 +220,10 @@ pub fn classify(path: &str, body: Value) -> Result<(String, CallEvent)> {
         ("call", "acceptance") => CallEvent::Acceptance(acceptance(&body)?),
         ("call", "progress") => CallEvent::Progress(progress(&body)),
         ("call", "mediaAnswer") => CallEvent::MediaAnswer(media_answer(&body)?),
+        ("call", "mediaAcknowledgement") => CallEvent::MediaAcknowledgement(MediaAcknowledgement {
+            links: nested_links(&body),
+            keys: object_keys(&body),
+        }),
         ("call", "mediaRenegotiation") => CallEvent::MediaRenegotiation(renegotiation(&body)?),
         ("call", "csrcInfo" | "dominantSpeakerInfo") => CallEvent::Speakers(speaker_sources(&body)),
         ("call", "controlVideoStreaming") => CallEvent::ControlVideoStreaming(body),
@@ -265,16 +277,87 @@ pub fn acknowledgement_links(body: &Value) -> BTreeMap<String, String> {
     string_links(&body["callAcceptanceAcknowledgement"]["links"])
 }
 
+/// Link names that belong to a call leg. Other `links` objects in a payload
+/// (people, photos) must not overwrite these.
+const LEG_LINK_NAMES: &[&str] = &[
+    "mediaAnswer",
+    "rejection",
+    "mediaAcknowledgement",
+    "acknowledgement",
+    "updateMediaDescriptions",
+    "applyChannelParameters",
+    "controlVideoStreaming",
+    "callLeg",
+    "retargetCompletion",
+    "mediaRenegotiation",
+    "transfer",
+    "replacement",
+    "balanceUpdate",
+];
+
+fn link_url(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| value.get("href").and_then(Value::as_str).map(str::to_owned))
+}
+
 fn string_links(value: &Value) -> BTreeMap<String, String> {
     value
         .as_object()
         .map(|links| {
             links
                 .iter()
-                .filter_map(|(name, url)| Some((name.clone(), url.as_str()?.to_owned())))
+                .filter_map(|(name, url)| Some((name.clone(), link_url(url)?)))
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Every call-leg `links` object in the payload. Escalation offers often put
+/// `updateMediaDescriptions` next to the media holder, not inside it; keeping
+/// only the holder's `mediaAnswer` left us posting at the ended leg.
+pub fn nested_links(value: &Value) -> BTreeMap<String, String> {
+    let mut links = BTreeMap::new();
+    collect_leg_links(value, 0, &mut links);
+    links
+}
+
+fn collect_leg_links(value: &Value, depth: usize, out: &mut BTreeMap<String, String>) {
+    if depth > 8 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            if let Some(links) = map.get("links") {
+                let parsed = string_links(links);
+                if parsed
+                    .keys()
+                    .any(|name| LEG_LINK_NAMES.contains(&name.as_str()))
+                {
+                    out.extend(parsed);
+                }
+            }
+            for child in map.values() {
+                collect_leg_links(child, depth + 1, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_leg_links(item, depth + 1, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn object_keys(value: &Value) -> String {
+    let Some(map) = value.as_object() else {
+        return String::new();
+    };
+    let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    keys.join(",")
 }
 
 fn acceptance(body: &Value) -> Result<Acceptance> {
@@ -346,6 +429,8 @@ fn renegotiation(body: &Value) -> Result<Renegotiation> {
         .as_str()
         .ok_or_else(|| Error::Callback("mediaRenegotiation without mediaContent.blob".into()))?
         .to_owned();
+    let mut links = nested_links(body);
+    links.extend(string_links(&holder["links"]));
     Ok(Renegotiation {
         sdp,
         new_offer: media["newOffer"].as_bool().unwrap_or(false),
@@ -353,7 +438,7 @@ fn renegotiation(body: &Value) -> Result<Renegotiation> {
             || media["isTwoPartyToMultiPartyEscalation"]
                 .as_bool()
                 .unwrap_or(false),
-        links: string_links(&holder["links"]),
+        links,
     })
 }
 
@@ -657,6 +742,58 @@ mod tests {
         };
         assert!(!renegotiation.new_offer && renegotiation.escalation);
         assert!(classify("callAgent/abc/1/call/mediaRenegotiation/", json!({"x": 1})).is_err());
+    }
+
+    #[test]
+    fn renegotiation_keeps_leg_links_that_sit_beside_the_offer() {
+        let body = json!({
+            "mediaRenegotiation": {
+                "mediaContent": {"blob": "v=0\r\n", "newOffer": true, "escalationOccurring": true},
+                "links": {"mediaAnswer": "https://cc/answer", "rejection": "https://cc/reject"}
+            },
+            "links": {
+                "updateMediaDescriptions": {"href": "https://cc/new/update"},
+                "applyChannelParameters": "https://cc/new/apply",
+                "callLeg": "https://cc/new/leg"
+            }
+        });
+        let (_, event) = classify("callAgent/abc/1/call/mediaRenegotiation/", body).unwrap();
+        let CallEvent::MediaRenegotiation(renegotiation) = event else {
+            panic!("not a renegotiation")
+        };
+        assert_eq!(renegotiation.links["mediaAnswer"], "https://cc/answer");
+        assert_eq!(
+            renegotiation.links["updateMediaDescriptions"],
+            "https://cc/new/update"
+        );
+        assert_eq!(
+            renegotiation.links["applyChannelParameters"],
+            "https://cc/new/apply"
+        );
+        assert_eq!(renegotiation.links["callLeg"], "https://cc/new/leg");
+    }
+
+    #[test]
+    fn media_acknowledgement_harvests_new_mixer_leg_links() {
+        let body = json!({
+            "mediaAcknowledgement": {
+                "links": {
+                    "updateMediaDescriptions": "https://cc/leg2/update",
+                    "applyChannelParameters": "https://cc/leg2/apply",
+                    "callLeg": "https://cc/leg2"
+                }
+            }
+        });
+        let (_, event) = classify("callAgent/abc/1/call/mediaAcknowledgement/", body).unwrap();
+        let CallEvent::MediaAcknowledgement(ack) = event else {
+            panic!("not a media acknowledgement")
+        };
+        assert_eq!(
+            ack.links["updateMediaDescriptions"],
+            "https://cc/leg2/update"
+        );
+        assert_eq!(ack.links["applyChannelParameters"], "https://cc/leg2/apply");
+        assert_eq!(ack.links["callLeg"], "https://cc/leg2");
     }
 
     #[test]

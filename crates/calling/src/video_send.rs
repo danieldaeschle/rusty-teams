@@ -215,6 +215,8 @@ pub struct LocalVideo {
     /// The desktop dialog already bound the PipeWire stream. Later `StartShare`
     /// commands must attach that capturer, not replace it.
     portal_bound: bool,
+    /// Optional uplink cap from the bitrate governor (never above mixer max-br).
+    camera_bitrate_cap: Option<u64>,
 }
 
 impl LocalVideo {
@@ -245,6 +247,7 @@ impl LocalVideo {
             portal_armed: false,
             portal_keep: false,
             portal_bound: false,
+            camera_bitrate_cap: None,
         }
     }
 
@@ -340,7 +343,10 @@ impl LocalVideo {
             .map(|encoding| encoding.rid)
             .collect();
         if rids.len() > 1 {
-            let plans = plan_layers(limits, frame, &rids);
+            let mut plans = plan_layers(limits, frame, &rids);
+            if source == SendSource::Camera {
+                Self::apply_bitrate_cap_to_plans(&mut plans, self.camera_bitrate_cap);
+            }
             if plans.iter().any(|plan| plan.keyframe) {
                 Self::set_layers(&sender, &plans, KEYFRAME_NUDGE)?;
             }
@@ -350,7 +356,12 @@ impl LocalVideo {
         let Some(limit) = limits.first() else {
             return Ok(None);
         };
-        let encoder = encoder_limits(limit, frame);
+        let mut encoder = encoder_limits(limit, frame);
+        if source == SendSource::Camera
+            && let Some(cap) = self.camera_bitrate_cap
+        {
+            encoder.max_bitrate = Some(encoder.max_bitrate.map_or(cap, |max| max.min(cap)));
+        }
         if limit.keyframe {
             Self::set_limits(&sender, &encoder, KEYFRAME_NUDGE)?;
         }
@@ -361,6 +372,15 @@ impl LocalVideo {
             limits: Some(encoder),
             keyframe: limit.keyframe,
         }]))
+    }
+
+    fn apply_bitrate_cap_to_plans(plans: &mut [LayerPlan], cap: Option<u64>) {
+        let Some(cap) = cap else { return };
+        for plan in plans {
+            if let Some(limits) = plan.limits.as_mut() {
+                limits.max_bitrate = Some(limits.max_bitrate.map_or(cap, |max| max.min(cap)));
+            }
+        }
     }
 
     /// The mixer sends its limits once, often before the first frame tells the size to scale from.
@@ -437,6 +457,10 @@ impl LocalVideo {
         self.camera.track.clone()
     }
 
+    pub fn share_track(&self) -> RtcVideoTrack {
+        self.screen.track.clone()
+    }
+
     pub fn take_effects_failure(&self) -> bool {
         self.blur.take_unavailable()
     }
@@ -453,6 +477,24 @@ impl LocalVideo {
 
     pub fn has_lines(&self) -> bool {
         self.lines.is_some()
+    }
+
+    /// Drop senders that belonged to a peer connection that was replaced.
+    /// Detach tracks first — closing a peer while a live camera/share track is
+    /// still attached can block the call task indefinitely (UI hang → kill).
+    pub fn clear_lines(&mut self) {
+        if let Some(lines) = self.lines.take() {
+            let _ = lines.camera.sender().set_track(None);
+            let _ = Self::set_active(&lines.camera.sender(), false);
+            if let Some(share) = lines.share {
+                let _ = share.sender().set_track(None);
+                let _ = Self::set_active(&share.sender(), false);
+            }
+        }
+    }
+
+    pub fn camera_mid(&self) -> Option<String> {
+        self.lines.as_ref().and_then(|lines| lines.camera.mid())
     }
 
     pub fn share_mid(&self) -> Option<String> {
@@ -520,26 +562,82 @@ impl LocalVideo {
     }
 
     pub fn set_lines(&mut self, lines: VideoLines) -> Result<()> {
+        self.clear_lines();
         if self.camera_on() {
-            Self::begin_sending(&lines.camera.sender(), &self.camera.track)?;
+            Self::begin_sending_on(&lines.camera, &self.camera.track)?;
         }
         if self.sharing()
             && let Some(share) = &lines.share
         {
-            Self::begin_sending(&share.sender(), &self.screen.track)?;
+            Self::begin_sending_on(share, &self.screen.track)?;
         }
         self.lines = Some(lines);
         Ok(())
+    }
+
+    fn ensure_send_direction(transceiver: &RtpTransceiver) -> Result<()> {
+        match transceiver.direction() {
+            RtpTransceiverDirection::SendRecv | RtpTransceiverDirection::SendOnly => Ok(()),
+            RtpTransceiverDirection::RecvOnly | RtpTransceiverDirection::Inactive => transceiver
+                .set_direction(RtpTransceiverDirection::SendRecv)
+                .map_err(|error| Error::Webrtc(error.to_string())),
+            RtpTransceiverDirection::Stopped => Err(Error::Webrtc("video line is stopped".into())),
+        }
+    }
+
+    fn begin_sending_on(transceiver: &RtpTransceiver, track: &RtcVideoTrack) -> Result<()> {
+        Self::ensure_send_direction(transceiver)?;
+        Self::begin_sending(&transceiver.sender(), track)
     }
 
     fn begin_sending(sender: &RtpSender, track: &RtcVideoTrack) -> Result<()> {
         sender
             .set_track(Some(MediaStreamTrack::Video(track.clone())))
             .map_err(|error| Error::Webrtc(error.to_string()))?;
+        // Prefer dropping resolution over framerate when the uplink is tight.
+        let mut parameters = sender.parameters();
+        parameters.set_degradation_preference(DegradationPreference::MaintainFramerate);
+        sender
+            .set_parameters(parameters)
+            .map_err(|error| Error::Webrtc(error.to_string()))?;
         Self::set_active(sender, true)
     }
 
-    fn set_active(sender: &RtpSender, active: bool) -> Result<()> {
+    /// Apply or clear a governor cap on the camera encodings; mixer limits stay the ceiling.
+    pub fn cap_camera_bitrate(&mut self, cap: Option<u64>) -> Result<()> {
+        if self.camera_bitrate_cap == cap {
+            return Ok(());
+        }
+        self.camera_bitrate_cap = cap;
+        if let Some(limits) = self
+            .camera
+            .requested
+            .as_ref()
+            .map(|requested| requested.limits.clone())
+        {
+            let _ = self.apply_send_limit(SendSource::Camera, &limits)?;
+            return Ok(());
+        }
+        let Some(sender) = self
+            .sender_of(SendSource::Camera)
+            .filter(|_| self.camera_on())
+        else {
+            return Ok(());
+        };
+        let mut parameters = sender.parameters();
+        for encoding in &mut parameters.encodings {
+            encoding.max_bitrate = match (encoding.max_bitrate, cap) {
+                (Some(max), Some(cap)) => Some(max.min(cap)),
+                (None, Some(cap)) => Some(cap),
+                (max, None) => max,
+            };
+        }
+        sender
+            .set_parameters(parameters)
+            .map_err(|error| Error::Webrtc(error.to_string()))
+    }
+
+    pub(crate) fn set_sender_active(sender: &RtpSender, active: bool) -> Result<()> {
         let mut parameters = sender.parameters();
         for encoding in &mut parameters.encodings {
             encoding.active = active;
@@ -547,6 +645,10 @@ impl LocalVideo {
         sender
             .set_parameters(parameters)
             .map_err(|error| Error::Webrtc(error.to_string()))
+    }
+
+    fn set_active(sender: &RtpSender, active: bool) -> Result<()> {
+        Self::set_sender_active(sender, active)
     }
 
     fn camera_sink(&self) -> LocalSink {
@@ -607,12 +709,11 @@ impl LocalVideo {
         if !self.is_available() {
             return Err(Error::Webrtc("video is switched off".into()));
         }
-        let sender = lines.camera.sender();
         if !self.camera_previewing() {
             self.camera.capture = None;
             self.camera.capture = Some(self.capture_camera(choice)?);
         }
-        Self::begin_sending(&sender, &self.camera.track)?;
+        Self::begin_sending_on(&lines.camera, &self.camera.track)?;
         self.camera_preview = false;
         Ok(())
     }
@@ -665,7 +766,7 @@ impl LocalVideo {
         self.camera_preview = preview;
         if !preview {
             if let Some(lines) = self.lines.as_ref() {
-                Self::begin_sending(&lines.camera.sender(), &self.camera.track)?;
+                Self::begin_sending_on(&lines.camera, &self.camera.track)?;
             }
         }
         Ok(())
@@ -778,7 +879,7 @@ impl LocalVideo {
             };
             self.screen.capture = Some(capture);
         }
-        Self::begin_sending(&share.sender(), &self.screen.track)?;
+        Self::begin_sending_on(&share, &self.screen.track)?;
         let _ = self.tune_share(&share.sender());
         Ok(())
     }
@@ -805,6 +906,9 @@ impl LocalVideo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use libwebrtc::MediaType;
+    use libwebrtc::peer_connection_factory::RtcConfiguration;
+    use libwebrtc::rtp_transceiver::{RtpTransceiverDirection, RtpTransceiverInit};
 
     #[tokio::test]
     async fn a_camera_preview_runs_without_a_line_and_stops_cleanly() {
@@ -825,6 +929,42 @@ mod tests {
         assert!(video.camera_previewing());
         video.stop_camera();
         assert!(!video.camera_previewing() && !video.camera_on());
+    }
+
+    #[tokio::test]
+    async fn clearing_a_sender_track_does_not_crash() {
+        let factory = crate::devices::shared_factory();
+        let peer = factory
+            .create_peer_connection(RtcConfiguration::default())
+            .expect("peer");
+        let transceiver = peer
+            .add_transceiver_for_media(
+                MediaType::Video,
+                RtpTransceiverInit {
+                    direction: RtpTransceiverDirection::SendRecv,
+                    stream_ids: vec!["camera".into()],
+                    send_encodings: Vec::new(),
+                },
+            )
+            .expect("transceiver");
+        let (updates, _) = tokio::sync::mpsc::unbounded_channel();
+        let video = LocalVideo::new(
+            &factory,
+            VideoMode::Pattern,
+            VideoHub::new(updates.clone()),
+            updates,
+        );
+        let sender = transceiver.sender();
+        sender
+            .set_track(Some(
+                libwebrtc::media_stream_track::MediaStreamTrack::Video(video.camera_track()),
+            ))
+            .expect("attach");
+        // Must not SIGSEGV on nullptr (peer switch calls clear_lines → set_track(None)).
+        // Do not call sender.track() afterwards: the FFI track() wrapper crashes on a null
+        // webrtc track (get_or_create_media_stream_track).
+        sender.set_track(None).expect("detach must accept nullptr");
+        peer.close();
     }
 
     #[test]
