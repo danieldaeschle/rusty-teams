@@ -345,15 +345,6 @@ impl AppState {
         self.calendar_event_peek_request.take()
     }
 
-    pub fn needs_event_details(event: &CalendarEvent) -> bool {
-        event.source == chatsvc::CalendarSource::Outlook
-            && (event.location.is_none()
-                || event.body_html.is_none()
-                || event.attendees.is_empty()
-                || event.response_counts.is_none()
-                || (event.series && event.series_master_id.is_none()))
-    }
-
     pub fn apply_calendar_event_details(
         &mut self,
         event_key: &str,
@@ -383,7 +374,7 @@ impl AppState {
         else {
             return;
         };
-        if !Self::needs_event_details(&event) {
+        if event.source != chatsvc::CalendarSource::Outlook {
             return;
         }
         let launcher = self.call_launcher.clone().filter(|_| !self.mode.demo);

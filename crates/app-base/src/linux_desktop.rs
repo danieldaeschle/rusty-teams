@@ -112,6 +112,9 @@ pub fn uninstall(layout: &Layout) -> io::Result<()> {
     if install_dir.join("update").is_dir() {
         fs::remove_dir_all(install_dir.join("update"))?;
     }
+    for size in ICON_SIZES {
+        remove(layout.icon_file(size))?;
+    }
     // Only when empty: anything else in there belongs to the user.
     let _ = fs::remove_dir(&install_dir);
     refresh_desktop_caches(layout);
@@ -360,6 +363,7 @@ mod tests {
 
         assert!(!layout.desktop_file().exists());
         assert!(!layout.install_dir().exists());
+        assert!(!layout.largest_icon().exists());
         uninstall(&layout).unwrap();
 
         fs::create_dir_all(layout.install_dir()).unwrap();

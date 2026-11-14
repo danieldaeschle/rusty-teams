@@ -17,7 +17,24 @@ pub fn open_profile_link(url: &str, position: Point<Pixels>, cx: &mut App) -> bo
     }
 }
 
-const OPENABLE_SCHEMES: [&str; 5] = ["https://", "http://", "mailto:", "tel:", "msteams:"];
+const OPENABLE_SCHEMES: [&str; 16] = [
+    "https://",
+    "http://",
+    "mailto:",
+    "tel:",
+    "sip:",
+    "callto:",
+    "msteams:",
+    "onenote:",
+    "ms-word:",
+    "ms-excel:",
+    "ms-powerpoint:",
+    "ms-visio:",
+    "ms-access:",
+    "ms-project:",
+    "ms-publisher:",
+    "ms-infopath:",
+];
 
 pub fn is_openable_link(url: &str) -> bool {
     let lower = url.trim_start().to_ascii_lowercase();
@@ -57,6 +74,9 @@ mod tests {
         assert!(is_openable_link(" HTTP://example.test"));
         assert!(is_openable_link("mailto:someone@example.test"));
         assert!(is_openable_link("msteams:/l/chat/0/0"));
+        assert!(is_openable_link(
+            "ms-word:ofe|u|https://example.test/a.docx"
+        ));
         assert!(!is_openable_link("file:///etc/passwd"));
         assert!(!is_openable_link("search-ms:query=x"));
         assert!(!is_openable_link("javascript:alert(1)"));

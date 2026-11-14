@@ -429,47 +429,7 @@ fn body_html_text(entry: &Value) -> Option<String> {
             .replace('\n', "<br>");
         return Some(escaped);
     }
-    // Drop non-http(s)/mailto hrefs so the agenda renderer cannot open them.
-    Some(sanitize_html_hrefs(&content))
-}
-
-fn sanitize_html_hrefs(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut rest = html;
-    while let Some(start) = rest.find("href=") {
-        out.push_str(&rest[..start]);
-        rest = &rest[start..];
-        let quote = rest.as_bytes().get(5).copied();
-        let (quote_char, after_quote) = match quote {
-            Some(b'"') | Some(b'\'') => (quote.unwrap() as char, &rest[6..]),
-            _ => {
-                out.push_str("href=");
-                rest = &rest[5..];
-                continue;
-            }
-        };
-        let Some(end) = after_quote.find(quote_char) else {
-            out.push_str(rest);
-            return out;
-        };
-        let url = &after_quote[..end];
-        let safe = url_is_safe_href(url);
-        out.push_str("href=");
-        out.push(quote_char);
-        if safe {
-            out.push_str(url);
-        }
-        out.push(quote_char);
-        rest = &after_quote[end + 1..];
-    }
-    out.push_str(rest);
-    out
-}
-
-fn url_is_safe_href(url: &str) -> bool {
-    let trimmed = url.trim();
-    let lower = trimmed.to_ascii_lowercase();
-    lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")
+    Some(content)
 }
 
 fn attendee_response(label: &str) -> ResponseType {
@@ -620,8 +580,8 @@ pub fn response_counts_from_attendees(entry: &Value) -> Option<AttendeeResponseC
 
 /// Merge Graph / detail fields into a calendar event without wiping list data.
 pub fn apply_event_details(event: &mut CalendarEvent, entry: &Value) {
-    if let Some(location) = location_text(entry) {
-        event.location = Some(location);
+    if entry.get("location").is_some() || entry.get("locationDisplayName").is_some() {
+        event.location = location_text(entry);
     }
     if let Some(preview) = body_preview_text(entry) {
         event.body_preview = Some(preview);
@@ -636,12 +596,9 @@ pub fn apply_event_details(event: &mut CalendarEvent, entry: &Value) {
         event.series_master_id = Some(master);
         event.series = true;
     }
-    if let Some(counts) = response_counts_from_attendees(entry) {
-        event.response_counts = Some(counts);
-    }
-    let attendees = attendees_from_entry(entry);
-    if !attendees.is_empty() {
-        event.attendees = attendees;
+    if entry.get("attendees").is_some_and(Value::is_array) {
+        event.response_counts = response_counts_from_attendees(entry);
+        event.attendees = attendees_from_entry(entry);
     }
     if let Some(name) = entry
         .pointer("/organizer/emailAddress/name")
@@ -900,26 +857,32 @@ mod tests {
     }
 
     #[test]
-    fn html_body_drops_javascript_hrefs() {
+    fn details_clear_a_removed_location_and_attendees() {
         let mut event = CalendarEvent {
-            object_id: "js".into(),
-            start: Utc.with_ymd_and_hms(2026, 10, 12, 8, 30, 0).unwrap(),
-            end: Utc.with_ymd_and_hms(2026, 10, 12, 9, 0, 0).unwrap(),
+            object_id: "stale".into(),
+            location: Some("Room 1".into()),
+            attendees: vec![EventAttendee {
+                name: "Someone".into(),
+                address: None,
+                response: ResponseType::Accepted,
+                required: true,
+            }],
+            response_counts: Some(AttendeeResponseCounts {
+                accepted: 1,
+                ..Default::default()
+            }),
             ..Default::default()
         };
+        apply_event_details(&mut event, &serde_json::json!({"subject": "kept"}));
+        assert_eq!(event.location.as_deref(), Some("Room 1"));
+        assert_eq!(event.attendees.len(), 1);
         apply_event_details(
             &mut event,
-            &serde_json::json!({
-                "body": {
-                    "contentType": "html",
-                    "content": r#"<p><a href="javascript:alert(1)">x</a> <a href='https://ok.example'>y</a></p>"#
-                }
-            }),
+            &serde_json::json!({"location": {"displayName": ""}, "attendees": []}),
         );
-        let html = event.body_html.as_deref().expect("html");
-        assert!(!html.to_ascii_lowercase().contains("javascript:"));
-        assert!(html.contains(r#"href="""#) || html.contains("href=''"));
-        assert!(html.contains(r#"href='https://ok.example'"#));
+        assert_eq!(event.location, None);
+        assert!(event.attendees.is_empty());
+        assert_eq!(event.response_counts, None);
     }
 
     #[test]
