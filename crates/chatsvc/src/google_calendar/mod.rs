@@ -24,6 +24,17 @@ use crate::calendar::CalendarEvent;
 use crate::error::{Error, Result};
 
 const CALENDAR_API: &str = "https://www.googleapis.com/calendar/v3";
+const EVENTS_PAGE_SIZE: u32 = 2500;
+const MAX_EVENT_PAGES: usize = 20;
+
+fn attendees_with_own_reply(event: &Value, status: &str) -> Option<Vec<Value>> {
+    let mut attendees = event.get("attendees")?.as_array()?.clone();
+    let own = attendees
+        .iter_mut()
+        .find(|attendee| attendee.get("self").and_then(Value::as_bool) == Some(true))?;
+    own["responseStatus"] = Value::String(status.to_owned());
+    Some(attendees)
+}
 
 pub struct GoogleCalendar {
     client: Client,
@@ -52,12 +63,35 @@ impl GoogleCalendar {
         let encoded =
             percent_encoding::utf8_percent_encode(calendar_id, percent_encoding::NON_ALPHANUMERIC);
         let url = format!(
-            "{CALENDAR_API}/calendars/{encoded}/events?singleEvents=true&orderBy=startTime&timeMin={}&timeMax={}",
+            "{CALENDAR_API}/calendars/{encoded}/events?singleEvents=true&orderBy=startTime&maxResults={EVENTS_PAGE_SIZE}&timeMin={}&timeMax={}",
             start.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             end.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         );
-        let body = self.get(&url).await?;
-        Ok(parse_google_events(&body, None, Some(calendar_id)))
+        let mut events = Vec::new();
+        let mut page_token: Option<String> = None;
+        for _ in 0..MAX_EVENT_PAGES {
+            let page_url = match &page_token {
+                Some(token) => format!(
+                    "{url}&pageToken={}",
+                    percent_encoding::utf8_percent_encode(
+                        token,
+                        percent_encoding::NON_ALPHANUMERIC
+                    )
+                ),
+                None => url.clone(),
+            };
+            let body = self.get(&page_url).await?;
+            events.extend(parse_google_events(&body, None, Some(calendar_id)));
+            page_token = body
+                .get("nextPageToken")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            if page_token.is_none() {
+                break;
+            }
+        }
+        events.sort_by_key(|event| (event.start, event.end));
+        Ok(events)
     }
 
     pub async fn insert_event(&self, calendar_id: &str, draft: &GoogleEventDraft) -> Result<Value> {
@@ -82,13 +116,13 @@ impl GoogleCalendar {
             "{CALENDAR_API}/calendars/{encoded_cal}/events/{encoded_event}?{}",
             google_rsvp_query(send_updates)
         );
-        // Patch attendee self via conferenceData-free body: use attendees[].responseStatus
-        // by first getting the event is heavy; Google allows PATCH with only attendees when
-        // "self" is present. Simpler path: PATCH with a single attendees entry marked self.
-        let body = serde_json::json!({
-            "attendees": [{ "self": true, "responseStatus": status }]
-        });
-        self.patch(&url, body).await?;
+        let event_url = format!("{CALENDAR_API}/calendars/{encoded_cal}/events/{encoded_event}");
+        let event = self.get(&event_url).await?;
+        let attendees = attendees_with_own_reply(&event, status).ok_or_else(|| {
+            Error::UnexpectedAnswer("the event lists no attendee for this account".into())
+        })?;
+        self.patch(&url, serde_json::json!({ "attendees": attendees }))
+            .await?;
         Ok(())
     }
 

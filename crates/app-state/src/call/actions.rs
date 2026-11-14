@@ -280,6 +280,7 @@ impl AppState {
         self.call_count += 1;
         let call_id = self.call_count;
         self.call_end = None;
+        self.prejoin = None;
         let CallHandle {
             commands,
             updates,
@@ -1315,6 +1316,9 @@ impl AppState {
         };
         if self.call.is_some() {
             self.leave_call(cx);
+        }
+        if let Some(held) = &self.held_call {
+            let _ = held.commands.send(CallCommand::Hangup);
         }
         self.signal_ring(ring_id, RingSignal::Accept, cx);
         let conversation_id = entry.ring.thread_id.clone();

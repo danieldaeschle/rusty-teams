@@ -80,7 +80,11 @@ impl<T: MessageTransport> Conversations<T> {
             };
             let answer = self.transport.send(Request::get(&url)).await?;
             ensure_success(&answer)?;
-            states.extend(states_in_page(&answer.body)?);
+            let page = states_in_page(&answer.body)?;
+            if page.is_empty() {
+                break;
+            }
+            states.extend(page);
             next_url = backward_link(&answer.body).filter(|link| *link != url);
         }
         Ok(states)

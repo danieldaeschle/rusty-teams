@@ -141,6 +141,7 @@ pub struct Directory {
     pub images: HashMap<String, ImageEntry>,
     pub images_requested: HashSet<String>,
     pub images_failed: HashMap<String, Instant>,
+    pub avatars_failed: HashMap<String, Instant>,
 }
 
 const IMAGE_RETRY_AFTER: Duration = Duration::from_secs(60);
@@ -192,8 +193,24 @@ impl Directory {
         let mut seen = HashSet::new();
         user_ids
             .into_iter()
-            .filter(|user_id| !self.avatars.contains_key(user_id) && seen.insert(user_id.clone()))
+            .filter(|user_id| {
+                let failed_recently = self
+                    .avatars_failed
+                    .get(user_id)
+                    .is_some_and(|failed| failed.elapsed() < IMAGE_RETRY_AFTER);
+                !self.avatars.contains_key(user_id)
+                    && !failed_recently
+                    && seen.insert(user_id.clone())
+            })
             .collect()
+    }
+
+    pub fn mark_avatar_failed(&mut self, user_id: &str) {
+        if matches!(self.avatars.get(user_id), Some(AvatarState::Pending)) {
+            self.avatars.remove(user_id);
+            self.avatars_failed
+                .insert(user_id.to_owned(), Instant::now());
+        }
     }
 
     pub fn mark_avatars_pending(&mut self, user_ids: &[String]) {
@@ -902,6 +919,19 @@ mod tests {
         directory.mark_avatars_pending(&wanted);
         assert!(directory.missing_avatars(["x".to_owned()]).is_empty());
         assert_eq!(directory.pending_avatars().len(), 2);
+    }
+
+    #[test]
+    fn a_failed_avatar_is_requested_again_only_after_the_retry_delay() {
+        let mut directory = Directory::default();
+        directory.mark_avatars_pending(&["a".to_owned()]);
+        directory.mark_avatar_failed("a");
+        assert!(directory.pending_avatars().is_empty());
+        assert!(directory.missing_avatars(["a".to_owned()]).is_empty());
+        directory
+            .avatars_failed
+            .insert("a".to_owned(), Instant::now() - IMAGE_RETRY_AFTER);
+        assert_eq!(directory.missing_avatars(["a".to_owned()]), vec!["a"]);
     }
 
     #[test]

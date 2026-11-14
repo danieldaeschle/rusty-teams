@@ -1372,6 +1372,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures-util",
+ "iana-time-zone",
  "percent-encoding",
  "rand 0.9.5",
  "reqwest 0.13.5",

@@ -3,7 +3,7 @@ use gpui_kit::*;
 
 use super::actions::NOT_CONNECTED_NOTICE;
 use super::features::TransferCandidate;
-use super::model::{CallKind, Tile};
+use super::model::{CallKind, Tile, TileState};
 use super::options_dialog::OptionsDialog;
 use crate::app_state::{AppEvent, AppState};
 use crate::runtime;
@@ -165,6 +165,14 @@ impl AppState {
         }
     }
 
+    fn drop_invited_tile(&mut self, mri: &str) {
+        if let Some(call) = self.call.as_mut() {
+            call.model
+                .tiles
+                .retain(|tile| tile.mri != mri || tile.state != TileState::Invited);
+        }
+    }
+
     pub fn invite_call_person(&mut self, target: TransferCandidate, cx: &mut Context<Self>) {
         self.close_transfer_picker(cx);
         let Some(call) = self.call.as_mut().filter(|call| call.model.can_invite()) else {
@@ -204,6 +212,7 @@ impl AppState {
             } else {
                 NO_PEER_NOTICE
             };
+            self.drop_invited_tile(&callee.mri);
             self.raise_notice(notice.to_owned(), None, cx);
             return;
         };
@@ -212,6 +221,7 @@ impl AppState {
                 .create_group(&[peer_user_id, invited_user_id], None)
                 .await
         });
+        let invited_mri = callee.mri.clone();
         cx.spawn(async move |this, cx| {
             let created = receiver.await.ok().and_then(Result::ok);
             this.update(cx, |state, cx| match created {
@@ -221,7 +231,12 @@ impl AppState {
                         group_thread: Some(thread_id),
                     });
                 }
-                _ => state.raise_notice(INVITE_FAILED_NOTICE.to_owned(), None, cx),
+                _ => {
+                    if state.call.as_ref().is_some_and(|call| call.id == call_id) {
+                        state.drop_invited_tile(&invited_mri);
+                    }
+                    state.raise_notice(INVITE_FAILED_NOTICE.to_owned(), None, cx);
+                }
             })
             .ok();
         })

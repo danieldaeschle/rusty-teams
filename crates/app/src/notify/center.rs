@@ -107,6 +107,7 @@ pub struct NotificationCenter {
     tray: Option<Tray>,
     app_icon: AppIcon,
     shown_badge: Option<Badge>,
+    shown_mention_dot: bool,
     animations: bool,
     _subscription: Subscription,
     _activity_observation: Subscription,
@@ -187,6 +188,7 @@ impl NotificationCenter {
             tray,
             app_icon,
             shown_badge: None,
+            shown_mention_dot: false,
             animations: platform::animations_enabled(),
             app,
             activity,
@@ -1220,10 +1222,14 @@ impl NotificationCenter {
         self.unread_mentions
             .retain(|conversation_id| still_unread.contains(conversation_id.as_str()));
         let badge = badge_for(count);
-        if badge == self.shown_badge {
+        let mention_dot = !self.unread_mentions.is_empty();
+        if badge == self.shown_badge && mention_dot == self.shown_mention_dot {
             return;
         }
-        if let Some(native) = self.main_native {
+        self.shown_mention_dot = mention_dot;
+        if badge != self.shown_badge
+            && let Some(native) = self.main_native
+        {
             platform::set_badge(native, badge.as_ref());
             if badge.is_none() && self.shown_badge.is_some() {
                 platform::stop_flash(native);

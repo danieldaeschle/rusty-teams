@@ -269,6 +269,7 @@ impl McpView {
             && port != current
         {
             agent_api::update_policy(cx, |policy| policy.port = port);
+            self.refresh_installs(cx);
         }
         self.refresh_wsl(cx);
         cx.notify();
@@ -547,9 +548,10 @@ impl McpView {
         .or(reinstall_note);
         let url = agent_api::endpoint_url(policy.port);
         let regenerate = small_button("mcp-token-new", "New")
-            .on_click(cx.listener(|_, _, _, cx| {
+            .on_click(cx.listener(|this, _, _, cx| {
                 if let Some(api) = agent_api::handle(cx) {
                     api.update(cx, |api, cx| api.regenerate_token(cx));
+                    this.refresh_installs(cx);
                 }
             }))
             .into_any_element();

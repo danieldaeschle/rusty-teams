@@ -236,6 +236,8 @@ impl ToastStack {
         if let Some(existing) = self.toasts.iter_mut().find(|toast| {
             toast.agent.is_none()
                 && !toast.status_change
+                && !toast.dismissed
+                && !toast.is_leaving()
                 && toast.conversation_id == incoming.conversation_id
         }) {
             let became_mention = incoming.mentions_me && !existing.mentions_me;
@@ -507,6 +509,17 @@ mod tests {
         assert_eq!(first.id, second.id);
         assert_eq!(stack.get(first.id).unwrap().count, 2);
         assert_eq!(stack.visible().len(), 1);
+    }
+
+    #[test]
+    fn a_message_never_bundles_into_a_dismissed_toast() {
+        let mut stack = ToastStack::default();
+        let now = Instant::now();
+        let first = stack.push(&incoming("a", false), now);
+        stack.dismiss(first.id, now, Duration::from_millis(150));
+        let second = stack.push(&incoming("a", false), now);
+        assert!(!second.bundled);
+        assert_ne!(first.id, second.id);
     }
 
     #[test]

@@ -292,10 +292,11 @@ fn continues_series(previous: &MessageRow, next: &MessageRow) -> bool {
 pub fn assign_series(rows: &mut [Row]) {
     let mut previous: Option<usize> = None;
     for index in 0..rows.len() {
-        let Row::Message(_) = &rows[index] else {
+        let Row::Message(message) = &mut rows[index] else {
             previous = None;
             continue;
         };
+        message.series = Series::default();
         if let Some(before) = previous {
             let joined = match (&rows[before], &rows[index]) {
                 (Row::Message(a), Row::Message(b)) => continues_series(a, b),
@@ -1982,6 +1983,21 @@ mod tests {
             series_of(&rows),
             vec![(false, true), (true, false), (false, false)]
         );
+    }
+
+    #[test]
+    fn a_new_messages_marker_set_later_breaks_the_series() {
+        let records = vec![
+            record_by("a", "ada", 9, 0, 7),
+            record_by("b", "ada", 9, 1, 7),
+        ];
+        let mut rows = flat_rows(&records, &context(), false);
+        assert_eq!(series_of(&rows), vec![(false, true), (true, false)]);
+        if let Some(Row::Message(message)) = rows.last_mut() {
+            message.new_marker = true;
+        }
+        assign_series(&mut rows);
+        assert_eq!(series_of(&rows), vec![(false, false), (false, false)]);
     }
 
     #[test]

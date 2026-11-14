@@ -184,7 +184,25 @@ fn text_characters(html: &str) -> Vec<TextChar> {
             offset += close + 1;
             if matches!(
                 name.as_str(),
-                "br" | "p" | "div" | "li" | "ul" | "ol" | "blockquote" | "pre"
+                "br" | "p"
+                    | "div"
+                    | "li"
+                    | "ul"
+                    | "ol"
+                    | "blockquote"
+                    | "pre"
+                    | "h1"
+                    | "h2"
+                    | "h3"
+                    | "h4"
+                    | "h5"
+                    | "h6"
+                    | "hr"
+                    | "table"
+                    | "tr"
+                    | "td"
+                    | "th"
+                    | "figure"
             ) {
                 characters.push(TextChar {
                     character: ' ',
@@ -278,6 +296,14 @@ pub(crate) fn ensure_allowed_in_chat(inputs: &[MentionInput]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mention_right_after_a_heading_or_rule_is_still_a_mention() {
+        for html in ["<h2>Plan</h2>@Ada please", "a<hr>@Ada please"] {
+            let (_, mentions) = apply_mentions(html, &[MentionInput::user("u1", "Ada")]);
+            assert_eq!(mentions.len(), 1, "{html}");
+        }
+    }
 
     #[test]
     fn mentions_become_at_tags_with_sequential_ids() {

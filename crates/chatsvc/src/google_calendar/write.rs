@@ -1,4 +1,4 @@
-use chrono::{Datelike, Timelike};
+use chrono::Datelike;
 use serde_json::{Value, json};
 
 use crate::calendar::{Attendee, NewEvent, Repeat, Reply};
@@ -8,11 +8,21 @@ pub struct GoogleEventDraft {
     pub subject: String,
     pub start: chrono::DateTime<chrono::Utc>,
     pub end: chrono::DateTime<chrono::Utc>,
+    pub local: Option<LocalTimes>,
     pub attendees: Vec<Attendee>,
     pub details: String,
     pub join_url: Option<String>,
     pub repeat: Repeat,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalTimes {
+    pub start: chrono::NaiveDateTime,
+    pub end: chrono::NaiveDateTime,
+    pub iana_zone: String,
+}
+
+const LOCAL_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
 
 impl From<&NewEvent> for GoogleEventDraft {
     fn from(event: &NewEvent) -> Self {
@@ -20,6 +30,15 @@ impl From<&NewEvent> for GoogleEventDraft {
             subject: event.subject.clone(),
             start: event.start,
             end: event.end,
+            local: event
+                .time_zone_name
+                .as_ref()
+                .and_then(|_| iana_time_zone::get_timezone().ok())
+                .map(|iana_zone| LocalTimes {
+                    start: event.local_start,
+                    end: event.local_end,
+                    iana_zone,
+                }),
             attendees: event.attendees.clone(),
             details: event.details.clone(),
             join_url: None,
@@ -28,7 +47,7 @@ impl From<&NewEvent> for GoogleEventDraft {
     }
 }
 
-pub fn rrule_for_repeat(repeat: Repeat, start: chrono::DateTime<chrono::Utc>) -> Option<String> {
+pub fn rrule_for_repeat(repeat: Repeat, start: chrono::NaiveDateTime) -> Option<String> {
     match repeat {
         Repeat::Never => None,
         Repeat::Daily => Some("RRULE:FREQ=DAILY".to_owned()),
@@ -56,16 +75,36 @@ pub fn google_event_body(draft: &GoogleEventDraft) -> Value {
         }
         description.push_str(join_url);
     }
+    let (start, end) = match &draft.local {
+        Some(local) => (
+            json!({
+                "dateTime": local.start.format(LOCAL_TIME_FORMAT).to_string(),
+                "timeZone": local.iana_zone,
+            }),
+            json!({
+                "dateTime": local.end.format(LOCAL_TIME_FORMAT).to_string(),
+                "timeZone": local.iana_zone,
+            }),
+        ),
+        None => (
+            json!({
+                "dateTime": draft.start.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                "timeZone": "UTC",
+            }),
+            json!({
+                "dateTime": draft.end.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                "timeZone": "UTC",
+            }),
+        ),
+    };
+    let series_start = draft
+        .local
+        .as_ref()
+        .map_or(draft.start.naive_utc(), |local| local.start);
     let mut body = json!({
         "summary": draft.subject,
-        "start": {
-            "dateTime": draft.start.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            "timeZone": "UTC",
-        },
-        "end": {
-            "dateTime": draft.end.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            "timeZone": "UTC",
-        },
+        "start": start,
+        "end": end,
         "attendees": draft.attendees.iter().map(|attendee| json!({
             "email": attendee.address,
             "displayName": attendee.name,
@@ -77,10 +116,9 @@ pub fn google_event_body(draft: &GoogleEventDraft) -> Value {
     if !description.is_empty() {
         body["description"] = json!(description);
     }
-    if let Some(rrule) = rrule_for_repeat(draft.repeat, draft.start) {
+    if let Some(rrule) = rrule_for_repeat(draft.repeat, series_start) {
         body["recurrence"] = json!([rrule]);
     }
-    let _ = (draft.start.hour(), draft.start.minute());
     body
 }
 
@@ -109,6 +147,7 @@ mod tests {
             end: chrono::Utc
                 .with_ymd_and_hms(2026, 11, 11, 9, 30, 0)
                 .unwrap(),
+            local: None,
             attendees: vec![Attendee {
                 name: "Mara".into(),
                 address: "mara@example.com".into(),
@@ -117,6 +156,24 @@ mod tests {
             join_url: Some("https://teams.microsoft.com/l/meetup-join/x".into()),
             repeat,
         }
+    }
+
+    #[test]
+    fn a_weekly_series_repeats_in_the_local_zone_on_the_local_weekday() {
+        let mut weekly = draft(Repeat::Weekly);
+        let late_monday = chrono::NaiveDate::from_ymd_opt(2026, 6, 8)
+            .unwrap()
+            .and_hms_opt(0, 30, 0)
+            .unwrap();
+        weekly.local = Some(LocalTimes {
+            start: late_monday,
+            end: late_monday + chrono::Duration::minutes(30),
+            iana_zone: "Europe/Berlin".into(),
+        });
+        let body = google_event_body(&weekly);
+        assert_eq!(body["start"]["dateTime"], "2026-06-08T00:30:00");
+        assert_eq!(body["start"]["timeZone"], "Europe/Berlin");
+        assert_eq!(body["recurrence"][0], "RRULE:FREQ=WEEKLY;BYDAY=MO");
     }
 
     #[test]
@@ -140,7 +197,10 @@ mod tests {
         assert_eq!(
             rrule_for_repeat(
                 Repeat::Weekdays,
-                chrono::Utc.with_ymd_and_hms(2026, 11, 11, 9, 0, 0).unwrap()
+                chrono::Utc
+                    .with_ymd_and_hms(2026, 11, 11, 9, 0, 0)
+                    .unwrap()
+                    .naive_utc()
             )
             .as_deref(),
             Some("RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")

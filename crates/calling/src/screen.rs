@@ -1,9 +1,9 @@
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use libwebrtc::desktop_capturer::{
-    CaptureSource, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
+    CaptureError, CaptureSource, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
     PortalPickerEvent,
 };
 use libwebrtc::native::yuv_helper::argb_to_i420;
@@ -79,6 +79,7 @@ pub fn list_share_sources() -> Vec<ShareSource> {
 }
 
 const THUMBNAIL_ATTEMPTS: u32 = 5;
+const SOURCE_GONE_AFTER: Duration = Duration::from_secs(3);
 const THUMBNAIL_RETRY: Duration = Duration::from_millis(40);
 
 pub fn share_thumbnail(
@@ -218,14 +219,35 @@ pub fn start_screen_capture(
         let Some(mut capturer) = capturer(wanted.kind) else {
             return failed("screen capture is not available".to_owned());
         };
+        let gone_since: Arc<Mutex<Option<Instant>>> = Arc::default();
+        let gone_mark = gone_since.clone();
         capturer.start_capture(Some(source), move |result| {
-            let Ok(frame) = result else { return };
+            let frame = match result {
+                Ok(frame) => frame,
+                Err(error) => {
+                    if matches!(error, CaptureError::Permanent)
+                        && let Ok(mut since) = gone_mark.lock()
+                    {
+                        since.get_or_insert_with(Instant::now);
+                    }
+                    return;
+                }
+            };
+            if let Ok(mut since) = gone_mark.lock() {
+                *since = None;
+            }
             let (width, height) = (frame.width() as u32 & !1, frame.height() as u32 & !1);
             if width >= 2 && height >= 2 {
                 deliver(i420_from_bgra(frame.data(), width, height, frame.stride()));
             }
         });
         while !stop.load(Ordering::SeqCst) {
+            let gone = gone_since
+                .lock()
+                .is_ok_and(|since| since.is_some_and(|since| since.elapsed() >= SOURCE_GONE_AFTER));
+            if gone {
+                return failed("the shared source is gone".to_owned());
+            }
             pump_messages();
             capturer.capture_frame();
             std::thread::sleep(Duration::from_secs(1) / fps.load(Ordering::Relaxed).max(1));

@@ -180,8 +180,10 @@ impl Graph {
             .batch(std::slice::from_ref(&request), scope)
             .await?
             .remove(0);
-        self.collect_pages::<User>(&request.url, answer, scope)
-            .await
+        if !answer.is_success() {
+            return Err(session::Error::api(answer.status, &request.url, answer.body).into());
+        }
+        Ok(Page::<User>::parse(answer.body, scope.clone())?.items)
     }
 
     pub async fn channel_messages(

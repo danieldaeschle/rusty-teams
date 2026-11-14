@@ -356,8 +356,7 @@ impl Drop for TabHold {
 pub(crate) fn retry_wait(header: Option<&str>, default: Duration) -> Duration {
     header
         .and_then(|value| value.trim().parse::<f64>().ok())
-        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
-        .map(Duration::from_secs_f64)
+        .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok())
         .unwrap_or(default)
 }
 
@@ -429,5 +428,6 @@ mod tests {
             default
         );
         assert_eq!(retry_wait(Some("-3"), default), default);
+        assert_eq!(retry_wait(Some("1e20"), default), default);
     }
 }

@@ -37,6 +37,12 @@ pub fn merge_calendar_events(events: Vec<CalendarEvent>) -> Vec<CalendarEvent> {
 }
 
 fn same_meeting(left: &CalendarEvent, right: &CalendarEvent) -> bool {
+    let same_all_day = left.all_day
+        && right.all_day
+        && (left.start - right.start).abs() < chrono::Duration::days(1);
+    if left.start != right.start && !same_all_day {
+        return false;
+    }
     if let (Some(a), Some(b)) = (&left.ical_uid, &right.ical_uid) {
         if !a.is_empty() && a == b {
             return true;
@@ -102,6 +108,19 @@ mod tests {
         assert_eq!(merged[0].sources.len(), 2);
         assert_eq!(merged[0].object_id, "o1");
         assert!(merged[0].join_url.is_some());
+    }
+
+    #[test]
+    fn occurrences_of_one_series_stay_separate() {
+        let join = Some("https://teams.microsoft.com/l/meetup-join/x");
+        let mut next_day = event("o2", CalendarSource::Outlook, Some("uid"), join);
+        next_day.start += chrono::Duration::days(1);
+        next_day.end += chrono::Duration::days(1);
+        let merged = merge_calendar_events(vec![
+            event("o1", CalendarSource::Outlook, Some("uid"), join),
+            next_day,
+        ]);
+        assert_eq!(merged.len(), 2);
     }
 
     #[test]

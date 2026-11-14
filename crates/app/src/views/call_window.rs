@@ -51,6 +51,7 @@ pub struct CallWindowView {
     was_fullscreen: bool,
     _app_subscription: Subscription,
     _media_subscription: Option<Subscription>,
+    _activation_subscription: Subscription,
 }
 
 impl CallWindowView {
@@ -61,6 +62,12 @@ impl CallWindowView {
             .call_media
             .clone()
             .map(|media| cx.observe(&media, |_, _, cx| cx.notify()));
+        let activation_subscription = cx.observe_window_activation(window, |this, window, cx| {
+            if !window.is_window_active() {
+                this.app
+                    .update(cx, |state, cx| state.release_push_to_talk(cx));
+            }
+        });
         let closing_app = app.clone();
         window.on_window_should_close(cx, move |_, cx| {
             leave_or_dismiss(&closing_app, cx);
@@ -77,6 +84,7 @@ impl CallWindowView {
             was_fullscreen: false,
             _app_subscription: app_subscription,
             _media_subscription: media_subscription,
+            _activation_subscription: activation_subscription,
         }
     }
 

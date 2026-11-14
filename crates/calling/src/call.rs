@@ -1029,6 +1029,7 @@ async fn drive(
         control.updates(),
     );
     local_video.attach_timeline(timeline.clone());
+    local_video.attach_commands(control.command_sender());
     let mut camera_choice = options.camera.clone();
     if options.start_camera {
         match local_video.preview_camera(&camera_choice) {

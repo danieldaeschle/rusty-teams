@@ -474,6 +474,10 @@ fn push_text(spans: &mut Vec<Span>, text: &str) {
 }
 
 fn tidy(spans: &mut Vec<Span>) {
+    tidy_children(spans, true);
+}
+
+fn tidy_children(spans: &mut Vec<Span>, block: bool) {
     for span in spans.iter_mut() {
         match span {
             Span::Bold(children)
@@ -484,22 +488,66 @@ fn tidy(spans: &mut Vec<Span>) {
             | Span::Sized(_, children)
             | Span::Underline(children)
             | Span::Colored { children, .. }
-            | Span::Heading { children, .. }
+            | Span::Link { children, .. } => tidy_children(children, false),
+            Span::Heading { children, .. }
             | Span::Quote { children, .. }
             | Span::BlockQuote(children)
-            | Span::Indent { children, .. }
-            | Span::Link { children, .. } => tidy(children),
+            | Span::Indent { children, .. } => tidy(children),
             Span::List { items, .. } => items.iter_mut().for_each(tidy),
             Span::Table { rows, .. } => rows.iter_mut().flatten().for_each(tidy),
             _ => {}
         }
     }
-    collapse_whitespace(spans);
+    collapse_whitespace(spans, block);
+    if block {
+        trim_inline_edge(spans, true);
+        trim_inline_edge(spans, false);
+    }
     limit_breaks(spans);
     trim_breaks(spans);
 }
 
-fn collapse_whitespace(spans: &mut Vec<Span>) {
+fn trim_inline_edge(spans: &mut Vec<Span>, leading: bool) {
+    let edge = if leading {
+        spans.first_mut()
+    } else {
+        spans.last_mut()
+    };
+    let emptied = match edge {
+        Some(Span::Text(text)) => {
+            *text = if leading {
+                text.trim_start().to_owned()
+            } else {
+                text.trim_end().to_owned()
+            };
+            text.is_empty()
+        }
+        Some(
+            Span::Bold(children)
+            | Span::Italic(children)
+            | Span::Strike(children)
+            | Span::Superscript(children)
+            | Span::Subscript(children)
+            | Span::Sized(_, children)
+            | Span::Underline(children)
+            | Span::Colored { children, .. }
+            | Span::Link { children, .. },
+        ) => {
+            trim_inline_edge(children, leading);
+            false
+        }
+        _ => false,
+    };
+    if emptied {
+        if leading {
+            spans.remove(0);
+        } else {
+            spans.pop();
+        }
+    }
+}
+
+fn collapse_whitespace(spans: &mut Vec<Span>, block: bool) {
     let mut collapsed: Vec<Span> = Vec::with_capacity(spans.len());
     let count = spans.len();
     for (index, span) in std::mem::take(spans).into_iter().enumerate() {
@@ -511,7 +559,10 @@ fn collapse_whitespace(spans: &mut Vec<Span>) {
         let at_edge = |neighbour: Option<&Span>| {
             matches!(
                 neighbour,
-                None | Some(
+                None if block
+            ) || matches!(
+                neighbour,
+                Some(
                     Span::LineBreak
                         | Span::Rule
                         | Span::List { .. }
@@ -526,7 +577,7 @@ fn collapse_whitespace(spans: &mut Vec<Span>) {
         if at_edge(collapsed.last()) {
             text = text.trim_start().to_owned();
         }
-        if index + 1 == count {
+        if block && index + 1 == count {
             text = text.trim_end().to_owned();
         }
         if !text.is_empty() {
@@ -582,4 +633,31 @@ fn trim_breaks(spans: &mut Vec<Span>) {
         .take_while(|span| matches!(span, Span::LineBreak))
         .count();
     spans.drain(..leading);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spaces_at_the_edge_of_inline_formatting_survive() {
+        assert_eq!(
+            html_to_spans("Hello<b> world</b>"),
+            vec![
+                Span::Text("Hello".into()),
+                Span::Bold(vec![Span::Text(" world".into())])
+            ]
+        );
+        assert_eq!(
+            html_to_spans("<b> Note </b>"),
+            vec![Span::Bold(vec![Span::Text("Note".into())])]
+        );
+        assert_eq!(
+            html_to_spans("<strong>Note: </strong>text"),
+            vec![
+                Span::Bold(vec![Span::Text("Note: ".into())]),
+                Span::Text("text".into())
+            ]
+        );
+    }
 }

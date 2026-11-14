@@ -3247,6 +3247,7 @@ impl ConversationView {
         self.saving_edits.insert(message_id.clone());
         self.rebuild(false, cx);
         let sent = outgoing.clone();
+        let edited_conversation = conversation_id.clone();
         let receiver = runtime::spawn(async move {
             engine
                 .edit_message_html(
@@ -3265,7 +3266,11 @@ impl ConversationView {
                     let _ = store.upsert_messages(std::slice::from_ref(record));
                 }
                 this.rebuild(false, cx);
-                if failed {
+                let same_chat = this.conversation_id().as_deref() == Some(&*edited_conversation);
+                if failed && !same_chat {
+                    this.notice = Some("Edit failed".to_owned());
+                    cx.notify();
+                } else if failed {
                     this.show_main_composer(cx);
                     if this.composer.read(cx).is_empty(cx) {
                         this.notice =

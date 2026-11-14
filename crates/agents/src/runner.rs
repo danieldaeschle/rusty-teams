@@ -229,6 +229,7 @@ async fn run_plan(
             }
             line = stdout_lines.next_line() => match line {
                 Ok(Some(line)) => handle_events(parser.feed(&line)),
+                Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
                 _ => break,
             }
         }

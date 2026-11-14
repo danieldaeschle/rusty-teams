@@ -625,7 +625,7 @@ impl AppState {
                 .cloned()
                 .collect();
         }
-        self.resolve_pending_avatars();
+        self.resolve_pending_avatars(&[]);
         self.sync_presence();
     }
 
@@ -654,9 +654,9 @@ impl AppState {
         }
         if let Some(engine) = self.engine.clone().filter(|_| !uncached.is_empty()) {
             self.directory.mark_avatars_pending(&uncached);
-            let done = data::fetch_avatars(&engine, uncached);
-            self.on_done(done, cx, |state, cx| {
-                state.resolve_pending_avatars();
+            let done = data::fetch_avatars(&engine, uncached.clone());
+            self.on_done(done, cx, move |state, cx| {
+                state.resolve_pending_avatars(&uncached);
                 cx.emit(AppEvent::Directory);
                 cx.notify();
             });
@@ -745,10 +745,12 @@ impl AppState {
         .detach();
     }
 
-    fn resolve_pending_avatars(&mut self) {
+    fn resolve_pending_avatars(&mut self, requested: &[String]) {
         for user_id in self.directory.pending_avatars() {
-            if let Some(cached) = data::cached_avatar(&self.store, &user_id) {
-                self.directory.set_avatar(&user_id, cached);
+            match data::cached_avatar(&self.store, &user_id) {
+                Some(cached) => self.directory.set_avatar(&user_id, cached),
+                None if requested.contains(&user_id) => self.directory.mark_avatar_failed(&user_id),
+                None => {}
             }
         }
     }

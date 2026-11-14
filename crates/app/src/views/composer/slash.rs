@@ -343,7 +343,8 @@ impl Composer {
         let Some(command) = popup.selected() else {
             return;
         };
-        self.replace_text(popup.range, "", 0, window, cx);
+        let typed_end = popup.range.end;
+        self.replace_text(popup.range, "", typed_end, window, cx);
         self.run_slash_command(command, window, cx);
         cx.notify();
     }
