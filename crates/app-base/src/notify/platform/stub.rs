@@ -77,7 +77,14 @@ pub fn share_geometry(_kind: ShareKind, _id: u64) -> Option<ShareGeometry> {
 }
 
 pub fn system_quiet() -> bool {
-    false
+    #[cfg(target_os = "linux")]
+    {
+        super::notifications_inhibited()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
 }
 
 pub fn restore_and_raise(_handle: NativeHandle) {}

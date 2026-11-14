@@ -576,6 +576,31 @@ tray:
   mute_sound:
     en: Mute sound
     de: Ton stumm schalten
+notify:
+  mark_read:
+    en: Mark as read
+    de: Als gelesen markieren
+  reply:
+    en: Reply
+    de: Antworten
+  decline:
+    en: Decline
+    de: Ablehnen
+  accept:
+    en: Accept
+    de: Annehmen
+  audio:
+    en: Audio
+    de: Audio
+  video:
+    en: Video
+    de: Video
+  join:
+    en: Join
+    de: Teilnehmen
+  snooze:
+    en: Snooze
+    de: Schlummern
 install:
   title:
     en: Install Rusty Teams?

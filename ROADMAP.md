@@ -14,7 +14,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Writing](#writing) | 100 % | 15 | 0 | 0 |
 | [Message actions](#message-actions) | 100 % | 5 | 0 | 0 |
 | [Channels](#channels) | 100 % | 7 | 0 | 0 |
-| [Notifications](#notifications) | 94 % | 8 | 1 | 0 |
+| [Notifications](#notifications) | 100 % | 9 | 0 | 0 |
 | [Search and navigation](#search-and-navigation) | 100 % | 6 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 100 % | 5 | 0 | 0 |
@@ -24,8 +24,7 @@ Feature parity with the Microsoft Teams desktop client.
 
 | # | Feature | Note |
 |---|---|---|
-| 1 | Desktop toasts on Linux | Sounds are in, toasts are not |
-| 2 | Incoming and 1:1 calls with a second person | Built, not yet rung live |
+| 1 | Incoming and 1:1 calls with a second person | Built, not yet rung live |
 
 ## Sign-in and app
 
@@ -134,7 +133,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Stack of 3, queue, Hide all, fade-out | Done |  |
 | Muted chats stay quiet | Done | Toast, sound and taskbar badge only for @mentions |
 | Mute notifications during calls and meetings | Done | Settings > Notifications switch, default off; message toasts and sounds stay away while a call is active, call rings still show |
-| Notifications on Linux | Partial | Message and ring sounds; desktop toasts still Windows only |
+| Notifications on Linux | Done | Message and ring sounds; desktop toasts via `org.freedesktop.Notifications` (same actions as the Windows card; shell history and desktop Do not disturb when the daemon supports them) |
 
 ## Search and navigation
 

@@ -21,6 +21,10 @@ pub struct Texture {
 }
 
 impl AvatarPhoto {
+    pub fn source_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
     pub fn from_bytes(bytes: Vec<u8>) -> Option<Self> {
         let (width, height) = ImageReader::new(Cursor::new(&bytes))
             .with_guessed_format()
