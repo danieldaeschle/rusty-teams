@@ -202,8 +202,7 @@ fn event_item_url(event_id: &str) -> String {
 
 // Include `body` — series occurrences often have an empty bodyPreview while the
 // full HTML agenda lives in body.content (body_preview_text already falls back).
-const EVENT_DETAIL_SELECT: &str =
-    "id,subject,body,bodyPreview,location,attendees,type,seriesMasterId,isOnlineMeeting,onlineMeeting,organizer,isAllDay,isCancelled";
+const EVENT_DETAIL_SELECT: &str = "id,subject,body,bodyPreview,location,attendees,type,seriesMasterId,isOnlineMeeting,onlineMeeting,organizer,isAllDay,isCancelled";
 
 fn event_details_url(event_id: &str) -> String {
     format!(
@@ -254,7 +253,11 @@ fn merge_detail_bodies(mut graph: Value, teams: Value) -> Value {
         }
     }
     if let Some(attendees) = teams.get("attendees").cloned() {
-        if graph.get("attendees").and_then(Value::as_array).is_none_or(|a| a.is_empty()) {
+        if graph
+            .get("attendees")
+            .and_then(Value::as_array)
+            .is_none_or(|a| a.is_empty())
+        {
             if let Some(map) = graph.as_object_mut() {
                 map.insert("attendees".into(), attendees);
             }
@@ -323,11 +326,7 @@ impl<T: CardTransport> Calendar<T> {
         Err(api_error(retried, &reply_url(&graph_id, reply)))
     }
 
-    pub async fn event_details(
-        &self,
-        event_id: &str,
-        ical_uid: Option<&str>,
-    ) -> Result<Value> {
+    pub async fn event_details(&self, event_id: &str, ical_uid: Option<&str>) -> Result<Value> {
         let answer = self.fetch_event(event_id).await?;
         if answer.is_success() {
             if details_have_agenda(&answer.body) {

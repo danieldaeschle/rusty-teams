@@ -57,8 +57,8 @@ pub use activity_mentions::{MentionActivity, MentionKind, mentions_of};
 pub use bot_profiles::{BotProfile, BotProfiles, parse_bot_profiles};
 pub use calendar::{
     Attendee, AttendeeResponseCounts, BusyTime, Calendar, CalendarEvent, CalendarSource,
-    CreatedEvent, DialIn, EventAttendee, NewEvent, PersonSchedule, Reminder, Repeat, Reply, ResponseType, ShowAs,
-    apply_event_details, join_info_text, meet_now_join_url, new_event_body,
+    CreatedEvent, DialIn, EventAttendee, NewEvent, PersonSchedule, Reminder, Repeat, Reply,
+    ResponseType, ShowAs, apply_event_details, join_info_text, meet_now_join_url, new_event_body,
     new_event_body_with_join, parse_calendar_events, parse_created_event, strip_html,
     truncate_preview,
 };

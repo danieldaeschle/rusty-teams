@@ -227,7 +227,10 @@ fn reminder_minutes_from(list: Option<&Value>) -> Vec<u32> {
     let mut minutes: Vec<u32> = items
         .iter()
         .filter_map(|item| {
-            let method = item.get("method").and_then(Value::as_str).unwrap_or("popup");
+            let method = item
+                .get("method")
+                .and_then(Value::as_str)
+                .unwrap_or("popup");
             if method != "popup" && method != "email" {
                 return None;
             }
@@ -439,9 +442,7 @@ mod tests {
             r#"Click <a href="javascript:alert(1)">here</a> or https://safe.example/x"#,
         );
         assert!(!html.to_ascii_lowercase().contains("javascript:"));
-        assert!(html.contains(
-            r#"<a href="https://safe.example/x">https://safe.example/x</a>"#
-        ));
+        assert!(html.contains(r#"<a href="https://safe.example/x">https://safe.example/x</a>"#));
         assert!(html.contains("Click here or"));
     }
 
@@ -494,7 +495,10 @@ mod tests {
         let events = parse_google_events(&body, None, None);
         assert_eq!(events[0].reminders, vec![5, 15, 30]);
         assert_eq!(
-            events[0].source_link.as_ref().map(|(t, u)| (t.as_str(), u.as_str())),
+            events[0]
+                .source_link
+                .as_ref()
+                .map(|(t, u)| (t.as_str(), u.as_str())),
             Some(("[Mail] KubeCon", "https://mail.example/1"))
         );
         assert_eq!(

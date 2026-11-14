@@ -122,7 +122,10 @@ mod tests {
             tr("calendar.peek.email_organizer"),
             "E-Mail an den Organisator"
         );
-        assert_eq!(tr("calendar.peek.teams_meeting"), "Microsoft Teams-Besprechung");
+        assert_eq!(
+            tr("calendar.peek.teams_meeting"),
+            "Microsoft Teams-Besprechung"
+        );
         assert_eq!(tr("calendar.peek.google_meet"), "Google Meet");
         assert_eq!(tr("calendar.peek.accept"), "Annehmen");
     }

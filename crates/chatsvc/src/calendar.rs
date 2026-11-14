@@ -66,10 +66,7 @@ pub struct AttendeeResponseCounts {
 
 impl AttendeeResponseCounts {
     pub fn is_empty(self) -> bool {
-        self.accepted == 0
-            && self.declined == 0
-            && self.tentative == 0
-            && self.not_responded == 0
+        self.accepted == 0 && self.declined == 0 && self.tentative == 0 && self.not_responded == 0
     }
 }
 
@@ -472,9 +469,7 @@ fn sanitize_html_hrefs(html: &str) -> String {
 fn url_is_safe_href(url: &str) -> bool {
     let trimmed = url.trim();
     let lower = trimmed.to_ascii_lowercase();
-    lower.starts_with("https://")
-        || lower.starts_with("http://")
-        || lower.starts_with("mailto:")
+    lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")
 }
 
 fn attendee_response(label: &str) -> ResponseType {
@@ -546,7 +541,10 @@ pub fn strip_html(input: &str) -> String {
             _ => {}
         }
     }
-    html_entities(&out).split_whitespace().collect::<Vec<_>>().join(" ")
+    html_entities(&out)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn html_entities(input: &str) -> String {
@@ -580,8 +578,13 @@ fn series_flag(entry: &Value) -> bool {
         .as_deref()
     {
         Some("occurrence" | "exception" | "seriesMaster") => true,
-        _ => entry.get("seriesMasterId").and_then(Value::as_str).is_some()
-            || entry.get("recurrence").is_some(),
+        _ => {
+            entry
+                .get("seriesMasterId")
+                .and_then(Value::as_str)
+                .is_some()
+                || entry.get("recurrence").is_some()
+        }
     }
 }
 
@@ -797,10 +800,7 @@ mod tests {
             standup.thread_id.as_deref(),
             Some("19:meeting_demo1@thread.v2")
         );
-        assert_eq!(
-            standup.location.as_deref(),
-            Some("Microsoft Teams Meeting")
-        );
+        assert_eq!(standup.location.as_deref(), Some("Microsoft Teams Meeting"));
         assert_eq!(
             standup.body_preview.as_deref(),
             Some("Daily agenda and blockers")
@@ -818,14 +818,8 @@ mod tests {
 
     #[test]
     fn strip_html_flattens_markup_for_peek_preview() {
-        assert_eq!(
-            strip_html("<p>Hello&nbsp;<b>team</b></p>"),
-            "Hello team"
-        );
-        assert_eq!(
-            strip_html("<p>NEUE</p><p>Agenda</p>"),
-            "NEUE Agenda"
-        );
+        assert_eq!(strip_html("<p>Hello&nbsp;<b>team</b></p>"), "Hello team");
+        assert_eq!(strip_html("<p>NEUE</p><p>Agenda</p>"), "NEUE Agenda");
         assert_eq!(truncate_preview(&"x".repeat(4_100)).chars().count(), 4_001);
     }
 
@@ -855,7 +849,10 @@ mod tests {
         assert_eq!(event.location.as_deref(), Some("Room A"));
         assert!(event.series);
         assert_eq!(event.series_master_id.as_deref(), Some("master"));
-        assert_eq!(event.join_url.as_deref(), Some("https://teams.microsoft.com/l/meetup-join/z"));
+        assert_eq!(
+            event.join_url.as_deref(),
+            Some("https://teams.microsoft.com/l/meetup-join/z")
+        );
         let counts = event.response_counts.expect("counts");
         assert_eq!(counts.accepted, 1);
         assert_eq!(counts.tentative, 1);
@@ -899,10 +896,7 @@ mod tests {
                 "body": {"contentType": "text", "content": "Line1\rLine2\r\nLine3"}
             }),
         );
-        assert_eq!(
-            event.body_html.as_deref(),
-            Some("Line1<br>Line2<br>Line3")
-        );
+        assert_eq!(event.body_html.as_deref(), Some("Line1<br>Line2<br>Line3"));
     }
 
     #[test]

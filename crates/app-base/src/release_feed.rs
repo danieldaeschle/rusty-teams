@@ -291,7 +291,6 @@ pub fn fetch_update(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
 
     use super::*;
 

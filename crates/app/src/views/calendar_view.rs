@@ -435,8 +435,7 @@ impl CalendarView {
         let look = event_look(event);
         // Join on the block whenever a Teams link exists (same as detail dialog).
         // Skip on tiny blocks — the button would crush the title.
-        let can_join =
-            !compact && event.online && !event.cancelled && event.join_url.is_some();
+        let can_join = !compact && event.online && !event.cancelled && event.join_url.is_some();
         let open_state = self.state.clone();
         let open_event = event.clone();
         let (menu_state, menu_event) = (self.state.clone(), event.clone());

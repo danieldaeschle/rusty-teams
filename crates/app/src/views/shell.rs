@@ -709,7 +709,6 @@ impl AppShell {
         cx.notify();
     }
 
-
     fn open_calendar_event_peek(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(event) = self
             .state
@@ -720,15 +719,11 @@ impl AppShell {
         self.switcher = None;
         let app = self.state.clone();
         let peek = cx.new(|cx| EventPeek::new(app, event, window, cx));
-        cx.subscribe_in(
-            &peek,
-            window,
-            |this, _, _: &EventPeekEvent, window, cx| {
-                this.calendar_event_peek = None;
-                this.restore_focus(window, cx);
-                cx.notify();
-            },
-        )
+        cx.subscribe_in(&peek, window, |this, _, _: &EventPeekEvent, window, cx| {
+            this.calendar_event_peek = None;
+            this.restore_focus(window, cx);
+            cx.notify();
+        })
         .detach();
         self.calendar_event_peek = Some(peek);
         cx.notify();

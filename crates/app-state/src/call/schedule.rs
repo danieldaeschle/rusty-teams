@@ -8,6 +8,7 @@ use super::agenda::demo_join_url;
 use crate::app_state::AppState;
 use crate::runtime;
 
+const AGENDA_KEYS: [&str; 4] = ["body", "bodyContent", "bodyContentType", "bodyPreview"];
 const HALF_HOUR_MINUTES: i64 = 30;
 const DEFAULT_LENGTH_MINUTES: i64 = 30;
 const READ_ONLY_MESSAGE: &str = "Meetings cannot be scheduled in read-only mode.";
@@ -334,11 +335,7 @@ impl AppState {
         .detach();
     }
 
-    pub fn request_calendar_event_peek(
-        &mut self,
-        event: CalendarEvent,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn request_calendar_event_peek(&mut self, event: CalendarEvent, cx: &mut Context<Self>) {
         self.calendar_event_peek_request = Some(event);
         cx.emit(crate::app_state::AppEvent::CalendarEventPeek);
         cx.notify();
@@ -471,14 +468,20 @@ impl AppState {
             else {
                 return;
             };
-            let master = runtime::spawn(async move {
-                launcher.calendar_event_details(&master_id, None).await
-            });
+            let master =
+                runtime::spawn(
+                    async move { launcher.calendar_event_details(&master_id, None).await },
+                );
             let Ok(Ok(master_details)) = master.await else {
                 return;
             };
+            let master_agenda: serde_json::Value = AGENDA_KEYS
+                .iter()
+                .filter_map(|key| Some(((*key).to_owned(), master_details.get(*key)?.clone())))
+                .collect::<serde_json::Map<_, _>>()
+                .into();
             this.update(cx, |state, cx| {
-                state.apply_calendar_event_details(&event_id, &master_details, cx);
+                state.apply_calendar_event_details(&event_id, &master_agenda, cx);
             })
             .ok();
         })
