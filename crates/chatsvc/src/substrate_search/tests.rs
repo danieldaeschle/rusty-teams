@@ -234,3 +234,15 @@ fn unknown_shape_parses_to_empty_results() {
         QueryResults::default()
     );
 }
+
+#[test]
+fn a_null_where_a_list_is_expected_keeps_the_other_results() {
+    let mut body = fixture(SUGGESTIONS);
+    body["LayoutHints"] = serde_json::Value::Null;
+    let suggestions = parse_suggestions(&body);
+    assert_eq!(
+        suggestions.people,
+        parse_suggestions(&fixture(SUGGESTIONS)).people
+    );
+    assert!(!suggestions.people.is_empty());
+}

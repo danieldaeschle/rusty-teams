@@ -390,8 +390,11 @@ impl AgentHub {
         self.wake.notify_waiters();
     }
 
-    pub fn needs_review(&self, conversation_id: &str) -> bool {
-        self.policy().review && self.free_writing(conversation_id).is_none()
+    pub fn needs_review(&self, conversation_id: &str, agent: Option<&str>) -> bool {
+        let granted = self
+            .free_writing(conversation_id)
+            .is_some_and(|grant| grant.agent.is_none() || grant.agent.as_deref() == agent);
+        self.policy().review && !granted
     }
 
     pub fn pending_proposal(&self, conversation_id: &str) -> Option<Proposal> {
@@ -1033,18 +1036,21 @@ mod tests {
     #[test]
     fn a_free_writing_window_skips_review_until_it_ends_or_stops() {
         let (hub, _receiver, _store) = hub_with(open_policy());
-        assert!(hub.needs_review("c1"));
+        let claude = Some("claude");
+        assert!(hub.needs_review("c1", claude));
         hub.grant_free_writing(
             "c1",
             Utc::now() + chrono::Duration::minutes(15),
             Some("claude".to_owned()),
         );
-        assert!(!hub.needs_review("c1"));
-        assert!(hub.needs_review("c2"));
+        assert!(!hub.needs_review("c1", claude));
+        assert!(hub.needs_review("c1", Some("codex")));
+        assert!(hub.needs_review("c1", None));
+        assert!(hub.needs_review("c2", claude));
         hub.stop_free_writing("c1");
-        assert!(hub.needs_review("c1"));
+        assert!(hub.needs_review("c1", claude));
         hub.grant_free_writing("c1", Utc::now() - chrono::Duration::seconds(1), None);
-        assert!(hub.needs_review("c1"));
+        assert!(hub.needs_review("c1", claude));
         let kinds: Vec<Option<DateTime<Utc>>> = hub
             .events_after(0)
             .0

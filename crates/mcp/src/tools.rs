@@ -756,7 +756,7 @@ impl TeamsTools {
         );
         let (reply_to_message_id, agent, session_id) =
             (params.reply_to_message_id, params.agent, params.session_id);
-        let direct = !self.hub.needs_review(&conversation_id);
+        let direct = !self.hub.needs_review(&conversation_id, agent.as_deref());
         let free_writing_ask =
             params
                 .ask_free_writing
@@ -884,7 +884,9 @@ impl TeamsTools {
                 "emoji is not a reaction Teams supports, use a single common emoji".to_owned(),
             );
         }
-        let direct = !self.hub.needs_review(&params.conversation_id);
+        let direct = !self
+            .hub
+            .needs_review(&params.conversation_id, params.agent.as_deref());
         let reaction = self
             .hub
             .add_reaction_proposal(NewReactionProposal {

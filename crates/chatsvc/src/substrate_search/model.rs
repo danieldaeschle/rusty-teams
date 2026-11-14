@@ -213,8 +213,24 @@ struct WireResult {
     source: Value,
 }
 
+/// `#[serde(default)]` covers a missing field, not an explicit null; one null would empty the whole answer.
+fn without_nulls(value: &Value) -> Value {
+    match value {
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .filter(|(_, field)| !field.is_null())
+                .map(|(name, field)| (name.clone(), without_nulls(field)))
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.iter().map(without_nulls).collect()),
+        other => other.clone(),
+    }
+}
+
 pub fn parse_suggestions(body: &Value) -> Suggestions {
-    let wire: WireSuggestions = WireSuggestions::deserialize(body).unwrap_or_default();
+    let wire: WireSuggestions =
+        WireSuggestions::deserialize(without_nulls(body)).unwrap_or_default();
     let mut suggestions = Suggestions {
         best_matches: wire
             .layout_hints
@@ -261,7 +277,7 @@ pub fn parse_suggestions(body: &Value) -> Suggestions {
 }
 
 pub fn parse_query_results(body: &Value) -> QueryResults {
-    let wire: WireQuery = WireQuery::deserialize(body).unwrap_or_default();
+    let wire: WireQuery = WireQuery::deserialize(without_nulls(body)).unwrap_or_default();
     let mut results = QueryResults {
         search_terms: wire.search_terms,
         ..QueryResults::default()

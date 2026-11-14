@@ -21,6 +21,8 @@ fn sibling(path: &Path, prefix: &str, suffix: &str) -> PathBuf {
 }
 
 pub(super) fn write_atomic(path: &Path, contents: &str) -> Result<(), InstallError> {
+    let resolved = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path = resolved.as_path();
     let existing = fs::metadata(path).ok();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| InstallError::io(parent, error))?;

@@ -136,14 +136,24 @@ impl Session {
     pub async fn batch(&self, requests: &[Request], scope: &Scope) -> Result<Vec<ApiResponse>> {
         let mut results: Vec<Option<ApiResponse>> = vec![None; requests.len()];
         let mut pending: Vec<usize> = (0..requests.len()).collect();
+        let mut forced_here = false;
         for attempt in 0..=self.config.max_throttle_retries {
             let batch: Vec<&Request> = pending.iter().map(|&index| &requests[index]).collect();
-            let answers = self.run_with_fresh_token(&batch, scope).await?;
+            let answers = match self.run_with_fresh_token(&batch, scope).await {
+                Ok(answers) => answers,
+                Err(error) => {
+                    if forced_here {
+                        self.force_refresh.store(false, Ordering::SeqCst);
+                    }
+                    return Err(error);
+                }
+            };
             let unauthorized_first_try =
                 attempt == 0 && answers.iter().any(|answer| answer.status == 401);
             if unauthorized_first_try {
                 // A CAE-revoked token stays unexpired in the app cache, so only a refresh-token grant replaces it.
                 self.force_refresh.store(true, Ordering::SeqCst);
+                forced_here = true;
                 self.reload_all().await;
                 sleep(self.config.unauthorized_reload_wait).await;
                 self.drop_all().await;
@@ -156,8 +166,9 @@ impl Session {
                     retry.push(index);
                 }
             }
-            if !unauthorized_first_try {
+            if forced_here && !unauthorized_first_try {
                 self.force_refresh.store(false, Ordering::SeqCst);
+                forced_here = false;
             }
             if retry.is_empty() || attempt == self.config.max_throttle_retries {
                 break;

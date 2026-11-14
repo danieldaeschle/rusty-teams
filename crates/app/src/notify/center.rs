@@ -539,8 +539,17 @@ impl NotificationCenter {
         self.sync_windows(cx);
     }
 
+    fn own_feature_decision(&self, cx: &mut Context<Self>) -> Decision {
+        let environment = self.environment("", cx);
+        decide_proposal(
+            &self.settings,
+            teams_core::DesktopNotifications::MatchAllChats,
+            environment,
+        )
+    }
+
     fn present_status_change(&mut self, user_id: &str, text: &str, cx: &mut Context<Self>) {
-        if self.settings.do_not_disturb {
+        if !self.own_feature_decision(cx).toast {
             return;
         }
         let (name, conversation_id) = {
@@ -571,6 +580,10 @@ impl NotificationCenter {
     }
 
     pub fn present_agent_run(&mut self, run: &AgentRun, cx: &mut Context<Self>) {
+        let decision = self.own_feature_decision(cx);
+        if !decision.toast {
+            return;
+        }
         let failed = matches!(run.state, RunState::Failed { .. });
         let verb = if failed { "failed" } else { "finished" };
         let body = if failed {
@@ -609,8 +622,7 @@ impl NotificationCenter {
                 .format(crate::format::clock_format())
                 .to_string();
         }
-        let quiet = self.settings.do_not_disturb || self.app.read(cx).mode.demo;
-        if self.settings.sounds.notification_sound && !quiet {
+        if decision.sound && !self.app.read(cx).mode.demo {
             self.play_notification_sound(cx);
         }
         self.sync_windows(cx);
@@ -849,6 +861,7 @@ impl NotificationCenter {
                 .handle
                 .update(cx, |_, window, _| window.remove_window())
                 .is_ok()
+                || !window_is_open(window.handle.window_id(), cx)
         });
         if closed {
             self.call_windows.remove(&key);
@@ -1016,6 +1029,7 @@ impl NotificationCenter {
                 .handle
                 .update(cx, |_, window, _| window.remove_window())
                 .is_ok()
+                || !window_is_open(window.handle.window_id(), cx)
         });
         if closed {
             self.windows.remove(&id);
@@ -1462,6 +1476,12 @@ fn open_popup<V: Into<AnyView>>(
         };
         center.update(cx, |this, _| opened(this, Some(window)));
     });
+}
+
+fn window_is_open(window_id: WindowId, cx: &App) -> bool {
+    cx.windows()
+        .iter()
+        .any(|window| window.window_id() == window_id)
 }
 
 fn own_presence(state: &AppState) -> PresenceKind {

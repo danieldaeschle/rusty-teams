@@ -47,8 +47,14 @@ impl ToolSession {
     }
 
     pub async fn call(&self, name: &str, arguments: &str) -> Result<String, String> {
-        let parsed: Value = serde_json::from_str(arguments).unwrap_or(Value::Object(Map::new()));
-        let arguments = parsed.as_object().cloned().unwrap_or_default();
+        let arguments = if arguments.trim().is_empty() {
+            Map::new()
+        } else {
+            serde_json::from_str::<Value>(arguments)
+                .ok()
+                .and_then(|parsed| parsed.as_object().cloned())
+                .ok_or_else(|| "arguments are not a JSON object".to_owned())?
+        };
         let params = CallToolRequestParams::new(name.to_owned()).with_arguments(arguments);
         let result = self
             .client

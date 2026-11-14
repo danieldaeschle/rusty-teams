@@ -379,11 +379,22 @@ impl NewChatDraft {
             return;
         }
         self.searching = false;
+        let held = self
+            .results(cx)
+            .into_iter()
+            .nth(self.highlighted)
+            .map(|pick| pick.user_id);
         match result {
             Ok(Ok(users)) => self.remote = users.into_iter().filter_map(pick_from_user).collect(),
             _ => self.search_failed = true,
         }
-        self.highlighted = 0;
+        self.highlighted = held
+            .and_then(|user_id| {
+                self.results(cx)
+                    .iter()
+                    .position(|pick| pick.user_id == user_id)
+            })
+            .unwrap_or(0);
         cx.notify();
     }
 
