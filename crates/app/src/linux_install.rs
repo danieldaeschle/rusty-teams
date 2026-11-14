@@ -1,6 +1,5 @@
 //! Linux desktop integration on start: offer to install the binary into
-//! `~/.local/share/applications/teams` with a menu entry, and fetch the Teams icon
-//! from Microsoft (it is not shipped with the app).
+//! `~/.local/share/rusty-teams` with a menu entry.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -12,26 +11,15 @@ use gpui_kit::component::{WindowExt as _, v_flex};
 use gpui_kit::*;
 
 use crate::app_state::AppHandle;
-use crate::appearance::AppIcon;
 use crate::i18n::{tr, tr_args};
 use crate::theme;
 
 const DIALOG_WIDTH: f32 = 460.;
 
-/// Loads an icon a previous run downloaded, before the first window picks its icon.
-pub fn load_icon() {
-    if let Some(layout) = Layout::current() {
-        linux_desktop::load_teams_icon(&layout);
-    }
-}
-
 pub fn start(cx: &mut App) {
     let (Ok(executable), Some(layout)) = (std::env::current_exe(), Layout::current()) else {
         return;
     };
-    if !linux_desktop::has_icon(&layout) {
-        download_icon(layout.clone(), cx);
-    }
     if linux_desktop::is_installed(&executable, &layout) {
         // Keeps the menu entry pointing at this file, e.g. after it was deleted by hand.
         if !layout.desktop_file().is_file()
@@ -48,28 +36,6 @@ pub fn start(cx: &mut App) {
         // After the shell's first frame, so the dialog sits on top of the splash.
         cx.defer(move |cx| offer_install(executable, layout, cx));
     }
-}
-
-fn download_icon(layout: Layout, cx: &mut App) {
-    let download = linux_desktop::download_icon(layout, cx);
-    cx.spawn(async move |cx| match download.await {
-        Ok(png) => {
-            linux_desktop::set_teams_icon(png);
-            cx.update(|cx| {
-                // First run: the Teams icon becomes the default unless one was chosen.
-                if let Some(store) = cx
-                    .try_global::<AppHandle>()
-                    .map(|handle| handle.0.read(cx).store.clone())
-                    && !crate::appearance::icon_saved(&store)
-                {
-                    crate::active_appearance::set_app_icon(AppIcon::MicrosoftTeams, &store, cx);
-                }
-                crate::views::shell::refresh_app_icon(cx);
-            });
-        }
-        Err(error) => log::warn!("Teams icon download failed: {error}"),
-    })
-    .detach();
 }
 
 fn offer_install(executable: PathBuf, layout: Layout, cx: &mut App) {
@@ -149,7 +115,7 @@ fn notice(text: String, cx: &mut App) {
     }
 }
 
-/// Where this process stands relative to `~/.local/share/applications/teams`.
+/// Where this process stands relative to the install folder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Installation {
     /// This process is the installed copy.

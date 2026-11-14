@@ -40,7 +40,7 @@ enum Stage {
 
 struct LinuxUpdates {
     stage: Stage,
-    dialog_open: bool,
+    dialog_window: Option<WindowId>,
     /// "Not now" holds for this run only; the next start asks again.
     declined: Option<String>,
 }
@@ -125,7 +125,7 @@ fn ensure_state(cx: &mut App) {
     if !cx.has_global::<LinuxUpdates>() {
         cx.set_global(LinuxUpdates {
             stage: Stage::Idle,
-            dialog_open: false,
+            dialog_window: None,
             declined: None,
         });
     }
@@ -273,21 +273,23 @@ fn open_dialog(cx: &mut App) {
     let Some(window) = crate::main_window::current(cx) else {
         return;
     };
-    if !cx.has_global::<LinuxUpdates>() || cx.global::<LinuxUpdates>().dialog_open {
+    if !cx.has_global::<LinuxUpdates>()
+        || cx.global::<LinuxUpdates>().dialog_window == Some(window.window_id())
+    {
         return;
     }
-    cx.global_mut::<LinuxUpdates>().dialog_open = true;
+    cx.global_mut::<LinuxUpdates>().dialog_window = Some(window.window_id());
     let opened = window.update(cx, |_, window, cx| {
         window.open_dialog(cx, |dialog: Dialog, _, cx| build_dialog(dialog, cx));
     });
     if opened.is_err() {
-        cx.global_mut::<LinuxUpdates>().dialog_open = false;
+        cx.global_mut::<LinuxUpdates>().dialog_window = None;
     }
 }
 
 fn close_dialog(window: &mut Window, cx: &mut App) {
     if cx.has_global::<LinuxUpdates>() {
-        cx.global_mut::<LinuxUpdates>().dialog_open = false;
+        cx.global_mut::<LinuxUpdates>().dialog_window = None;
     }
     window.close_dialog(cx);
 }

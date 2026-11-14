@@ -176,14 +176,6 @@ struct KeptParts {
 
 impl Global for KeptParts {}
 
-/// Re-applies the app icon to the tray and window, e.g. after the Teams icon arrived.
-pub fn refresh_app_icon(cx: &mut App) {
-    if let Some(kept) = cx.try_global::<KeptParts>().cloned() {
-        kept.notifications
-            .update(cx, |notifications, cx| notifications.reapply_app_icon(cx));
-    }
-}
-
 pub struct AppShell {
     state: Entity<AppState>,
     rail: Entity<RailView>,

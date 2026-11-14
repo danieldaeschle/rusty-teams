@@ -261,7 +261,7 @@ mod platform {
 }
 
 /// Whether this build may replace itself from GitHub releases. On Linux only the copy
-/// installed in `~/.local/share/applications/teams` updates; a binary run from a
+/// installed in `~/.local/share/rusty-teams` updates; a binary run from a
 /// build folder or a package location is left alone.
 pub fn self_update_allowed() -> bool {
     #[cfg(target_os = "linux")]

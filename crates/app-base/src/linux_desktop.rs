@@ -1,28 +1,18 @@
-//! Desktop integration on Linux: the install folder
-//! (`~/.local/share/applications/teams`), the `.desktop` entry and the Teams icon,
-//! which is downloaded from Microsoft instead of shipped.
+//! Desktop integration on Linux: the install folder (`~/.local/share/rusty-teams`),
+//! the `.desktop` entry and the menu icon.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
-
-use futures_util::AsyncReadExt as _;
-use gpui_kit::{App, Task};
 
 /// Matches the window's app id, so KDE pairs the window with the entry.
 pub const DESKTOP_ID: &str = "rusty-teams";
 /// Name the `.desktop` entry, the tray and `hicolor` use for the icon.
 pub const ICON_NAME: &str = "rusty-teams";
 pub const BINARY_FILE_NAME: &str = "teams";
-/// Same icon the Teams web page shows in its tab.
-pub const TEAMS_ICON_URL: &str = "https://teams.public.onecdn.static.microsoft/evergreen-assets/icons/microsoft_teams_logo_refresh_v2025.ico";
-/// Fallback when [`TEAMS_ICON_URL`] moves: the page names its current favicon.
-pub const TEAMS_PAGE_URL: &str = "https://teams.cloud.microsoft/";
 pub const ICON_SIZES: [u32; 5] = [256, 128, 64, 48, 32];
-const INSTALL_FOLDER: &str = "teams";
+const INSTALL_FOLDER: &str = "rusty-teams";
 const DONT_ASK_META_KEY: &str = "linux.install.dont_ask";
-const FAVICON_ID: &str = "id=\"teams-favicon\"";
 
 /// Cargo marks its target folder with `CACHEDIR.TAG`; a binary in
 /// `target/<profile>/` is build output and is copied, not moved, on install.
@@ -55,7 +45,7 @@ impl Layout {
     }
 
     pub fn install_dir(&self) -> PathBuf {
-        self.applications_dir().join(INSTALL_FOLDER)
+        self.data_dir.join(INSTALL_FOLDER)
     }
 
     pub fn installed_binary(&self) -> PathBuf {
@@ -108,8 +98,8 @@ pub fn ask_again(store: &store::Store) {
     let _ = store.set_meta(DONT_ASK_META_KEY, "0");
 }
 
-/// Removes the menu entry and the installed binary (with a staged update). Sign-in,
-/// cache and the downloaded icon stay. A running installed copy keeps running.
+/// Removes the menu entry and the installed binary (with a staged update). Sign-in
+/// and cache stay. A running installed copy keeps running.
 pub fn uninstall(layout: &Layout) -> io::Result<()> {
     let remove = |path: PathBuf| match fs::remove_file(&path) {
         Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
@@ -142,6 +132,7 @@ pub fn install_binary(executable: &Path, layout: &Layout) -> io::Result<PathBuf>
         }
     }
     make_executable(&target)?;
+    install_icon(layout, crate::appearance::AppIcon::RustyTeams.png()).map_err(io::Error::other)?;
     write_desktop_entry(layout, &target)?;
     refresh_desktop_caches(layout);
     Ok(target)
@@ -153,7 +144,8 @@ fn move_file(from: &Path, to: &Path) -> io::Result<()> {
         return Ok(());
     }
     copy_file(from, to)?;
-    fs::remove_file(from)
+    let _ = fs::remove_file(from);
+    Ok(())
 }
 
 /// Copies through a temporary file and renames it into place, so a running older
@@ -179,6 +171,9 @@ fn exec_quoted(path: &Path) -> String {
     for character in path.display().to_string().chars() {
         if matches!(character, '"' | '`' | '$' | '\\') {
             quoted.push('\\');
+        }
+        if character == '%' {
+            quoted.push('%');
         }
         quoted.push(character);
     }
@@ -235,8 +230,7 @@ pub fn refresh_desktop_caches(layout: &Layout) {
     });
 }
 
-/// Writes the Teams icon into `hicolor` in every size of [`ICON_SIZES`].
-/// `bytes` is an `.ico` or a `.png`.
+/// Writes the menu icon into `hicolor` in every size of [`ICON_SIZES`].
 pub fn install_icon(layout: &Layout, bytes: &[u8]) -> Result<(), String> {
     let decoded = image::load_from_memory(bytes).map_err(|error| error.to_string())?;
     for size in ICON_SIZES {
@@ -254,87 +248,6 @@ pub fn install_icon(layout: &Layout, bytes: &[u8]) -> Result<(), String> {
         fs::rename(&partial, &path).map_err(|error| error.to_string())?;
     }
     Ok(())
-}
-
-pub fn has_icon(layout: &Layout) -> bool {
-    layout.largest_icon().is_file()
-}
-
-/// The `href` of `<link id="teams-favicon" ...>` in the Teams page.
-pub fn favicon_url(html: &str) -> Option<String> {
-    let start = html.find(FAVICON_ID)?;
-    let tag_start = html[..start].rfind('<')?;
-    let tag_end = start + html[start..].find('>')?;
-    let tag = &html[tag_start..tag_end];
-    let href = tag.find("href=\"")? + "href=\"".len();
-    let length = tag[href..].find('"')?;
-    let url = &tag[href..href + length];
-    url.starts_with("https://").then(|| url.to_owned())
-}
-
-/// Downloads the Teams icon into `hicolor` and returns the 256 px PNG.
-pub fn download_icon(layout: Layout, cx: &App) -> Task<Result<Vec<u8>, String>> {
-    let client = cx.http_client();
-    cx.background_executor().spawn(async move {
-        let get = |url: String| {
-            let client = client.clone();
-            async move {
-                let mut response = client
-                    .get(&url, ().into(), true)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let mut body = Vec::new();
-                response
-                    .body_mut()
-                    .read_to_end(&mut body)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                if !response.status().is_success() {
-                    return Err(format!("{url}: status {}", response.status()));
-                }
-                Ok::<_, String>(body)
-            }
-        };
-        let bytes = match get(TEAMS_ICON_URL.to_owned()).await {
-            Ok(bytes) => bytes,
-            Err(first) => {
-                let page = get(TEAMS_PAGE_URL.to_owned()).await?;
-                let url = favicon_url(&String::from_utf8_lossy(&page))
-                    .ok_or_else(|| format!("{first}; no favicon on the Teams page"))?;
-                get(url).await?
-            }
-        };
-        install_icon(&layout, &bytes)?;
-        refresh_desktop_caches(&layout);
-        fs::read(layout.largest_icon()).map_err(|error| error.to_string())
-    })
-}
-
-static TEAMS_ICON: RwLock<Option<&'static [u8]>> = RwLock::new(None);
-
-/// The downloaded Teams icon as PNG, once it is on disk.
-pub fn teams_icon() -> Option<&'static [u8]> {
-    *TEAMS_ICON
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-pub fn set_teams_icon(png: Vec<u8>) {
-    if !png.starts_with(b"\x89PNG") {
-        return;
-    }
-    let mut slot = TEAMS_ICON
-        .write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    // Set once or twice per run (start and after a download); the leak is bounded.
-    *slot = Some(Box::leak(png.into_boxed_slice()));
-}
-
-/// Loads the icon a previous run downloaded.
-pub fn load_teams_icon(layout: &Layout) {
-    if let Ok(png) = fs::read(layout.largest_icon()) {
-        set_teams_icon(png);
-    }
 }
 
 #[cfg(test)]
@@ -355,7 +268,7 @@ mod tests {
         let layout = Layout::new("/home/a/.local/share");
         assert_eq!(
             layout.installed_binary(),
-            Path::new("/home/a/.local/share/applications/teams/teams")
+            Path::new("/home/a/.local/share/rusty-teams/teams")
         );
         assert_eq!(
             layout.desktop_file(),
@@ -459,27 +372,11 @@ mod tests {
     fn the_icon_lands_in_every_size() {
         let home = tempfile::tempdir().unwrap();
         let layout = Layout::new(home.path());
-        assert!(!has_icon(&layout));
         install_icon(&layout, &png(300)).unwrap();
         for size in ICON_SIZES {
             let written = image::open(layout.icon_file(size)).unwrap();
             assert_eq!((written.width(), written.height()), (size, size));
         }
-        assert!(has_icon(&layout));
         assert!(install_icon(&layout, b"not an image").is_err());
-    }
-
-    #[test]
-    fn the_favicon_comes_from_the_teams_page() {
-        let html = r#"<head><link rel="shortcut icon" type="image/x-icon" id="teams-favicon" href="https://cdn.example/icons/teams.ico"/></head>"#;
-        assert_eq!(
-            favicon_url(html).as_deref(),
-            Some("https://cdn.example/icons/teams.ico")
-        );
-        assert_eq!(favicon_url("<html></html>"), None);
-        assert_eq!(
-            favicon_url(r#"<link id="teams-favicon" href="http://insecure/x.ico">"#),
-            None
-        );
     }
 }

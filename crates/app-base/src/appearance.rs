@@ -12,27 +12,14 @@ pub const ZOOM_STEPS: [f32; 14] = [
 ];
 pub const DEFAULT_ZOOM: f32 = 1.;
 const RUSTY_TEAMS_ICON_PNG: &[u8] = include_bytes!("../../app/assets/icon/teams-fast-256.png");
-// Linux builds leave the Microsoft logo out; the app downloads it from Microsoft
-// on first start (see `linux_desktop`).
-#[cfg(not(target_os = "linux"))]
 const MICROSOFT_TEAMS_ICON_PNG: &[u8] =
     include_bytes!("../../app/assets/icon/microsoft-teams-256.png");
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppIcon {
+    #[default]
     RustyTeams,
     MicrosoftTeams,
-}
-
-impl Default for AppIcon {
-    /// On Linux the downloaded Teams icon is the default once it is there.
-    fn default() -> Self {
-        #[cfg(target_os = "linux")]
-        if crate::linux_desktop::teams_icon().is_some() {
-            return AppIcon::MicrosoftTeams;
-        }
-        AppIcon::RustyTeams
-    }
 }
 
 impl AppIcon {
@@ -59,12 +46,7 @@ impl AppIcon {
     pub fn png(self) -> &'static [u8] {
         match self {
             AppIcon::RustyTeams => RUSTY_TEAMS_ICON_PNG,
-            #[cfg(not(target_os = "linux"))]
             AppIcon::MicrosoftTeams => MICROSOFT_TEAMS_ICON_PNG,
-            #[cfg(target_os = "linux")]
-            AppIcon::MicrosoftTeams => {
-                crate::linux_desktop::teams_icon().unwrap_or(RUSTY_TEAMS_ICON_PNG)
-            }
         }
     }
 }
@@ -206,16 +188,6 @@ pub fn load(store: &Store) -> AppearanceSettings {
         .flatten()
         .map(|text| parse(&text))
         .unwrap_or_default()
-}
-
-/// Whether an icon was ever saved, by the user or by an earlier default.
-pub fn icon_saved(store: &Store) -> bool {
-    store.meta(META_KEY).ok().flatten().is_some_and(|text| {
-        text.lines().any(|line| {
-            line.split_once('=')
-                .is_some_and(|(key, _)| key == APP_ICON_KEY)
-        })
-    })
 }
 
 pub fn save(store: &Store, settings: &AppearanceSettings) {
