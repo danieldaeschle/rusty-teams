@@ -35,6 +35,7 @@ pub mod runtime;
 pub mod schedule_time;
 pub mod single_instance;
 pub mod stickers;
+pub mod support;
 pub mod task_dialog;
 pub mod theme;
 pub mod translation;

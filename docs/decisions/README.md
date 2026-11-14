@@ -27,5 +27,6 @@ Statuses: `proposed`, `accepted`, `superseded`.
 | [0009](0009-bundled-google-oauth-client.md) | Bundled Google OAuth Desktop client |
 | [0010](0010-preferred-external-browser.md) | Preferred browser for links and Google OAuth |
 | [0011](0011-calendar-event-peek.md) | Calendar events open as a Teams-like peek |
+| [0012](0012-local-diagnostic-data-and-upstream-issues.md) | Local diagnostic data layout and upstream issues |
 
-Records `0001` to `0010` are the decisions already shipped. `0011` stays `proposed` until the calendar-peek pull request merges. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.
+Records `0001` to `0010` are the decisions already shipped. `0011` stays `proposed` until the calendar-peek pull request merges. `0012` stays `proposed` until the support-bundle path change merges. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.

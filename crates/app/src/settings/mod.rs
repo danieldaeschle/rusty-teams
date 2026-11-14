@@ -7,6 +7,7 @@ mod chats;
 mod devices;
 mod dialog;
 mod general;
+mod help;
 mod mcp;
 mod nav;
 mod notifications;

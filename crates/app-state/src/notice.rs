@@ -51,6 +51,7 @@ impl AppState {
         action: Option<NoticeAction>,
         cx: &mut Context<Self>,
     ) {
+        app_base::diagnostics::record(format!("notice: {text}"));
         self.notice_count += 1;
         let id = self.notice_count;
         self.notice = Some(Notice { id, text, action });

@@ -13,6 +13,7 @@ pub enum SettingsSection {
     Devices,
     Agents,
     Mcp,
+    Help,
     About,
 }
 

@@ -292,6 +292,12 @@ impl AppState {
             conversation_id,
             video,
         ));
+        if let Some(call) = self.call.as_ref() {
+            crate::diagnostics::record(format!(
+                "calls: start kind={:?} incoming={} peer={}",
+                call.model.kind, call.model.incoming, call.model.peer_name
+            ));
+        }
         if self.call_share_sound {
             self.send_call_command(CallCommand::SetShareSound(true));
         }
@@ -627,6 +633,11 @@ impl AppState {
             return;
         };
         let elapsed = call.model.elapsed(Instant::now());
+        crate::diagnostics::record(format!(
+            "calls: end kind={:?} reason={reason:?} elapsed_ms={}",
+            call.model.kind,
+            elapsed.map(|value| value.as_millis()).unwrap_or(0)
+        ));
         let consult = call.consult.take();
         let notice = match &consult {
             Some(consult) if consult.transfer == ConsultTransfer::Done => {

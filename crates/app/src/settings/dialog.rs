@@ -3,9 +3,11 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use super::devices::DevicesView;
+use super::help::HelpView;
 use super::mcp::McpView;
 use super::nav::{NavLayout, NavSearch, first_match, label, matches, render_nav};
 use super::rows::ROW_INSET;
@@ -63,6 +65,7 @@ pub struct SettingsDialog {
     center: Entity<NotificationCenter>,
     section: SettingsSection,
     devices: Option<Entity<DevicesView>>,
+    help: Option<Entity<HelpView>>,
     mcp: Option<Entity<McpView>>,
     agents: Option<Entity<AgentsSettings>>,
     body_scroll: ScrollHandle,
@@ -102,6 +105,7 @@ impl SettingsDialog {
             center,
             section,
             devices: None,
+            help: None,
             mcp: None,
             agents: None,
             body_scroll: ScrollHandle::new(),
@@ -126,6 +130,19 @@ impl SettingsDialog {
             }
         } else {
             self.devices = None;
+        }
+        if section == SettingsSection::Help {
+            if self.help.is_none() {
+                let app = self.app.clone();
+                self.help = Some(cx.new(|cx| HelpView::new(app, cx)));
+            } else if let Some(help) = self.help.as_ref() {
+                help.update(cx, |view, cx| {
+                    view.reload_bundles();
+                    cx.notify();
+                });
+            }
+        } else {
+            self.help = None;
         }
         if section == SettingsSection::Mcp && self.mcp.is_none() {
             let app = self.app.clone();
@@ -199,6 +216,10 @@ impl SettingsDialog {
                 .mcp
                 .clone()
                 .map_or_else(|| div().into_any_element(), |view| view.into_any_element()),
+            SettingsSection::Help => self
+                .help
+                .clone()
+                .map_or_else(|| div().into_any_element(), |view| view.into_any_element()),
             SettingsSection::About => about::render().into_any_element(),
         }
     }
@@ -268,25 +289,46 @@ impl Render for SettingsDialog {
         } else {
             metrics.padding
         };
-        let scroll_area = div()
-            .id(SharedString::from(format!(
-                "settings-body-{}",
-                label(self.section)
-            )))
+        let help_preview = self
+            .help
+            .as_ref()
+            .is_some_and(|help| help.read(cx).is_previewing());
+        let content = div()
+            .debug_selector(|| "settings/main/body/content".into())
             .w_full()
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scrollbar()
-            .track_scroll(&self.body_scroll)
-            .px(px(body_inset.max(0.)))
-            .pb(px(metrics.padding))
-            .child(
-                div()
-                    .debug_selector(|| "settings/main/body/content".into())
-                    .w_full()
-                    .max_w(px(CONTENT_MAX_WIDTH))
-                    .child(self.content(cx)),
-            );
+            .max_w(px(CONTENT_MAX_WIDTH))
+            .when(help_preview, |content| content.h_full().min_h_0())
+            .child(self.content(cx));
+        let scroll_area = if help_preview {
+            div()
+                .id(SharedString::from(format!(
+                    "settings-body-{}",
+                    label(self.section)
+                )))
+                .w_full()
+                .flex_1()
+                .min_h_0()
+                .overflow_hidden()
+                .px(px(body_inset.max(0.)))
+                .pb(px(metrics.padding))
+                .child(content)
+                .into_any_element()
+        } else {
+            div()
+                .id(SharedString::from(format!(
+                    "settings-body-{}",
+                    label(self.section)
+                )))
+                .w_full()
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scrollbar()
+                .track_scroll(&self.body_scroll)
+                .px(px(body_inset.max(0.)))
+                .pb(px(metrics.padding))
+                .child(content)
+                .into_any_element()
+        };
         let body = div()
             .debug_selector(|| "settings/main/body".into())
             .w_full()

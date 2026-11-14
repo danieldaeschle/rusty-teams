@@ -91,6 +91,13 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             "Model Context Protocol".to_owned(),
             "Conversation access".to_owned(),
         ],
+        SettingsSection::Help => vec![
+            tr("settings.help.create_bundle"),
+            tr("settings.help.open_issue"),
+            "GitHub".to_owned(),
+            "diagnostics".to_owned(),
+            "support".to_owned(),
+        ],
         SettingsSection::About => vec!["Version".to_owned(), "Build".to_owned()],
     }
 }
@@ -107,7 +114,7 @@ pub fn first_match(query: &str, agents_available: bool) -> Option<SettingsSectio
     TEAMS_GROUP
         .into_iter()
         .chain(RUSTY_GROUP)
-        .chain([SettingsSection::About])
+        .chain([SettingsSection::Help, SettingsSection::About])
         .filter(|section| agents_available || *section != SettingsSection::Agents)
         .find(|section| matches(*section, query))
 }
@@ -123,6 +130,7 @@ pub fn label(section: SettingsSection) -> String {
         SettingsSection::Devices => tr("settings.nav.devices"),
         SettingsSection::Agents => tr("settings.nav.agents"),
         SettingsSection::Mcp => tr("settings.nav.mcp"),
+        SettingsSection::Help => tr("settings.nav.help"),
         SettingsSection::About => tr("settings.nav.about"),
     }
 }
@@ -138,6 +146,7 @@ fn icon_name(section: SettingsSection) -> IconName {
         SettingsSection::Devices => IconName::Headphones,
         SettingsSection::Agents => IconName::Bot,
         SettingsSection::Mcp => IconName::Plug,
+        SettingsSection::Help => IconName::BookOpen,
         SettingsSection::About => IconName::Info,
     }
 }
@@ -161,6 +170,7 @@ fn element_id(section: SettingsSection) -> &'static str {
         SettingsSection::Devices => "settings-nav-devices",
         SettingsSection::Agents => "settings-nav-agents",
         SettingsSection::Mcp => "settings-nav-mcp",
+        SettingsSection::Help => "settings-nav-help",
         SettingsSection::About => "settings-nav-about",
     }
 }
@@ -195,8 +205,9 @@ pub fn render_nav(
         .filter(|section| matches(*section, query))
         .map(item)
         .collect();
+    let help_shown = matches(SettingsSection::Help, query);
     let about_shown = matches(SettingsSection::About, query);
-    let nothing_found = teams.is_empty() && rusty.is_empty() && !about_shown;
+    let nothing_found = teams.is_empty() && rusty.is_empty() && !help_shown && !about_shown;
     let group = |items: Vec<Stateful<Div>>| {
         v_flex()
             .w_full()
@@ -276,16 +287,26 @@ pub fn render_nav(
                         .child(group(rusty))
                 }),
         )
-        .when(about_shown, |nav| {
+        .when(help_shown || about_shown, |nav| {
             nav.child(
-                div()
+                v_flex()
                     .w_full()
                     .flex_none()
                     .px(px(NAV_PADDING_X))
                     .pt(px(6.))
-                    .child(
-                        item(SettingsSection::About).debug_selector(|| "settings/nav/about".into()),
-                    ),
+                    .gap(px(ITEM_GAP))
+                    .when(help_shown, |footer| {
+                        footer.child(
+                            item(SettingsSection::Help)
+                                .debug_selector(|| "settings/nav/help".into()),
+                        )
+                    })
+                    .when(about_shown, |footer| {
+                        footer.child(
+                            item(SettingsSection::About)
+                                .debug_selector(|| "settings/nav/about".into()),
+                        )
+                    }),
             )
         })
 }

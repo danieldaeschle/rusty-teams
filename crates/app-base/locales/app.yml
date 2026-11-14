@@ -115,9 +115,118 @@ settings:
     mcp:
       en: MCP
       de: MCP
+    help:
+      en: Help
+      de: Hilfe
     about:
       en: About
       de: Info
+  help:
+    caption_client:
+      en: CLIENT
+      de: CLIENT
+    caption_paths:
+      en: PATHS
+      de: PFADE
+    caption_packages:
+      en: SUPPORT PACKAGES
+      de: SUPPORT-PAKETE
+    caption_actions:
+      en: SUPPORT
+      de: SUPPORT
+    packages_empty:
+      en: No support packages yet
+      de: Noch keine Support-Pakete
+    copy_path_tooltip:
+      en: Copy path
+      de: Pfad kopieren
+    preview_truncated:
+      en: Showing the first 256 KB
+      de: Es werden die ersten 256 KB angezeigt
+    preview_binary:
+      en: This file is not plain text and cannot be previewed here.
+      de: Diese Datei ist kein Klartext und kann hier nicht angezeigt werden.
+    preview_error:
+      en: Could not read this file.
+      de: Diese Datei konnte nicht gelesen werden.
+    version:
+      en: Version
+      de: Version
+    platform:
+      en: Platform
+      de: Plattform
+    locale:
+      en: Language and timezone
+      de: Sprache und Zeitzone
+    signed_in:
+      en: Signed in
+      de: Angemeldet
+    yes:
+      en: Yes
+      de: Ja
+    no:
+      en: No
+      de: Nein
+    debug_logging:
+      en: Debug logging
+      de: Debug-Protokollierung
+    debug_logging_on_detail:
+      en: Writing diagnostics.log — turn off when you are done
+      de: Schreibt diagnostics.log — danach wieder ausschalten
+    debug_logging_off_detail:
+      en: Off by default — enable before reproducing a bug
+      de: Standardmässig aus — vor der Fehlerreproduktion einschalten
+    clear_logs:
+      en: Clear logs
+      de: Logs leeren
+    clear_logs_detail:
+      en: Removes diagnostics, crash logs, and call dumps on this computer
+      de: Entfernt Diagnosen, Absturzprotokolle und Anruf-Dumps auf diesem Computer
+    clear_logs_button:
+      en: Clear
+      de: Leeren
+    logs_path:
+      en: Logs root
+      de: Log-Root
+    bundles_path:
+      en: Support packages
+      de: Support-Pakete
+    detail:
+      en: Create a local support package, then open an upstream GitHub issue and attach the files. Nothing is uploaded automatically.
+      de: Erstellen Sie ein lokales Support-Paket, öffnen Sie danach ein Upstream-GitHub-Issue und hängen Sie die Dateien an. Es wird nichts automatisch hochgeladen.
+    create_bundle:
+      en: Support package
+      de: Support-Paket
+    create_bundle_detail:
+      en: Scrubbed diagnostics and recent call reports on this computer
+      de: Bereinigte Diagnosen und aktuelle Anrufberichte auf diesem Computer
+    create_bundle_button:
+      en: Create
+      de: Erstellen
+    open_issue:
+      en: GitHub issue
+      de: GitHub-Issue
+    open_issue_detail:
+      en: Opens danieldaeschle/rusty-teams with a pre-filled draft
+      de: Öffnet danieldaeschle/rusty-teams mit vorausgefülltem Entwurf
+    open_issue_button:
+      en: Open
+      de: Öffnen
+    copy_summary:
+      en: Client summary
+      de: Client-Zusammenfassung
+    copy_summary_detail:
+      en: Copy the same English block used in the issue
+      de: Denselben englischen Block wie im Issue kopieren
+    copy_button:
+      en: Copy
+      de: Kopieren
+    open_logs:
+      en: Logs folder
+      de: Log-Ordner
+    open_logs_detail:
+      en: diagnostics.log and call dumps
+      de: diagnostics.log und Anruf-Dumps
   caption:
     system:
       en: SYSTEM

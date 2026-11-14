@@ -1,7 +1,7 @@
 mod common_words;
 mod document;
 mod markdown;
-mod scrub;
+pub mod scrub;
 mod series;
 mod storage;
 mod web_shadow;

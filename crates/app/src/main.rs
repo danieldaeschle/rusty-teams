@@ -173,12 +173,18 @@ fn main() {
     if let Some(tag) = option_env!("TEAMS_RELEASE_TAG") {
         app_base::version::set_release_tag(tag);
     }
-    crash_log::install(data_path(crash_log::CRASH_LOG_FILE));
+    crash_log::install(
+        app_base::support::crash_log_path().unwrap_or_else(|| data_path(crash_log::CRASH_LOG_FILE)),
+    );
     app_base::native_dumps::install(
         data_path("native-dumps"),
-        data_path(crash_log::CRASH_LOG_FILE),
+        app_base::support::crash_log_path().unwrap_or_else(|| data_path(crash_log::CRASH_LOG_FILE)),
     );
-    diagnostics::install(data_path(diagnostics::DIAGNOSTICS_FILE));
+    diagnostics::install(
+        app_base::support::diagnostics_log_path()
+            .unwrap_or_else(|| data_path(diagnostics::DIAGNOSTICS_FILE)),
+    );
+    let _ = diagnostics::enable_from_override();
     #[cfg(target_os = "linux")]
     app_base::linux_fonts::hide_system_color_emoji();
     let arguments = parse_arguments();
@@ -222,9 +228,20 @@ fn main() {
         open_store(&path)
     };
     let store = Arc::new(store);
-    app_base::ui_locale::apply_locale(app_base::ui_locale::effective_locale(
-        app_base::ui_locale::load(&store),
-    ));
+    let stored_diag = store
+        .meta(diagnostics::DIAGNOSTICS_SETTING_KEY)
+        .ok()
+        .flatten();
+    diagnostics::load_enabled_from_store(stored_diag.as_deref());
+    let ui_locale = app_base::ui_locale::effective_locale(app_base::ui_locale::load(&store));
+    app_base::ui_locale::apply_locale(ui_locale);
+    let call_reports = app_call_model::report::load_enabled(&store);
+    app_base::support::record_startup_client_line(
+        env!("CARGO_PKG_VERSION"),
+        ui_locale,
+        crate::data::me(&store).is_some(),
+        call_reports,
+    );
     #[cfg(windows)]
     let sign_in_title = format!(
         "{} - {}",

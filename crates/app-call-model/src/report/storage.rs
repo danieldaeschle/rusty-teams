@@ -4,8 +4,6 @@ use std::path::{Path, PathBuf};
 
 use super::Document;
 
-#[cfg(not(test))]
-const REPORT_DIRECTORY: &str = "call-reports";
 const KEEP_REPORTS: usize = 30;
 const JSON_EXTENSION: &str = "json";
 const MARKDOWN_EXTENSION: &str = "md";
@@ -23,9 +21,8 @@ pub fn report_directory() -> PathBuf {
 
 #[cfg(not(test))]
 pub fn report_directory() -> PathBuf {
-    directories::ProjectDirs::from("", "", store::DATA_DIR_NAME)
-        .map(|directories| directories.data_local_dir().join(REPORT_DIRECTORY))
-        .unwrap_or_else(|| PathBuf::from(REPORT_DIRECTORY))
+    app_base::support::call_reports_dir()
+        .unwrap_or_else(|| PathBuf::from(app_base::support::CALL_REPORTS_DIR))
 }
 
 pub fn save_report(directory: &Path, document: &Document) -> io::Result<SavedReport> {
