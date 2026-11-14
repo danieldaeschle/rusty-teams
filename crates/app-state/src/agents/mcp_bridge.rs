@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use gpui_kit::*;
 
 pub fn endpoint(cx: &App) -> Option<agents::McpEndpoint> {
@@ -13,4 +15,8 @@ pub fn chat_allowed(conversation_id: &str, cx: &App) -> bool {
 
 pub fn allow_chat(conversation_id: &str, cx: &mut App) {
     crate::agent_api::allow_chat(conversation_id, cx);
+}
+
+pub fn set_app_sessions(session_ids: HashSet<String>, cx: &App) {
+    crate::agent_api::set_app_sessions(session_ids, cx);
 }

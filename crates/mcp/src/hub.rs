@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -19,6 +19,18 @@ const CAPTION_CAPACITY: usize = 2000;
 const PENDING_STATE: &str = "pending";
 const PROPOSAL_PERMITS: usize = 4;
 const MAX_PENDING_MEETINGS: usize = 5;
+pub const MIN_WAKEUP_DELAY: Duration = Duration::from_secs(60);
+pub const MAX_WAKEUP_DELAY: Duration = Duration::from_secs(24 * 60 * 60);
+const NOT_AN_APP_SESSION: &str = "schedule_wakeup only works in a session rusty-teams started (Answer, Build this or a send to a session); in your own session use your client's scheduling";
+
+/// A run started by rusty-teams that asks to be resumed later with `prompt`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Wakeup {
+    pub session_id: String,
+    pub due_at: DateTime<Utc>,
+    pub prompt: String,
+    pub reason: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProposalMention {
@@ -258,6 +270,7 @@ pub enum UiEvent {
         message_id: String,
     },
     MeetingProposalsChanged,
+    WakeupScheduled(Wakeup),
 }
 
 #[derive(Default)]
@@ -270,6 +283,7 @@ struct HubState {
     captions: HashMap<String, VecDeque<CaptionLine>>,
     free_writing: HashMap<String, FreeWriting>,
     pending_meetings: Vec<MeetingProposal>,
+    app_sessions: HashSet<String>,
 }
 
 pub struct AgentHub {
@@ -296,6 +310,31 @@ impl AgentHub {
 
     pub fn proposal_permits(&self) -> Arc<Semaphore> {
         self.proposal_permits.clone()
+    }
+
+    pub fn set_app_sessions(&self, session_ids: HashSet<String>) {
+        self.lock().app_sessions = session_ids;
+    }
+
+    pub fn schedule_wakeup(
+        &self,
+        session_id: &str,
+        delay: Duration,
+        prompt: &str,
+        reason: &str,
+    ) -> Result<Wakeup, String> {
+        if !self.lock().app_sessions.contains(session_id) {
+            return Err(NOT_AN_APP_SESSION.to_owned());
+        }
+        let delay = delay.clamp(MIN_WAKEUP_DELAY, MAX_WAKEUP_DELAY);
+        let wakeup = Wakeup {
+            session_id: session_id.to_owned(),
+            due_at: Utc::now() + chrono::Duration::from_std(delay).unwrap_or_default(),
+            prompt: prompt.to_owned(),
+            reason: reason.to_owned(),
+        };
+        let _ = self.ui.send(UiEvent::WakeupScheduled(wakeup.clone()));
+        Ok(wakeup)
     }
 
     pub fn set_policy(&self, policy: AgentPolicy) {
@@ -1303,5 +1342,21 @@ mod tests {
             .unwrap();
         assert_eq!(store.agent_proposal_image_count(&kept.id).unwrap(), 1);
         assert_eq!(store.agent_proposal_image_count("old").unwrap(), 0);
+    }
+
+    #[test]
+    fn only_sessions_the_app_started_can_schedule_a_wakeup() {
+        let (hub, mut events, _store) = hub_with(open_policy());
+        assert!(
+            hub.schedule_wakeup("desktop", Duration::from_secs(600), "check", "PR")
+                .is_err()
+        );
+        hub.set_app_sessions(HashSet::from(["app-run".to_owned()]));
+        let before = Utc::now();
+        let wakeup = hub
+            .schedule_wakeup("app-run", Duration::from_secs(5), "check CI", "PR 7")
+            .unwrap();
+        assert!(wakeup.due_at >= before + chrono::Duration::seconds(60));
+        assert_eq!(events.try_recv().unwrap(), UiEvent::WakeupScheduled(wakeup));
     }
 }

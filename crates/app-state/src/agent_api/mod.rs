@@ -201,6 +201,12 @@ pub fn configured_endpoint(cx: &App) -> Option<McpEndpoint> {
     })
 }
 
+pub fn set_app_sessions(session_ids: HashSet<String>, cx: &App) {
+    if let Some(api) = handle(cx) {
+        api.read(cx).hub.set_app_sessions(session_ids);
+    }
+}
+
 pub fn policy(cx: &App) -> AgentPolicy {
     handle(cx)
         .map(|api| api.read(cx).hub.policy())
@@ -572,6 +578,12 @@ impl AgentApi {
         pictures: Vec<ProposalPicture>,
         cx: &mut Context<Self>,
     ) {
+        if let mcp::UiEvent::WakeupScheduled(wakeup) = event {
+            if let Some(runs) = crate::agents::runs_handle(cx) {
+                cx.defer(move |cx| runs.update(cx, |runs, cx| runs.schedule_wakeup(wakeup, cx)));
+            }
+            return;
+        }
         if matches!(event, mcp::UiEvent::MeetingProposalsChanged) {
             let pending = self.hub.pending_meetings();
             for proposal in meetings::unannounced(&self.announced_meetings, &pending) {

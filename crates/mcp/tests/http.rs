@@ -434,7 +434,7 @@ async fn raw_status(addr: std::net::SocketAddr, host: &str, authorization: Optio
 }
 
 #[tokio::test]
-async fn lists_all_thirteen_tools_and_marks_reads_read_only() {
+async fn lists_all_fourteen_tools_and_marks_reads_read_only() {
     let harness = Harness::start(true).await;
     let client = harness.client().await;
     let tools = client.list_all_tools().await.unwrap();
@@ -445,8 +445,13 @@ async fn lists_all_thirteen_tools_and_marks_reads_read_only() {
             .annotations
             .as_ref()
             .and_then(|annotations| annotations.read_only_hint);
-        let writes =
-            ["write_message", "add_reaction", "create_meeting"].contains(&tool.name.as_ref());
+        let writes = [
+            "write_message",
+            "add_reaction",
+            "create_meeting",
+            "schedule_wakeup",
+        ]
+        .contains(&tool.name.as_ref());
         assert_eq!(read_only == Some(true), !writes, "{}", tool.name);
         if writes {
             let annotations = tool.annotations.as_ref().unwrap();
@@ -467,6 +472,7 @@ async fn lists_all_thirteen_tools_and_marks_reads_read_only() {
             "list_meetings",
             "read_messages",
             "recent_messages",
+            "schedule_wakeup",
             "search_messages",
             "wait_for_event",
             "write_message"
