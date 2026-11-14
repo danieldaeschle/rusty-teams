@@ -64,7 +64,12 @@ impl HelpView {
     }
 
     pub(crate) fn reload_bundles(&mut self) {
-        let root = support::support_bundles_dir().unwrap_or_default();
+        let Some(root) = support::support_bundles_dir() else {
+            self.bundles.clear();
+            self.expanded = None;
+            self.expanded_files.clear();
+            return;
+        };
         self.bundles = list_support_bundles(&root).unwrap_or_default();
         if let Some(expanded) = self.expanded.clone() {
             if self.bundles.iter().any(|entry| entry.directory == expanded) {
@@ -560,9 +565,12 @@ struct ReadPreview {
 }
 
 fn read_preview_text(path: &Path) -> std::io::Result<ReadPreview> {
-    let bytes = std::fs::read(path)?;
-    let truncated = bytes.len() > PREVIEW_LIMIT;
-    let slice = &bytes[..bytes.len().min(PREVIEW_LIMIT)];
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path)?;
+    let mut buf = vec![0u8; PREVIEW_LIMIT + 1];
+    let read = file.read(&mut buf)?;
+    let truncated = read > PREVIEW_LIMIT;
+    let slice = &buf[..read.min(PREVIEW_LIMIT)];
     match std::str::from_utf8(slice) {
         Ok(text) => Ok(ReadPreview {
             text: text.to_owned(),

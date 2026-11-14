@@ -3,8 +3,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use app_base::support::{self, ClientInfo};
-use app_call_model::report::scrub::Scrubber;
 use app_call_model::report::report_directory;
+use app_call_model::report::scrub::Scrubber;
 use chrono::Utc;
 
 const KEEP_CALL_REPORTS: usize = 3;
@@ -20,10 +20,14 @@ pub struct SupportBundle {
     pub folder_name: String,
 }
 
-pub fn write_support_bundle(
+pub fn write_support_bundle(data_dir: &Path, client: &ClientInfo) -> io::Result<SupportBundle> {
+    write_support_bundle_from(data_dir, client, &report_directory())
+}
+
+fn write_support_bundle_from(
     data_dir: &Path,
     client: &ClientInfo,
-    _diagnostics_path: &Path,
+    call_reports: &Path,
 ) -> io::Result<SupportBundle> {
     let folder_name = support::bundle_folder_name(Utc::now());
     let directory = support::support_bundles_directory(data_dir).join(&folder_name);
@@ -38,7 +42,7 @@ pub fn write_support_bundle(
         &app_base::crash_log::read_merged(CRASH_MERGE_CAP),
         &directory.join(CRASH_NAME),
     )?;
-    copy_recent_call_reports(&directory)?;
+    copy_recent_call_reports(&directory, call_reports)?;
     copy_latest_call_timeline(&directory)?;
     Ok(SupportBundle {
         directory,
@@ -55,12 +59,11 @@ fn write_scrubbed_text(raw: &str, destination: &Path) -> io::Result<()> {
     fs::write(destination, scrubbed)
 }
 
-fn copy_recent_call_reports(bundle: &Path) -> io::Result<()> {
-    let reports = report_directory();
+fn copy_recent_call_reports(bundle: &Path, reports: &Path) -> io::Result<()> {
     if !reports.is_dir() {
         return Ok(());
     }
-    let mut markdown: Vec<PathBuf> = fs::read_dir(&reports)?
+    let mut markdown: Vec<PathBuf> = fs::read_dir(reports)?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "md"))
@@ -144,10 +147,8 @@ mod tests {
         .unwrap();
         fs::write(data.join("store.db"), "secret-store").unwrap();
 
-        // Install diagnostics path so merge can find the file we wrote under data.
         app_base::diagnostics::install(diagnostics.clone());
         app_base::diagnostics::set_enabled(true);
-        // Re-write through the live path if install used a different OnceLock path already.
         if let Some(live) = app_base::diagnostics::path() {
             let _ = fs::write(
                 &live,
@@ -155,7 +156,9 @@ mod tests {
             );
         }
 
-        let bundle = write_support_bundle(&data, &sample_client(), &diagnostics).unwrap();
+        let reports = root.path().join("call-reports");
+        fs::create_dir_all(&reports).unwrap();
+        let bundle = write_support_bundle_from(&data, &sample_client(), &reports).unwrap();
         let client = fs::read_to_string(bundle.directory.join("client.md")).unwrap();
         assert!(client.contains("### Client"));
         assert!(client.contains("Debug logging:"));
@@ -174,30 +177,13 @@ mod tests {
         let root = tempdir().unwrap();
         let data = root.path().join("data");
         fs::create_dir_all(&data).unwrap();
-        // Dependency `report_directory()` is the live path (cfg(test) only applies in
-        // app-call-model's own tests). Use a stem that sorts last so KEEP_CALL_REPORTS
-        // still includes it among any pre-existing reports.
-        let target = report_directory();
-        fs::create_dir_all(&target).unwrap();
-        let stem = format!(
-            "zzz-{}-bundle-test",
-            chrono::Utc::now().format("%Y%m%dT%H%M%S%3fZ")
-        );
-        let md_name = format!("{stem}.md");
-        let json_name = format!("{stem}.json");
-        fs::write(target.join(&md_name), "# report\n").unwrap();
-        fs::write(target.join(&json_name), "{\"schema\":1}\n").unwrap();
+        let reports = root.path().join("call-reports");
+        fs::create_dir_all(&reports).unwrap();
+        fs::write(reports.join("20260101T000000Z-echo.md"), "# report\n").unwrap();
+        fs::write(reports.join("20260101T000000Z-echo.json"), "{\"schema\":1}\n").unwrap();
 
-        let diagnostics = data.join(DIAGNOSTICS_NAME);
-        fs::write(&diagnostics, "line\n").unwrap();
-        let bundle = write_support_bundle(&data, &sample_client(), &diagnostics).unwrap();
-        assert!(
-            bundle.directory.join(&md_name).is_file(),
-            "missing {md_name} in {:?}",
-            bundle.directory
-        );
-        assert!(bundle.directory.join(&json_name).is_file());
-        let _ = fs::remove_file(target.join(&md_name));
-        let _ = fs::remove_file(target.join(&json_name));
+        let bundle = write_support_bundle_from(&data, &sample_client(), &reports).unwrap();
+        assert!(bundle.directory.join("20260101T000000Z-echo.md").is_file());
+        assert!(bundle.directory.join("20260101T000000Z-echo.json").is_file());
     }
 }

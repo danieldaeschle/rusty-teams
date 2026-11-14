@@ -90,11 +90,11 @@ pub fn record_if_slow(label: &str, elapsed: std::time::Duration) {
 }
 
 pub fn record(message: impl AsRef<str>) {
-    let message = message.as_ref();
-    eprintln!("{message}");
     if !is_enabled() {
         return;
     }
+    let message = message.as_ref();
+    eprintln!("{message}");
     let Some(path) = PATH.get() else {
         return;
     };

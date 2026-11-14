@@ -23,9 +23,7 @@ impl AppState {
     pub fn create_support_bundle(&self) -> Result<SupportBundle, String> {
         let data_dir =
             support::local_data_dir().ok_or_else(|| "data directory unavailable".to_owned())?;
-        let diagnostics = support::diagnostics_log_path()
-            .unwrap_or_else(|| data_dir.join(app_base::diagnostics::DIAGNOSTICS_FILE));
-        support_bundle::write_support_bundle(&data_dir, &self.client_info(), &diagnostics)
+        support_bundle::write_support_bundle(&data_dir, &self.client_info())
             .map_err(|error| error.to_string())
     }
 

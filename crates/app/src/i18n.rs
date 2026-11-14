@@ -72,8 +72,6 @@ mod tests {
     }
 
     #[test]
-
-    #[test]
     fn ui_locale_settings_help_keys() {
         let _guard = locale_test_lock();
         apply_locale("en");
@@ -95,6 +93,7 @@ mod tests {
         assert!(tr("settings.help.detail").contains("Support-Paket"));
     }
 
+    #[test]
     fn ui_locale_auth_splash_keys() {
         let _guard = locale_test_lock();
         apply_locale("en");
