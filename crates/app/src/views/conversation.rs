@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Local, Offset, Utc};
+use chrono::{DateTime, Local, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
@@ -232,6 +232,7 @@ pub struct ConversationView {
     new_post_open: bool,
     reply_composer: Option<Entity<Composer>>,
     reply_root: Option<String>,
+    reply_drafts: HashMap<String, Outgoing>,
     feed_stash: Option<FeedStash>,
     feed_rows_seen: Rc<Cell<usize>>,
     feed_at_top: bool,
@@ -409,7 +410,11 @@ impl ConversationView {
             return;
         };
         let now = Local::now();
-        let items = collect_gallery(&self.rows.borrow(), now.date_naive(), now.offset().fix());
+        let items = collect_gallery(
+            &self.rows.borrow(),
+            now.date_naive(),
+            app_base::format::Zone::Local,
+        );
         let Some(index) = position_of(&items, message_key, url) else {
             return;
         };
@@ -587,6 +592,7 @@ impl ConversationView {
             new_post_open: false,
             reply_composer: None,
             reply_root: None,
+            reply_drafts: HashMap::new(),
             feed_stash: None,
             feed_rows_seen: Rc::new(Cell::new(usize::MAX)),
             feed_at_top: true,
@@ -1479,6 +1485,9 @@ impl ConversationView {
             return;
         }
         self.composer.update(cx, |composer, cx| {
+            if composer.is_editing() {
+                composer.cancel_edit(window, cx);
+            }
             composer.set_reply(Some(preview), cx);
             composer.focus(window, cx);
         });
@@ -1524,7 +1533,7 @@ impl ConversationView {
             })
             .unwrap_or_default();
         RowContext {
-            offset: now.offset().fix(),
+            offset: app_base::format::Zone::Local,
             today: now.date_naive(),
             my_user_id: app.store.meta(META_USER_ID).ok().flatten(),
             names,
@@ -3272,11 +3281,12 @@ impl ConversationView {
                     cx.notify();
                 } else if failed {
                     this.show_main_composer(cx);
-                    if this.composer.read(cx).is_empty(cx) {
+                    if !this.composer.read(cx).is_editing() {
                         this.notice =
                             Some("Edit failed: your text is back in the composer".to_owned());
-                        this.composer
-                            .update(cx, |composer, cx| composer.restore(&outgoing, window, cx));
+                        this.composer.update(cx, |composer, cx| {
+                            composer.begin_edit(outgoing.clone(), window, cx)
+                        });
                     } else {
                         this.notice = Some("Edit failed".to_owned());
                     }

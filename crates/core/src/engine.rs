@@ -660,6 +660,7 @@ fn oldest_created(page: &RemotePage) -> Option<DateTime<Utc>> {
     page.items
         .iter()
         .filter_map(|message| message.created_date_time)
+        .chain(page.oldest_at)
         .min()
 }
 

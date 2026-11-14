@@ -61,9 +61,8 @@ pub(super) fn pinned_post_item(message_id: &str, record: Option<&MessageRecord>)
             byline: String::new(),
         };
     };
-    let offset = Local::now().offset().fix();
-    let today = Utc::now().with_timezone(&offset).date_naive();
-    let date = format::list_time_label(record.created_at, today, offset);
+    let today = Local::now().date_naive();
+    let date = format::list_time_label(record.created_at, today, app_base::format::Zone::Local);
     let author = record.sender_name.clone().unwrap_or_default();
     let byline = match (author.is_empty(), date.is_empty()) {
         (false, false) => format!("{author}, {date}"),

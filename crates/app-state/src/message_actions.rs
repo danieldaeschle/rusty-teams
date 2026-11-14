@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use chrono::{DateTime, Local, Offset, Utc};
+use chrono::{DateTime, Local, Utc};
 use gpui_kit::*;
 use store::MessageRecord;
 use teams_core::{PinnedMessage, SavedMessage};
@@ -439,7 +439,7 @@ impl AppState {
 }
 
 fn forward_time(time: DateTime<Utc>, now: DateTime<Local>) -> String {
-    format::list_time_label(time, now.date_naive(), now.offset().fix())
+    format::list_time_label(time, now.date_naive(), app_base::format::Zone::Local)
 }
 
 #[cfg(test)]

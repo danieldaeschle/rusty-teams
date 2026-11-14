@@ -250,6 +250,8 @@ pub struct Composer {
     saved_images: Option<drafts::ImageFingerprint>,
     schedule: Option<schedule::SchedulePopover>,
     scheduling: Option<String>,
+    scheduling_for: Option<String>,
+    draft_before_edit: Option<(Outgoing, Vec<u64>)>,
     pending_anchors: HashMap<u64, usize>,
     link: ComposeLink,
     fun_picker: Entity<FunPicker>,
@@ -525,6 +527,8 @@ impl Composer {
             saved_images: None,
             schedule: None,
             scheduling: None,
+            scheduling_for: None,
+            draft_before_edit: None,
             pending_anchors: HashMap::new(),
             link: ComposeLink::default(),
             fun_picker,
@@ -1791,6 +1795,7 @@ impl Composer {
             self.save_draft_now(cx);
             self.draft_save = None;
             self.saved_images = None;
+            self.draft_before_edit = None;
             let carry = self.carry_images_into.take().as_deref() == Some(conversation_id);
             self.conversation_id = Some(conversation_id.to_owned());
             self.close_rewrite();
@@ -1842,13 +1847,41 @@ impl Composer {
     }
 
     pub fn begin_edit(&mut self, draft: Outgoing, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing.is_none() {
+            self.save_draft_now(cx);
+            let image_ids = self.live_image_ids(cx);
+            self.draft_before_edit = Some((self.compose(cx), image_ids));
+        }
         self.restore(&draft, window, cx);
         self.focus(window, cx);
     }
 
     pub fn cancel_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.editing = None;
-        self.set_text("", window, cx);
+        self.restore_draft_before_edit(window, cx);
+    }
+
+    fn live_image_ids(&self, cx: &App) -> Vec<u64> {
+        self.input
+            .read(cx)
+            .tokens()
+            .iter()
+            .filter_map(|span| image_id(span.token()))
+            .filter(|id| self.tray.image(*id).is_some())
+            .collect()
+    }
+
+    fn restore_draft_before_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.draft_before_edit.take() {
+            Some((outgoing, image_ids)) => {
+                let image_ids = image_ids
+                    .into_iter()
+                    .filter(|id| self.tray.image(*id).is_some())
+                    .collect();
+                self.restore_content(&outgoing, image_ids, window, cx);
+            }
+            None => self.set_text("", window, cx),
+        }
     }
 
     fn outgoing(&self, cx: &App) -> Option<Outgoing> {
@@ -2372,9 +2405,10 @@ impl Composer {
     }
 
     pub fn submit_current(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.scheduling.is_some() {
+        if self.scheduling.is_some() && self.scheduling_for == self.conversation_id {
             return;
         }
+        let was_editing = self.editing.is_some();
         let Some(outgoing) = self.outgoing(cx) else {
             return;
         };
@@ -2391,6 +2425,9 @@ impl Composer {
         self.close_popup();
         self.reset_importance();
         self.close_announcement(window, cx);
+        if was_editing {
+            self.restore_draft_before_edit(window, cx);
+        }
         cx.emit(ComposerEvent::Submit(Box::new(outgoing)));
         cx.notify();
     }
@@ -2423,13 +2460,23 @@ impl Composer {
     }
 
     pub fn restore(&mut self, outgoing: &Outgoing, window: &mut Window, cx: &mut Context<Self>) {
-        self.mention_inputs.clear();
         let image_ids = if outgoing.edit.is_none() {
             self.cancel_uploads();
             self.tray.restore(&outgoing.images, &outgoing.files)
         } else {
             Vec::new()
         };
+        self.restore_content(outgoing, image_ids, window, cx);
+    }
+
+    fn restore_content(
+        &mut self,
+        outgoing: &Outgoing,
+        image_ids: Vec<u64>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.mention_inputs.clear();
         let text = outgoing.draft.text();
         let mut content = InputContent::new(text.to_owned());
         for ((offset, _), id) in text.match_indices(OBJECT_MARK).zip(image_ids) {
@@ -2495,6 +2542,10 @@ impl Composer {
         self.update_mention(cx);
         self.update_link_preview(cx);
         cx.notify();
+    }
+
+    pub fn unsent(&self, cx: &App) -> Option<Outgoing> {
+        (!self.draft.is_blank() && self.editing.is_none()).then(|| self.compose(cx))
     }
 
     pub fn is_empty(&self, cx: &App) -> bool {
@@ -5316,6 +5367,7 @@ mod tests {
                         files: Vec::new(),
                         importance: Default::default(),
                     };
+                    composer.set_text("half reply", window, cx);
                     composer.begin_edit(draft, window, cx);
                 });
             })
@@ -5335,6 +5387,7 @@ mod tests {
                 let composer = composer.read(cx);
                 assert_eq!(composer.tray.items().len(), 1);
                 assert!(composer.can_send(cx));
+                assert_eq!(composer.outgoing(cx).unwrap().text(), "half reply");
             });
         }
 

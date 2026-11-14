@@ -258,6 +258,7 @@ impl Composer {
         self.importance = store::MessageImportance::Normal;
         let outgoing = self.compose(cx);
         self.scheduling = Some(outgoing.html());
+        self.scheduling_for = self.conversation_id.clone();
         self.close_schedule(window, cx);
         cx.emit(ComposerEvent::Schedule {
             outgoing: Box::new(outgoing),

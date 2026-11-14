@@ -148,7 +148,11 @@ impl Fake {
 }
 
 fn page_of(items: Vec<Message>, next_link: Option<String>) -> Result<RemotePage> {
-    Ok(RemotePage { items, next_link })
+    Ok(RemotePage {
+        items,
+        next_link,
+        oldest_at: None,
+    })
 }
 
 struct Handle(Arc<Fake>);

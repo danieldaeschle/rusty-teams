@@ -2097,11 +2097,14 @@ fn is_private_channel(channel: &ChannelRecord) -> bool {
 }
 
 fn channel_activity(channel: &ChannelRecord) -> String {
-    let offset = Local::now().offset().fix();
     channel
         .last_message_at
         .map(|time| {
-            format::channel_time_label(time, Utc::now().with_timezone(&offset).date_naive(), offset)
+            format::channel_time_label(
+                time,
+                Local::now().date_naive(),
+                app_base::format::Zone::Local,
+            )
         })
         .unwrap_or_default()
 }

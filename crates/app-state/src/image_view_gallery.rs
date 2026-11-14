@@ -1,4 +1,5 @@
-use chrono::{FixedOffset, NaiveDate};
+use app_base::format::Zone;
+use chrono::NaiveDate;
 use teams_core::ImageRef;
 
 use crate::format;
@@ -33,16 +34,22 @@ pub fn caption_of(row: &MessageRow) -> String {
         .join(" ")
 }
 
-pub fn viewer_time_label(row: &MessageRow, today: NaiveDate, offset: FixedOffset) -> String {
+pub fn viewer_time_label(row: &MessageRow, today: NaiveDate, offset: impl Into<Zone>) -> String {
+    let offset = offset.into();
     let label = format::post_time_label(row.created_at, today, offset);
-    if row.created_at.with_timezone(&offset).date_naive() == today {
+    if offset.at(row.created_at).date_naive() == today {
         format!("Today {label}")
     } else {
         label
     }
 }
 
-pub fn collect_gallery(rows: &[Row], today: NaiveDate, offset: FixedOffset) -> Vec<GalleryItem> {
+pub fn collect_gallery(
+    rows: &[Row],
+    today: NaiveDate,
+    offset: impl Into<Zone>,
+) -> Vec<GalleryItem> {
+    let offset = offset.into();
     rows.iter()
         .flat_map(Row::messages)
         .filter(|message| !message.deleted)
@@ -69,6 +76,7 @@ pub fn position_of(items: &[GalleryItem], message_key: &str, url: &str) -> Optio
 
 #[cfg(test)]
 mod tests {
+    use chrono::FixedOffset;
     use std::collections::HashMap;
 
     use chrono::{TimeZone, Utc};
@@ -88,7 +96,7 @@ mod tests {
 
     fn context() -> RowContext {
         RowContext {
-            offset: offset(),
+            offset: offset().into(),
             today: today(),
             my_user_id: None,
             names: HashMap::new(),

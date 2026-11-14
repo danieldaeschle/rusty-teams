@@ -257,7 +257,7 @@ pub(crate) fn entry_badge(entry: &DriveEntry) -> Div {
 pub(crate) fn modified_text(entry: &DriveEntry) -> String {
     entry.modified_at.map_or_else(String::new, |time| {
         let now = Local::now();
-        format::list_time_label(time, now.date_naive(), now.offset().fix())
+        format::list_time_label(time, now.date_naive(), app_base::format::Zone::Local)
     })
 }
 

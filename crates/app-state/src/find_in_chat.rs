@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
+use app_base::format::Zone;
 use chatsvc::substrate_search::{MessageFilter, SearchMessage, split_highlights};
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use store::{HIGHLIGHT_END, HIGHLIGHT_START, MessageRecord, SearchHit};
 
 pub const FIND_IN_CHAT: &str = "Find in chat";
@@ -94,15 +95,15 @@ impl FindFilters {
         self.from.is_some() || self.date.is_some() || self.has_attachment || self.mentions_me
     }
 
-    pub fn admits(&self, hit: &FindHit, today: NaiveDate, offset: FixedOffset) -> bool {
+    pub fn admits(&self, hit: &FindHit, today: NaiveDate, offset: impl Into<Zone>) -> bool {
         let from_holds = self.from.as_ref().is_none_or(|sender| {
             hit.sender_id
                 .as_deref()
                 .is_some_and(|sender_id| same_user(sender_id, &sender.user_id))
         });
-        let date_holds = self.date.is_none_or(|range| {
-            range.contains(hit.sent_at.with_timezone(&offset).date_naive(), today)
-        });
+        let date_holds = self
+            .date
+            .is_none_or(|range| range.contains(offset.into().at(hit.sent_at).date_naive(), today));
         from_holds
             && date_holds
             && (!self.has_attachment || hit.has_attachment)
@@ -259,10 +260,15 @@ pub struct MonthGroup {
     pub hits: Vec<FindHit>,
 }
 
-pub fn group_by_month(hits: &[FindHit], today: NaiveDate, offset: FixedOffset) -> Vec<MonthGroup> {
+pub fn group_by_month(
+    hits: &[FindHit],
+    today: NaiveDate,
+    offset: impl Into<Zone>,
+) -> Vec<MonthGroup> {
+    let offset = offset.into();
     let mut groups: Vec<MonthGroup> = Vec::new();
     for hit in hits {
-        let label = month_label(hit.sent_at.with_timezone(&offset).date_naive(), today);
+        let label = month_label(offset.at(hit.sent_at).date_naive(), today);
         match groups.last_mut() {
             Some(group) if group.label == label => group.hits.push(hit.clone()),
             _ => groups.push(MonthGroup {
@@ -288,6 +294,7 @@ pub fn step_index(current: Option<usize>, count: usize, backwards: bool) -> Opti
 
 #[cfg(test)]
 mod tests {
+    use chrono::FixedOffset;
     use chrono::TimeZone;
 
     use super::*;

@@ -203,18 +203,38 @@ impl ConversationView {
         let composer = self.reply_composer(window, cx);
         let previous = self.reply_root.replace(root_id.clone());
         let changed = previous.as_deref() != Some(root_id.as_str());
+        if changed && let Some(previous) = &previous {
+            self.keep_reply_draft(previous, cx);
+        }
+        let kept = self.reply_drafts.remove(&root_id).filter(|_| changed);
         composer.update(cx, |composer, cx| {
-            if changed {
-                composer.set_text("", window, cx);
+            match &kept {
+                Some(outgoing) => composer.restore(outgoing, window, cx),
+                None if changed => composer.set_text("", window, cx),
+                None => {}
             }
-            composer.set_reply(quote, cx);
+            if quote.is_some() || kept.is_none() {
+                composer.set_reply(quote, cx);
+            }
             composer.focus(window, cx);
         });
         self.remeasure_posts(&[Some(root_id), previous], cx);
     }
 
+    fn keep_reply_draft(&mut self, root_id: &str, cx: &mut Context<Self>) {
+        let unsent = self
+            .reply_composer
+            .as_ref()
+            .and_then(|composer| composer.read(cx).unsent(cx));
+        match unsent {
+            Some(outgoing) => self.reply_drafts.insert(root_id.to_owned(), outgoing),
+            None => self.reply_drafts.remove(root_id),
+        };
+    }
+
     pub(super) fn close_reply_editor(&mut self, cx: &mut Context<Self>) {
         if let Some(root_id) = self.reply_root.take() {
+            self.keep_reply_draft(&root_id, cx);
             self.remeasure_posts(&[Some(root_id)], cx);
         }
     }

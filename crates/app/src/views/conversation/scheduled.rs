@@ -17,6 +17,9 @@ use crate::scheduled_rows::{
     draft_id_of, draft_key, scheduled_feed_rows, scheduled_outgoing, scheduled_rows,
 };
 use crate::views::composer::{EditPreview, Outgoing};
+
+const SCHEDULED_EDIT_LOST_NOTICE: &str =
+    "This scheduled message can no longer be changed: your text is back in the composer";
 use crate::views::message_actions::Action;
 use crate::views::message_row::{DeliveryActions, RowAction};
 use crate::views::scheduled_toolbar::ScheduledMenu;
@@ -237,6 +240,15 @@ impl ConversationView {
         let Some(edit) = outgoing.edit.as_ref() else {
             return;
         };
+        let changeable = self
+            .scheduled_draft(&edit.message_id, cx)
+            .is_some_and(|draft| {
+                !draft.id.is_empty() && !self.scheduled_in_flight.contains(&draft.id)
+            });
+        if !changeable {
+            self.restore_unsent(SCHEDULED_EDIT_LOST_NOTICE, &outgoing, None, window, cx);
+            return;
+        }
         self.change_scheduled(
             &edit.message_id.clone(),
             ScheduledAction::Update(outgoing.html()),

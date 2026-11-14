@@ -1,8 +1,30 @@
 use std::cell::Cell;
 
-use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, Utc, Weekday};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, Utc, Weekday};
 
 use crate::theme;
+
+/// `Local` follows the daylight saving rules at the given instant, a fixed offset is the same all year.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Zone {
+    Local,
+    Fixed(FixedOffset),
+}
+
+impl Zone {
+    pub fn at(self, time: DateTime<Utc>) -> DateTime<FixedOffset> {
+        match self {
+            Zone::Local => time.with_timezone(&Local).fixed_offset(),
+            Zone::Fixed(offset) => time.with_timezone(&offset),
+        }
+    }
+}
+
+impl From<FixedOffset> for Zone {
+    fn from(offset: FixedOffset) -> Self {
+        Zone::Fixed(offset)
+    }
+}
 
 const BADGE_CAP: u32 = 99;
 const WEEKDAY_WINDOW_DAYS: i64 = 6;
@@ -201,7 +223,7 @@ pub fn short_version(build_id: &str, package_version: &str) -> String {
     format!("v{package_version} ({commit})")
 }
 
-pub fn list_time_label(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffset) -> String {
+pub fn list_time_label(time: DateTime<Utc>, today: NaiveDate, offset: impl Into<Zone>) -> String {
     list_time_label_in(current_date_style(), time, today, offset)
 }
 
@@ -209,9 +231,9 @@ pub fn list_time_label_in(
     style: Option<DateStyle>,
     time: DateTime<Utc>,
     today: NaiveDate,
-    offset: FixedOffset,
+    offset: impl Into<Zone>,
 ) -> String {
-    let local = time.with_timezone(&offset);
+    let local = offset.into().at(time);
     let day = local.date_naive();
     let days_ago = (today - day).num_days();
     if days_ago <= 0 {
@@ -228,7 +250,11 @@ pub fn list_time_label_in(
 }
 
 /// The last activity next to a channel name: the time today, else day and month, with the year once older.
-pub fn channel_time_label(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffset) -> String {
+pub fn channel_time_label(
+    time: DateTime<Utc>,
+    today: NaiveDate,
+    offset: impl Into<Zone>,
+) -> String {
     channel_time_label_in(current_date_style(), time, today, offset)
 }
 
@@ -236,9 +262,9 @@ pub fn channel_time_label_in(
     style: Option<DateStyle>,
     time: DateTime<Utc>,
     today: NaiveDate,
-    offset: FixedOffset,
+    offset: impl Into<Zone>,
 ) -> String {
-    let local = time.with_timezone(&offset);
+    let local = offset.into().at(time);
     let pattern = if local.date_naive() >= today {
         style.map_or("%H:%M", |style| style.clock)
     } else if local.year() == today.year() {
@@ -249,7 +275,7 @@ pub fn channel_time_label_in(
     local.format(pattern).to_string()
 }
 
-pub fn post_time_label(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffset) -> String {
+pub fn post_time_label(time: DateTime<Utc>, today: NaiveDate, offset: impl Into<Zone>) -> String {
     post_time_label_in(current_date_style(), time, today, offset)
 }
 
@@ -257,9 +283,9 @@ pub fn post_time_label_in(
     style: Option<DateStyle>,
     time: DateTime<Utc>,
     today: NaiveDate,
-    offset: FixedOffset,
+    offset: impl Into<Zone>,
 ) -> String {
-    let local = time.with_timezone(&offset);
+    let local = offset.into().at(time);
     let day = local.date_naive();
     let days_ago = (today - day).num_days();
     let clock = local.format(style.map_or("%H:%M", |style| style.clock));

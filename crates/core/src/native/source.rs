@@ -164,6 +164,9 @@ impl<'a> NativeChats<'a> {
                 .filter_map(|message| graph_message(chat_id, message))
                 .collect(),
             next_link: page.has_older.then(|| OLDER_PAGE_MARKER.to_owned()),
+            oldest_at: page
+                .oldest_arrival_ms
+                .and_then(DateTime::from_timestamp_millis),
         })
     }
 

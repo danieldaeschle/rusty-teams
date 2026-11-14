@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use app_base::format::Zone;
+use chrono::{DateTime, NaiveDate, Utc};
 use store::MessageRecord;
 use teams_core::roster_event::RosterEvent;
 use teams_core::{CallEvent, CallPhase, CallType, ImageRef, format_duration};
@@ -134,7 +135,7 @@ pub fn roster_card(
 }
 
 pub struct CallClock<'a> {
-    pub offset: FixedOffset,
+    pub offset: Zone,
     pub today: NaiveDate,
     pub meeting: &'a MeetingInfo,
 }
@@ -322,19 +323,20 @@ fn recap_date_line(
         });
     format!(
         "{} - {}",
-        slot.start.with_timezone(&clock.offset).format(&format!(
+        clock.offset.at(slot.start).format(&format!(
             "{RECAP_DATE_FORMAT} {}",
             app_base::format::clock_format()
         )),
-        slot.end
-            .with_timezone(&clock.offset)
+        clock
+            .offset
+            .at(slot.end)
             .format(app_base::format::clock_format())
     )
 }
 
 /// Teams writes the weekday in full on these lines ("Thursday 11:45"), unlike message times.
 fn notice_stamp(time: DateTime<Utc>, clock: &CallClock) -> String {
-    let local = time.with_timezone(&clock.offset);
+    let local = clock.offset.at(time);
     let days_ago = (clock.today - local.date_naive()).num_days();
     if (2..=WEEKDAY_STAMP_DAYS).contains(&days_ago) {
         format!(
@@ -543,6 +545,7 @@ pub fn call_card(
 
 #[cfg(test)]
 mod tests {
+    use chrono::FixedOffset;
     use chrono::TimeZone;
     use teams_core::Recording;
 
@@ -603,7 +606,7 @@ mod tests {
             names: &names,
         };
         let clock = CallClock {
-            offset: FixedOffset::east_opt(0).unwrap(),
+            offset: FixedOffset::east_opt(0).unwrap().into(),
             today: NaiveDate::from_ymd_opt(2026, 10, 30).unwrap(),
             meeting,
         };
@@ -728,7 +731,7 @@ mod tests {
                 started_at,
                 ended_at,
                 &CallClock {
-                    offset: FixedOffset::east_opt(2 * 3600).unwrap(),
+                    offset: FixedOffset::east_opt(2 * 3600).unwrap().into(),
                     today: NaiveDate::from_ymd_opt(2026, 10, 17).unwrap(),
                     meeting,
                 },
@@ -752,7 +755,7 @@ mod tests {
     fn notice_stamps_spell_out_the_weekday_like_teams() {
         let meeting = MeetingInfo::default();
         let clock = CallClock {
-            offset: FixedOffset::east_opt(0).unwrap(),
+            offset: FixedOffset::east_opt(0).unwrap().into(),
             today: NaiveDate::from_ymd_opt(2026, 10, 17).unwrap(),
             meeting: &meeting,
         };

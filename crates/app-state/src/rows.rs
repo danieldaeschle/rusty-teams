@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
+use app_base::format::Zone;
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use gpui_kit::Image;
 use store::{MessageImportance, MessageRecord};
 use teams_core::roster_event::{RosterEvent, roster_event};
@@ -401,8 +402,10 @@ pub struct Thread {
     pub reply_ids: Vec<String>,
 }
 
-pub fn clock_label(time: DateTime<Utc>, offset: FixedOffset) -> String {
-    time.with_timezone(&offset)
+pub fn clock_label(time: DateTime<Utc>, offset: impl Into<Zone>) -> String {
+    offset
+        .into()
+        .at(time)
         .format(app_base::format::clock_format())
         .to_string()
 }
@@ -634,7 +637,7 @@ pub fn reply_excerpt(record: &MessageRecord) -> String {
 }
 
 pub struct RowContext {
-    pub offset: FixedOffset,
+    pub offset: Zone,
     pub today: NaiveDate,
     pub my_user_id: Option<String>,
     pub names: HashMap<String, String>,
@@ -768,10 +771,7 @@ fn event_row(
         series: Series::default(),
         author: author.name,
         day_header: Some(format::day_label(
-            record
-                .created_at
-                .with_timezone(&context.offset)
-                .date_naive(),
+            context.offset.at(record.created_at).date_naive(),
             context.today,
         )),
         blocks: Vec::new(),
@@ -879,7 +879,7 @@ fn message_row_with(
     if let Some(event) = roster_event(record) {
         return roster_row(record, &event, context);
     }
-    let local = record.created_at.with_timezone(&context.offset);
+    let local = context.offset.at(record.created_at);
     let images = images(record);
     let own = context.my_user_id.is_some() && record.sender_id == context.my_user_id;
     let translation = context.translation.resolve(record, own);
@@ -971,10 +971,7 @@ pub fn flat_rows(records: &[MessageRecord], context: &RowContext, has_older: boo
         if let Some(call) = row.call.as_mut() {
             call.started &= timeline.is_live_start(index);
         }
-        let day = record
-            .created_at
-            .with_timezone(&context.offset)
-            .date_naive();
+        let day = context.offset.at(record.created_at).date_naive();
         if previous_day == Some(day) {
             row.day_header = None;
         }
@@ -1264,6 +1261,7 @@ pub fn changed_indices(old: &[Row], new: &[Row]) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
+    use chrono::FixedOffset;
     use chrono::TimeZone;
     use teams_core::CallType;
 
@@ -1526,7 +1524,7 @@ mod tests {
 
     fn context() -> RowContext {
         RowContext {
-            offset: FixedOffset::east_opt(0).unwrap(),
+            offset: FixedOffset::east_opt(0).unwrap().into(),
             today: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
             my_user_id: None,
             names: HashMap::new(),

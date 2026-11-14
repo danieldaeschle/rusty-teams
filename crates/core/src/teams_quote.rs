@@ -73,14 +73,16 @@ pub(crate) fn mention_entries(mentions: &[OutgoingMention]) -> Option<Vec<Value>
 }
 
 fn mention_entry(mention: &OutgoingMention) -> Option<Value> {
-    let MentionTarget::User { user_id } = &mention.target else {
-        return None;
+    let (mri, mention_type) = match &mention.target {
+        MentionTarget::User { user_id } => (user_mri(user_id), "person"),
+        MentionTarget::Everyone { chat_id } => (chat_id.clone(), "everyone"),
+        _ => return None,
     };
     Some(json!({
         "@type": MENTION_ITEMTYPE,
         "itemid": mention.id.to_string(),
-        "mri": user_mri(user_id),
-        "mentionType": "person",
+        "mri": mri,
+        "mentionType": mention_type,
         "displayName": mention.text,
     }))
 }
@@ -186,6 +188,19 @@ mod tests {
     }
 
     #[test]
+    fn an_everyone_mention_names_the_chat_itself() {
+        let everyone = mention(
+            0,
+            MentionTarget::Everyone {
+                chat_id: "19:g@thread.v2".into(),
+            },
+        );
+        let entries = mention_entries(&[everyone]).unwrap();
+        assert_eq!(entries[0]["mri"], "19:g@thread.v2");
+        assert_eq!(entries[0]["mentionType"], "everyone");
+    }
+
+    #[test]
     fn group_mentions_have_no_chatsvc_shape() {
         for target in [
             MentionTarget::Channel {
@@ -193,9 +208,6 @@ mod tests {
             },
             MentionTarget::Team {
                 team_id: "team-1".into(),
-            },
-            MentionTarget::Everyone {
-                chat_id: "19:g@thread.v2".into(),
             },
             MentionTarget::Tag {
                 tag_id: "tag-1".into(),

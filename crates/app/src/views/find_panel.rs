@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use chrono::{Local, NaiveDate, Offset};
+use chrono::{Local, NaiveDate};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
@@ -240,7 +240,16 @@ impl FindPanel {
             .filter_map(from_server)
             .filter(|hit| self.filters.admits(hit, today, offset))
             .collect();
+        let current = self
+            .current_index
+            .and_then(|index| self.hits.get(index))
+            .map(|hit| hit.message_id.clone());
         self.hits = merge(self.local_hits.clone(), server);
+        self.current_index = current.and_then(|message_id| {
+            self.hits
+                .iter()
+                .position(|hit| hit.message_id == message_id)
+        });
         self.status = Status::Ready;
         cx.notify();
     }
@@ -468,7 +477,7 @@ impl FindPanel {
         hit: &FindHit,
         index: usize,
         today: NaiveDate,
-        offset: chrono::FixedOffset,
+        offset: app_base::format::Zone,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let current = self.current_index == Some(index);
@@ -586,9 +595,8 @@ fn panel_title(selection: &Selection) -> &'static str {
     }
 }
 
-fn today_and_offset() -> (NaiveDate, chrono::FixedOffset) {
-    let now = Local::now();
-    (now.date_naive(), now.offset().fix())
+fn today_and_offset() -> (NaiveDate, app_base::format::Zone) {
+    (Local::now().date_naive(), app_base::format::Zone::Local)
 }
 
 fn local_hits(

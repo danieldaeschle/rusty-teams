@@ -3,7 +3,7 @@ use std::ops::Range;
 use std::rc::Rc;
 
 use app_ui_kit::layout::SIDEBAR_WIDTH;
-use chrono::{DateTime, Local, NaiveDate, Offset, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, TimeZone, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
@@ -267,7 +267,7 @@ impl ActivityPanel {
         sidebar: &Sidebar,
         directory: &crate::data::Directory,
         today: NaiveDate,
-        offset: chrono::FixedOffset,
+        offset: app_base::format::Zone,
         panel: Entity<ActivityPanel>,
     ) -> AnyElement {
         let activity = self.activity.clone();
@@ -309,7 +309,7 @@ impl ActivityPanel {
         pending: &PendingProposal,
         sidebar: &Sidebar,
         today: NaiveDate,
-        offset: chrono::FixedOffset,
+        offset: app_base::format::Zone,
         panel: Entity<ActivityPanel>,
     ) -> AnyElement {
         let group = SharedString::from(format!("activity-proposal-group-{}", pending.id));
@@ -824,7 +824,7 @@ fn visible_slots(heights: &[f32], from: f32, to: f32) -> VisibleSlots {
 impl Render for ActivityPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let now: DateTime<Local> = Local::now();
-        let (today, offset) = (now.date_naive(), now.offset().fix());
+        let (today, offset) = (now.date_naive(), app_base::format::Zone::Local);
         let panel = cx.entity();
         let app = self.app.clone();
         let activity = self.activity.clone();
@@ -947,7 +947,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    use chrono::{Local, Offset, TimeZone, Utc};
+    use chrono::{Local, TimeZone, Utc};
     use gpui_kit::{AppContext as _, Modifiers, TestAppContext};
     use store::{ChatRecord, Sidebar, Store};
 
@@ -1178,11 +1178,12 @@ mod tests {
         let activity = cx.update(|_, cx| panel.read(cx).activity.clone());
         let first_unread = cx.update(|_, cx| {
             let now = Local::now();
-            activity
-                .read(cx)
-                .feed()
-                .sections(Filter::Unread, now.date_naive(), now.offset().fix())[0]
-                .entries[0]
+            activity.read(cx).feed().sections(
+                Filter::Unread,
+                now.date_naive(),
+                app_base::format::Zone::Local,
+            )[0]
+            .entries[0]
                 .id
                 .clone()
         });

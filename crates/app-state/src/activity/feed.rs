@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use app_base::format::Zone;
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::reaction_model::UNKNOWN_REACTOR;
@@ -99,8 +100,8 @@ pub enum Bucket {
 }
 
 impl Bucket {
-    pub fn of(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffset) -> Bucket {
-        let days_ago = (today - time.with_timezone(&offset).date_naive()).num_days();
+    pub fn of(time: DateTime<Utc>, today: NaiveDate, offset: impl Into<Zone>) -> Bucket {
+        let days_ago = (today - offset.into().at(time).date_naive()).num_days();
         match days_ago {
             ..=0 => Bucket::Today,
             1 => Bucket::Yesterday,
@@ -224,8 +225,9 @@ impl Feed {
         &self,
         filter: Filter,
         today: NaiveDate,
-        offset: FixedOffset,
+        offset: impl Into<Zone>,
     ) -> Vec<Section<'_>> {
+        let offset = offset.into();
         let mut admitted: Vec<&Entry> = self
             .entries
             .iter()
@@ -250,6 +252,7 @@ impl Feed {
 
 #[cfg(test)]
 mod tests {
+    use chrono::FixedOffset;
     use chrono::TimeZone;
 
     use super::*;

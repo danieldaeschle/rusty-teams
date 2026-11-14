@@ -19,6 +19,7 @@ pub struct ConversationPage {
 pub struct MessagePage {
     pub messages: Vec<Value>,
     pub has_older: bool,
+    pub oldest_arrival_ms: Option<i64>,
 }
 
 /// One chat with its members and meeting details, from the chat service aggregator.
@@ -135,9 +136,11 @@ impl<T: MessageTransport> ChatListing<T> {
             .and_then(Value::as_str)
             .is_some_and(|link| !link.is_empty())
             && !messages.is_empty();
+        let oldest_arrival_ms = messages.iter().filter_map(arrival_ms).min();
         Ok(MessagePage {
             messages,
             has_older,
+            oldest_arrival_ms,
         })
     }
 

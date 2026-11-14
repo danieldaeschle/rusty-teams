@@ -39,6 +39,7 @@ const URGENT_ACK_EMOTION: &str = "acks";
 pub struct RemotePage {
     pub items: Vec<Message>,
     pub next_link: Option<String>,
+    pub oldest_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone)]
@@ -990,10 +991,7 @@ impl Remote for Graph {
                     )
                     .await?)
             }
-            Some(_) => Err(Error::Unsupported(
-                "editing a channel message with mentions",
-            )),
-            None => Ok(Graph::edit_message(self, target, html, mentions, extras).await?),
+            Some(_) | None => Ok(Graph::edit_message(self, target, html, mentions, extras).await?),
         }
     }
 
@@ -1667,6 +1665,7 @@ impl From<graph::Page<Message>> for RemotePage {
         RemotePage {
             items: page.items,
             next_link: page.next_link,
+            oldest_at: None,
         }
     }
 }
