@@ -5,10 +5,14 @@ pub use windows_impl::*;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod linux_sound;
+#[cfg(target_os = "linux")]
+mod linux_tray;
 #[cfg(not(windows))]
 mod stub;
 #[cfg(target_os = "linux")]
 mod x11_input;
+#[cfg(target_os = "linux")]
+pub use linux_tray::Tray;
 #[cfg(not(windows))]
 pub use stub::*;
 
