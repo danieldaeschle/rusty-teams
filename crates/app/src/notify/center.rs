@@ -109,6 +109,8 @@ pub struct NotificationCenter {
     hover_hold: bool,
     unread_mentions: HashSet<String>,
     tray: Option<Tray>,
+    /// Last presence pushed to the tray; skip `sync_tray` when unchanged.
+    last_tray_presence: Option<TrayPresence>,
     app_icon: AppIcon,
     shown_badge: Option<Badge>,
     shown_mention_dot: bool,
@@ -133,17 +135,22 @@ impl NotificationCenter {
         let mut settings = settings::load(&app.read(cx).store);
         settings.account = app.read(cx).account_chat_settings().notifications;
         let app_icon = active_appearance::current(cx).app_icon;
+        let initial_presence = tray_presence_from(&app.read(cx), false);
         let tray = if app.read(cx).mode.demo {
             None
         } else {
-            Tray::new(tray_presence_from(&app.read(cx), false), app_icon.png())
+            Tray::new(initial_presence.clone(), app_icon.png())
         };
+        let last_tray_presence = tray.as_ref().map(|_| initial_presence);
         platform::set_window_icon(window, app_icon.png());
         let appearance_observation = cx.observe_global::<ActiveAppearance>(|this, cx| {
             this.apply_app_icon(active_appearance::current(cx).app_icon, cx)
         });
-        let locale_observation = cx.observe_global::<ActiveLocale>(|this, _| {
+        let locale_observation = cx.observe_global::<ActiveLocale>(|this, cx| {
+            // Locale changes the presence title; force a tray sync.
+            this.last_tray_presence = None;
             this.relocalize_tray();
+            this.sync_tray(cx);
         });
         let subscription = cx.subscribe(&app, |this, _, event: &AppEvent, cx| {
             this.on_app_event(event, cx);
@@ -186,6 +193,7 @@ impl NotificationCenter {
             hover_hold: false,
             unread_mentions: HashSet::new(),
             tray,
+            last_tray_presence,
             app_icon,
             shown_badge: None,
             shown_mention_dot: false,
@@ -1273,12 +1281,15 @@ impl NotificationCenter {
     }
 
     fn sync_tray(&mut self, cx: &App) {
-        if let Some(tray) = &self.tray {
-            tray.sync(tray_presence_from(
-                self.app.read(cx),
-                !self.unread_mentions.is_empty(),
-            ));
+        let Some(tray) = &self.tray else {
+            return;
+        };
+        let presence = tray_presence_from(self.app.read(cx), !self.unread_mentions.is_empty());
+        if self.last_tray_presence.as_ref() == Some(&presence) {
+            return;
         }
+        tray.sync(presence.clone());
+        self.last_tray_presence = Some(presence);
     }
 
     fn refresh_badge(&mut self, cx: &mut Context<Self>) {
