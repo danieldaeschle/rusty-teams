@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use gpui_kit::*;
 use store::Sidebar;
+use teams_core::{ForcedAvailability, ForcedKind};
 
 use super::badge::{Badge, badge_for};
 use super::incoming::IncomingTracker;
@@ -107,6 +108,8 @@ pub struct NotificationCenter {
     tray: Option<Tray>,
     app_icon: AppIcon,
     shown_badge: Option<Badge>,
+    /// The published "Do not disturb" presence, as the tray checkbox shows it.
+    tray_do_not_disturb: bool,
     shown_mention_dot: bool,
     animations: bool,
     _subscription: Subscription,
@@ -128,13 +131,20 @@ impl NotificationCenter {
     ) -> Self {
         let mut settings = settings::load(&app.read(cx).store);
         settings.account = app.read(cx).account_chat_settings().notifications;
+        // The tray used to set a local "Do not disturb" with no other switch; it now sets
+        // the published presence, so a leftover local flag would mute the app for good.
+        if settings.do_not_disturb {
+            settings.do_not_disturb = false;
+            settings::save(&app.read(cx).store, &settings);
+        }
+        let tray_do_not_disturb = own_do_not_disturb(app.read(cx));
         let app_icon = active_appearance::current(cx).app_icon;
         let tray = if app.read(cx).mode.demo {
             None
         } else {
             Tray::new(
                 settings.sounds.notification_sound,
-                settings.do_not_disturb,
+                tray_do_not_disturb,
                 app_icon.png(),
             )
         };
@@ -188,6 +198,7 @@ impl NotificationCenter {
             tray,
             app_icon,
             shown_badge: None,
+            tray_do_not_disturb,
             shown_mention_dot: false,
             animations: platform::animations_enabled(),
             app,
@@ -426,6 +437,7 @@ impl NotificationCenter {
             AppEvent::CallTone(tone) => self.on_call_tone(*tone, cx),
             AppEvent::Call => self.sync_call_sounds(cx),
             AppEvent::SoundSettings => self.on_account_sounds(cx),
+            AppEvent::Directory => self.on_own_presence(cx),
             AppEvent::ChatSettings => self.on_account_notifications(cx),
             AppEvent::FollowedStatus { user_id, text } => {
                 self.present_status_change(user_id, text, cx)
@@ -1176,13 +1188,11 @@ impl NotificationCenter {
                 TrayCommand::ToggleSound => self.update_settings(cx, |settings| {
                     settings.sounds.notification_sound = !settings.sounds.notification_sound
                 }),
-                TrayCommand::ToggleDoNotDisturb => self.update_settings(cx, |settings| {
-                    settings.do_not_disturb = !settings.do_not_disturb
-                }),
+                TrayCommand::ToggleDoNotDisturb => self.toggle_do_not_disturb(cx),
                 TrayCommand::Settings => {
                     self.raise_main_window(cx);
                     self.app.update(cx, |state, cx| {
-                        state.open_settings(SettingsSection::General, cx)
+                        state.open_settings(SettingsSection::Notifications, cx)
                     });
                 }
                 TrayCommand::Quit => cx.quit(),
@@ -1246,11 +1256,30 @@ impl NotificationCenter {
         }
     }
 
+    /// Sets or clears the published "Do not disturb" presence, like `/dnd` and the
+    /// status menu; clearing resets to the automatic status.
+    fn toggle_do_not_disturb(&mut self, cx: &mut Context<Self>) {
+        let forced = (!own_do_not_disturb(self.app.read(cx))).then_some(ForcedAvailability {
+            kind: ForcedKind::DoNotDisturb,
+            expires_at: None,
+        });
+        self.app
+            .update(cx, |state, cx| state.set_own_availability(forced, cx));
+    }
+
+    fn on_own_presence(&mut self, cx: &mut Context<Self>) {
+        let do_not_disturb = own_do_not_disturb(self.app.read(cx));
+        if do_not_disturb != self.tray_do_not_disturb {
+            self.tray_do_not_disturb = do_not_disturb;
+            self.sync_tray();
+        }
+    }
+
     fn sync_tray(&self) {
         if let Some(tray) = &self.tray {
             tray.sync(
                 self.settings.sounds.notification_sound,
-                self.settings.do_not_disturb,
+                self.tray_do_not_disturb,
                 !self.unread_mentions.is_empty(),
             );
         }
