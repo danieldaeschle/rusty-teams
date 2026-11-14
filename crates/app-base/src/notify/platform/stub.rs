@@ -110,7 +110,7 @@ pub struct Tray;
 
 #[cfg(not(target_os = "linux"))]
 impl Tray {
-    pub fn new(_sound_on: bool, _do_not_disturb: bool, _icon_png: &[u8]) -> Option<Self> {
+    pub fn new(_presence: super::TrayPresence, _icon_png: &[u8]) -> Option<Self> {
         None
     }
 
@@ -120,7 +120,7 @@ impl Tray {
         Vec::new()
     }
 
-    pub fn sync(&self, _sound_on: bool, _do_not_disturb: bool, _mention: bool) {}
+    pub fn sync(&self, _presence: super::TrayPresence) {}
 
     pub fn relocalize(&self) {}
 }
