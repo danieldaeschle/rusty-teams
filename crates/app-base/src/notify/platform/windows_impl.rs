@@ -7,7 +7,7 @@ use std::time::Duration;
 use calling::ShareKind;
 use gpui_kit::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
@@ -43,8 +43,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{BOOL, PCWSTR, w};
 
 use super::stack_plan::{StackPlan, stack_plan};
-use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
+use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, TrayPresence, WorkArea};
 use crate::notify::badge::{Badge, render_badge};
+use crate::notify::tray_status;
 
 const SOUND_BYTES: &[u8] = include_bytes!("../../../../app/assets/sounds/notification.mp3");
 const TRAY_ICON_SIZE: u32 = 32;
@@ -652,17 +653,19 @@ pub fn play_sound() {
 }
 
 const ID_OPEN: &str = "open";
-const ID_SOUND: &str = "sound";
-const ID_DO_NOT_DISTURB: &str = "do_not_disturb";
-const ID_SETTINGS: &str = "settings";
+const ID_NOTIFICATIONS: &str = "notifications";
 const ID_QUIT: &str = "quit";
+const ID_RESET_STATUS: &str = "status:reset";
 
 pub struct Tray {
     icon: TrayIcon,
     open: MenuItem,
-    sound: CheckMenuItem,
-    do_not_disturb: CheckMenuItem,
-    settings: MenuItem,
+    status: Submenu,
+    status_items: Vec<CheckMenuItem>,
+    duration_items: Vec<MenuItem>,
+    duration_menu: Submenu,
+    reset: MenuItem,
+    notifications: MenuItem,
     quit: MenuItem,
     plain: Icon,
     with_dot: Icon,
@@ -673,25 +676,55 @@ fn tray_menu_label(key: &str) -> String {
 }
 
 impl Tray {
-    pub fn new(sound_on: bool, do_not_disturb: bool, icon_png: &[u8]) -> Option<Self> {
+    pub fn new(presence: TrayPresence, icon_png: &[u8]) -> Option<Self> {
         let (plain, with_dot) = tray_icons(icon_png)?;
         let open = MenuItem::with_id(ID_OPEN, tray_menu_label("tray.open"), true, None);
-        let sound = CheckMenuItem::with_id(
-            ID_SOUND,
-            tray_menu_label("tray.mute_sound"),
-            true,
-            !sound_on,
-            None,
-        );
-        let dnd = CheckMenuItem::with_id(
-            ID_DO_NOT_DISTURB,
-            tray_menu_label("tray.do_not_disturb"),
-            true,
-            do_not_disturb,
-            None,
-        );
-        let settings = MenuItem::with_id(
-            ID_SETTINGS,
+        let status_items: Vec<CheckMenuItem> = tray_status::STATUS_CHOICES
+            .into_iter()
+            .map(|kind| {
+                CheckMenuItem::with_id(
+                    tray_status::kind_id(kind),
+                    tray_status::choice_label(kind),
+                    true,
+                    presence.forced == Some(kind),
+                    None,
+                )
+            })
+            .collect();
+        let duration_enabled = tray_status::duration_target(presence.forced).is_some();
+        let duration_items: Vec<MenuItem> = tray_status::STATUS_DURATIONS
+            .into_iter()
+            .map(|duration| {
+                MenuItem::with_id(
+                    tray_status::duration_id(duration),
+                    tray_status::duration_label(duration),
+                    duration_enabled,
+                    None,
+                )
+            })
+            .collect();
+        let duration_refs: Vec<&dyn tray_icon::menu::IsMenuItem> = duration_items
+            .iter()
+            .map(|item| item as &dyn tray_icon::menu::IsMenuItem)
+            .collect();
+        let duration_menu = Submenu::with_items(
+            tray_status::duration_menu_label(),
+            duration_enabled,
+            &duration_refs,
+        )
+        .ok()?;
+        let reset = MenuItem::with_id(ID_RESET_STATUS, tray_status::reset_label(), true, None);
+        let mut status_entry_refs: Vec<&dyn tray_icon::menu::IsMenuItem> = status_items
+            .iter()
+            .map(|item| item as &dyn tray_icon::menu::IsMenuItem)
+            .collect();
+        let separator = PredefinedMenuItem::separator();
+        status_entry_refs.push(&separator);
+        status_entry_refs.push(&duration_menu);
+        status_entry_refs.push(&reset);
+        let status = Submenu::with_items(&presence.title, true, &status_entry_refs).ok()?;
+        let notifications = MenuItem::with_id(
+            ID_NOTIFICATIONS,
             tray_menu_label("tray.notifications"),
             true,
             None,
@@ -701,9 +734,8 @@ impl Tray {
         menu.append_items(&[
             &open,
             &PredefinedMenuItem::separator(),
-            &sound,
-            &dnd,
-            &settings,
+            &status,
+            &notifications,
             &PredefinedMenuItem::separator(),
             &quit,
         ])
@@ -718,9 +750,12 @@ impl Tray {
         Some(Tray {
             icon,
             open,
-            sound,
-            do_not_disturb: dnd,
-            settings,
+            status,
+            status_items,
+            duration_items,
+            duration_menu,
+            reset,
+            notifications,
             quit,
             plain,
             with_dot,
@@ -729,26 +764,48 @@ impl Tray {
 
     pub fn relocalize(&self) {
         let _ = self.open.set_text(tray_menu_label("tray.open"));
-        let _ = self.sound.set_text(tray_menu_label("tray.mute_sound"));
         let _ = self
-            .do_not_disturb
-            .set_text(tray_menu_label("tray.do_not_disturb"));
-        let _ = self
-            .settings
+            .notifications
             .set_text(tray_menu_label("tray.notifications"));
         let _ = self.quit.set_text(tray_menu_label("tray.quit"));
+        let _ = self.reset.set_text(tray_status::reset_label());
+        let _ = self
+            .duration_menu
+            .set_text(tray_status::duration_menu_label());
+        for (item, kind) in self
+            .status_items
+            .iter()
+            .zip(tray_status::STATUS_CHOICES.into_iter())
+        {
+            let _ = item.set_text(tray_status::choice_label(kind));
+        }
+        for (item, duration) in self
+            .duration_items
+            .iter()
+            .zip(tray_status::STATUS_DURATIONS.into_iter())
+        {
+            let _ = item.set_text(tray_status::duration_label(duration));
+        }
     }
 
     pub fn poll(&self) -> Vec<TrayCommand> {
         let mut commands = Vec::new();
         while let Ok(event) = MenuEvent::receiver().try_recv() {
-            let command = match event.id.0.as_str() {
+            let id = event.id.0.as_str();
+            let command = match id {
                 ID_OPEN => TrayCommand::Open,
-                ID_SOUND => TrayCommand::ToggleSound,
-                ID_DO_NOT_DISTURB => TrayCommand::ToggleDoNotDisturb,
-                ID_SETTINGS => TrayCommand::Settings,
+                ID_NOTIFICATIONS => TrayCommand::Notifications,
                 ID_QUIT => TrayCommand::Quit,
-                _ => continue,
+                ID_RESET_STATUS => TrayCommand::ResetStatus,
+                other => {
+                    if let Some(kind) = tray_status::parse_kind_id(other) {
+                        TrayCommand::SetStatus(kind)
+                    } else if let Some(duration) = tray_status::parse_duration_id(other) {
+                        TrayCommand::SetStatusDuration(duration)
+                    } else {
+                        continue;
+                    }
+                }
             };
             commands.push(command);
         }
@@ -775,11 +832,26 @@ impl Tray {
         let _ = self.icon.set_icon(Some(icon.clone()));
     }
 
-    pub fn sync(&self, sound_on: bool, do_not_disturb: bool, mention: bool) {
+    pub fn sync(&self, presence: TrayPresence) {
         self.relocalize();
-        self.sound.set_checked(!sound_on);
-        self.do_not_disturb.set_checked(do_not_disturb);
-        let icon = if mention { &self.with_dot } else { &self.plain };
+        let _ = self.status.set_text(&presence.title);
+        for (item, kind) in self
+            .status_items
+            .iter()
+            .zip(tray_status::STATUS_CHOICES.into_iter())
+        {
+            item.set_checked(presence.forced == Some(kind));
+        }
+        let duration_enabled = tray_status::duration_target(presence.forced).is_some();
+        let _ = self.duration_menu.set_enabled(duration_enabled);
+        for item in &self.duration_items {
+            let _ = item.set_enabled(duration_enabled);
+        }
+        let icon = if presence.mention {
+            &self.with_dot
+        } else {
+            &self.plain
+        };
         let _ = self.icon.set_icon(Some(icon.clone()));
     }
 }

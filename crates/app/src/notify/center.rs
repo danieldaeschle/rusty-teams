@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use gpui_kit::*;
 use store::Sidebar;
 use teams_core::{ForcedAvailability, ForcedKind};
@@ -11,7 +11,9 @@ use super::badge::{Badge, badge_for};
 use super::incoming::IncomingTracker;
 use super::layout::{self, MEETING_HEIGHT, Slot, ring_height};
 use super::meeting_view::MeetingToastView;
-use super::platform::{self, NativeHandle, Tray, TrayCommand, WorkArea};
+use super::platform::{
+    self, NativeHandle, Tray, TrayCommand, TrayPresence, TrayStatusDuration, WorkArea,
+};
 use super::ring_view::RingView;
 use super::rules::{
     ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide,
@@ -39,6 +41,7 @@ use crate::appearance::AppIcon;
 use crate::autostart::{self, StartupSettings};
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
+use crate::own_status::{self, StatusDuration};
 use crate::runtime;
 use crate::settings_section::SettingsSection;
 use crate::single_instance;
@@ -106,7 +109,6 @@ pub struct NotificationCenter {
     hover_hold: bool,
     unread_mentions: HashSet<String>,
     tray: Option<Tray>,
-    tray_do_not_disturb: bool,
     app_icon: AppIcon,
     shown_badge: Option<Badge>,
     shown_mention_dot: bool,
@@ -131,15 +133,10 @@ impl NotificationCenter {
         let mut settings = settings::load(&app.read(cx).store);
         settings.account = app.read(cx).account_chat_settings().notifications;
         let app_icon = active_appearance::current(cx).app_icon;
-        let tray_do_not_disturb = own_do_not_disturb(app.read(cx));
         let tray = if app.read(cx).mode.demo {
             None
         } else {
-            Tray::new(
-                settings.sounds.notification_sound,
-                tray_do_not_disturb,
-                app_icon.png(),
-            )
+            Tray::new(tray_presence_from(&app.read(cx), false), app_icon.png())
         };
         platform::set_window_icon(window, app_icon.png());
         let appearance_observation = cx.observe_global::<ActiveAppearance>(|this, cx| {
@@ -189,7 +186,6 @@ impl NotificationCenter {
             hover_hold: false,
             unread_mentions: HashSet::new(),
             tray,
-            tray_do_not_disturb,
             app_icon,
             shown_badge: None,
             shown_mention_dot: false,
@@ -424,7 +420,7 @@ impl NotificationCenter {
             AppEvent::Messages(conversation_id) => self.on_messages(conversation_id, cx),
             AppEvent::Selection => self.on_selection(cx),
             AppEvent::Sidebar => self.refresh_badge(cx),
-            AppEvent::Directory => self.sync_tray_presence(cx),
+            AppEvent::Directory | AppEvent::Status => self.sync_tray(cx),
             AppEvent::Ring => self.on_rings_changed(cx),
             AppEvent::MeetingReminder => self.on_meeting_reminder(cx),
             AppEvent::MeetingChime => self.on_meeting_chime(cx),
@@ -1176,11 +1172,40 @@ impl NotificationCenter {
             match command {
                 TrayCommand::Toggle => self.toggle_main_window(cx),
                 TrayCommand::Open => self.raise_main_window(cx),
-                TrayCommand::ToggleSound => self.update_settings(cx, |settings| {
-                    settings.sounds.notification_sound = !settings.sounds.notification_sound
-                }),
-                TrayCommand::ToggleDoNotDisturb => self.toggle_own_do_not_disturb(cx),
-                TrayCommand::Settings => {
+                TrayCommand::SetStatus(kind) => {
+                    let forced = ForcedAvailability {
+                        kind,
+                        expires_at: None,
+                    };
+                    self.app
+                        .update(cx, |state, cx| state.set_own_availability(Some(forced), cx));
+                    self.sync_tray(cx);
+                }
+                TrayCommand::SetStatusDuration(duration) => {
+                    let Some(kind) = self
+                        .app
+                        .read(cx)
+                        .own_status
+                        .forced
+                        .map(|forced| forced.kind)
+                        .filter(|kind| *kind != ForcedKind::Available)
+                    else {
+                        continue;
+                    };
+                    let forced = ForcedAvailability {
+                        kind,
+                        expires_at: Some(tray_duration(duration).expires_at(Local::now())),
+                    };
+                    self.app
+                        .update(cx, |state, cx| state.set_own_availability(Some(forced), cx));
+                    self.sync_tray(cx);
+                }
+                TrayCommand::ResetStatus => {
+                    self.app
+                        .update(cx, |state, cx| state.set_own_availability(None, cx));
+                    self.sync_tray(cx);
+                }
+                TrayCommand::Notifications => {
                     self.raise_main_window(cx);
                     self.app.update(cx, |state, cx| {
                         state.open_settings(SettingsSection::Notifications, cx)
@@ -1188,22 +1213,6 @@ impl NotificationCenter {
                 }
                 TrayCommand::Quit => cx.quit(),
             }
-        }
-    }
-
-    fn toggle_own_do_not_disturb(&mut self, cx: &mut Context<Self>) {
-        let forced = (!own_do_not_disturb(self.app.read(cx))).then_some(ForcedAvailability {
-            kind: ForcedKind::DoNotDisturb,
-            expires_at: None,
-        });
-        self.app
-            .update(cx, |state, cx| state.set_own_availability(forced, cx));
-        self.sync_tray(cx);
-    }
-
-    fn sync_tray_presence(&mut self, cx: &App) {
-        if self.tray_do_not_disturb != own_do_not_disturb(self.app.read(cx)) {
-            self.sync_tray(cx);
         }
     }
 
@@ -1264,13 +1273,11 @@ impl NotificationCenter {
     }
 
     fn sync_tray(&mut self, cx: &App) {
-        self.tray_do_not_disturb = own_do_not_disturb(self.app.read(cx));
         if let Some(tray) = &self.tray {
-            tray.sync(
-                self.settings.sounds.notification_sound,
-                self.tray_do_not_disturb,
+            tray.sync(tray_presence_from(
+                self.app.read(cx),
                 !self.unread_mentions.is_empty(),
-            );
+            ));
         }
     }
 
@@ -1545,6 +1552,29 @@ fn own_presence(state: &AppState) -> PresenceKind {
 
 fn own_do_not_disturb(state: &AppState) -> bool {
     own_presence(state) == PresenceKind::DoNotDisturb
+}
+
+fn tray_presence_from(state: &AppState, mention: bool) -> TrayPresence {
+    let summary = own_status::state_summary(&state.own_status, own_presence(state), &Local::now());
+    let title = match &summary.until {
+        Some(until) => format!("{} {until}", summary.label),
+        None => summary.label.to_owned(),
+    };
+    TrayPresence::new(
+        title,
+        state.own_status.forced.map(|forced| forced.kind),
+        mention,
+    )
+}
+
+fn tray_duration(duration: TrayStatusDuration) -> StatusDuration {
+    match duration {
+        TrayStatusDuration::HalfHour => StatusDuration::HalfHour,
+        TrayStatusDuration::OneHour => StatusDuration::OneHour,
+        TrayStatusDuration::TwoHours => StatusDuration::TwoHours,
+        TrayStatusDuration::Today => StatusDuration::Today,
+        TrayStatusDuration::ThisWeek => StatusDuration::ThisWeek,
+    }
 }
 
 fn sync_loop(handle: &mut Option<SoundHandle>, audible: bool, tone: CallTone, cx: &App) {

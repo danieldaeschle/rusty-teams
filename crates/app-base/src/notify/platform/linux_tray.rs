@@ -4,12 +4,14 @@
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use chatsvc::ForcedKind;
 use ksni::blocking::{Handle, TrayMethods as _};
-use ksni::menu::{CheckmarkItem, StandardItem};
+use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::{Category, Icon, MenuItem, ToolTip};
 
-use super::TrayCommand;
+use super::{TrayCommand, TrayPresence};
 use crate::linux_desktop::DESKTOP_ID;
+use crate::notify::tray_status;
 
 const TRAY_ICON_SIZES: [u32; 3] = [22, 32, 64];
 const DOT_COLOR: [u8; 4] = [0xef, 0x44, 0x44, 0xff];
@@ -17,10 +19,10 @@ const DOT_COLOR: [u8; 4] = [0xef, 0x44, 0x44, 0xff];
 #[derive(Clone)]
 struct Labels {
     open: String,
-    mute_sound: String,
-    do_not_disturb: String,
     notifications: String,
     quit: String,
+    duration: String,
+    reset: String,
 }
 
 impl Labels {
@@ -28,10 +30,10 @@ impl Labels {
         let tr = crate::ui_locale::tr;
         Labels {
             open: tr("tray.open"),
-            mute_sound: tr("tray.mute_sound"),
-            do_not_disturb: tr("tray.do_not_disturb"),
             notifications: tr("tray.notifications"),
             quit: tr("tray.quit"),
+            duration: tray_status::duration_menu_label().to_owned(),
+            reset: tray_status::reset_label().to_owned(),
         }
     }
 }
@@ -39,8 +41,8 @@ impl Labels {
 struct Item {
     commands: Sender<TrayCommand>,
     labels: Labels,
-    sound_on: bool,
-    do_not_disturb: bool,
+    title: String,
+    forced: Option<ForcedKind>,
     mention: bool,
     plain: Vec<Icon>,
     dotted: Vec<Icon>,
@@ -55,6 +57,63 @@ impl Item {
 /// Escapes the mnemonic underscores of a menu label.
 fn menu_label(text: &str) -> String {
     text.replace('_', "__")
+}
+
+fn status_submenu(item: &Item) -> MenuItem<Item> {
+    let mut entries = Vec::new();
+    for kind in tray_status::STATUS_CHOICES {
+        let label = tray_status::choice_label(kind);
+        entries.push(
+            CheckmarkItem {
+                label: menu_label(label),
+                checked: item.forced == Some(kind),
+                activate: Box::new(move |item: &mut Item| {
+                    item.send(TrayCommand::SetStatus(kind))
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
+    }
+    entries.push(MenuItem::Separator);
+    let duration_enabled = tray_status::duration_target(item.forced).is_some();
+    let mut duration_items = Vec::new();
+    for duration in tray_status::STATUS_DURATIONS {
+        duration_items.push(
+            StandardItem {
+                label: menu_label(tray_status::duration_label(duration)),
+                enabled: duration_enabled,
+                activate: Box::new(move |item: &mut Item| {
+                    item.send(TrayCommand::SetStatusDuration(duration))
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
+    }
+    entries.push(
+        SubMenu {
+            label: menu_label(&item.labels.duration),
+            enabled: duration_enabled,
+            submenu: duration_items,
+            ..Default::default()
+        }
+        .into(),
+    );
+    entries.push(
+        StandardItem {
+            label: menu_label(&item.labels.reset),
+            activate: Box::new(|item: &mut Item| item.send(TrayCommand::ResetStatus)),
+            ..Default::default()
+        }
+        .into(),
+    );
+    SubMenu {
+        label: menu_label(&item.title),
+        submenu: entries,
+        ..Default::default()
+    }
+    .into()
 }
 
 impl ksni::Tray for Item {
@@ -98,23 +157,10 @@ impl ksni::Tray for Item {
             }
             .into(),
             MenuItem::Separator,
-            CheckmarkItem {
-                label: menu_label(&self.labels.mute_sound),
-                checked: !self.sound_on,
-                activate: Box::new(|item: &mut Self| item.send(TrayCommand::ToggleSound)),
-                ..Default::default()
-            }
-            .into(),
-            CheckmarkItem {
-                label: menu_label(&self.labels.do_not_disturb),
-                checked: self.do_not_disturb,
-                activate: Box::new(|item: &mut Self| item.send(TrayCommand::ToggleDoNotDisturb)),
-                ..Default::default()
-            }
-            .into(),
+            status_submenu(self),
             StandardItem {
                 label: menu_label(&self.labels.notifications),
-                activate: Box::new(|item: &mut Self| item.send(TrayCommand::Settings)),
+                activate: Box::new(|item: &mut Self| item.send(TrayCommand::Notifications)),
                 ..Default::default()
             }
             .into(),
@@ -137,15 +183,15 @@ pub struct Tray {
 
 impl Tray {
     /// `None` when there is no session bus or no tray host (no StatusNotifierWatcher).
-    pub fn new(sound_on: bool, do_not_disturb: bool, icon_png: &[u8]) -> Option<Self> {
+    pub fn new(presence: TrayPresence, icon_png: &[u8]) -> Option<Self> {
         let (plain, dotted) = tray_icons(icon_png)?;
         let (sender, receiver) = channel();
         let item = Item {
             commands: sender,
             labels: Labels::current(),
-            sound_on,
-            do_not_disturb,
-            mention: false,
+            title: presence.title,
+            forced: presence.forced,
+            mention: presence.mention,
             plain,
             dotted,
         };
@@ -185,13 +231,13 @@ impl Tray {
         });
     }
 
-    pub fn sync(&self, sound_on: bool, do_not_disturb: bool, mention: bool) {
+    pub fn sync(&self, presence: TrayPresence) {
         let labels = Labels::current();
         self.handle.update(move |item| {
             item.labels = labels;
-            item.sound_on = sound_on;
-            item.do_not_disturb = do_not_disturb;
-            item.mention = mention;
+            item.title = presence.title;
+            item.forced = presence.forced;
+            item.mention = presence.mention;
         });
     }
 }
@@ -271,5 +317,38 @@ mod tests {
     #[test]
     fn underscores_stay_visible_in_menu_labels() {
         assert_eq!(menu_label("Do_not_disturb"), "Do__not__disturb");
+    }
+
+    #[test]
+    fn status_submenu_lists_every_choice_and_reset() {
+        let (sender, _receiver) = channel();
+        let item = Item {
+            commands: sender,
+            labels: Labels::current(),
+            title: "Available".into(),
+            forced: Some(ForcedKind::Busy),
+            mention: false,
+            plain: Vec::new(),
+            dotted: Vec::new(),
+        };
+        let MenuItem::SubMenu(menu) = status_submenu(&item) else {
+            panic!("expected status submenu");
+        };
+        assert_eq!(menu.label, "Available");
+        let labels: Vec<_> = menu
+            .submenu
+            .iter()
+            .filter_map(|entry| match entry {
+                MenuItem::Checkmark(item) => Some(item.label.as_str()),
+                MenuItem::Standard(item) => Some(item.label.as_str()),
+                MenuItem::SubMenu(item) => Some(item.label.as_str()),
+                _ => None,
+            })
+            .collect();
+        for kind in tray_status::STATUS_CHOICES {
+            assert!(labels.contains(&tray_status::choice_label(kind)));
+        }
+        assert!(labels.contains(&tray_status::reset_label()));
+        assert!(labels.contains(&tray_status::duration_menu_label()));
     }
 }
