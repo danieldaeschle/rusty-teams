@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, Offset, Utc};
+use app_base::format::Zone;
+use chrono::{DateTime, Local, NaiveDate, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{h_flex, tooltip::Tooltip, v_flex};
@@ -44,7 +45,7 @@ fn place_of(sidebar: &Sidebar, conversation_id: &str) -> Option<String> {
     selection_for(sidebar, conversation_id).map(|selection| selection_title(sidebar, &selection))
 }
 
-fn time_label(time: DateTime<Utc>, today: NaiveDate, offset: FixedOffset) -> String {
+fn time_label(time: DateTime<Utc>, today: NaiveDate, offset: Zone) -> String {
     format::list_time_label(time, today, offset)
 }
 
@@ -52,7 +53,7 @@ pub fn mention_rows(
     entries: &[Entry],
     sidebar: &Sidebar,
     today: NaiveDate,
-    offset: FixedOffset,
+    offset: Zone,
 ) -> Vec<QuickRow> {
     let mut mentions: Vec<&Entry> = entries
         .iter()
@@ -109,7 +110,7 @@ pub fn saved_rows(
     items: &[SavedMessage],
     sidebar: &Sidebar,
     today: NaiveDate,
-    offset: FixedOffset,
+    offset: Zone,
 ) -> Vec<QuickRow> {
     items
         .iter()
@@ -167,8 +168,8 @@ impl QuickViewPane {
 
     fn rows(&self, view: QuickView, cx: &App) -> Vec<QuickRow> {
         let state = self.app.read(cx);
-        let offset = Local::now().offset().fix();
-        let today = Utc::now().with_timezone(&offset).date_naive();
+        let offset = Zone::Local;
+        let today = Local::now().date_naive();
         match view {
             QuickView::Mentions => mention_rows(
                 self.activity.read(cx).feed().entries(),
@@ -390,7 +391,7 @@ mod tests {
             entry("b", Kind::Reaction, 2),
             entry("c", Kind::Mention, 3),
         ];
-        let offset = FixedOffset::east_opt(0).unwrap();
+        let offset = FixedOffset::east_opt(0).unwrap().into();
         let today = NaiveDate::from_ymd_opt(2026, 11, 8).unwrap();
         let rows = mention_rows(&entries, &Sidebar::default(), today, offset);
         let ids: Vec<_> = rows

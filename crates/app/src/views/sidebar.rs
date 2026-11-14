@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
-use chrono::{Local, Offset, Utc};
+use chrono::{Local, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
@@ -1163,7 +1163,7 @@ impl SidebarView {
         let (sections, section_menus, menu, local_previews) = {
             let state = self.state.read(cx);
             let now = Utc::now();
-            let offset = Local::now().offset().fix();
+            let offset = app_base::format::Zone::Local;
             let input = SectionInput {
                 chats: &state.sidebar.chats,
                 directory: &state.directory,

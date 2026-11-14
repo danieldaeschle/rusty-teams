@@ -105,6 +105,11 @@ impl Feeder {
     }
 }
 
+const DEFAULT_MICROPHONE_NOTICE: &str =
+    "The picked microphone could not be captured while sharing sound, using the default one";
+const NO_MICROPHONE_NOTICE: &str =
+    "The microphone could not be captured while sharing sound, others cannot hear you";
+
 /// Mic through our own processing, plus computer sound when planned, as one track that replaces the device track.
 pub struct SoftwareAudio {
     pub track: RtcAudioTrack,
@@ -112,6 +117,7 @@ pub struct SoftwareAudio {
     pub loopback: Option<LoopbackKind>,
     pub warning: Option<String>,
     pub microphone_source: Option<String>,
+    pub microphone_notice: Option<&'static str>,
     microphone_muted: Arc<AtomicBool>,
     running: Arc<AtomicBool>,
     feeder: Option<std::thread::JoinHandle<()>>,
@@ -153,6 +159,7 @@ impl SoftwareAudio {
         let mut captures = Vec::new();
         let mut warning = None;
         let mut microphone_source = None;
+        let mut microphone_notice = None;
         let (microphone, computer, loopback) = if mode == AudioMode::Platform {
             let computer_queue = SampleQueue::default();
             let (computer, loopback) = if plan.computer_sound {
@@ -174,10 +181,29 @@ impl SoftwareAudio {
                     if !plan.computer_sound {
                         return Err(error);
                     }
-                    warning.get_or_insert(format!(
-                        "microphone not captured while sharing sound: {error}"
-                    ));
-                    FrameSource::Silence
+                    let fallback_queue = SampleQueue::default();
+                    let fallback = Some(input)
+                        .filter(|input| **input != DeviceChoice::SystemDefault)
+                        .and_then(|_| {
+                            start_microphone(&DeviceChoice::SystemDefault, fallback_queue.clone())
+                                .ok()
+                        });
+                    match fallback {
+                        Some(started) => {
+                            microphone_notice = Some(DEFAULT_MICROPHONE_NOTICE);
+                            microphone_source =
+                                Some(format!("{}, picked one failed: {error}", started.source));
+                            captures.push(started.capture);
+                            FrameSource::Captured(fallback_queue)
+                        }
+                        None => {
+                            microphone_notice = Some(NO_MICROPHONE_NOTICE);
+                            warning.get_or_insert(format!(
+                                "microphone not captured while sharing sound: {error}"
+                            ));
+                            FrameSource::Silence
+                        }
+                    }
                 }
             };
             (microphone, computer, loopback)
@@ -230,6 +256,7 @@ impl SoftwareAudio {
             loopback,
             warning,
             microphone_source,
+            microphone_notice,
             microphone_muted,
             running,
             feeder: Some(thread),

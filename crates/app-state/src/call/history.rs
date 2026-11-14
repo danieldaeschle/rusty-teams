@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, Duration, FixedOffset, Utc};
+use app_base::format::Zone;
+use chrono::{DateTime, Duration, Utc};
 use gpui_kit::Context;
 use store::ChatRecord;
 use teams_core::{CallDirection, CallLogEntry, CallOutcome};
@@ -79,12 +80,12 @@ pub fn call_rows<'a>(
     entries: impl IntoIterator<Item = &'a CallLogEntry>,
     chats: &[ChatRecord],
     now: DateTime<Utc>,
-    offset: FixedOffset,
+    offset: Zone,
 ) -> Vec<CallRow> {
     let names = known_names(chats);
     let chats_by_id: HashMap<&str, &ChatRecord> =
         chats.iter().map(|chat| (chat.id.as_str(), chat)).collect();
-    let today = now.with_timezone(&offset).date_naive();
+    let today = offset.at(now).date_naive();
     entries
         .into_iter()
         .map(|entry| {
@@ -358,7 +359,12 @@ mod tests {
 
     fn rows(entries: &[CallLogEntry], chats: &[ChatRecord]) -> Vec<CallRow> {
         let now = Utc.with_ymd_and_hms(2026, 10, 9, 12, 0, 0).unwrap();
-        call_rows(entries, chats, now, FixedOffset::east_opt(0).unwrap())
+        call_rows(
+            entries,
+            chats,
+            now,
+            chrono::FixedOffset::east_opt(0).unwrap().into(),
+        )
     }
 
     #[test]

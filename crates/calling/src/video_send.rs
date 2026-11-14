@@ -437,6 +437,10 @@ impl LocalVideo {
         self.camera.track.clone()
     }
 
+    pub fn take_effects_failure(&self) -> bool {
+        self.blur.take_unavailable()
+    }
+
     pub fn blur_average_ms(&self) -> Option<f32> {
         (self.camera_on() && self.blur.active()).then(|| self.blur.average_ms())
     }

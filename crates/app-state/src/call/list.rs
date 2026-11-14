@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use app_base::format::Zone;
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use store::ChatRecord;
 use teams_core::{CallDirection, CallLogEntry};
@@ -130,19 +131,20 @@ impl CallsList {
         history: &[CallLogEntry],
         chats: &[ChatRecord],
         now: DateTime<Utc>,
-        offset: FixedOffset,
+        zone: impl Into<Zone>,
     ) {
+        let zone = zone.into();
         let mut entries = Vec::new();
         let filter = self.filter;
         let admitted = history.iter().filter(|entry| filter.admits(entry));
-        let calls = call_rows(admitted, chats, now, offset);
+        let calls = call_rows(admitted, chats, now, zone);
         if calls.is_empty() {
             entries.push(ListEntry::Empty(self.filter.empty_text()));
         }
         entries.extend(calls.into_iter().map(ListEntry::Call));
         self.set_entries(entries);
         self.built_at = Some(BuiltAt {
-            day: now.with_timezone(&offset).date_naive(),
+            day: zone.at(now).date_naive(),
             time: now,
         });
         self.invalidated = false;

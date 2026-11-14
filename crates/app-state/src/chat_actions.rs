@@ -1,7 +1,7 @@
 use std::future::Future;
 
 use chatsvc::HistoryShare;
-use chrono::{DateTime, Duration, Local, Offset, Utc};
+use chrono::{DateTime, Duration, Utc};
 use gpui_kit::*;
 use store::{ChannelNotifications, ChatRecord, MemberRecord};
 use teams_core::roster_event::{RosterChange, RosterEvent, SharedHistory, merge_members};
@@ -475,7 +475,7 @@ impl AppState {
             expanded_lists: &self.expanded_lists,
             typing: &self.typing,
             now: Utc::now(),
-            offset: Local::now().offset().fix(),
+            offset: app_base::format::Zone::Local,
         };
         build_sections(&input)
     }

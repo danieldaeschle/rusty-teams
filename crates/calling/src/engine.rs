@@ -598,6 +598,14 @@ async fn ring_task(
                 }
             }
             command = commands.recv() => match command {
+                Some(RingCommand::Accept(_, answer)) if answer.is_closed() => {
+                    if let Some(call_leg) = attached.links.get("callLeg")
+                        && let Err(error) = signaling.decline(call_leg).await
+                    {
+                        timeline.record("decline failed", error.to_string());
+                    }
+                    break;
+                }
                 Some(RingCommand::Accept(accept, answer)) => {
                     let (handle, control) = call_channel();
                     let incoming = IncomingCall {

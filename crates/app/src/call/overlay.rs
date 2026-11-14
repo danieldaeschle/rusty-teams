@@ -107,6 +107,7 @@ pub struct CallWindows {
     stage_native: Option<NativeHandle>,
     stage_opening: bool,
     stage_closed_by_user: bool,
+    stage_closed_call: Option<u64>,
     seen_viewing: Option<bool>,
     work_area: Option<WorkArea>,
     minimized: bool,
@@ -186,6 +187,7 @@ impl CallWindows {
             stage_native: None,
             stage_opening: false,
             stage_closed_by_user: false,
+            stage_closed_call: None,
             seen_viewing: None,
             work_area: None,
             minimized: false,
@@ -297,14 +299,17 @@ impl CallWindows {
 
     fn sync_stage(&mut self, cx: &mut Context<Self>) {
         let wanted = self.stage_wanted(cx);
-        if self.stage_closed_by_user {
+        let current_call = self.app.read(cx).call.as_ref().map(|call| call.id);
+        let another_call = current_call.is_some() && current_call != self.stage_closed_call;
+        if self.stage_closed_by_user && !another_call {
             if !wanted {
                 self.stage_closed_by_user = false;
-            } else if self.app.read(cx).call.is_none() {
+            } else if current_call.is_none() {
                 self.app.update(cx, |state, cx| state.dismiss_call_end(cx));
             }
             return;
         }
+        self.stage_closed_by_user = false;
         match (wanted, self.stage) {
             (true, None) => self.open_stage(cx),
             (false, Some(stage)) => {
@@ -315,6 +320,7 @@ impl CallWindows {
                 if stage.update(cx, |_, _, _| ()).is_err() {
                     self.forget_stage();
                     self.stage_closed_by_user = true;
+                    self.stage_closed_call = current_call;
                 }
             }
             (false, None) => {}

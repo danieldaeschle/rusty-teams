@@ -1,7 +1,7 @@
 use std::sync::OnceLock;
 
 use chatsvc::CalendarEvent;
-use chrono::{DateTime, Local, Offset, Utc};
+use chrono::{DateTime, Utc};
 use gpui_kit::Context;
 
 use super::agenda::{AgendaRow, demo_events};
@@ -48,9 +48,12 @@ impl AppState {
 
     pub fn rebuild_calls_list(&mut self, cx: &mut Context<Self>) {
         let now = Utc::now();
-        let offset = Local::now().offset().fix();
-        self.calls_list
-            .rebuild(&self.call_history, &self.sidebar.chats, now, offset);
+        self.calls_list.rebuild(
+            &self.call_history,
+            &self.sidebar.chats,
+            now,
+            app_base::format::Zone::Local,
+        );
         cx.emit(AppEvent::CallHistory);
         cx.notify();
     }

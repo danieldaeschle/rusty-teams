@@ -75,9 +75,18 @@ pub struct BlurSettings {
     effects: Mutex<CameraEffects>,
     cutout: Mutex<Option<Arc<Cutout>>>,
     model: Mutex<&'static str>,
+    unavailable: AtomicBool,
 }
 
 impl BlurSettings {
+    pub fn mark_unavailable(&self) {
+        self.unavailable.store(true, Ordering::Relaxed);
+    }
+
+    pub fn take_unavailable(&self) -> bool {
+        self.unavailable.swap(false, Ordering::Relaxed)
+    }
+
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Relaxed);
     }
@@ -214,6 +223,7 @@ struct WorkerShared {
     outbox: Mutex<Outbox>,
     stride: AtomicU64,
     model: Mutex<&'static str>,
+    failed: AtomicBool,
 }
 
 fn stride_for(inference: Duration) -> u64 {
@@ -294,14 +304,14 @@ impl MaskSource {
             outbox: Mutex::default(),
             stride: AtomicU64::new(1),
             model: Mutex::new(""),
+            failed: AtomicBool::new(false),
         });
         let worker_shared = shared.clone();
         let worker = std::thread::Builder::new()
             .name("segmentation".to_owned())
-            .spawn(move || {
-                if let Some(mut inference) = create() {
-                    run_worker(&worker_shared, &mut inference);
-                }
+            .spawn(move || match create() {
+                Some(mut inference) => run_worker(&worker_shared, &mut inference),
+                None => worker_shared.failed.store(true, Ordering::Relaxed),
             })
             .expect("segmentation thread");
         MaskSource {
@@ -323,6 +333,10 @@ impl MaskSource {
 
     pub fn mask(&self) -> &Mask {
         &self.mask
+    }
+
+    pub fn failed(&self) -> bool {
+        self.shared.failed.load(Ordering::Relaxed)
     }
 
     /// The model that made the newest mask, empty until the first one.

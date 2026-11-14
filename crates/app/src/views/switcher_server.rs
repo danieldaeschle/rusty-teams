@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use chrono::{FixedOffset, NaiveDate};
+use chrono::NaiveDate;
 use teams_core::substrate_search::{SearchMessage, SearchPerson, split_highlights};
 
 use super::switcher::MessageResult;
@@ -46,7 +46,7 @@ pub fn server_message_results(
     messages: &[SearchMessage],
     conversations: &HashMap<String, (String, Selection)>,
     today: NaiveDate,
-    offset: FixedOffset,
+    offset: app_base::format::Zone,
 ) -> Vec<MessageResult> {
     messages
         .iter()
@@ -161,7 +161,7 @@ mod tests {
             ..SearchMessage::default()
         };
         let today = NaiveDate::from_ymd_opt(2026, 11, 8).unwrap();
-        let offset = FixedOffset::east_opt(0).unwrap();
+        let offset = chrono::FixedOffset::east_opt(0).unwrap().into();
         let results = server_message_results(
             &[hit("19:a"), hit("19:unknown")],
             &conversations,

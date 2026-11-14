@@ -369,7 +369,7 @@ mod tests {
             expanded_lists: &expanded,
             typing: &NO_TYPING,
             now: Utc.with_ymd_and_hms(2026, 10, 17, 12, 0, 0).unwrap(),
-            offset: FixedOffset::east_opt(0).unwrap(),
+            offset: FixedOffset::east_opt(0).unwrap().into(),
         };
         let filter = ChatFilter {
             text: "release".into(),

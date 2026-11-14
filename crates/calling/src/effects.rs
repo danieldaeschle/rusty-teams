@@ -171,6 +171,11 @@ impl EffectsStage {
                 Err(_) => self.unavailable = true,
             }
         }
+        if !self.unavailable && self.masks.as_ref().is_some_and(MaskSource::failed) {
+            self.unavailable = true;
+            self.masks = None;
+            self.settings.mark_unavailable();
+        }
         !self.unavailable
     }
 
