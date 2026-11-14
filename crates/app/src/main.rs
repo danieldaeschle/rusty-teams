@@ -14,6 +14,11 @@ mod inline_video;
 mod layout_guard;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod linux_browser;
+#[cfg(target_os = "linux")]
+mod linux_install;
+#[cfg(target_os = "linux")]
+mod linux_update;
+mod main_window;
 pub mod notify;
 mod settings;
 mod views;
@@ -154,6 +159,18 @@ fn transport(
     ))
 }
 
+fn main_window_options(cx: &App) -> WindowOptions {
+    let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
+    let mut options = TitleBar::window_options();
+    options.window_bounds = Some(WindowBounds::Windowed(bounds));
+    options.window_min_size = Some(size(px(WINDOW_MIN_WIDTH), px(WINDOW_MIN_HEIGHT)));
+    options.app_id = Some(LINUX_APP_ID.to_owned());
+    if let Some(titlebar) = options.titlebar.as_mut() {
+        titlebar.title = Some(APP_NAME.into());
+    }
+    options
+}
+
 const STORE_OPEN_ATTEMPTS: u32 = 20;
 const STORE_OPEN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -181,6 +198,8 @@ fn main() {
     diagnostics::install(data_path(diagnostics::DIAGNOSTICS_FILE));
     #[cfg(target_os = "linux")]
     app_base::linux_fonts::hide_system_color_emoji();
+    #[cfg(target_os = "linux")]
+    linux_install::load_icon();
     let arguments = parse_arguments();
     if !arguments.demo && arguments.database.is_none() {
         let relaunch_value = std::env::var(updater::RELAUNCH_ENV).ok();
@@ -199,7 +218,7 @@ fn main() {
             return;
         }
     }
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     updater::clean_up_old_binary();
     let mode = Mode {
         demo: arguments.demo,
@@ -305,32 +324,49 @@ fn main() {
                 .detach();
             }
 
-            let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
-            let mut options = TitleBar::window_options();
-            options.window_bounds = Some(WindowBounds::Windowed(bounds));
-            options.window_min_size = Some(size(px(WINDOW_MIN_WIDTH), px(WINDOW_MIN_HEIGHT)));
-            options.app_id = Some(LINUX_APP_ID.to_owned());
-            if let Some(titlebar) = options.titlebar.as_mut() {
-                titlebar.title = Some(APP_NAME.into());
-            }
-            let open_target = arguments.open_target;
-            let startup = Startup {
-                switcher_query: arguments.switcher_query,
-                composer_text: arguments.composer_text,
-                reply_to_last: arguments.reply_to_last,
-                launched_by_autostart: arguments.autostart,
-            };
-            let (main_window, _) = gpui_kit::open_window(options, cx, move |window, cx| {
-                cx.new(|cx| AppShell::new(state, open_target, startup, window, cx))
-            })
+            // The main window decides when to quit (see `main_window`): closing it into
+            // the tray leaves the app running without windows.
+            cx.set_quit_mode(QuitMode::Explicit);
+            // The command line only applies to the first window, not to one reopened from the tray.
+            let first_open = std::cell::Cell::new(Some((
+                arguments.open_target,
+                Startup {
+                    switcher_query: arguments.switcher_query,
+                    composer_text: arguments.composer_text,
+                    reply_to_last: arguments.reply_to_last,
+                    launched_by_autostart: arguments.autostart,
+                },
+            )));
+            main_window::install(
+                move |cx| {
+                    let (open_target, startup) = first_open.take().unwrap_or_default();
+                    let state = state.clone();
+                    let opened =
+                        gpui_kit::open_window(main_window_options(cx), cx, move |window, cx| {
+                            cx.new(|cx| AppShell::new(state, open_target, startup, window, cx))
+                        });
+                    match opened {
+                        Ok((handle, _)) => Some(handle.into()),
+                        Err(error) => {
+                            log::error!("failed to open the main window: {error}");
+                            None
+                        }
+                    }
+                },
+                cx,
+            )
             .expect("failed to open window");
-            let main_window_id = main_window.window_id();
-            cx.on_window_closed(move |cx, closed| {
-                if closed == main_window_id {
+            cx.on_window_closed(|cx, closed| {
+                if main_window::note_closed(closed, cx) {
                     cx.quit();
                 }
             })
             .detach();
+            #[cfg(target_os = "linux")]
+            if !arguments.demo {
+                linux_install::start(cx);
+                linux_update::start(cx);
+            }
             if !arguments.autostart {
                 cx.activate(true);
             }

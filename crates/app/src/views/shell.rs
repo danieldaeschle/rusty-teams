@@ -166,6 +166,24 @@ fn watch_releases(running_tag: &'static str, cx: &mut App) {
 
 const DEMO_UPDATE_VARIABLE: &str = "TEAMS_DEMO_UPDATE";
 
+/// Entities created with the first main window that a reopened one takes over.
+#[derive(Clone)]
+struct KeptParts {
+    activity: Entity<ActivityCenter>,
+    notifications: Entity<NotificationCenter>,
+    call_windows: Entity<CallWindows>,
+}
+
+impl Global for KeptParts {}
+
+/// Re-applies the app icon to the tray and window, e.g. after the Teams icon arrived.
+pub fn refresh_app_icon(cx: &mut App) {
+    if let Some(kept) = cx.try_global::<KeptParts>().cloned() {
+        kept.notifications
+            .update(cx, |notifications, cx| notifications.reapply_app_icon(cx));
+    }
+}
+
 pub struct AppShell {
     state: Entity<AppState>,
     rail: Entity<RailView>,
@@ -240,9 +258,20 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let call_media = cx.new(|_| CallMedia);
-        state.update(cx, |state, _| state.call_media = Some(call_media.clone()));
-        let activity = cx.new(|cx| ActivityCenter::new(state.clone(), window, cx));
+        let kept = cx.try_global::<KeptParts>().cloned();
+        let reopened = kept.is_some();
+        let activity = match &kept {
+            Some(kept) => {
+                kept.activity
+                    .update(cx, |activity, _| activity.attach_main_window(window));
+                kept.activity.clone()
+            }
+            None => {
+                let call_media = cx.new(|_| CallMedia);
+                state.update(cx, |state, _| state.call_media = Some(call_media.clone()));
+                cx.new(|cx| ActivityCenter::new(state.clone(), window, cx))
+            }
+        };
         let activity_panel = cx.new(|cx| ActivityPanel::new(state.clone(), activity.clone(), cx));
         let quick_pane = cx.new(|cx| QuickViewPane::new(state.clone(), activity.clone(), cx));
         let manage_team_page = cx.new(|cx| ManageTeamPage::new(state.clone(), window, cx));
@@ -361,9 +390,29 @@ impl AppShell {
             });
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
-        let notifications =
-            cx.new(|cx| NotificationCenter::new(state.clone(), activity.clone(), window, cx));
-        let call_windows = cx.new(|cx| CallWindows::new(state.clone(), window, cx));
+        // The tray, notifications and calls outlive a main window closed into the tray.
+        let (notifications, call_windows) = match kept {
+            Some(kept) => {
+                kept.notifications.update(cx, |notifications, _| {
+                    notifications.attach_main_window(window)
+                });
+                kept.call_windows.update(cx, |call_windows, _| {
+                    call_windows.attach_main_window(window)
+                });
+                (kept.notifications, kept.call_windows)
+            }
+            None => {
+                let notifications = cx
+                    .new(|cx| NotificationCenter::new(state.clone(), activity.clone(), window, cx));
+                let call_windows = cx.new(|cx| CallWindows::new(state.clone(), window, cx));
+                cx.set_global(KeptParts {
+                    activity: activity.clone(),
+                    notifications: notifications.clone(),
+                    call_windows: call_windows.clone(),
+                });
+                (notifications, call_windows)
+            }
+        };
         let user_input = cx.global::<UserInputHandle>().0.clone();
         let escape_observation = cx.observe_keystrokes(|this, event, _, cx| {
             this.user_input.touch();
@@ -385,7 +434,9 @@ impl AppShell {
             }
         });
         let closing = notifications.clone();
-        window.on_window_should_close(cx, move |_, cx| !closing.read(cx).intercept_close(cx));
+        window.on_window_should_close(cx, move |_, cx| {
+            !closing.update(cx, |notifications, cx| notifications.intercept_close(cx))
+        });
         let mut shell = AppShell {
             state,
             rail,
@@ -434,14 +485,17 @@ impl AppShell {
             reply_to_last,
             launched_by_autostart,
         } = startup;
-        if shell
-            .notifications
-            .read(cx)
-            .startup()
-            .starts_hidden(launched_by_autostart)
+        if !reopened
+            && shell
+                .notifications
+                .read(cx)
+                .startup()
+                .starts_hidden(launched_by_autostart)
         {
             cx.defer_in(window, |this, window, cx| {
-                this.notifications.read(cx).start_in_background(window)
+                this.notifications.update(cx, |notifications, cx| {
+                    notifications.start_in_background(window, cx)
+                })
             });
         }
         if let Some(query) = switcher_query {
@@ -459,7 +513,7 @@ impl AppShell {
                 });
             });
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(updater::POLL_INTERVAL).await;
@@ -472,6 +526,7 @@ impl AppShell {
             }
         })
         .detach();
+        // Linux asks before downloading (`linux_update`); Windows downloads quietly.
         #[cfg(windows)]
         if let Some(running_tag) = app_base::version::release_tag() {
             watch_releases(running_tag, cx);
@@ -479,7 +534,7 @@ impl AppShell {
         shell
     }
 
-    #[cfg_attr(not(windows), allow(dead_code))]
+    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
     fn poll_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(
             self.update,
@@ -505,7 +560,8 @@ impl AppShell {
             composer_empty: conversation.composer_is_empty(cx),
             send_in_flight: conversation.send_in_flight(),
         });
-        if idle {
+        // On Linux only the user restarts: the update dialog or the title bar button.
+        if idle && cfg!(not(target_os = "linux")) {
             self.restart_into_update(cx);
         }
         cx.notify();

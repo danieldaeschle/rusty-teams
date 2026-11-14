@@ -34,7 +34,8 @@ Feature parity with the Microsoft Teams desktop client.
 | Sign in on Windows through embedded WebView2, single sign-on | Done |  |
 | Start from the local cache, no spinner | Done |  |
 | Self-update | Done |  |
-| Tray icon, close to tray | Done |  |
+| Tray icon, close to tray | Done | Linux: StatusNotifierItem tray (KDE, GNOME with AppIndicator); close really closes the window and the tray opens a new one, since GPUI cannot hide a Wayland window |
+| Linux install, menu entry and self-update | Done | Offers to install itself to `~/.local/share/applications/teams` with a `.desktop` entry (Settings > General to install, replace, remove or ask again); the installed release build offers new GitHub releases in a dialog (download with progress, then Restart now); the Teams icon is downloaded from Microsoft, not shipped |
 | Sign in on Linux without starting Chrome by hand | Done | The app starts Chrome or Chromium headless with its own profile, shows the window for the login and hides it again afterwards; a watchdog restarts a dead or hung Chrome |
 | Single instance, second start brings the window to front | Done |  |
 | Sign in on macOS without starting Chrome by hand | Done | Same managed Chrome as on Linux, profile in Application Support |

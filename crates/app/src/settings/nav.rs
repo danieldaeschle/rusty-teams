@@ -34,6 +34,10 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.general.open_in_background"),
             tr("settings.general.close_to_tray"),
             tr("settings.general.external_browser"),
+            #[cfg(target_os = "linux")]
+            tr("install.menu_title"),
+            #[cfg(target_os = "linux")]
+            tr("install.updates_title"),
             tr("settings.general.up_arrow"),
             tr("settings.general.translate_into"),
             tr("settings.general.behavior_title"),

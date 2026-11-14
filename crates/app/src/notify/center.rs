@@ -313,20 +313,40 @@ impl NotificationCenter {
         cx.notify();
     }
 
-    pub fn start_in_background(&self, window: &mut Window) {
-        match (&self.tray, self.main_native) {
-            (Some(_), Some(native)) => platform::hide_window(native),
-            _ => window.minimize_window(),
-        }
+    /// Points at a main window reopened from the tray.
+    pub fn attach_main_window(&mut self, window: &mut Window) {
+        self.main_window = window.window_handle();
+        self.main_native = platform::native_handle(window);
+        platform::set_window_icon(window, self.app_icon.png());
     }
 
-    pub fn intercept_close(&self, _cx: &App) -> bool {
+    pub fn start_in_background(&self, window: &mut Window, cx: &mut App) {
+        match (&self.tray, self.main_native) {
+            (Some(_), Some(native)) => platform::hide_window(native),
+            #[cfg(target_os = "linux")]
+            (Some(_), None) => crate::main_window::hide(cx),
+            _ => window.minimize_window(),
+        }
+        let _ = cx;
+    }
+
+    /// True when the close is handled here (window hidden natively). On Linux the
+    /// window closes for real and the app stays in the tray.
+    pub fn intercept_close(&self, cx: &mut App) -> bool {
         match (self.settings.close_to_tray, &self.tray, self.main_native) {
             (true, Some(_), Some(native)) => {
                 platform::hide_window(native);
                 true
             }
-            _ => false,
+            #[cfg(target_os = "linux")]
+            (true, Some(_), None) => {
+                crate::main_window::mark_hiding(cx);
+                false
+            }
+            _ => {
+                let _ = cx;
+                false
+            }
         }
     }
 
@@ -1158,6 +1178,9 @@ impl NotificationCenter {
         if self.main_window_active(cx) {
             if let Some(native) = self.main_native {
                 platform::hide_window(native);
+            } else {
+                #[cfg(target_os = "linux")]
+                crate::main_window::hide(cx);
             }
         } else {
             self.raise_main_window(cx);
@@ -1171,6 +1194,11 @@ impl NotificationCenter {
     }
 
     fn raise_main_window(&mut self, cx: &mut Context<Self>) {
+        #[cfg(target_os = "linux")]
+        if crate::main_window::is_hidden(cx) {
+            crate::main_window::show(cx);
+            return;
+        }
         if let Some(native) = self.main_native {
             platform::restore_and_raise(native);
         }
@@ -1179,10 +1207,18 @@ impl NotificationCenter {
             .ok();
     }
 
+    /// Applies the icon again even if the choice is unchanged: its image changed.
+    pub fn reapply_app_icon(&mut self, cx: &mut Context<Self>) {
+        self.show_app_icon(active_appearance::current(cx).app_icon, cx);
+    }
+
     fn apply_app_icon(&mut self, icon: AppIcon, cx: &mut Context<Self>) {
-        if icon == self.app_icon {
-            return;
+        if icon != self.app_icon {
+            self.show_app_icon(icon, cx);
         }
+    }
+
+    fn show_app_icon(&mut self, icon: AppIcon, cx: &mut Context<Self>) {
         self.app_icon = icon;
         let mention = !self.unread_mentions.is_empty();
         if let Some(tray) = &mut self.tray {

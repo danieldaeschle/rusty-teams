@@ -7,7 +7,9 @@ use gpui_kit::Window;
 
 use calling::ShareKind;
 
-use super::{NativeHandle, ScreenRect, ShareGeometry, TrayCommand, WorkArea};
+#[cfg(not(target_os = "linux"))]
+use super::TrayCommand;
+use super::{NativeHandle, ScreenRect, ShareGeometry, WorkArea};
 use crate::notify::badge::Badge;
 
 pub fn native_handle(_window: &Window) -> Option<NativeHandle> {
@@ -103,8 +105,10 @@ pub fn play_mp3(_bytes: Vec<u8>) {}
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub fn play_mp3_until(_bytes: Vec<u8>, _looped: bool, _stop: Arc<AtomicBool>) {}
 
+#[cfg(not(target_os = "linux"))]
 pub struct Tray;
 
+#[cfg(not(target_os = "linux"))]
 impl Tray {
     pub fn new(_sound_on: bool, _do_not_disturb: bool, _icon_png: &[u8]) -> Option<Self> {
         None
