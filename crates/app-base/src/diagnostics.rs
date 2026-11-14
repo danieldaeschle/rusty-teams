@@ -1,8 +1,8 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const DIAGNOSTICS_FILE: &str = "diagnostics.log";
 pub const DIAGNOSTICS_SETTING_KEY: &str = "diagnostics_enabled";
@@ -17,15 +17,7 @@ static PATH: OnceLock<PathBuf> = OnceLock::new();
 static ENABLED: AtomicBool = AtomicBool::new(false);
 
 const OWN_CRATE_PREFIXES: [&str; 10] = [
-    "app",
-    "app_base",
-    "state",
-    "calling",
-    "chatsvc",
-    "session",
-    "webview",
-    "mcp",
-    "agents",
+    "app", "app_base", "state", "calling", "chatsvc", "session", "webview", "mcp", "agents",
     "teams",
 ];
 
@@ -90,16 +82,17 @@ pub fn record_if_slow(label: &str, elapsed: std::time::Duration) {
 }
 
 pub fn record(message: impl AsRef<str>) {
-    if !is_enabled() {
-        return;
-    }
     let message = message.as_ref();
     eprintln!("{message}");
     let Some(path) = PATH.get() else {
         return;
     };
-    if let Err(error) = append_rotated(path, MAX_BYTES, RING_SLOTS, &format!("{} {message}\n", line_prefix()))
-    {
+    if let Err(error) = append_rotated(
+        path,
+        MAX_BYTES,
+        RING_SLOTS,
+        &format!("{} {message}\n", line_prefix()),
+    ) {
         eprintln!("diagnostics write failed: {error}");
     }
 }
@@ -182,7 +175,9 @@ fn rotate_ring(path: &Path, ring_slots: u32) -> std::io::Result<()> {
 fn ring_path(path: &Path, slot: u32) -> PathBuf {
     path.with_file_name(format!(
         "{}.{}",
-        path.file_name().and_then(|name| name.to_str()).unwrap_or(DIAGNOSTICS_FILE),
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(DIAGNOSTICS_FILE),
         slot
     ))
 }
@@ -202,7 +197,10 @@ pub(crate) fn read_ring_merged(path: &Path, slots: u32, max_bytes: u64) -> Strin
     if merged.len() as u64 <= max_bytes {
         return merged;
     }
-    let start = merged.len() - max_bytes as usize;
+    let mut start = merged.len() - max_bytes as usize;
+    while !merged.is_char_boundary(start) {
+        start += 1;
+    }
     merged[start..].to_owned()
 }
 
@@ -218,12 +216,12 @@ struct DiagnosticsLog;
 
 impl log::Log for DiagnosticsLog {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        if !is_enabled() {
-            return false;
-        }
         let target = metadata.target();
         if target == "libwebrtc" {
             return true;
+        }
+        if !is_enabled() {
+            return false;
         }
         if is_own_crate(target) {
             return metadata.level() <= log::Level::Info;
@@ -288,7 +286,10 @@ mod tests {
 
     #[test]
     fn audio_lines_are_kept_and_endpoint_dumps_and_noise_are_skipped() {
-        assert!(keeps_webrtc_line(log::Level::Debug, "(audio_device_impl.cc:123): Init"));
+        assert!(keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:123): Init"
+        ));
         assert!(keeps_webrtc_line(
             log::Level::Debug,
             "(webrtc_voice_engine.cc:10): WebRtcVoiceEngine::Init"

@@ -206,9 +206,11 @@ impl HelpView {
                             .child(title),
                     )
                     .child(Self::copy_path_button(copy_id, path.clone()))
-                    .child(text_button(open_id, tr("common.open")).on_click(move |_, _, _| {
-                        Self::reveal_path(&open_path);
-                    })),
+                    .child(
+                        text_button(open_id, tr("common.open")).on_click(move |_, _, _| {
+                            Self::reveal_path(&open_path);
+                        }),
+                    ),
             )
             .child(
                 div()
@@ -376,9 +378,8 @@ impl HelpView {
                     .gap(px(8.))
                     .items_center()
                     .child(
-                        text_button("settings-help-preview-back", tr("common.close")).on_click(
-                            cx.listener(|this, _, _, cx| this.close_preview(cx)),
-                        ),
+                        text_button("settings-help-preview-back", tr("common.close"))
+                            .on_click(cx.listener(|this, _, _, cx| this.close_preview(cx))),
                     )
                     .child(
                         div()
@@ -475,11 +476,14 @@ impl HelpView {
                 control_row(
                     tr("settings.help.clear_logs"),
                     tr("settings.help.clear_logs_detail"),
-                    text_button("settings-help-clear-logs", tr("settings.help.clear_logs_button"))
-                        .on_click(cx.listener(move |_, _, _, cx| {
-                            clear_app.update(cx, |state, cx| state.clear_diagnostic_logs(cx));
-                            cx.notify();
-                        })),
+                    text_button(
+                        "settings-help-clear-logs",
+                        tr("settings.help.clear_logs_button"),
+                    )
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        clear_app.update(cx, |state, cx| state.clear_diagnostic_logs(cx));
+                        cx.notify();
+                    })),
                 )
             })
             .child(caption(tr("settings.help.caption_paths")))
@@ -510,19 +514,20 @@ impl HelpView {
             .child(control_row(
                 tr("settings.help.create_bundle"),
                 tr("settings.help.create_bundle_detail"),
-                text_button("settings-help-bundle", tr("settings.help.create_bundle_button"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        create_app.update(cx, |state, _| {
-                            match state.create_support_bundle() {
-                                Ok(bundle) => AppState::reveal_support_bundle(&bundle),
-                                Err(error) => app_base::diagnostics::record(format!(
-                                    "support bundle: {error}"
-                                )),
-                            }
-                        });
-                        this.reload_bundles();
-                        cx.notify();
-                    })),
+                text_button(
+                    "settings-help-bundle",
+                    tr("settings.help.create_bundle_button"),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    create_app.update(cx, |state, _| match state.create_support_bundle() {
+                        Ok(bundle) => AppState::reveal_support_bundle(&bundle),
+                        Err(error) => {
+                            app_base::diagnostics::record(format!("support bundle: {error}"))
+                        }
+                    });
+                    this.reload_bundles();
+                    cx.notify();
+                })),
             ))
             .child(control_row(
                 tr("settings.help.open_issue"),

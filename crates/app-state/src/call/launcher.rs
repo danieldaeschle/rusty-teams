@@ -367,9 +367,7 @@ async fn start_engine(
 )> {
     let session = Session::with_transport(transport.clone(), SessionConfig::for_app()).await?;
     let poll_session = Session::with_transport(transport, SessionConfig::for_app()).await?;
-    let dump_dir = app_base::diagnostics::is_enabled()
-        .then(|| crate::support::call_dumps_dir())
-        .flatten();
+    let dump_dir = crate::support::call_dumps_dir();
     let config = EngineConfig {
         ringable,
         dump_dir,

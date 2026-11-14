@@ -42,10 +42,10 @@ impl ClientInfo {
         camera: impl Into<String>,
     ) -> Self {
         let logs_root = local_data_dir()
-            .map(|path| path.display().to_string())
+            .map(|path| home_relative(&path))
             .unwrap_or_else(|| "unknown".to_owned());
         let support_bundles_root = support_bundles_dir()
-            .map(|path| path.display().to_string())
+            .map(|path| home_relative(&path))
             .unwrap_or_else(|| "unknown".to_owned());
         ClientInfo {
             version: package_version.to_owned(),
@@ -116,6 +116,14 @@ impl ClientInfo {
             yes_no(self.debug_logging),
             self.logs_root,
         )
+    }
+}
+
+pub fn home_relative(path: &Path) -> String {
+    let home = directories::BaseDirs::new().map(|base| base.home_dir().to_path_buf());
+    match home.and_then(|home| path.strip_prefix(home).ok().map(Path::to_path_buf)) {
+        Some(relative) => format!("~/{}", relative.display()).replace('\\', "/"),
+        None => path.display().to_string(),
     }
 }
 
@@ -242,8 +250,12 @@ pub fn list_bundle_files(bundle: &Path) -> std::io::Result<Vec<BundleFileEntry>>
 /// Remove one support package directory. Refuses paths outside `parent` when provided.
 pub fn delete_support_bundle(bundle: &Path, parent: Option<&Path>) -> std::io::Result<()> {
     if let Some(parent) = parent {
-        let canonical_parent = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
-        let canonical_bundle = bundle.canonicalize().unwrap_or_else(|_| bundle.to_path_buf());
+        let canonical_parent = parent
+            .canonicalize()
+            .unwrap_or_else(|_| parent.to_path_buf());
+        let canonical_bundle = bundle
+            .canonicalize()
+            .unwrap_or_else(|_| bundle.to_path_buf());
         if !canonical_bundle.starts_with(&canonical_parent) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -289,7 +301,7 @@ pub fn issue_body(client: &ClientInfo, bundle: &SupportBundlePaths) -> String {
          Attach the files from that folder (do not paste secrets).\n",
         client.markdown(),
         bundle.folder_name,
-        bundle.directory.display(),
+        home_relative(&bundle.directory),
     )
 }
 
@@ -431,7 +443,9 @@ mod tests {
     fn issue_url_encodes_spaces_and_newlines() {
         let info = sample_client();
         let bundle = SupportBundlePaths {
-            directory: PathBuf::from("/tmp/ms-teams-linux/support-bundles/support-20260101T000000Z"),
+            directory: PathBuf::from(
+                "/tmp/ms-teams-linux/support-bundles/support-20260101T000000Z",
+            ),
             folder_name: "support-20260101T000000Z".into(),
         };
         let url = issue_url(&info, &bundle);

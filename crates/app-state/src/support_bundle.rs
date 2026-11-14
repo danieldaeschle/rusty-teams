@@ -180,10 +180,19 @@ mod tests {
         let reports = root.path().join("call-reports");
         fs::create_dir_all(&reports).unwrap();
         fs::write(reports.join("20260101T000000Z-echo.md"), "# report\n").unwrap();
-        fs::write(reports.join("20260101T000000Z-echo.json"), "{\"schema\":1}\n").unwrap();
+        fs::write(
+            reports.join("20260101T000000Z-echo.json"),
+            "{\"schema\":1}\n",
+        )
+        .unwrap();
 
         let bundle = write_support_bundle_from(&data, &sample_client(), &reports).unwrap();
         assert!(bundle.directory.join("20260101T000000Z-echo.md").is_file());
-        assert!(bundle.directory.join("20260101T000000Z-echo.json").is_file());
+        assert!(
+            bundle
+                .directory
+                .join("20260101T000000Z-echo.json")
+                .is_file()
+        );
     }
 }

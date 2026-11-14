@@ -171,11 +171,11 @@ settings:
       en: Debug logging
       de: Debug-Protokollierung
     debug_logging_on_detail:
-      en: Writing diagnostics.log — turn off when you are done
-      de: Schreibt diagnostics.log — danach wieder ausschalten
+      en: Writing detailed logs to diagnostics.log - turn off when you are done
+      de: Schreibt ausführliche Logs in diagnostics.log - danach wieder ausschalten
     debug_logging_off_detail:
-      en: Off by default — enable before reproducing a bug
-      de: Standardmässig aus — vor der Fehlerreproduktion einschalten
+      en: Off by default - enable before reproducing a bug
+      de: Standardmäßig aus - vor der Fehlerreproduktion einschalten
     clear_logs:
       en: Clear logs
       de: Logs leeren
