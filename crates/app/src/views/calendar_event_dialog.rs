@@ -985,7 +985,7 @@ fn percent_encode_query(value: &str) -> String {
 }
 
 fn is_teams_url(url: &str) -> bool {
-    url.contains("teams.microsoft.com")
+    teams_core::parse_meeting_link(url).is_some()
 }
 
 fn is_google_meet_url(url: &str) -> bool {
