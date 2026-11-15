@@ -439,10 +439,12 @@ mod tests {
     fn linux_auto_arms_the_hook_and_other_modes_do_not() {
         clear();
         let auto = MicSettings::default();
-        assert!(should_arm_hook(auto, true));
+        // Windows never uses the device track, so Auto stays in MicChain even when
+        // the caller says the device track is outgoing. Linux and macOS arm the hook.
+        assert_eq!(should_arm_hook(auto, true), auto.uses_device_track());
         assert!(!should_arm_hook(auto, false), "MicChain / computer sound");
         apply_for_outgoing(auto, true);
-        assert!(hook_armed());
+        assert_eq!(hook_armed(), auto.uses_device_track());
 
         let low = MicSettings {
             noise_suppression: NoiseSuppression::Low,
@@ -496,17 +498,12 @@ mod tests {
     #[test]
     fn hook_and_mic_chain_never_arm_together() {
         let auto = MicSettings::default();
-        // Device track outgoing → hook, no MicChain ml path for Linux Auto.
-        assert!(should_arm_hook(auto, true));
-        assert!(
-            auto.ml_noise_suppression() && auto.uses_device_track(),
-            "Linux Auto: hook owns DeepFilterNet"
-        );
+        // Device track outgoing arms the hook only where Auto stays on Pulse/CoreAudio.
+        assert_eq!(should_arm_hook(auto, true), auto.uses_device_track());
+        assert!(auto.ml_noise_suppression());
+        assert!(auto.uses_device_track_on(false));
+        assert!(!auto.uses_device_track_on(true));
         // Software outgoing → MicChain may run ml, hook stays off.
         assert!(!should_arm_hook(auto, false));
-        assert!(
-            auto.ml_noise_suppression() && !should_arm_hook(auto, false),
-            "software path: MicChain only"
-        );
     }
 }
