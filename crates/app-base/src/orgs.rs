@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub const ORGS_FILE: &str = "orgs.json";
+/// Start flag that opens one chat once its org has loaded, used when a toast of another org is clicked.
+pub const OPEN_CONVERSATION_FLAG: &str = "--open-conversation";
 const HOME_DATABASE: &str = "cache.sqlite3";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +80,10 @@ impl Orgs {
 
 /// Tenant ids are GUIDs; anything else must not end up in a file name.
 fn is_tenant_id(id: &str) -> bool {
-    !id.is_empty() && id.chars().all(|character| character.is_ascii_hexdigit() || character == '-')
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|character| character.is_ascii_hexdigit() || character == '-')
 }
 
 #[cfg(test)]

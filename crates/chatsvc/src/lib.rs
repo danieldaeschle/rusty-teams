@@ -82,7 +82,6 @@ pub use emotions::{EmotionReaction, MessageEmotions, parse_message_emotions, use
 pub use error::{Error, Result};
 pub use forward::{ForwardResult, MAX_FORWARD_MESSAGES};
 pub use gifs::{Gif, Gifs};
-pub use tenants::{Tenant, list_tenants};
 pub use google_calendar::{
     AuthPending, GoogleCalendar, GoogleEventDraft, GoogleOAuth, TokenBundle, allocate_redirect_uri,
     client_id_from_env, exchange_code, google_event_body, google_rsvp_query, google_rsvp_status,
@@ -138,6 +137,7 @@ pub use substrate_search::{
 pub use team_admin::{
     ChannelEdit, ChannelPrivacy, ExistingChannel, Mailbox, NewChannel, TeamAdmin,
 };
+pub use tenants::{Tenant, list_tenants};
 pub use thread_activity::{ThreadActivity, ThreadActivityKind};
 pub use transcripts::{MeetingTranscript, TranscriptError, TranscriptTurn, Transcripts};
 pub use translate::{

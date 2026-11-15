@@ -537,7 +537,7 @@ impl Render for ToastView {
                         .child(self.avatar(&model, fill, cx))
                         .child(self.body(&model, &text, hovered)),
                 )
-                .when(!model.status_change, |content| {
+                .when(!model.status_change && model.org.is_none(), |content| {
                     content.child(self.action_row(mention, cx))
                 }),
         };

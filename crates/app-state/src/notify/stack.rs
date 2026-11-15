@@ -196,6 +196,8 @@ pub struct ToastModel {
     pub agent: Option<AgentToast>,
     pub status_change: bool,
     pub urgent: bool,
+    /// Set for a message in an org that is not open; clicking switches to that org.
+    pub org: Option<app_base::orgs::Org>,
 }
 
 impl ToastModel {
@@ -236,6 +238,7 @@ impl ToastStack {
         if let Some(existing) = self.toasts.iter_mut().find(|toast| {
             toast.agent.is_none()
                 && !toast.status_change
+                && toast.org.is_none()
                 && !toast.dismissed
                 && !toast.is_leaving()
                 && toast.conversation_id == incoming.conversation_id
@@ -280,6 +283,7 @@ impl ToastStack {
             agent: None,
             status_change: false,
             urgent: incoming.is_urgent(),
+            org: None,
         });
         PushOutcome {
             id: self.next_id,
@@ -319,6 +323,7 @@ impl ToastStack {
             agent: Some(agent),
             status_change: false,
             urgent: false,
+            org: None,
         });
         self.next_id
     }
@@ -355,6 +360,46 @@ impl ToastStack {
             agent: None,
             status_change: true,
             urgent: false,
+            org: None,
+        });
+        self.next_id
+    }
+
+    /// A chat message from an org that is not open. No quick reply: the open org's engine cannot send there.
+    pub fn push_org_message(
+        &mut self,
+        message: &crate::org_watch::OrgMessage,
+        now: Instant,
+    ) -> u64 {
+        self.next_id += 1;
+        let queued = self.toasts.len() >= MAX_VISIBLE;
+        self.toasts.push(ToastModel {
+            id: self.next_id,
+            conversation_id: message.conversation_id.clone(),
+            message_id: message.message_id.clone(),
+            kind: if message.direct {
+                ChatKind::Direct
+            } else {
+                ChatKind::Group { member_count: 0 }
+            },
+            chat_title: message.chat_title.clone(),
+            sender_id: None,
+            sender_name: message.sender_name.clone(),
+            preview: Preview::Text(message.preview.clone()),
+            mentions_me: false,
+            count: 1,
+            timer: ToastTimer::new(now, false),
+            reply: ReplyState::Closed,
+            reply_text: String::new(),
+            hovered: false,
+            time: String::new(),
+            queued,
+            dismissed: false,
+            fade: Fade::new(0., 1., now, FADE_IN, Curve::Linear),
+            agent: None,
+            status_change: false,
+            urgent: false,
+            org: Some(message.org.clone()),
         });
         self.next_id
     }

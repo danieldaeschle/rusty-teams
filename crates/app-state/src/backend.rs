@@ -74,6 +74,7 @@ pub enum BackendEvent {
     Synced(DateTime<Utc>),
     LiveRetry(Arc<Notify>),
     Orgs(Vec<app_base::orgs::Org>),
+    OrgMessage(crate::org_watch::OrgMessage),
 }
 
 impl BackendEvent {
@@ -98,6 +99,7 @@ impl BackendEvent {
             BackendEvent::Synced(_) => "Synced".into(),
             BackendEvent::LiveRetry(_) => "LiveRetry".into(),
             BackendEvent::Orgs(_) => "Orgs".into(),
+            BackendEvent::OrgMessage(_) => "OrgMessage".into(),
         }
     }
 }
@@ -185,7 +187,7 @@ async fn supervise(
             }
         }
     };
-    tokio::spawn(org_list(home.clone(), events.clone()));
+    tokio::spawn(org_list(home.clone(), guest_tenant.clone(), events.clone()));
     // Calls stay on the home tenant's registration, like rings for the home org while a guest org is open.
     let session = match &guest_tenant {
         Some(tenant) => home.in_tenant(tenant),
@@ -235,19 +237,38 @@ async fn supervise(
     refresh_loop(engine, events, nudges).await;
 }
 
-/// Fetches the account's organizations once per start; retried a few times while sign-in settles.
-async fn org_list(home: Session, events: EventSender) {
+/// Fetches the account's organizations once per start, retried a few times while sign-in settles,
+/// and keeps every org that is not open live for notifications.
+async fn org_list(home: Session, open_guest: Option<String>, events: EventSender) {
     for _ in 0..ORG_LIST_ATTEMPTS {
         match chatsvc::list_tenants(&home).await {
             Ok(tenants) => {
-                let orgs = tenants
-                    .into_iter()
-                    .map(|tenant| app_base::orgs::Org {
+                let mut orgs = Vec::with_capacity(tenants.len());
+                for tenant in tenants {
+                    let org = app_base::orgs::Org {
                         id: tenant.id,
                         name: tenant.name,
                         guest: tenant.guest,
-                    })
-                    .collect();
+                    };
+                    let open = match &open_guest {
+                        Some(open) => *open == org.id,
+                        None => !org.guest,
+                    };
+                    if !open {
+                        let session = if org.guest {
+                            home.in_tenant(&org.id)
+                        } else {
+                            home.clone()
+                        };
+                        tokio::spawn(crate::org_watch::watch(
+                            session,
+                            org.clone(),
+                            tenant.user_id,
+                            events.clone(),
+                        ));
+                    }
+                    orgs.push(org);
+                }
                 let _ = events.send(BackendEvent::Orgs(orgs));
                 return;
             }

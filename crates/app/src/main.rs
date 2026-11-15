@@ -107,6 +107,9 @@ fn parse_arguments() -> Arguments {
                     .and_then(|value| value.parse().ok())
                     .map(OpenTarget::Chat)
             }
+            app_base::orgs::OPEN_CONVERSATION_FLAG => {
+                arguments.open_target = input.next().map(OpenTarget::Conversation)
+            }
             "--open-channel" => {
                 arguments.open_target = input
                     .next()

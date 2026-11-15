@@ -69,10 +69,12 @@ pub fn bind_keys(cx: &mut App) {
     );
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum OpenTarget {
     Chat(usize),
     Channel(usize),
+    /// A chat or channel by id; waits until a sync has brought it into the sidebar.
+    Conversation(String),
 }
 
 #[derive(Default)]
@@ -590,21 +592,22 @@ impl AppShell {
     }
 
     fn apply_open_target(&mut self, cx: &mut Context<Self>) {
-        let Some(target) = self.open_target else {
+        let Some(target) = &self.open_target else {
             return;
         };
         let sidebar = &self.state.read(cx).sidebar;
         let selection = match target {
             OpenTarget::Chat(index) => sidebar
                 .chats
-                .get(index)
+                .get(*index)
                 .map(|chat| Selection::Chat(chat.id.clone())),
             OpenTarget::Channel(index) => sidebar
                 .teams
                 .iter()
                 .flat_map(|team| team.channels.iter())
-                .nth(index)
+                .nth(*index)
                 .map(|channel| Selection::Channel(channel.id.clone())),
+            OpenTarget::Conversation(id) => crate::app_state::selection_for(sidebar, id),
         };
         if let Some(selection) = selection {
             self.open_target = None;

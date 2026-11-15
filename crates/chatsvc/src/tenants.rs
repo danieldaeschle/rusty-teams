@@ -11,11 +11,14 @@ pub struct Tenant {
     pub name: String,
     /// The account is a guest here; its home tenant is the one with `guest == false`.
     pub guest: bool,
+    /// The account's user id in this tenant; a guest has its own id in every tenant.
+    pub user_id: Option<String>,
 }
 
 /// Every tenant of the account, home tenant first.
 pub async fn list_tenants(session: &Session) -> Result<Vec<Tenant>> {
-    let url = format!("https://teams.cloud.microsoft/api/mt/{DEFAULT_MT_REGION}/beta/users/tenants");
+    let url =
+        format!("https://teams.cloud.microsoft/api/mt/{DEFAULT_MT_REGION}/beta/users/tenants");
     let answer = session
         .request(Method::Get, &url, &spaces_scope(), None)
         .await?;
@@ -34,6 +37,7 @@ fn parse_tenants(body: &Value) -> Option<Vec<Tenant>> {
                 guest: entry["userType"]
                     .as_str()
                     .is_some_and(|kind| kind.eq_ignore_ascii_case("guest")),
+                user_id: entry["userId"].as_str().map(str::to_ascii_lowercase),
             })
         })
         .collect();
@@ -49,7 +53,7 @@ mod tests {
     #[test]
     fn lists_the_home_tenant_first_and_marks_guest_tenants() {
         let body = json!([
-            {"tenantId": "BBBB-GUEST", "tenantName": "Guest Org", "userType": "guest"},
+            {"tenantId": "BBBB-GUEST", "tenantName": "Guest Org", "userType": "guest", "userId": "AB-12"},
             {"tenantId": "aaaa-home", "tenantName": "Home Org", "userType": "member"},
             {"tenantName": "no id"},
         ]);
@@ -59,12 +63,14 @@ mod tests {
                 Tenant {
                     id: "aaaa-home".into(),
                     name: "Home Org".into(),
-                    guest: false
+                    guest: false,
+                    user_id: None,
                 },
                 Tenant {
                     id: "bbbb-guest".into(),
                     name: "Guest Org".into(),
-                    guest: true
+                    guest: true,
+                    user_id: Some("ab-12".into()),
                 },
             ]
         );
