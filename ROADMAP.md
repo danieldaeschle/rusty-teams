@@ -38,7 +38,7 @@ Feature parity with the Microsoft Teams desktop client.
 | Linux install, menu entry and self-update | Done | Offers to install itself to `~/.local/share/rusty-teams` with a `.desktop` entry (Settings > General to install, replace, remove or ask again); the installed release build offers new GitHub releases in a dialog (download with progress, then Restart now); the Teams icon is downloaded from Microsoft, not shipped |
 | Sign in on Linux without starting Chrome by hand | Done | The app starts Chrome or Chromium headless with its own profile, shows the window for the login and hides it again afterwards; a watchdog restarts a dead or hung Chrome |
 | Single instance, second start brings the window to front | Done |  |
-| Sign in on macOS without starting Chrome by hand | Done | Same managed Chrome as on Linux, profile in Application Support |
+| Sign in on macOS without starting Chrome by hand | Done | Same managed browser as on Linux, profile in Application Support. Takes the first of Chrome, Chromium, Edge, Brave, Helium, Vivaldi; checked live with Helium |
 
 ## Chat list
 
