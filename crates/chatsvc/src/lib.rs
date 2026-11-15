@@ -44,6 +44,7 @@ pub mod sounds;
 pub mod substrate_search;
 pub mod team_admin;
 pub mod teams_cdn;
+pub mod tenants;
 pub mod thread_activity;
 pub mod transcripts;
 pub mod translate;
@@ -81,6 +82,7 @@ pub use emotions::{EmotionReaction, MessageEmotions, parse_message_emotions, use
 pub use error::{Error, Result};
 pub use forward::{ForwardResult, MAX_FORWARD_MESSAGES};
 pub use gifs::{Gif, Gifs};
+pub use tenants::{Tenant, list_tenants};
 pub use google_calendar::{
     AuthPending, GoogleCalendar, GoogleEventDraft, GoogleOAuth, TokenBundle, allocate_redirect_uri,
     client_id_from_env, exchange_code, google_event_body, google_rsvp_query, google_rsvp_status,
