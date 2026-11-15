@@ -133,6 +133,8 @@ pub struct CalendarPrefs {
     pub pane_hidden: bool,
     pub collapsed_groups: Vec<String>,
     pub work_hours: WorkHours,
+    /// Mailbox language (`en-CH`), cached; Outlook takes the default week start from it.
+    pub mailbox_locale: Option<String>,
 }
 
 impl CalendarPrefs {

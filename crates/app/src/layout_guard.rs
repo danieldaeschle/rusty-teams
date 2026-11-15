@@ -265,6 +265,9 @@ mod frames {
     ];
     const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
     const CALENDAR: &str = "shell/islands/calendar";
+    use crate::views::calendar_view::{
+        CALENDAR_DAY_HEADERS_TAG, CALENDAR_HEADER_TAG, CALENDAR_NEW_MEETING_TAG,
+    };
     const CHAT_FILTER_TAGS: &[&str] = &[FILTER_TAG, FILTER_PILLS_TAG];
     const CHAT_FILTER_OPEN_TAGS: &[&str] = &[FILTER_INPUT_TAG, FILTER_EMPTY_TAG];
     const FIND_TAGS: &[&str] = &[
@@ -633,6 +636,9 @@ mod frames {
                 &ACTIVITY_PROPOSALS_TAG,
                 &AGENTS_LIST,
                 &CALENDAR,
+                &CALENDAR_HEADER_TAG,
+                &CALENDAR_DAY_HEADERS_TAG,
+                &CALENDAR_NEW_MEETING_TAG,
                 &CALL_TRANSCRIPT,
                 &MENU,
                 &RECAP_TAB,
@@ -1043,6 +1049,7 @@ mod frames {
                             !matches!(*path, "shell/islands/sidebar" | "shell/islands/main")
                         });
                         expected.push(CALENDAR);
+                        expected.extend([CALENDAR_HEADER_TAG, CALENDAR_DAY_HEADERS_TAG]);
                     }
                     "prejoin" => expected.extend(PREJOIN_TAGS),
                     _ => {}
@@ -1063,6 +1070,21 @@ mod frames {
                         found.push((
                             "shell/islands/rail:gap".to_owned(),
                             format!("first island starts {gap} px after the rail, expected 0"),
+                        ));
+                    }
+                }
+                if screen_name == "calendar"
+                    && let (Some(header), Some(button)) = (
+                        bounds_of(CALENDAR_HEADER_TAG),
+                        bounds_of(CALENDAR_NEW_MEETING_TAG),
+                    )
+                {
+                    let overflow = f32::from(button.origin.x + button.size.width)
+                        - f32::from(header.origin.x + header.size.width);
+                    if overflow > TOLERANCE {
+                        found.push((
+                            CALENDAR_HEADER_TAG.to_owned(),
+                            format!("header controls overflow by {overflow} px"),
                         ));
                     }
                 }

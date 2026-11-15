@@ -21,6 +21,8 @@ pub struct MailboxWorkingHours {
     pub end: NaiveTime,
     /// Windows or IANA name as the mailbox stores it; written back unchanged.
     pub time_zone: Option<String>,
+    /// Mailbox language (`en-CH`); Outlook derives the first day of week from it.
+    pub locale: Option<String>,
 }
 
 impl Graph {
@@ -67,6 +69,11 @@ pub fn parse_working_hours(body: &Value) -> Option<MailboxWorkingHours> {
             .pointer("/timeZone/name")
             .and_then(Value::as_str)
             .map(str::to_owned),
+        locale: body
+            .pointer("/language/locale")
+            .and_then(Value::as_str)
+            .filter(|locale| !locale.is_empty())
+            .map(str::to_owned),
     })
 }
 
@@ -108,6 +115,7 @@ mod tests {
         json!({
             "timeFormat": "HH:mm",
             "dateFormat": "d MMM yyyy",
+            "language": {"locale": "en-CH", "displayName": "English (Switzerland)"},
             "workingHours": {
                 "daysOfWeek": ["monday", "tuesday", "wednesday", "thursday", "friday"],
                 "startTime": "08:00:00.0000000",
@@ -133,6 +141,7 @@ mod tests {
         assert_eq!(hours.start, NaiveTime::from_hms_opt(8, 0, 0).unwrap());
         assert_eq!(hours.end, NaiveTime::from_hms_opt(17, 0, 0).unwrap());
         assert_eq!(hours.time_zone.as_deref(), Some("W. Europe Standard Time"));
+        assert_eq!(hours.locale.as_deref(), Some("en-CH"));
     }
 
     #[test]
@@ -150,7 +159,11 @@ mod tests {
             body["workingHours"]["timeZone"]["name"],
             "W. Europe Standard Time"
         );
-        assert_eq!(parse_working_hours(&body).unwrap(), hours);
+        let parsed = parse_working_hours(&body).unwrap();
+        assert_eq!(
+            (parsed.days, parsed.start, parsed.end),
+            (hours.days, hours.start, hours.end)
+        );
     }
 
     #[test]

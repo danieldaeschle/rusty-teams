@@ -123,7 +123,7 @@ impl Render for DatePicker {
                             .text_size(px(14.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
-                            .child(self.month.format("%B %Y").to_string()),
+                            .child(app_base::format::month_year_label(self.month)),
                     )
                     .child(
                         h_flex()
@@ -132,7 +132,7 @@ impl Render for DatePicker {
                                     .small()
                                     .ghost()
                                     .icon(IconName::ChevronLeft)
-                                    .tooltip("Previous month")
+                                    .tooltip(crate::i18n::tr("calendar.view.previous_month_short"))
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.move_month(false, cx)),
                                     ),
@@ -142,7 +142,7 @@ impl Render for DatePicker {
                                     .small()
                                     .ghost()
                                     .icon(IconName::ChevronRight)
-                                    .tooltip("Next month")
+                                    .tooltip(crate::i18n::tr("calendar.view.next_month_short"))
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.move_month(true, cx)),
                                     ),

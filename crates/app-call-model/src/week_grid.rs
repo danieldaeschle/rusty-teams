@@ -225,6 +225,38 @@ pub fn week_range(
     )
 }
 
+/// Position of a Google calendar in the calendar list; Outlook is 0.
+pub fn google_calendar_index(
+    accounts: &store::CalendarAccounts,
+    account_id: &str,
+    calendar_id: &str,
+) -> Option<usize> {
+    accounts
+        .google_accounts
+        .iter()
+        .flat_map(|account| {
+            account
+                .calendars
+                .iter()
+                .map(move |calendar| (account.id.as_str(), calendar.id.as_str()))
+        })
+        .position(|(account, calendar)| account == account_id && calendar == calendar_id)
+        .map(|position| position + 1)
+}
+
+/// Calendar list position that colours an event (merged events keep Outlook's colour).
+pub fn calendar_index(event: &CalendarEvent, accounts: &store::CalendarAccounts) -> usize {
+    match event.source {
+        chatsvc::CalendarSource::Outlook => 0,
+        chatsvc::CalendarSource::Google => event
+            .account_id
+            .as_deref()
+            .zip(event.calendar_id.as_deref())
+            .and_then(|(account, calendar)| google_calendar_index(accounts, account, calendar))
+            .unwrap_or(1),
+    }
+}
+
 pub fn shown_in_calendar(event: &CalendarEvent) -> bool {
     event.response != ResponseType::Declined
 }
@@ -338,7 +370,7 @@ pub fn event_look(event: &CalendarEvent) -> EventLook {
 
 pub fn hour_label(hour: u32, twelve_hour: bool) -> String {
     if !twelve_hour {
-        return hour.to_string();
+        return format!("{hour:02}:00");
     }
     match hour {
         0 => "12 AM".to_owned(),
@@ -583,10 +615,48 @@ mod tests {
     }
 
     #[test]
+    fn events_take_the_colour_index_of_their_calendar() {
+        use store::{CalendarAccounts, GoogleAccount, GoogleCalendarInfo, GoogleTokenSet};
+        let calendar = |id: &str| GoogleCalendarInfo {
+            id: id.into(),
+            summary: id.into(),
+            selected: true,
+            primary: false,
+        };
+        let accounts = CalendarAccounts {
+            google_accounts: vec![
+                GoogleAccount {
+                    id: "a".into(),
+                    email: "a@example.com".into(),
+                    calendars: vec![calendar("primary"), calendar("family")],
+                    tokens: GoogleTokenSet::default(),
+                },
+                GoogleAccount {
+                    id: "b".into(),
+                    email: "b@example.com".into(),
+                    calendars: vec![calendar("work")],
+                    tokens: GoogleTokenSet::default(),
+                },
+            ],
+            ..CalendarAccounts::default()
+        };
+        let mut google = event(9, 0, 30);
+        google.source = chatsvc::CalendarSource::Google;
+        google.account_id = Some("b".into());
+        google.calendar_id = Some("work".into());
+        assert_eq!(calendar_index(&google, &accounts), 3);
+        google.account_id = Some("a".into());
+        google.calendar_id = Some("family".into());
+        assert_eq!(calendar_index(&google, &accounts), 2);
+        assert_eq!(calendar_index(&event(9, 0, 30), &accounts), 0);
+    }
+
+    #[test]
     fn labels_read_like_teams() {
         assert_eq!(hour_label(0, true), "12 AM");
         assert_eq!(hour_label(13, true), "1 PM");
-        assert_eq!(hour_label(13, false), "13");
+        assert_eq!(hour_label(13, false), "13:00");
+        assert_eq!(hour_label(7, false), "07:00");
     }
 
     #[test]

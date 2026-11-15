@@ -397,6 +397,15 @@ pub fn avatar_color(index: usize) -> Hsla {
     color(palette[index % palette.len()])
 }
 
+/// Colour of the calendar at `index` in the calendar list: Outlook (0) takes the
+/// accent, every further calendar the next avatar palette colour.
+pub fn calendar_color(index: usize) -> Hsla {
+    match index {
+        0 => accent(),
+        index => avatar_color(index - 1),
+    }
+}
+
 pub fn avatar_palette_len() -> usize {
     palette().avatar_palette.len()
 }
@@ -407,6 +416,16 @@ mod tests {
         SCHEMES, Shade, avatar_color, avatar_palette_len, color, elevation_tokens,
         set_thread_scheme, set_thread_shade,
     };
+
+    #[test]
+    fn calendar_colors_start_with_the_accent_then_follow_the_palette() {
+        assert_eq!(super::calendar_color(0), super::accent());
+        assert_eq!(super::calendar_color(1), avatar_color(0));
+        assert_eq!(
+            super::calendar_color(1 + avatar_palette_len()),
+            avatar_color(0)
+        );
+    }
 
     #[test]
     fn avatar_colors_wrap_around_the_palette() {

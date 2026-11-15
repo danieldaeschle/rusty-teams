@@ -335,8 +335,8 @@ settings:
       en: Week, work week and month start on this day
       de: Woche, Arbeitswoche und Monat beginnen an diesem Tag
     first_day_regional:
-      en: "Regional format (%{day})"
-      de: "Regionalformat (%{day})"
+      en: "As in Outlook (%{day})"
+      de: "Wie in Outlook (%{day})"
     work_days:
       en: Work days
       de: Arbeitstage

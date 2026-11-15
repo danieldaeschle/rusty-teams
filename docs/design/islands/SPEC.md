@@ -85,6 +85,7 @@ Core roles (non-exhaustive; prefer an existing role over inventing a hex):
 | `accent`, `accent_text`, `accent_soft`, `accent_strong`, `on_accent` | Primary actions and links |
 | `bubble_own` / `bubble_other` | Message bubbles |
 | `green`, `red`, `amber`, … | Status semantics already defined on the palette |
+| `accent`, then `avatar_palette` | Calendar colours: Outlook takes `accent`, every further calendar in the calendar list the next palette colour (`theme::calendar_color`) |
 
 Shades: Dark (default), Light, High contrast. Schemes: Rusty Teams and Teams (`SCHEMES` in `schemes.rs`). Changing a hex belongs in the palette / scheme tables, not in a view.
 

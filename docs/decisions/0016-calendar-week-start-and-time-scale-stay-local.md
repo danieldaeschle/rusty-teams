@@ -21,7 +21,7 @@ The options were:
 ## Decision
 
 - Work days and hours are read from and written to the mailbox working hours through Graph. A local copy is only a cache for the grid.
-- First day of week defaults to the regional format, which is where Teams takes it from when no OWA option is set. A local override can change it.
+- First day of week defaults to the region of the mailbox language (`language.locale` in the mailbox settings), which is where Outlook takes the OWA default from. The regional format is the fallback. A local override can change it.
 - The time scale is a local setting. Its default, 30 minutes, matches Teams.
 - Default view and the last used span are fork settings and stay local.
 

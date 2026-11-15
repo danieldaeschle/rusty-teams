@@ -53,8 +53,17 @@ impl CalendarWeek {
 impl AppState {
     /// Week layout from the calendar settings and the regional first day.
     pub fn calendar_layout(&self) -> WeekLayout {
+        self.calendar_prefs.layout(self.default_first_day())
+    }
+
+    /// First day of week without an override: the mailbox language's region, as in
+    /// Outlook and Teams, else the regional format.
+    pub fn default_first_day(&self) -> Weekday {
         self.calendar_prefs
-            .layout(app_base::format::regional_first_day())
+            .mailbox_locale
+            .as_deref()
+            .map(app_base::format::first_day_for_locale)
+            .unwrap_or_else(app_base::format::regional_first_day)
     }
 
     pub fn calendar_start(&self) -> NaiveDate {
@@ -173,7 +182,11 @@ impl AppState {
         let (from, to) = dates_range(&self.calendar_dates(), offset);
         if self.mode.demo {
             let mut events = demo_events(demo_anchor());
-            events.extend(demo_week(week_start(start, Weekday::Mon), offset));
+            // Demo meetings sit Monday to Friday of the week the grid shows.
+            // The Monday inside the first shown week, whatever day the week starts on.
+            let dates = self.calendar_dates();
+            let anchor = dates.get(6).or(dates.last()).copied().unwrap_or(start);
+            events.extend(demo_week(week_start(anchor, Weekday::Mon), offset));
             events.extend(self.demo_meetings.iter().cloned());
             events.retain(|event| event.end > from && event.start < to);
             events.sort_by_key(|event| (event.start, event.end));
@@ -472,7 +485,7 @@ mod tests {
     use std::sync::Arc;
 
     use chatsvc::{CalendarEvent, CalendarSource};
-    use chrono::{TimeZone, Utc};
+    use chrono::{Offset as _, TimeZone, Utc};
     use gpui_kit::{AppContext as _, TestAppContext};
     use store::Store;
 
@@ -540,6 +553,32 @@ mod tests {
                 let shifted = state.calendar_scroll_to_now;
                 state.show_calendar_date(chrono::Local::now().date_naive(), cx);
                 assert_ne!(state.calendar_scroll_to_now, shifted);
+            })
+        });
+    }
+
+    #[gpui_kit::test]
+    fn demo_week_fills_the_visible_work_week(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let mode = Mode {
+            demo: true,
+            ..Mode::default()
+        };
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store, mode)));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.open_calendar(cx);
+                let dates = state.calendar_dates();
+                let offset = chrono::Local::now().offset().fix();
+                let days =
+                    crate::call::week_grid::week_days(&state.calendar_week.events, &dates, offset);
+                let blocks: usize = days.iter().map(|day| day.blocks.len()).sum();
+                assert!(
+                    blocks >= 8,
+                    "dates {dates:?}, events {}, blocks {blocks}",
+                    state.calendar_week.events.len()
+                );
             })
         });
     }

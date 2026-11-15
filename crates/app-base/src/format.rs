@@ -80,6 +80,13 @@ pub fn regional_first_day() -> Weekday {
     current_date_style().map_or(Weekday::Mon, |style| style.first_day)
 }
 
+/// First day of the week for a locale tag such as `en-CH` (CLDR region data).
+pub fn first_day_for_locale(locale: &str) -> Weekday {
+    let locale = locale.to_ascii_lowercase().replace('_', "-");
+    let language = locale.split('-').next().unwrap_or_default().to_owned();
+    first_day_for(&locale, &language)
+}
+
 fn first_day_for(locale: &str, language: &str) -> Weekday {
     if SUNDAY_FIRST_LOCALES.contains(&locale) || SUNDAY_FIRST_LOCALES.contains(&language) {
         Weekday::Sun
@@ -404,6 +411,8 @@ mod tests {
         assert_eq!(first("ar-SA"), Weekday::Sat);
         assert_eq!(first("ar-MA"), Weekday::Mon);
         assert_eq!(first("ja-JP"), Weekday::Sun);
+        assert_eq!(first_day_for_locale("en-CH"), Weekday::Mon);
+        assert_eq!(first_day_for_locale("en_US"), Weekday::Sun);
         set_date_locale(None);
         assert_eq!(regional_first_day(), Weekday::Mon);
     }

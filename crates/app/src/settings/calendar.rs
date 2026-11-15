@@ -5,7 +5,7 @@ use store::{CalendarProvider, CalendarRef};
 
 use std::collections::HashMap;
 
-use app_base::format::{WeekdayWidth, clock_format, regional_first_day, weekday_name};
+use app_base::format::{WeekdayWidth, clock_format, weekday_name};
 use chrono::{NaiveTime, Weekday};
 use gpui_kit::component::h_flex;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -25,7 +25,7 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
     let mut body = v_flex()
         .w_full()
         .child(caption(tr("settings.calendar.section_view")))
-        .children(view_rows(app, &prefs))
+        .children(view_rows(app, &prefs, app.read(cx).default_first_day()))
         .child(caption(tr("settings.calendar.section_google")))
         .child(connect_row(app, accounts.has_google(), pending));
     for account in &accounts.google_accounts {
@@ -252,7 +252,11 @@ const CHIP_SIZE: f32 = 32.;
 const TIME_SELECT_WIDTH: f32 = 104.;
 
 /// Default view, first day, work days and hours, time scale, weekend Work week.
-fn view_rows(app: &Entity<AppState>, prefs: &CalendarPrefs) -> Vec<Div> {
+fn view_rows(
+    app: &Entity<AppState>,
+    prefs: &CalendarPrefs,
+    default_first_day: Weekday,
+) -> Vec<Div> {
     vec![
         control_row(
             tr("settings.calendar.default_view"),
@@ -279,14 +283,14 @@ fn view_rows(app: &Entity<AppState>, prefs: &CalendarPrefs) -> Vec<Div> {
             tr("settings.calendar.first_day_detail"),
             select(
                 "settings-calendar-first-day",
-                first_day_label(prefs.first_day),
+                first_day_label(prefs.first_day, default_first_day),
                 false,
                 std::iter::once(None)
                     .chain(FIRST_DAY_CHOICES.into_iter().map(Some))
                     .map(|day| {
                         prefs_choice(
                             app,
-                            first_day_label(day),
+                            first_day_label(day, default_first_day),
                             prefs.first_day == day,
                             move |prefs| prefs.first_day = day,
                         )
@@ -297,7 +301,7 @@ fn view_rows(app: &Entity<AppState>, prefs: &CalendarPrefs) -> Vec<Div> {
         control_row(
             tr("settings.calendar.work_days"),
             tr("settings.calendar.mailbox_detail"),
-            work_day_chips(app, prefs),
+            work_day_chips(app, prefs, default_first_day),
         ),
         control_row(
             tr("settings.calendar.work_hours"),
@@ -371,14 +375,14 @@ fn default_view_label(view: DefaultView) -> String {
         .map_or_else(|| tr("settings.calendar.last_used"), |span| span.label())
 }
 
-fn first_day_label(day: Option<Weekday>) -> String {
+fn first_day_label(day: Option<Weekday>, default_first_day: Weekday) -> String {
     match day {
         Some(day) => weekday_name(day, WeekdayWidth::Full),
         None => {
             let mut args = HashMap::new();
             args.insert(
                 "day".to_owned(),
-                weekday_name(regional_first_day(), WeekdayWidth::Full),
+                weekday_name(default_first_day, WeekdayWidth::Full),
             );
             crate::i18n::tr_args("settings.calendar.first_day_regional", &args)
         }
@@ -399,8 +403,12 @@ fn weekend_label(rule: WeekendWorkWeek) -> String {
 }
 
 /// Seven day chips from the first day of week; the last work day cannot be turned off.
-fn work_day_chips(app: &Entity<AppState>, prefs: &CalendarPrefs) -> Div {
-    let layout = prefs.layout(regional_first_day());
+fn work_day_chips(
+    app: &Entity<AppState>,
+    prefs: &CalendarPrefs,
+    default_first_day: Weekday,
+) -> Div {
+    let layout = prefs.layout(default_first_day);
     h_flex()
         .gap(px(4.))
         .children(layout.weekdays().into_iter().map(|day| {

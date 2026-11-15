@@ -43,8 +43,16 @@ impl AppState {
                 Ok(mailbox) => {
                     state.mailbox_time_zone = mailbox.time_zone.clone();
                     let hours = work_hours_from(&mailbox);
-                    if hours != state.calendar_prefs.work_hours {
-                        state.update_calendar_prefs(|prefs| prefs.work_hours = hours, cx);
+                    let locale = mailbox.locale.clone();
+                    let prefs = &state.calendar_prefs;
+                    if hours != prefs.work_hours || locale != prefs.mailbox_locale {
+                        state.update_calendar_prefs(
+                            |prefs| {
+                                prefs.work_hours = hours;
+                                prefs.mailbox_locale = locale;
+                            },
+                            cx,
+                        );
                     }
                 }
                 Err(error) => crate::diagnostics::record(format!(
@@ -76,6 +84,7 @@ impl AppState {
             start: hours.start,
             end: hours.end,
             time_zone: self.mailbox_time_zone.clone(),
+            locale: None,
         };
         let receiver =
             crate::runtime::spawn(async move { engine.remote().set_working_hours(&mailbox).await });
@@ -119,6 +128,25 @@ mod tests {
     use crate::app_state::{AppState, Mode};
     use crate::call::calendar_prefs::{DefaultView, WorkHours, load_calendar_prefs};
     use crate::call::week_grid::CalendarSpan;
+
+    #[gpui_kit::test]
+    fn the_week_start_follows_the_mailbox_language(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store, Mode::default())));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state
+                    .update_calendar_prefs(|prefs| prefs.mailbox_locale = Some("en-US".into()), cx);
+                assert_eq!(state.calendar_layout().first_day, Weekday::Sun);
+                state
+                    .update_calendar_prefs(|prefs| prefs.mailbox_locale = Some("en-CH".into()), cx);
+                assert_eq!(state.calendar_layout().first_day, Weekday::Mon);
+                state.update_calendar_prefs(|prefs| prefs.first_day = Some(Weekday::Sat), cx);
+                assert_eq!(state.calendar_layout().first_day, Weekday::Sat);
+            })
+        });
+    }
 
     #[gpui_kit::test]
     fn the_chosen_span_survives_a_restart(cx: &mut TestAppContext) {

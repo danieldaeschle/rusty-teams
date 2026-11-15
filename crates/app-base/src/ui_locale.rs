@@ -135,6 +135,65 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// Leaf keys (`a.b.c`) with the languages they define, read from the locale file.
+    fn leaf_languages() -> Vec<(String, Vec<String>)> {
+        let mut path: Vec<(usize, String)> = Vec::new();
+        let mut leaves: Vec<(String, Vec<String>)> = Vec::new();
+        for line in include_str!("../locales/app.yml").lines() {
+            let trimmed = line.trim_start();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('_') {
+                continue;
+            }
+            let indent = line.len() - trimmed.len();
+            let Some((key, value)) = trimmed.split_once(':') else {
+                continue;
+            };
+            if key == "en" || key == "de" {
+                if let Some(last) = leaves.last_mut() {
+                    last.1.push(key.to_owned());
+                }
+                continue;
+            }
+            path.retain(|(depth, _)| *depth < indent);
+            path.push((indent, key.to_owned()));
+            if value.trim().is_empty() {
+                let full: Vec<&str> = path.iter().map(|(_, key)| key.as_str()).collect();
+                leaves.push((full.join("."), Vec::new()));
+            }
+        }
+        leaves.retain(|(_, languages)| !languages.is_empty());
+        leaves
+    }
+
+    #[test]
+    fn calendar_strings_exist_in_english_and_german() {
+        const PREFIXES: [&str; 5] = [
+            "calendar.view.",
+            "calendar.weekday.",
+            "calendar.weekday_short.",
+            "calendar.month.",
+            "settings.calendar.",
+        ];
+        let leaves = leaf_languages();
+        let covered: Vec<_> = leaves
+            .iter()
+            .filter(|(key, _)| PREFIXES.iter().any(|prefix| key.starts_with(prefix)))
+            .collect();
+        assert!(
+            covered.len() > 60,
+            "only {} calendar keys found",
+            covered.len()
+        );
+        let missing: Vec<_> = covered
+            .iter()
+            .filter(|(_, languages)| {
+                !(languages.contains(&"en".into()) && languages.contains(&"de".into()))
+            })
+            .map(|(key, _)| key.as_str())
+            .collect();
+        assert!(missing.is_empty(), "missing en or de: {missing:?}");
+    }
+
     #[test]
     fn ui_locale_effective_prefers_explicit_english_and_german() {
         let _guard = locale_test_lock();
