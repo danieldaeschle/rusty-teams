@@ -26,4 +26,4 @@ Options were: swap the store and engine under the running UI, run a second proce
 - A guest org works with all features that go through the session, because every token request carries the tenant.
 - Switching costs a restart of a second or two instead of an in-place swap. Swapping the store under the UI would touch every view that holds it.
 - Calls inside a guest org and Outlook calendar for a guest (no mailbox there) are not covered.
-- Notifications and unread badges for the org that is not open are a separate step.
+- Every org that is not open keeps its own realtime socket through a tenant session. New chat messages from others show as toasts that name the org, without quick reply, and the menu counts chats with new messages. Clicking the toast restarts on that org with `--open-conversation`. Channel posts of other orgs do not notify.

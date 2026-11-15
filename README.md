@@ -83,6 +83,7 @@
 - Dark theme, opens instantly from the cache
 - Self-update from GitHub releases (Windows, and the installed Linux binary)
 - Single instance: a second start brings the window to the front
+- Guest orgs: the avatar menu lists every org of your account (home and guest tenants) with unread counts; picking one restarts on it with its own cache. Messages from the other orgs show as toasts
 
 ## Status
 
