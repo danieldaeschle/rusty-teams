@@ -77,7 +77,11 @@ impl StayAwake {
             // SAFETY: pre_exec runs in the child before exec; PR_SET_PDEATHSIG is process-local.
             unsafe {
                 command.pre_exec(|| {
-                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                    // Fail spawn if PDEATHSIG cannot be armed — otherwise a crash can leave
+                    // `sleep infinity` orphaned under systemd-inhibit.
+                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
                     Ok(())
                 });
             }
