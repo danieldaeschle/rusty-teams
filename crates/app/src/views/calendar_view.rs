@@ -22,8 +22,8 @@ use super::rsvp_menu::rsvp_menu;
 use super::scroll_edge::scroll_offset;
 use crate::app_state::AppState;
 use crate::call::calendar_now::{
-    DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION,
-    now_scroll_offset_y, offset_differs, shows_hour_grid,
+    DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION, hour_height,
+    now_scroll_offset_y, offset_differs, shows_hour_grid, work_start_scroll_offset_y,
 };
 use crate::call::week::CalendarLoadFailure;
 use crate::call::week_grid::{
@@ -33,8 +33,6 @@ use crate::call::week_grid::{
 use crate::i18n::tr;
 use crate::theme;
 
-const HOUR_HEIGHT: f32 = 120.;
-const QUARTERS_PER_HOUR: usize = 4;
 const QUARTER_LINE_OPACITY: f32 = 0.45;
 const GUTTER_WIDTH: f32 = 50.;
 const HEADER_HEIGHT: f32 = 52.;
@@ -63,6 +61,9 @@ pub struct CalendarView {
     last_programmatic_offset: f32,
     skip_manual_check: bool,
     clock_running: bool,
+    /// Row height of one hour and minor lines per hour, from the time scale.
+    hour_height: f32,
+    steps_per_hour: usize,
     _observation: Subscription,
     _agent_observation: Option<Subscription>,
 }
@@ -80,6 +81,8 @@ impl CalendarView {
             last_programmatic_offset: 0.,
             skip_manual_check: false,
             clock_running: false,
+            hour_height: hour_height(Default::default()),
+            steps_per_hour: 2,
             _observation: observation,
             _agent_observation: agent_observation,
         }
@@ -94,23 +97,41 @@ impl CalendarView {
         let offset = now_scroll_offset_y(
             local.hour(),
             local.minute(),
-            HOUR_HEIGHT,
+            self.hour_height,
             Self::grid_viewport_height(window),
             NOW_BIAS_FRACTION,
         );
+        self.set_programmatic_offset(offset);
+    }
+
+    /// A range without today opens at work start instead of midnight.
+    fn align_scroll_to_work_start(&mut self, work_start_minute: i64, window: &Window) {
+        let offset = work_start_scroll_offset_y(
+            work_start_minute,
+            self.hour_height,
+            Self::grid_viewport_height(window),
+        );
+        self.set_programmatic_offset(offset);
+    }
+
+    fn set_programmatic_offset(&mut self, offset: f32) {
         self.scroll.set_offset(point(px(0.), px(offset)));
         self.last_programmatic_offset = offset;
         self.skip_manual_check = true;
     }
 
     fn sync_follow_from_state(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let (scroll_to_now, span, today_visible) = {
+        let (scroll_to_now, span, today_visible, work_start) = {
             let state = self.state.read(cx);
             let today_visible = state.calendar_shows_today();
+            let prefs = &state.calendar_prefs;
+            self.hour_height = hour_height(prefs.time_scale);
+            self.steps_per_hour = prefs.time_scale.steps_per_hour() as usize;
             (
                 state.calendar_scroll_to_now,
                 state.calendar_week.span,
                 today_visible,
+                prefs.work_hours.minute_range().0,
             )
         };
         if !shows_hour_grid(span) {
@@ -120,7 +141,12 @@ impl CalendarView {
         self.ensure_clock(cx);
         if scroll_to_now != self.seen_scroll_to_now {
             self.seen_scroll_to_now = scroll_to_now;
-            self.follow_now.request_align();
+            if today_visible {
+                self.follow_now.request_align();
+            } else {
+                self.align_scroll_to_work_start(work_start, window);
+                return;
+            }
         }
         if self.skip_manual_check {
             self.skip_manual_check = false;
@@ -426,8 +452,8 @@ impl CalendarView {
         day: NaiveDate,
         send_response: bool,
     ) -> impl IntoElement {
-        let top = block.start_minute as f32 / 60. * HOUR_HEIGHT;
-        let height = ((block.end_minute - block.start_minute) as f32 / 60. * HOUR_HEIGHT
+        let top = block.start_minute as f32 / 60. * self.hour_height;
+        let height = ((block.end_minute - block.start_minute) as f32 / 60. * self.hour_height
             - BLOCK_GAP)
             .max(14.);
         let width = 1. / block.lanes as f32;
@@ -548,7 +574,9 @@ impl CalendarView {
         send_response: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let total_height = 24. * HOUR_HEIGHT;
+        let row = self.hour_height;
+        let steps = self.steps_per_hour;
+        let total_height = 24. * row;
         let twelve_hour = clock_format().contains("%p") || clock_format().contains("%P");
         let now_minute = {
             let local = now.with_timezone(&Local);
@@ -571,7 +599,7 @@ impl CalendarView {
                             .flex_none()
                             .children((0..24).map(|hour| {
                                 div()
-                                    .h(px(HOUR_HEIGHT))
+                                    .h(px(row))
                                     .pt(px(4.))
                                     .flex()
                                     .justify_center()
@@ -590,15 +618,13 @@ impl CalendarView {
                             .h_full()
                             .border_l_1()
                             .border_color(theme::border())
-                            .children((1..24 * QUARTERS_PER_HOUR).map(|quarter| {
+                            .children((1..24 * steps).map(|quarter| {
                                 let line = div()
                                     .absolute()
-                                    .top(
-                                        px(quarter as f32 * HOUR_HEIGHT / QUARTERS_PER_HOUR as f32),
-                                    )
+                                    .top(px(quarter as f32 * row / steps as f32))
                                     .left_0()
                                     .right_0();
-                                if quarter % QUARTERS_PER_HOUR == 0 {
+                                if quarter % steps == 0 {
                                     line.h(px(1.)).bg(theme::border())
                                 } else {
                                     line.h(px(1.))
@@ -614,7 +640,7 @@ impl CalendarView {
                                 )
                             }))
                             .when(day.date == today, |column| {
-                                let now_top = now_minute as f32 / 60. * HOUR_HEIGHT;
+                                let now_top = now_minute as f32 / 60. * row;
                                 column
                                     .child(
                                         div()

@@ -526,6 +526,24 @@ mod tests {
         });
     }
 
+    #[gpui_kit::test]
+    fn navigating_asks_the_grid_to_align_again(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store, Mode::default())));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                state.open_calendar(cx);
+                let opened = state.calendar_scroll_to_now;
+                state.shift_calendar_week(1, cx);
+                assert_ne!(state.calendar_scroll_to_now, opened);
+                let shifted = state.calendar_scroll_to_now;
+                state.show_calendar_date(chrono::Local::now().date_naive(), cx);
+                assert_ne!(state.calendar_scroll_to_now, shifted);
+            })
+        });
+    }
+
     #[test]
     fn a_failed_source_keeps_its_previous_events() {
         let previous = vec![
