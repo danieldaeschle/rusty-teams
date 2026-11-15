@@ -4,6 +4,7 @@ mod content;
 mod error;
 mod files;
 mod library;
+mod mailbox;
 mod models;
 mod outgoing;
 mod page;
@@ -23,6 +24,7 @@ pub use files::{
     percent_done, share_id,
 };
 pub use library::DriveEntry;
+pub use mailbox::{MailboxWorkingHours, parse_working_hours, working_hours_body};
 pub use models::{
     Attachment, Body, Channel, Chat, ChatViewpoint, Identity, Member, Mention, Message,
     OnlineMeetingInfo, Photo, Presence, Reaction, Sender, Tag, Team, UNKNOWN_USER_NAME, User,

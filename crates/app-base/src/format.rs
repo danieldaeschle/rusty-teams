@@ -31,12 +31,20 @@ const WEEKDAY_WINDOW_DAYS: i64 = 6;
 const TWELVE_HOUR_LOCALES: [&str; 6] = ["en-us", "en-ca", "en-ph", "en-au", "en-nz", "en-in"];
 const DOTTED_LOCALES: [&str; 7] = ["de", "da", "nb", "no", "fi", "cs", "sk"];
 const PADDED_DOT_LOCALES: [&str; 4] = ["ru", "pl", "tr", "uk"];
+/// Regions whose week starts on Sunday (CLDR first-day data for the common locales).
+const SUNDAY_FIRST_LOCALES: [&str; 13] = [
+    "en-us", "en-ca", "en-ph", "en-au", "en-nz", "en-in", "ja", "ko", "zh-tw", "he", "pt-br",
+    "es-mx", "zh-hk",
+];
+/// Arabic regions that start on Monday instead of Saturday.
+const ARABIC_MONDAY_LOCALES: [&str; 2] = ["ar-ma", "ar-tn"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DateStyle {
     day_month: &'static str,
     day_month_year: &'static str,
     clock: &'static str,
+    first_day: Weekday,
 }
 
 thread_local! {
@@ -67,6 +75,21 @@ fn current_date_style() -> Option<DateStyle> {
     DATE_STYLE.with(Cell::get)
 }
 
+/// First day of the week of the regional format; Monday when it is unknown.
+pub fn regional_first_day() -> Weekday {
+    current_date_style().map_or(Weekday::Mon, |style| style.first_day)
+}
+
+fn first_day_for(locale: &str, language: &str) -> Weekday {
+    if SUNDAY_FIRST_LOCALES.contains(&locale) || SUNDAY_FIRST_LOCALES.contains(&language) {
+        Weekday::Sun
+    } else if (language == "ar" && !ARABIC_MONDAY_LOCALES.contains(&locale)) || language == "fa" {
+        Weekday::Sat
+    } else {
+        Weekday::Mon
+    }
+}
+
 pub fn clock_format() -> &'static str {
     current_date_style().map_or("%H:%M", |style| style.clock)
 }
@@ -90,32 +113,70 @@ pub fn calendar_day_number(date: NaiveDate) -> String {
         .to_string()
 }
 
+/// Month name in the app language (`calendar.month.mNN`), not chrono's English `%B`.
+pub fn month_name(date: NaiveDate) -> String {
+    crate::ui_locale::tr(&format!("calendar.month.m{:02}", date.month()))
+}
+
+/// "November 2026" / "November 2026" — month title of the month grid.
+pub fn month_year_label(date: NaiveDate) -> String {
+    format!("{} {}", month_name(date), date.year())
+}
+
+const WEEKDAY_KEYS: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WeekdayWidth {
+    /// "Monday" / "Montag"
+    Full,
+    /// "Mon" / "Mo"
+    Short,
+    /// "M" / "M"
+    Letter,
+}
+
+/// Weekday name in the app language; chrono's `%A`/`%a` are always English.
+pub fn weekday_name(day: Weekday, width: WeekdayWidth) -> String {
+    let key = WEEKDAY_KEYS[day.num_days_from_monday() as usize];
+    match width {
+        WeekdayWidth::Full => crate::ui_locale::tr(&format!("calendar.weekday.{key}")),
+        WeekdayWidth::Short => crate::ui_locale::tr(&format!("calendar.weekday_short.{key}")),
+        WeekdayWidth::Letter => crate::ui_locale::tr(&format!("calendar.weekday_short.{key}"))
+            .chars()
+            .next()
+            .map(String::from)
+            .unwrap_or_default(),
+    }
+}
+
 pub fn calendar_range_label(start: NaiveDate, end: NaiveDate) -> String {
     let style = current_date_style();
-    let day = style.map_or("%-d", |style| style.day_number());
+    let day = |date: NaiveDate| {
+        date.format(style.map_or("%-d", |style| style.day_number()))
+            .to_string()
+    };
+    let (start_month, end_month) = (month_name(start), month_name(end));
     if style.is_none_or(|style| style.month_first()) {
-        let from = start.format(&format!("%B {day}")).to_string();
-        let to = end.format(&format!("%B {day}, %Y")).to_string();
+        let to = format!("{end_month} {}, {}", day(end), end.year());
         return if start == end {
             to
         } else if start.year() != end.year() {
-            format!("{} - {to}", start.format(&format!("%B {day}, %Y")))
+            format!("{start_month} {}, {} - {to}", day(start), start.year())
         } else if start.month() != end.month() {
-            format!("{from} - {to}")
+            format!("{start_month} {} - {to}", day(start))
         } else {
-            format!("{from}-{}, {}", end.format(day), end.year())
+            format!("{start_month} {}-{}, {}", day(start), day(end), end.year())
         };
     }
-    let from = start.format(&format!("{day} %B")).to_string();
-    let to = end.format(&format!("{day} %B, %Y")).to_string();
+    let to = format!("{} {end_month}, {}", day(end), end.year());
     if start == end {
         to
     } else if start.year() != end.year() {
-        format!("{} - {to}", start.format(&format!("{day} %B, %Y")))
+        format!("{} {start_month}, {} - {to}", day(start), start.year())
     } else if start.month() != end.month() {
-        format!("{from} - {to}")
+        format!("{} {start_month} - {to}", day(start))
     } else {
-        format!("{}-{to}", start.format(day))
+        format!("{}-{to}", day(start))
     }
 }
 
@@ -144,6 +205,7 @@ pub fn date_style(locale: &str) -> DateStyle {
         day_month,
         day_month_year,
         clock,
+        first_day: first_day_for(&locale, language),
     }
 }
 
@@ -331,7 +393,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_first_day_of_week_follows_the_region() {
+        let first = |locale| {
+            set_date_locale(Some(locale));
+            regional_first_day()
+        };
+        assert_eq!(first("en-US"), Weekday::Sun);
+        assert_eq!(first("de-CH"), Weekday::Mon);
+        assert_eq!(first("en-GB"), Weekday::Mon);
+        assert_eq!(first("ar-SA"), Weekday::Sat);
+        assert_eq!(first("ar-MA"), Weekday::Mon);
+        assert_eq!(first("ja-JP"), Weekday::Sun);
+        set_date_locale(None);
+        assert_eq!(regional_first_day(), Weekday::Mon);
+    }
+
+    #[test]
+    fn calendar_names_follow_the_app_language() {
+        let _guard = crate::ui_locale::locale_test_lock();
+        let date = NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        rust_i18n::set_locale("de");
+        assert_eq!(weekday_name(Weekday::Mon, WeekdayWidth::Full), "Montag");
+        assert_eq!(weekday_name(Weekday::Thu, WeekdayWidth::Short), "Do");
+        assert_eq!(weekday_name(Weekday::Sun, WeekdayWidth::Letter), "S");
+        assert_eq!(month_year_label(date), "November 2026");
+        assert_eq!(
+            month_name(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()),
+            "März"
+        );
+        rust_i18n::set_locale("en");
+        assert_eq!(weekday_name(Weekday::Mon, WeekdayWidth::Full), "Monday");
+        assert_eq!(weekday_name(Weekday::Thu, WeekdayWidth::Letter), "T");
+    }
+
+    #[test]
     fn calendar_range_follows_the_account_locale() {
+        let _guard = crate::ui_locale::locale_test_lock();
+        rust_i18n::set_locale("en");
         let date = |month, day| NaiveDate::from_ymd_opt(2026, month, day).unwrap();
         set_date_locale(Some("en-GB"));
         assert_eq!(

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use chrono::{Datelike, Duration, Local, Months, NaiveDate};
+use chrono::{Datelike, Duration, Local, Months, NaiveDate, Weekday};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -15,31 +15,30 @@ use crate::call::week_grid::{MONTH_GRID_DAYS, first_of_month, month_grid_start};
 use crate::theme;
 
 pub const DATE_PICKER_TAG: &str = "shell/islands/calendar/date-picker";
-const WEEKDAY_LETTERS: [&str; 7] = ["M", "T", "W", "T", "F", "S", "S"];
 const CELL_SIZE: f32 = 32.;
 const PICKER_PADDING: f32 = 12.;
 
 pub struct DatePicker {
     app: Entity<AppState>,
     month: NaiveDate,
-    shown_start: NaiveDate,
-    shown_days: i64,
+    shown: Vec<NaiveDate>,
+    first_day: Weekday,
     popover: WeakEntity<PopoverState>,
 }
 
 impl DatePicker {
     fn new(
         app: Entity<AppState>,
-        shown_start: NaiveDate,
-        shown_days: i64,
+        shown: Vec<NaiveDate>,
+        first_day: Weekday,
         month: NaiveDate,
         popover: WeakEntity<PopoverState>,
     ) -> Self {
         DatePicker {
             app,
             month: first_of_month(month),
-            shown_start,
-            shown_days,
+            shown,
+            first_day,
             popover,
         }
     }
@@ -64,8 +63,7 @@ impl DatePicker {
 
     fn day_cell(&self, date: NaiveDate, today: NaiveDate, cx: &mut Context<Self>) -> Stateful<Div> {
         let in_month = date.month() == self.month.month();
-        let shown =
-            self.shown_start <= date && date < self.shown_start + Duration::days(self.shown_days);
+        let shown = self.shown.contains(&date);
         let is_today = date == today;
         div()
             .id(SharedString::from(format!("date-picker-{date}")))
@@ -96,7 +94,7 @@ impl DatePicker {
 impl Render for DatePicker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let today = Local::now().date_naive();
-        let start = month_grid_start(self.month);
+        let start = month_grid_start(self.month, self.first_day);
         let days: Vec<NaiveDate> = (0..MONTH_GRID_DAYS)
             .map(|offset| start + Duration::days(offset))
             .collect();
@@ -151,25 +149,37 @@ impl Render for DatePicker {
                             ),
                     ),
             )
-            .child(h_flex().children(WEEKDAY_LETTERS.iter().map(|letter| {
-                div()
-                    .size(px(CELL_SIZE))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(11.))
-                    .text_color(theme::text_muted())
-                    .child(*letter)
-            })))
+            .child(
+                h_flex().children(weekday_letters(self.first_day).map(|letter| {
+                    div()
+                        .size(px(CELL_SIZE))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(11.))
+                        .text_color(theme::text_muted())
+                        .child(letter)
+                })),
+            )
             .children(weeks)
     }
+}
+
+/// Weekday initials in column order from the first day, in the app language.
+fn weekday_letters(first_day: Weekday) -> [String; 7] {
+    let mut day = first_day;
+    std::array::from_fn(|_| {
+        let letter = app_base::format::weekday_name(day, app_base::format::WeekdayWidth::Letter);
+        day = day.succ();
+        letter
+    })
 }
 
 pub fn date_picker_button(
     app: &Entity<AppState>,
     title: String,
-    shown_start: NaiveDate,
-    shown_days: i64,
+    shown: Vec<NaiveDate>,
+    first_day: Weekday,
     month: NaiveDate,
 ) -> AnyElement {
     let app = app.clone();
@@ -196,7 +206,8 @@ pub fn date_picker_button(
             }
             let popover = cx.entity().downgrade();
             let app = app.clone();
-            let created = cx.new(|_| DatePicker::new(app, shown_start, shown_days, month, popover));
+            let created =
+                cx.new(|_| DatePicker::new(app, shown.clone(), first_day, month, popover));
             *picker.borrow_mut() = Some(created.clone());
             created
         })

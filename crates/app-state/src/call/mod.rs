@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod calendar;
+pub mod calendar_settings;
 pub mod consult;
 pub mod end_actions;
 pub mod features;
@@ -24,9 +25,10 @@ pub mod view_actions;
 pub mod week;
 
 pub use app_call_model::{
-    agenda, background, bubbles, calendar_now, caption_style, demo, end_screen, fullscreen, health,
-    media, mic, model, options_dialog, people, preview, record_rights, recording_menu, report,
-    ring, share_view, stage_layout, stage_split, transcript, view_settings, week_grid,
+    agenda, background, bubbles, calendar_now, calendar_prefs, caption_style, demo, end_screen,
+    fullscreen, health, media, mic, model, options_dialog, people, preview, record_rights,
+    recording_menu, report, ring, share_view, stage_layout, stage_split, transcript, view_settings,
+    week_grid,
 };
 
 pub use actions::{

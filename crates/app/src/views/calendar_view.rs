@@ -27,7 +27,8 @@ use crate::call::calendar_now::{
 };
 use crate::call::week::CalendarLoadFailure;
 use crate::call::week_grid::{
-    CalendarSpan, EventLook, WeekBlock, WeekDay, event_look, hour_label, month_shown, week_days,
+    CalendarSpan, EventLook, WeekBlock, WeekDay, WeekLayout, event_look, hour_label, month_shown,
+    week_days,
 };
 use crate::i18n::tr;
 use crate::theme;
@@ -105,10 +106,7 @@ impl CalendarView {
     fn sync_follow_from_state(&mut self, window: &Window, cx: &mut Context<Self>) {
         let (scroll_to_now, span, today_visible) = {
             let state = self.state.read(cx);
-            let start = state.calendar_start();
-            let today = Local::now().date_naive();
-            let today_visible = start <= today
-                && today < start + chrono::Duration::days(state.calendar_week.span.days());
+            let today_visible = state.calendar_shows_today();
             (
                 state.calendar_scroll_to_now,
                 state.calendar_week.span,
@@ -181,7 +179,14 @@ impl CalendarView {
         cx.notify();
     }
 
-    fn header(&self, start: NaiveDate, span: CalendarSpan, compact: bool) -> impl IntoElement {
+    fn header(
+        &self,
+        start: NaiveDate,
+        span: CalendarSpan,
+        dates: &[NaiveDate],
+        layout: &WeekLayout,
+        compact: bool,
+    ) -> impl IntoElement {
         let span_state = self.state.clone();
         let label = |text: &'static str| (!compact).then_some(text);
         let (today, back, forward) = (self.state.clone(), self.state.clone(), self.state.clone());
@@ -242,9 +247,9 @@ impl CalendarView {
             )
             .child(h_flex().flex_1().min_w_0().child(date_picker_button(
                 &self.state,
-                span.title(start),
-                start,
-                span.days(),
+                span.title(start, layout),
+                dates.to_vec(),
+                layout.first_day,
                 if span == CalendarSpan::Month {
                     month_shown(start)
                 } else {
@@ -815,7 +820,9 @@ impl Render for CalendarView {
         let loading = state.calendar_week.loading && events.is_empty();
         let offset = Local::now().offset().fix();
         let span = state.calendar_week.span;
-        let days = week_days(&events, start, span.days(), offset);
+        let layout = state.calendar_layout();
+        let dates = state.calendar_dates();
+        let days = week_days(&events, &dates, offset);
         let today = Local::now().date_naive();
         let now = Utc::now();
         let show_picker = !compact;
@@ -836,7 +843,7 @@ impl Render for CalendarView {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(self.header(start, span, compact))
+                    .child(self.header(start, span, &dates, &layout, compact))
                     .children(load_notices(&self.state, &failures, loading))
                     .children(meeting_proposal_cards(cx))
                     .map(|calendar| {
@@ -848,6 +855,7 @@ impl Render for CalendarView {
                                 &events,
                                 today,
                                 offset,
+                                layout.weekdays(),
                             ))
                         } else {
                             calendar

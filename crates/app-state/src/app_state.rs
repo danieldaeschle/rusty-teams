@@ -211,6 +211,9 @@ pub struct AppState {
     pub meeting_toasts: crate::call::MeetingToasts,
     pub demo_meetings: Vec<chatsvc::CalendarEvent>,
     pub calendar_week: crate::call::week::CalendarWeek,
+    pub calendar_prefs: crate::call::calendar_prefs::CalendarPrefs,
+    /// Mailbox time zone name, written back unchanged with the work hours.
+    pub mailbox_time_zone: Option<String>,
     /// Bumped when the hour grid should align to local «now» (open / Today / day-week span).
     pub calendar_scroll_to_now: u64,
     pub call_backgrounds: crate::call::BackgroundLibrary,
@@ -275,6 +278,7 @@ impl AppState {
         let markdown_mode = crate::chat_settings_actions::stored_markdown_mode(&store);
         let actions_on_right_click =
             crate::chat_settings_actions::stored_actions_on_right_click(&store);
+        let calendar_prefs = crate::call::calendar_prefs::load_calendar_prefs(&store);
         let mut state = AppState {
             store,
             engine: None,
@@ -375,7 +379,11 @@ impl AppState {
             rsvp_send_response: true,
             meeting_toasts: crate::call::MeetingToasts::default(),
             demo_meetings: Vec::new(),
-            calendar_week: crate::call::week::CalendarWeek::default(),
+            calendar_week: crate::call::week::CalendarWeek::with_span(
+                calendar_prefs.initial_span(),
+            ),
+            calendar_prefs,
+            mailbox_time_zone: None,
             calendar_scroll_to_now: 0,
             call_backgrounds: if mode.demo {
                 crate::call::demo_library()
@@ -1178,6 +1186,7 @@ impl AppState {
                 crate::agent_api::engine_ready(engine.clone(), cx);
                 self.engine = Some(engine);
                 self.run_pending_calendar_load(cx);
+                self.load_work_hours(cx);
                 self.resend_outbox(cx);
                 self.refresh_scheduled(cx);
                 self.refresh_translation_settings(cx);

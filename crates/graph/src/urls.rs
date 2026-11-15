@@ -62,6 +62,10 @@ pub fn user_direct_reports(user_id: &str) -> String {
     )
 }
 
+pub fn mailbox_settings() -> String {
+    format!("{GRAPH}/v1.0/me/mailboxSettings")
+}
+
 pub fn get_schedule() -> String {
     format!("{GRAPH}/v1.0/me/calendar/getSchedule")
 }

@@ -1,6 +1,7 @@
 use app_base::format::clock_format;
+use app_base::format::{WeekdayWidth, weekday_name};
 use chatsvc::CalendarEvent;
-use chrono::{Datelike, FixedOffset, NaiveDate};
+use chrono::{Datelike, FixedOffset, NaiveDate, Weekday};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -10,7 +11,6 @@ use crate::call::week_grid::{WeekDay, is_effective_all_day, month_shown};
 use crate::theme;
 
 pub const MONTH_GRID_TAG: &str = "shell/islands/calendar/month";
-const WEEKDAY_NAMES: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const WEEKDAY_HEADER_HEIGHT: f32 = 32.;
 const VISIBLE_EVENTS: usize = 3;
 const DAY_NUMBER_SIZE: f32 = 24.;
@@ -168,6 +168,7 @@ pub fn month_grid(
     events: &[CalendarEvent],
     today: NaiveDate,
     offset: FixedOffset,
+    weekdays: [Weekday; 7],
 ) -> Div {
     let shown_month = month_shown(start);
     let mut rows = v_flex().flex_1().min_h_0().w_full();
@@ -191,13 +192,13 @@ pub fn month_grid(
                 .h(px(WEEKDAY_HEADER_HEIGHT))
                 .flex_none()
                 .w_full()
-                .children(WEEKDAY_NAMES.iter().map(|name| {
+                .children(weekdays.iter().map(|day| {
                     div()
                         .flex_1()
                         .px(px(10.))
                         .text_size(px(12.))
                         .text_color(theme::text_muted())
-                        .child(*name)
+                        .child(weekday_name(*day, WeekdayWidth::Short))
                 })),
         )
         .child(rows)

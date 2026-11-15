@@ -123,17 +123,17 @@ pub fn notice_payload(key: &str, detail: impl std::fmt::Display) -> String {
     format!("{key}{NOTICE_DETAIL_SEP}{detail}")
 }
 
+/// Serialises tests in this crate that read or set the global UI language.
+#[cfg(test)]
+pub(crate) fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|error| error.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::{Mutex, MutexGuard};
-
     use super::*;
     use tempfile::tempdir;
-
-    fn locale_test_lock() -> MutexGuard<'static, ()> {
-        static LOCK: Mutex<()> = Mutex::new(());
-        LOCK.lock().unwrap_or_else(|error| error.into_inner())
-    }
 
     #[test]
     fn ui_locale_effective_prefers_explicit_english_and_german() {
