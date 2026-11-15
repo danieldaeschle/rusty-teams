@@ -55,6 +55,7 @@ impl Session {
             "concurrency": 1,
             "maxBytes": 1,
             "forceRefresh": force_refresh,
+            "tenant": self.tenant(),
         });
         let script = format!(
             "{head}{TOKEN_MARKER}\nconst args = {args};\n{body}\n}})",

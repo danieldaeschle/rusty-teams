@@ -74,6 +74,7 @@ pub struct Session {
     tabs: Arc<HashMap<App, Mutex<Option<TabControl>>>>,
     force_refresh: Arc<AtomicBool>,
     native: Option<Arc<NativeHttp>>,
+    tenant: Option<Arc<str>>,
 }
 
 impl Session {
@@ -90,13 +91,9 @@ impl Session {
         config: SessionConfig,
     ) -> Result<Self> {
         transport.check().await?;
-        let native = config
-            .native_http
-            .then(|| NativeHttp::new(config.evaluate_timeout, MAX_DOWNLOAD_BYTES))
-            .flatten()
-            .map(Arc::new);
         Ok(Session {
-            native,
+            native: native_http(&config),
+            tenant: None,
             transport,
             config,
             tabs: Arc::new(
@@ -107,6 +104,22 @@ impl Session {
             ),
             force_refresh: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// The same browser session with tokens for `tenant_id`, e.g. a tenant the account is a guest in.
+    /// Tokens are held apart from the home tenant's, so both can run side by side.
+    pub fn in_tenant(&self, tenant_id: &str) -> Session {
+        Session {
+            native: native_http(&self.config),
+            force_refresh: Arc::new(AtomicBool::new(false)),
+            tenant: Some(tenant_id.to_ascii_lowercase().into()),
+            ..self.clone()
+        }
+    }
+
+    /// The tenant set with [`Session::in_tenant`]; `None` is the account's home tenant.
+    pub fn tenant(&self) -> Option<&str> {
+        self.tenant.as_deref()
     }
 
     pub async fn request(
@@ -314,6 +327,7 @@ impl Session {
             "concurrency": DEFAULT_CONCURRENCY,
             "maxBytes": MAX_DOWNLOAD_BYTES,
             "forceRefresh": self.force_refresh.load(Ordering::SeqCst),
+            "tenant": self.tenant(),
         })
         .to_string()
     }
@@ -362,6 +376,14 @@ impl Drop for TabHold {
     fn drop(&mut self) {
         self.transport.hold(self.app, false);
     }
+}
+
+fn native_http(config: &SessionConfig) -> Option<Arc<NativeHttp>> {
+    config
+        .native_http
+        .then(|| NativeHttp::new(config.evaluate_timeout, MAX_DOWNLOAD_BYTES))
+        .flatten()
+        .map(Arc::new)
 }
 
 pub(crate) fn retry_wait(header: Option<&str>, default: Duration) -> Duration {
@@ -418,6 +440,25 @@ mod tests {
             *recorder.holds.lock().unwrap(),
             vec![(App::Teams, true), (App::Teams, false)]
         );
+    }
+
+    #[tokio::test]
+    async fn a_tenant_session_asks_the_page_for_that_tenant_only() {
+        let home =
+            Session::with_transport(Arc::new(HoldRecorder::default()), SessionConfig::default())
+                .await
+                .unwrap();
+        let guest = home.in_tenant("AAAA-Guest");
+        let request = Request::get("https://graph.microsoft.com/v1.0/me");
+        let tenant_of = |session: &Session| {
+            let payload: Value =
+                serde_json::from_str(&session.payload(&[&request], &Scope::graph("User.Read")))
+                    .unwrap();
+            payload["tenant"].clone()
+        };
+        assert_eq!(tenant_of(&home), Value::Null);
+        assert_eq!(tenant_of(&guest), json!("aaaa-guest"));
+        assert_eq!(home.tenant(), None);
     }
 
     #[test]

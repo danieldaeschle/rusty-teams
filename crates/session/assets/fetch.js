@@ -1,4 +1,4 @@
-(async ({requests, resource, scope, marginMs, concurrency, maxBytes, forceRefresh, nestedApp}) => {
+(async ({requests, resource, scope, marginMs, concurrency, maxBytes, forceRefresh, nestedApp, tenant}) => {
   const fresh = (expires) => expires > Date.now() + marginMs;
   const normalize = (value) => value.toLowerCase().replace(/\/\/+(?=[^/]*$)/, '/');
   const covers = (value, name) => value === name || value === name + '.all';
@@ -54,6 +54,8 @@
   if (sealed.length) await unseal();
   const ownAccount = (entry) => !activeHome || entry.homeAccountId === activeHome;
   const homeTenant = (entry) => (entry.homeAccountId || '').split('.')[1];
+  // Without a tenant the account's home tenant; a guest tenant is reached with the same account's refresh token.
+  const inTenant = (entry) => tenant ? entry.realm === tenant : (!entry.realm || entry.realm === homeTenant(entry));
   const cache = (window.__rustyTeamsTokens = window.__rustyTeamsTokens || {});
   const acquire = async (resource, scope) => {
     const base = resource.replace(/\/+$/, '');
@@ -62,12 +64,12 @@
     const underResource = (name) => normalize(name).startsWith(base.toLowerCase() + '/');
     const grants = (scopes) => scopes.some(s => (scope === '.default' ? underResource(s) : covers(normalize(s), wanted))
       || (base === 'https://graph.microsoft.com' && covers(s.toLowerCase(), short)));
-    const cacheKey = nestedApp ? base + '|' + nestedApp.clientId : base;
+    const cacheKey = [base, nestedApp ? nestedApp.clientId : '', tenant || ''].join('|');
     let token = null, expiresOn = 0;
     for (const entry of forceRefresh ? [] : entries) {
       if (entry.credentialType !== 'AccessToken' || (entry.tokenType && entry.tokenType !== 'Bearer')) continue;
       if (nestedApp && entry.clientId !== nestedApp.clientId) continue;
-      if (!ownAccount(entry) || (entry.realm && entry.realm !== homeTenant(entry))) continue;
+      if (!ownAccount(entry) || !inTenant(entry)) continue;
       const expires = Number(entry.expiresOn) * 1000;
       if (!grants((entry.target || '').split(' ')) || !fresh(expires) || expires <= expiresOn) continue;
       token = entry.secret; expiresOn = expires;
@@ -94,7 +96,7 @@
         form.set('brk_redirect_uri', nestedApp.brokerRedirectUri);
       }
       try {
-        const response = await fetch(`https://login.microsoftonline.com/${homeTenant(refreshToken) || 'organizations'}/oauth2/v2.0/token`,
+        const response = await fetch(`https://login.microsoftonline.com/${tenant || homeTenant(refreshToken) || 'organizations'}/oauth2/v2.0/token`,
           {method: 'POST', body: form});
         const answer = await response.json();
         if (!response.ok) { refreshError = answer.error || `HTTP ${response.status}`; continue; }
