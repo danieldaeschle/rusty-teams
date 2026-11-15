@@ -309,6 +309,19 @@ pub fn portal_follow_up(event: PortalPickerEvent, source: Option<ShareSource>) -
     }
 }
 
+/// What a frame result says about a system picker without a delegated
+/// controller (macOS). Frames start once a source is picked. A cancel, or a
+/// picker that fails to start, turns into a permanent error.
+fn picker_event_from_frame<T>(
+    result: &std::result::Result<T, CaptureError>,
+) -> Option<PortalPickerEvent> {
+    match result {
+        Ok(_) => Some(PortalPickerEvent::Selected),
+        Err(CaptureError::Permanent) => Some(PortalPickerEvent::Cancelled),
+        Err(CaptureError::Temporary) => None,
+    }
+}
+
 pub(crate) fn start_portal_capture(
     kind: ShareKind,
     fps: Arc<AtomicU32>,
@@ -321,11 +334,29 @@ pub(crate) fn start_portal_capture(
             outcome(PortalFollowUp::Notice(PORTAL_UNAVAILABLE_NOTICE));
             return;
         };
+        // The Wayland portal reports the pick through a delegated picker. The
+        // macOS system picker has none: it opens in `start_capture` and the
+        // outcome shows in the frame results.
+        let delegated = capturer.has_delegated_picker();
+        if !delegated && !cfg!(target_os = "macos") {
+            outcome(PortalFollowUp::Notice(PORTAL_UNAVAILABLE_NOTICE));
+            return;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let frame_events = (!delegated).then(|| sender.clone());
         let selected = Arc::new(AtomicBool::new(false));
         let gate = selected.clone();
         capturer.start_capture(None, move |result| {
             if !gate.load(Ordering::SeqCst) {
-                return;
+                let Some(events) = &frame_events else { return };
+                let Some(event) = picker_event_from_frame(&result) else {
+                    return;
+                };
+                let _ = events.send(event);
+                if event != PortalPickerEvent::Selected {
+                    return;
+                }
+                gate.store(true, Ordering::SeqCst);
             }
             let Ok(frame) = result else { return };
             let (width, height) = (frame.width() as u32 & !1, frame.height() as u32 & !1);
@@ -333,18 +364,18 @@ pub(crate) fn start_portal_capture(
                 deliver(i420_from_bgra(frame.data(), width, height, frame.stride()));
             }
         });
-        if !capturer.has_delegated_picker() {
-            outcome(PortalFollowUp::Notice(PORTAL_UNAVAILABLE_NOTICE));
-            return;
+        if delegated {
+            capturer.watch_picker(move |event| {
+                let _ = sender.send(event);
+            });
+            capturer.ensure_picker_visible();
         }
-        let (sender, receiver) = std::sync::mpsc::channel();
-        capturer.watch_picker(move |event| {
-            let _ = sender.send(event);
-        });
-        capturer.ensure_picker_visible();
         let event = loop {
             if stop.load(Ordering::SeqCst) {
                 return;
+            }
+            if !delegated {
+                capturer.capture_frame();
             }
             match receiver.recv_timeout(Duration::from_millis(40)) {
                 Ok(event) => break event,
@@ -404,6 +435,22 @@ mod tests {
             title: " Notes ".into(),
         };
         assert_eq!(window.label(), "Notes");
+    }
+
+    #[test]
+    fn frames_report_the_macos_picker_outcome() {
+        assert_eq!(
+            picker_event_from_frame(&Ok(())),
+            Some(PortalPickerEvent::Selected)
+        );
+        assert_eq!(
+            picker_event_from_frame::<()>(&Err(CaptureError::Permanent)),
+            Some(PortalPickerEvent::Cancelled)
+        );
+        assert_eq!(
+            picker_event_from_frame::<()>(&Err(CaptureError::Temporary)),
+            None
+        );
     }
 }
 
