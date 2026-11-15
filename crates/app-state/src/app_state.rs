@@ -210,8 +210,6 @@ pub struct AppState {
     pub rsvp_send_response: bool,
     pub meeting_toasts: crate::call::MeetingToasts,
     pub demo_meetings: Vec<chatsvc::CalendarEvent>,
-    /// Google week-load failure already surfaced as a notice this session.
-    pub google_sync_notice_shown: bool,
     pub calendar_week: crate::call::week::CalendarWeek,
     /// Bumped when the hour grid should align to local «now» (open / Today / day-week span).
     pub calendar_scroll_to_now: u64,
@@ -377,7 +375,6 @@ impl AppState {
             rsvp_send_response: true,
             meeting_toasts: crate::call::MeetingToasts::default(),
             demo_meetings: Vec::new(),
-            google_sync_notice_shown: false,
             calendar_week: crate::call::week::CalendarWeek::default(),
             calendar_scroll_to_now: 0,
             call_backgrounds: if mode.demo {
@@ -1168,7 +1165,10 @@ impl AppState {
                 self.call_launcher = Some(launcher);
                 self.load_own_time_zone(cx);
             }
-            BackendEvent::Calendar(events) => self.apply_calendar(events, cx),
+            BackendEvent::Calendar(events) => {
+                self.apply_calendar(events, cx);
+                self.refresh_visible_calendar(cx);
+            }
             BackendEvent::CalendarNudge(nudge) => self.calendar_nudge = Some(nudge),
             BackendEvent::Ring(event) => self.on_engine_event(event, cx),
             BackendEvent::ThreadChanged(conversation_id) => {
@@ -1177,6 +1177,7 @@ impl AppState {
             BackendEvent::Engine(engine) => {
                 crate::agent_api::engine_ready(engine.clone(), cx);
                 self.engine = Some(engine);
+                self.run_pending_calendar_load(cx);
                 self.resend_outbox(cx);
                 self.refresh_scheduled(cx);
                 self.refresh_translation_settings(cx);

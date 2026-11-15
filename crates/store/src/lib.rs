@@ -27,7 +27,8 @@ mod time;
 
 pub use calendar_accounts::{
     CALENDAR_ACCOUNTS_KEY, CalendarAccounts, CalendarProvider, CalendarRef, GoogleAccount,
-    GoogleCalendarInfo, GoogleTokenSet, load_calendar_accounts, save_calendar_accounts,
+    GoogleCalendarInfo, GoogleTokenSet, load_calendar_accounts, merge_google_tokens,
+    save_calendar_accounts,
 };
 pub use error::{Error, Result};
 pub use image_files::ImageFileCache;

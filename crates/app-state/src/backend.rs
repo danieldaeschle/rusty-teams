@@ -490,7 +490,8 @@ async fn calendar_loop(session: Session, store: Arc<Store>, events: EventSender)
         deferred_fetch = None;
         last_fetch = Some(tokio::time::Instant::now());
         let (start, end) = fetch_window(Utc::now(), Local::now().offset().fix());
-        let mut accounts = store::load_calendar_accounts(&store);
+        let accounts = store::load_calendar_accounts(&store);
+        let mut fetched_accounts = accounts.clone();
         let mut combined = Vec::new();
         let mut outlook_failed = false;
         if accounts.outlook_selected {
@@ -505,9 +506,12 @@ async fn calendar_loop(session: Session, store: Arc<Store>, events: EventSender)
                 }
             }
         }
-        match crate::google_calendar_sync::fetch_google_events(&mut accounts, start, end).await {
+        match crate::google_calendar_sync::fetch_google_events(&mut fetched_accounts, start, end)
+            .await
+        {
             Ok(google_events) => {
-                let _ = store::save_calendar_accounts(&store, &accounts);
+                // Only refreshed tokens: a calendar toggle made during the fetch stays.
+                let _ = store::merge_google_tokens(&store, &fetched_accounts);
                 combined.extend(google_events);
             }
             Err(error) => crate::diagnostics::record(format!(

@@ -25,6 +25,7 @@ use crate::call::calendar_now::{
     DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION,
     now_scroll_offset_y, offset_differs, shows_hour_grid,
 };
+use crate::call::week::CalendarLoadFailure;
 use crate::call::week_grid::{
     CalendarSpan, EventLook, WeekBlock, WeekDay, event_look, hour_label, month_shown, week_days,
 };
@@ -634,6 +635,66 @@ impl CalendarView {
     }
 }
 
+/// Loading line and one notice per failed source, under the calendar header.
+fn load_notices(
+    state: &Entity<AppState>,
+    failures: &[CalendarLoadFailure],
+    loading: bool,
+) -> Vec<Div> {
+    let mut rows = Vec::new();
+    if loading {
+        rows.push(
+            h_flex()
+                .flex_none()
+                .px(px(16.))
+                .pb(px(6.))
+                .text_size(px(12.))
+                .text_color(theme::text_muted())
+                .child(tr("calendar.view.loading")),
+        );
+    }
+    for failure in failures {
+        let retry = state.clone();
+        let mut args = std::collections::HashMap::new();
+        args.insert("source".to_owned(), failure.source.label().to_owned());
+        rows.push(
+            h_flex()
+                .flex_none()
+                .mx(px(16.))
+                .mb(px(6.))
+                .px(px(12.))
+                .py(px(6.))
+                .gap(px(12.))
+                .items_center()
+                .rounded(px(6.))
+                .bg(theme::red_tint())
+                .text_size(px(13.))
+                .text_color(theme::text())
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(crate::i18n::tr_args("calendar.view.source_failed", &args)),
+                )
+                .child(
+                    Button::new(SharedString::from(format!(
+                        "calendar-retry-{}",
+                        failure.source.label()
+                    )))
+                    .xsmall()
+                    .outline()
+                    .label(tr("common.retry"))
+                    .tooltip(failure.message.clone())
+                    .on_click(move |_, _, cx| {
+                        retry.update(cx, |state, cx| state.retry_calendar_week(cx))
+                    }),
+                ),
+        );
+    }
+    rows
+}
+
 fn event_menu(
     menu: PopupMenu,
     state: &Entity<AppState>,
@@ -750,6 +811,8 @@ impl Render for CalendarView {
         let start = state.calendar_start();
         let events = state.calendar_week.events.clone();
         let send_response = state.rsvp_send_response;
+        let failures = state.calendar_week.failures.clone();
+        let loading = state.calendar_week.loading && events.is_empty();
         let offset = Local::now().offset().fix();
         let span = state.calendar_week.span;
         let days = week_days(&events, start, span.days(), offset);
@@ -774,6 +837,7 @@ impl Render for CalendarView {
                     .min_w_0()
                     .h_full()
                     .child(self.header(start, span, compact))
+                    .children(load_notices(&self.state, &failures, loading))
                     .children(meeting_proposal_cards(cx))
                     .map(|calendar| {
                         if span == CalendarSpan::Month {
