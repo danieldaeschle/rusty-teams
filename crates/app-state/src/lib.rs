@@ -39,6 +39,7 @@ pub mod manage_team;
 pub mod message_actions;
 pub mod notice;
 pub mod notify;
+mod org_actions;
 pub mod outbox;
 pub mod outgoing;
 pub mod own_status;

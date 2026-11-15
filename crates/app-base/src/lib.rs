@@ -28,6 +28,7 @@ pub mod linux_desktop;
 pub mod linux_fonts;
 pub mod native_dumps;
 pub mod notify;
+pub mod orgs;
 pub mod presence_link;
 pub mod read_state;
 pub mod recap;

@@ -195,12 +195,13 @@ fn status_menu(
         None => context.summary.label.to_owned(),
     };
     let submenu_context = context.clone();
-    popup
+    let popup = popup
         .min_w(px(MENU_WIDTH))
         .item(PopupMenuItem::element(move |_, cx| {
             header(&header_context, cx)
         }))
-        .separator()
+        .separator();
+    org_items(popup, &context.app, cx)
         .submenu_with_icon(
             Some(status_icon(context.summary.presence)),
             row_label,
@@ -217,6 +218,36 @@ fn status_menu(
                     message_app.update(cx, |state, cx| state.request_status_message(cx));
                 }),
         )
+}
+
+/// One row per organization of the account, the open one checked; picking another restarts on it.
+fn org_items(popup: PopupMenu, app: &Entity<AppState>, cx: &mut Context<PopupMenu>) -> PopupMenu {
+    let state = app.read(cx);
+    let rows: Vec<_> = state
+        .switchable_orgs()
+        .iter()
+        .map(|org| (org.clone(), state.orgs.is_active(org)))
+        .collect();
+    if rows.is_empty() {
+        return popup;
+    }
+    rows.into_iter()
+        .fold(popup, |popup, (org, active)| {
+            let label = if org.guest {
+                tr("status_menu.guest_org").replace("%{name}", &org.name)
+            } else {
+                org.name.clone()
+            };
+            let app = app.clone();
+            popup.item(
+                PopupMenuItem::new(label)
+                    .checked(active)
+                    .on_click(move |_, _, cx| {
+                        app.update(cx, |state, cx| state.switch_org(&org, cx));
+                    }),
+            )
+        })
+        .separator()
 }
 
 fn pause_item(

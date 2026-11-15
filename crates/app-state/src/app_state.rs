@@ -133,6 +133,8 @@ pub struct AppState {
     pub collapsed: HashSet<String>,
     pub expanded_lists: HashSet<String>,
     pub start_on_channels: bool,
+    /// The account's organizations and the one this window shows.
+    pub orgs: app_base::orgs::Orgs,
     pub pending_jump: Option<(String, String)>,
     pub cards: CardState,
     pub task_dialog: Option<TaskDialogState>,
@@ -300,6 +302,7 @@ impl AppState {
             collapsed: HashSet::new(),
             expanded_lists: HashSet::new(),
             start_on_channels: false,
+            orgs: app_base::orgs::Orgs::default(),
             pending_jump: None,
             cards: CardState::default(),
             task_dialog: None,
@@ -1246,6 +1249,10 @@ impl AppState {
                 self.live = live;
                 self.refresh_connection_banner(cx);
                 cx.emit(AppEvent::Status);
+            }
+            BackendEvent::Orgs(list) => {
+                self.take_org_list(list);
+                cx.notify();
             }
             BackendEvent::Favorites(ids) => {
                 self.favorite_ids = ids;

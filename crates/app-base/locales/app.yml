@@ -1413,6 +1413,9 @@ shell:
     en: Settings and more
     de: Einstellungen und mehr
 status_menu:
+  guest_org:
+    en: "%{name} (Guest)"
+    de: "%{name} (Gast)"
   view_account:
     en: View account
     de: Konto anzeigen
