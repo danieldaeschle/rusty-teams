@@ -171,6 +171,7 @@ fn vertical_line() -> Div {
     div().w(px(1.)).h_full().flex_none().bg(theme::border())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn month_grid(
     state: &Entity<AppState>,
     start: NaiveDate,

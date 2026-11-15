@@ -425,17 +425,15 @@ fn work_day_chips(
                 .items_center()
                 .justify_center()
                 .rounded(px(6.))
-                .border_1()
                 .text_size(px(12.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .map(|chip| {
                     if on {
-                        chip.bg(theme::accent())
-                            .border_color(theme::accent())
-                            .text_color(theme::on_accent())
+                        chip.bg(theme::accent()).text_color(theme::on_accent())
                     } else {
-                        chip.border_color(theme::border_strong())
+                        chip.bg(theme::surface_raised())
                             .text_color(theme::text_soft())
+                            .hover(|chip| chip.bg(theme::popup_hover()))
                     }
                 })
                 .when(!last, |chip| {

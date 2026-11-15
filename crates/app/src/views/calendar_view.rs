@@ -46,6 +46,25 @@ pub const CALENDAR_HEADER_TAG: &str = "shell/islands/calendar/header";
 pub const CALENDAR_DAY_HEADERS_TAG: &str = "shell/islands/calendar/day-headers";
 pub const CALENDAR_NEW_MEETING_TAG: &str = "shell/islands/calendar/header/new-meeting";
 pub const COMPACT_HEADER_WIDTH: f32 = 960.;
+/// Header widths below which button labels give way to icons (German labels are longest).
+const SECONDARY_LABELS_WIDTH: f32 = 1080.;
+const PRIMARY_LABELS_WIDTH: f32 = 780.;
+
+/// Which header buttons keep their text at a given header width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeaderLabels {
+    /// Today, view and New meeting.
+    pub primary: bool,
+    /// Join with an ID and Meet now.
+    pub secondary: bool,
+}
+
+pub fn header_labels(header_width: f32) -> HeaderLabels {
+    HeaderLabels {
+        primary: header_width >= PRIMARY_LABELS_WIDTH,
+        secondary: header_width >= SECONDARY_LABELS_WIDTH,
+    }
+}
 const BUSY_FILL_OPACITY: f32 = 0.28;
 const FREE_FILL_OPACITY: f32 = 0.12;
 const STATUS_BAR_WIDTH: f32 = 4.;
@@ -216,9 +235,11 @@ impl CalendarView {
         dates: &[NaiveDate],
         layout: &WeekLayout,
         compact: bool,
+        labels: HeaderLabels,
     ) -> impl IntoElement {
         let span_state = self.state.clone();
-        let label = |key: &'static str| (!compact).then(|| tr(key));
+        let label = |key: &'static str| labels.primary.then(|| tr(key));
+        let secondary = |key: &'static str| labels.secondary.then(|| tr(key));
         let (today, back, forward) = (self.state.clone(), self.state.clone(), self.state.clone());
         let (join_state, meet_state, new_state) =
             (self.state.clone(), self.state.clone(), self.state.clone());
@@ -301,7 +322,7 @@ impl CalendarView {
                     .small()
                     .ghost()
                     .icon(IconName::LayoutGrid)
-                    .label(span.label())
+                    .when(labels.primary, |button| button.label(span.label()))
                     .dropdown_caret(true)
                     .dropdown_menu(move |menu, _, _| {
                         CalendarSpan::ALL.iter().fold(menu, |menu, &choice| {
@@ -323,7 +344,7 @@ impl CalendarView {
                     .small()
                     .outline()
                     .icon(IconName::Hash)
-                    .when_some(label("calendar.view.join_with_id"), |button, text| {
+                    .when_some(secondary("calendar.view.join_with_id"), |button, text| {
                         button.label(text)
                     })
                     .tooltip(tr("calendar.view.join_with_id"))
@@ -336,7 +357,7 @@ impl CalendarView {
                     .small()
                     .outline()
                     .icon(IconName::Video)
-                    .when_some(label("calendar.view.meet_now"), |button, text| {
+                    .when_some(secondary("calendar.view.meet_now"), |button, text| {
                         button.label(text)
                     })
                     .tooltip(tr("calendar.view.meet_now"))
@@ -715,7 +736,7 @@ impl CalendarView {
                                         div()
                                             .absolute()
                                             .top(px(now_top - NOW_DOT_SIZE / 2.))
-                                            .left(px(-NOW_DOT_SIZE / 2.))
+                                            .left_0()
                                             .size(px(NOW_DOT_SIZE))
                                             .rounded_full()
                                             .bg(theme::accent()),
@@ -916,7 +937,8 @@ fn source_label(event: &CalendarEvent) -> String {
 
 impl Render for CalendarView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let compact = f32::from(window.viewport_size().width) < COMPACT_HEADER_WIDTH;
+        let window_width = f32::from(window.viewport_size().width);
+        let compact = window_width < COMPACT_HEADER_WIDTH;
         self.sync_follow_from_state(window, cx);
         let state = self.state.read(cx);
         let start = state.calendar_start();
@@ -938,6 +960,16 @@ impl Render for CalendarView {
             .collect();
         let work_minutes = state.calendar_prefs.work_hours.minute_range();
         let show_picker = !compact && !state.calendar_prefs.pane_hidden;
+        // Width left for the header: window minus rail, island gaps and the pane.
+        let header_width = window_width
+            - app_ui_kit::layout::RAIL_WIDTH
+            - 2. * app_ui_kit::layout::ISLAND_GAP
+            - if show_picker {
+                calendar_picker::PICKER_WIDTH
+            } else {
+                0.
+            };
+        let labels = header_labels(header_width);
         h_flex()
             .debug_selector(|| "shell/islands/calendar".into())
             .flex_1()
@@ -955,7 +987,7 @@ impl Render for CalendarView {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(self.header(start, span, &dates, &layout, compact))
+                    .child(self.header(start, span, &dates, &layout, compact, labels))
                     .children(load_notices(&self.state, &failures, loading))
                     .children(meeting_proposal_cards(cx))
                     .map(|calendar| {
@@ -988,5 +1020,20 @@ impl Render for CalendarView {
                         }
                     }),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::header_labels;
+
+    #[test]
+    fn header_buttons_drop_their_text_as_the_header_narrows() {
+        let wide = header_labels(1300.);
+        assert!(wide.primary && wide.secondary);
+        let middle = header_labels(900.);
+        assert!(middle.primary && !middle.secondary);
+        let narrow = header_labels(600.);
+        assert!(!narrow.primary && !narrow.secondary);
     }
 }
