@@ -27,6 +27,20 @@ const ITEM_RADIUS: f32 = 6.;
 const ITEM_ICON: f32 = 16.;
 const NAV_PADDING_X: f32 = 12.;
 
+const CALENDAR_TERMS: [&str; 11] = [
+    "settings.calendar.default_view",
+    "settings.calendar.first_day",
+    "settings.calendar.work_days",
+    "settings.calendar.work_hours",
+    "settings.calendar.time_scale",
+    "settings.calendar.weekend",
+    "settings.calendar.google_title",
+    "settings.calendar.connect_button",
+    "settings.calendar.section_home",
+    "settings.calendar.section_write",
+    "settings.calendar.outlook_mailbox",
+];
+
 fn search_terms(section: SettingsSection) -> Vec<String> {
     match section {
         SettingsSection::General => vec![
@@ -34,10 +48,6 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.general.open_in_background"),
             tr("settings.general.close_to_tray"),
             tr("settings.general.external_browser"),
-            #[cfg(target_os = "linux")]
-            tr("install.menu_title"),
-            #[cfg(target_os = "linux")]
-            tr("install.updates_title"),
             tr("settings.general.up_arrow"),
             tr("settings.general.translate_into"),
             tr("settings.general.behavior_title"),
@@ -70,13 +80,7 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.chats.markdown"),
         ],
         SettingsSection::Calls => vec![tr("settings.calls.ringtones")],
-        SettingsSection::Calendar => vec![
-            "Google Calendar".to_owned(),
-            "Connect Google".to_owned(),
-            "Home calendar".to_owned(),
-            "Also write to".to_owned(),
-            "Outlook".to_owned(),
-        ],
+        SettingsSection::Calendar => CALENDAR_TERMS.iter().map(|key| tr(key)).collect(),
         SettingsSection::Devices => vec![
             "Speaker".to_owned(),
             "Microphone".to_owned(),
@@ -369,6 +373,7 @@ mod tests {
 
     #[test]
     fn search_finds_sections_by_name_and_by_setting() {
+        let _guard = crate::i18n::locale_test_lock();
         apply_locale("en");
         assert!(matches(SettingsSection::Chats, "read receipts"));
         assert!(matches(SettingsSection::Devices, "MICRO"));
@@ -417,12 +422,14 @@ mod tests {
                 "settings.chats.enter_to",
                 "settings.chats.markdown",
             ],
+            SettingsSection::Calendar => &super::CALENDAR_TERMS,
             _ => &[],
         }
     }
 
     #[test]
     fn every_search_term_names_a_setting_on_its_page() {
+        let _guard = crate::i18n::locale_test_lock();
         apply_locale("en");
         let pages = [
             (SettingsSection::General, include_str!("general.rs")),
@@ -432,6 +439,7 @@ mod tests {
             ),
             (SettingsSection::Appearance, include_str!("appearance.rs")),
             (SettingsSection::Devices, include_str!("devices.rs")),
+            (SettingsSection::Calendar, include_str!("calendar.rs")),
         ];
         for (section, source) in pages {
             for key in search_term_keys(section) {

@@ -1915,6 +1915,7 @@ mod frames {
     const MENU_ITEMS_SCANNED: usize = 40;
     const MENU_CHAT: &str = "demo-chat-release";
     const THEME_SELECT: &str = "settings-theme";
+    const CALENDAR_DEFAULT_VIEW_SELECT: &str = "settings-calendar-default-view";
 
     struct MenuRow {
         index: usize,
@@ -2136,17 +2137,22 @@ mod frames {
 
     #[gpui_kit::test]
     fn settings_select_list_lines_up_with_its_trigger(cx: &mut TestAppContext) {
+        select_list_lines_up(cx, SettingsSection::Appearance, THEME_SELECT);
+    }
+
+    #[gpui_kit::test]
+    fn calendar_default_view_list_lines_up_with_its_trigger(cx: &mut TestAppContext) {
+        select_list_lines_up(cx, SettingsSection::Calendar, CALENDAR_DEFAULT_VIEW_SELECT);
+    }
+
+    fn select_list_lines_up(cx: &mut TestAppContext, section: SettingsSection, id: &str) {
         let (handle, state) = mount(cx);
         let mut visual = VisualTestContext::from_window(handle, cx);
         visual.simulate_resize(size(px(1280.), px(800.)));
-        visual.update(|_, cx| {
-            state.update(cx, |state, cx| {
-                state.open_settings(SettingsSection::Appearance, cx)
-            })
-        });
-        let select: &'static str = Box::leak(select_selector(THEME_SELECT).into_boxed_str());
+        visual.update(|_, cx| state.update(cx, |state, cx| state.open_settings(section, cx)));
+        let select: &'static str = Box::leak(select_selector(id).into_boxed_str());
         collect(&mut visual, Some(select));
-        let trigger = visual.debug_bounds(select).expect("theme select rendered");
+        let trigger = visual.debug_bounds(select).expect("select rendered");
         visual.simulate_click(trigger.center(), Default::default());
         collect(&mut visual, Some(MENU));
         let menu = visual.debug_bounds(MENU).expect("list rendered");

@@ -30,5 +30,6 @@ Statuses: `proposed`, `accepted`, `superseded`.
 | [0012](0012-linux-close-to-tray-closes-the-window.md) | On Linux, close to tray closes the main window |
 | [0013](0013-local-diagnostic-data-and-upstream-issues.md) | Local diagnostic data layout and upstream issues |
 | [0014](0014-linux-installs-and-updates-itself.md) | The Linux binary installs and updates itself |
+| [0016](0016-calendar-week-start-and-time-scale-stay-local.md) | Calendar work hours go to the mailbox, week start and time scale stay local |
 
 Records `0001` to `0014` are the decisions already shipped. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.
