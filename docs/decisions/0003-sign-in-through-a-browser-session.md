@@ -21,6 +21,7 @@ Tokens are not written to disk. The browser profile holds the session.
 
 ## Consequences
 
-- Linux and macOS need a Chrome or Chromium install.
+- Linux needs a Chrome or Chromium install. macOS takes the first Chromium browser it finds: Chrome, Chromium, Edge, Brave, Helium or Vivaldi. Each runs with the app's own profile, so the user's everyday profile is never touched.
+- Forks print their own version in `--version` (`Helium 0.21.3.1 (Chromium 157.0.8103.78)`), so the user agent takes the highest major in that line.
 - Sign-in bugs are browser and profile bugs, not a second token store to rotate.
 - The headless user agent must look like desktop Chrome on that OS, or Microsoft rejects the session.

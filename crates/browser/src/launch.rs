@@ -76,14 +76,14 @@ pub(crate) fn major_from_directory_names<'a>(names: impl Iterator<Item = &'a str
         .max()
 }
 
+/// The Chromium major from `--version`. Forks print their own version first, as in
+/// "Helium 0.21.3.1 (Chromium 157.0.8103.78)", so the highest major wins.
 pub(crate) fn major_from_version_output(output: &str) -> Option<u32> {
-    output.split_whitespace().find_map(|word| {
-        word.split('.')
-            .next()?
-            .parse::<u32>()
-            .ok()
-            .filter(|_| word.contains('.'))
-    })
+    output
+        .split(|character: char| character.is_whitespace() || character == '(' || character == ')')
+        .filter(|word| word.contains('.'))
+        .filter_map(|word| word.split('.').next()?.parse::<u32>().ok())
+        .max()
 }
 
 const FALLBACK_MAJOR: u32 = 150;
@@ -279,6 +279,10 @@ mod tests {
         assert_eq!(
             major_from_version_output("Chromium 131.0.6778.85 snap"),
             Some(131)
+        );
+        assert_eq!(
+            major_from_version_output("Helium 0.21.3.1 (Chromium 157.0.8103.78)\n"),
+            Some(157)
         );
         assert_eq!(major_from_version_output("nothing"), None);
     }

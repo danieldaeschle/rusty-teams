@@ -16,9 +16,15 @@ const LINUX_CHROME_NAMES: [&str; 5] = [
     "chrome",
 ];
 const MACOS_CHROME_NAMES: [&str; 3] = ["google-chrome", "chromium", "chrome"];
-const MACOS_CHROME_APP_PATHS: [&str; 2] = [
+/// Chromium-based browsers in order of preference; each one gets its own profile, so the user's
+/// everyday browser stays untouched.
+const MACOS_CHROME_APP_PATHS: [&str; 6] = [
     "Google Chrome.app/Contents/MacOS/Google Chrome",
     "Chromium.app/Contents/MacOS/Chromium",
+    "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "Brave Browser.app/Contents/MacOS/Brave Browser",
+    "Helium.app/Contents/MacOS/Helium",
+    "Vivaldi.app/Contents/MacOS/Vivaldi",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,7 +268,7 @@ pub(crate) fn find_chrome(
             .or_else(|| find_named_chrome(names, path_variable, exists))
             .ok_or_else(|| {
                 BrowserError::ChromeNotFound(
-                    "not under /Applications, ~/Applications, or PATH".into(),
+                    "no Chrome, Chromium, Edge, Brave, Helium or Vivaldi under /Applications, ~/Applications, or PATH".into(),
                 )
             }),
     }
@@ -498,9 +504,12 @@ mod tests {
             PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         );
         assert_eq!(
-            files[2],
+            files[MACOS_CHROME_APP_PATHS.len()],
             PathBuf::from("/Users/joe/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
         );
+        assert!(files.contains(&PathBuf::from(
+            "/Applications/Helium.app/Contents/MacOS/Helium"
+        )));
         assert!(names.iter().any(|name| name == "google-chrome"));
         assert_eq!(
             config.with_profile_name("x").profile,
