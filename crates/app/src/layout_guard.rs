@@ -265,6 +265,7 @@ mod frames {
     ];
     const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
     const CALENDAR: &str = "shell/islands/calendar";
+    use crate::views::calendar_picker::{CALENDAR_PANE_TAG, MINI_MONTH_TAG};
     use crate::views::calendar_view::{
         CALENDAR_DAY_HEADERS_TAG, CALENDAR_HEADER_TAG, CALENDAR_NEW_MEETING_TAG,
     };
@@ -639,6 +640,8 @@ mod frames {
                 &CALENDAR_HEADER_TAG,
                 &CALENDAR_DAY_HEADERS_TAG,
                 &CALENDAR_NEW_MEETING_TAG,
+                &CALENDAR_PANE_TAG,
+                &MINI_MONTH_TAG,
                 &CALL_TRANSCRIPT,
                 &MENU,
                 &RECAP_TAB,
@@ -1050,6 +1053,10 @@ mod frames {
                         });
                         expected.push(CALENDAR);
                         expected.extend([CALENDAR_HEADER_TAG, CALENDAR_DAY_HEADERS_TAG]);
+                        // The calendar list pane hides on narrow windows.
+                        if width >= crate::views::calendar_view::COMPACT_HEADER_WIDTH {
+                            expected.extend([CALENDAR_PANE_TAG, MINI_MONTH_TAG]);
+                        }
                     }
                     "prejoin" => expected.extend(PREJOIN_TAGS),
                     _ => {}

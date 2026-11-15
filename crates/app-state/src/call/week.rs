@@ -136,7 +136,42 @@ impl AppState {
         self.open_calendar(cx);
     }
 
+    /// Month the mini month shows: the user's own choice, else the visible range.
+    pub fn calendar_mini_month_shown(&self) -> NaiveDate {
+        self.calendar_mini_month.unwrap_or_else(|| {
+            let dates = self.calendar_dates();
+            let middle = dates.get(dates.len() / 2).copied();
+            super::week_grid::first_of_month(middle.unwrap_or_else(|| self.calendar_start()))
+        })
+    }
+
+    pub fn move_calendar_mini_month(&mut self, steps: i32, cx: &mut Context<Self>) {
+        let month = self.calendar_mini_month_shown();
+        let moved = if steps >= 0 {
+            month.checked_add_months(chrono::Months::new(steps.unsigned_abs()))
+        } else {
+            month.checked_sub_months(chrono::Months::new(steps.unsigned_abs()))
+        };
+        self.calendar_mini_month = Some(moved.unwrap_or(month));
+        cx.notify();
+    }
+
+    pub fn toggle_calendar_group_expanded(&mut self, group: &str, cx: &mut Context<Self>) {
+        if let Some(index) = self
+            .calendar_expanded_groups
+            .iter()
+            .position(|existing| existing == group)
+        {
+            self.calendar_expanded_groups.remove(index);
+        } else {
+            self.calendar_expanded_groups.push(group.to_owned());
+        }
+        cx.notify();
+    }
+
     pub fn request_calendar_scroll_to_now(&mut self, cx: &mut Context<Self>) {
+        // Every navigation lands here: the mini month follows the grid again.
+        self.calendar_mini_month = None;
         if !crate::call::calendar_now::shows_hour_grid(self.calendar_week.span) {
             return;
         }
@@ -155,6 +190,7 @@ impl AppState {
         };
         self.calendar_week.span = span;
         self.calendar_week.start = Some(self.calendar_span_start(anchor));
+        self.calendar_mini_month = None;
         if self.calendar_prefs.last_span != span {
             self.calendar_prefs.last_span = span;
             save_calendar_prefs(&self.store, &self.calendar_prefs);

@@ -160,6 +160,10 @@ pub struct AppState {
     pub call_history: Vec<teams_core::CallLogEntry>,
     pub calendar_events: Vec<chatsvc::CalendarEvent>,
     pub calendar_event_peek_request: Option<chatsvc::CalendarEvent>,
+    /// Authorize URL while Google OAuth waits on the loopback redirect.
+    pub google_connect_pending: Option<String>,
+    /// Bumped on cancel so a late loopback result is discarded.
+    pub google_connect_generation: u64,
     pub calendar_nudge: Option<tokio::sync::mpsc::UnboundedSender<()>>,
     pub calls_list: crate::call::CallsList,
     pub speed_dial: Vec<crate::call::SpeedDialEntry>,
@@ -212,6 +216,10 @@ pub struct AppState {
     pub demo_meetings: Vec<chatsvc::CalendarEvent>,
     pub calendar_week: crate::call::week::CalendarWeek,
     pub calendar_prefs: crate::call::calendar_prefs::CalendarPrefs,
+    /// Month the mini month shows after the user moved it; `None` follows the grid.
+    pub calendar_mini_month: Option<chrono::NaiveDate>,
+    /// Calendar list groups expanded with Show all (this session only).
+    pub calendar_expanded_groups: Vec<String>,
     /// Mailbox time zone name, written back unchanged with the work hours.
     pub mailbox_time_zone: Option<String>,
     /// Bumped when the hour grid should align to local «now» (open / Today / day-week span).
@@ -329,6 +337,8 @@ impl AppState {
             call_history: Vec::new(),
             calendar_events: Vec::new(),
             calendar_event_peek_request: None,
+            google_connect_pending: None,
+            google_connect_generation: 0,
             calendar_nudge: None,
             calls_list: crate::call::CallsList::default(),
             speed_dial,
@@ -383,6 +393,8 @@ impl AppState {
                 calendar_prefs.initial_span(),
             ),
             calendar_prefs,
+            calendar_mini_month: None,
+            calendar_expanded_groups: Vec::new(),
             mailbox_time_zone: None,
             calendar_scroll_to_now: 0,
             call_backgrounds: if mode.demo {

@@ -175,6 +175,19 @@ pub fn calendar_range_label(start: NaiveDate, end: NaiveDate) -> String {
             format!("{start_month} {}-{}, {}", day(start), day(end), end.year())
         };
     }
+    if style.is_some_and(|style| style.day_month.ends_with('.')) {
+        // German and other dotted styles: "16.–20. November 2026".
+        let to = format!("{}. {end_month} {}", day(end), end.year());
+        return if start == end {
+            to
+        } else if start.year() != end.year() {
+            format!("{}. {start_month} {} – {to}", day(start), start.year())
+        } else if start.month() != end.month() {
+            format!("{}. {start_month} – {to}", day(start))
+        } else {
+            format!("{}.–{to}", day(start))
+        };
+    }
     let to = format!("{} {end_month}, {}", day(end), end.year());
     if start == end {
         to
@@ -436,6 +449,28 @@ mod tests {
     }
 
     #[test]
+    fn calendar_range_reads_german_with_dots() {
+        let _guard = crate::ui_locale::locale_test_lock();
+        let date = |month, day| NaiveDate::from_ymd_opt(2026, month, day).unwrap();
+        rust_i18n::set_locale("de");
+        set_date_locale(Some("de-CH"));
+        assert_eq!(
+            calendar_range_label(date(11, 16), date(11, 20)),
+            "16.–20. November 2026"
+        );
+        assert_eq!(
+            calendar_range_label(date(11, 30), date(12, 4)),
+            "30. November – 4. Dezember 2026"
+        );
+        assert_eq!(
+            calendar_range_label(date(11, 16), date(11, 16)),
+            "16. November 2026"
+        );
+        rust_i18n::set_locale("en");
+        set_date_locale(None);
+    }
+
+    #[test]
     fn calendar_range_follows_the_account_locale() {
         let _guard = crate::ui_locale::locale_test_lock();
         rust_i18n::set_locale("en");
@@ -456,10 +491,11 @@ mod tests {
             "November 9-13, 2026"
         );
         assert_eq!(calendar_day_number(date(11, 9)), "9");
+        // Intl.DateTimeFormat in de-DE writes the day with a dot and no comma.
         set_date_locale(Some("de-DE"));
         assert_eq!(
             calendar_range_label(date(11, 9), date(11, 9)),
-            "9 November, 2026"
+            "9. November 2026"
         );
         set_date_locale(None);
     }

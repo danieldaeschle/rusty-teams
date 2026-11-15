@@ -8,6 +8,7 @@ pub mod attachments;
 pub mod avatar;
 pub mod calendar_date_picker;
 pub mod calendar_event_dialog;
+pub mod calendar_mini_month;
 pub mod calendar_month;
 pub mod calendar_picker;
 pub mod calendar_view;

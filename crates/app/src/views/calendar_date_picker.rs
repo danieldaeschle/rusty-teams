@@ -1,17 +1,17 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use chrono::{Datelike, Duration, Local, Months, NaiveDate, Weekday};
+use chrono::{Local, Months, NaiveDate, Weekday};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::{h_flex, v_flex};
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::calendar_mini_month::mini_month_grid;
 use crate::app_state::AppState;
-use crate::call::week_grid::{MONTH_GRID_DAYS, first_of_month, month_grid_start};
+use crate::call::week_grid::first_of_month;
 use crate::theme;
 
 pub const DATE_PICKER_TAG: &str = "shell/islands/calendar/date-picker";
@@ -60,54 +60,25 @@ impl DatePicker {
             .update(cx, |popover, cx| popover.dismiss(window, cx))
             .ok();
     }
-
-    fn day_cell(&self, date: NaiveDate, today: NaiveDate, cx: &mut Context<Self>) -> Stateful<Div> {
-        let in_month = date.month() == self.month.month();
-        let shown = self.shown.contains(&date);
-        let is_today = date == today;
-        div()
-            .id(SharedString::from(format!("date-picker-{date}")))
-            .size(px(CELL_SIZE))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_full()
-            .cursor_pointer()
-            .text_size(px(12.))
-            .text_color(if in_month {
-                theme::text()
-            } else {
-                theme::text_faint()
-            })
-            .when(shown && !is_today, |cell| cell.bg(theme::popup_hover()))
-            .when(is_today, |cell| {
-                cell.bg(theme::accent()).text_color(theme::on_accent())
-            })
-            .when(!is_today, |cell| {
-                cell.hover(|cell| cell.bg(theme::border_strong()))
-            })
-            .child(date.day().to_string())
-            .on_click(cx.listener(move |this, _, window, cx| this.pick(date, window, cx)))
-    }
 }
 
 impl Render for DatePicker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let today = Local::now().date_naive();
-        let start = month_grid_start(self.month, self.first_day);
-        let days: Vec<NaiveDate> = (0..MONTH_GRID_DAYS)
-            .map(|offset| start + Duration::days(offset))
-            .collect();
-        let weeks = days
-            .chunks(7)
-            .map(|week| {
-                h_flex().children(
-                    week.iter()
-                        .map(|date| self.day_cell(*date, today, cx))
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let picker = cx.entity().downgrade();
+        let grid = mini_month_grid(
+            "date-picker",
+            self.month,
+            &self.shown,
+            self.first_day,
+            today,
+            CELL_SIZE,
+            Rc::new(move |date, window, cx| {
+                picker
+                    .update(cx, |picker, cx| picker.pick(date, window, cx))
+                    .ok();
+            }),
+        );
         v_flex()
             .debug_selector(|| DATE_PICKER_TAG.into())
             .p(px(PICKER_PADDING))
@@ -149,30 +120,8 @@ impl Render for DatePicker {
                             ),
                     ),
             )
-            .child(
-                h_flex().children(weekday_letters(self.first_day).map(|letter| {
-                    div()
-                        .size(px(CELL_SIZE))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(px(11.))
-                        .text_color(theme::text_muted())
-                        .child(letter)
-                })),
-            )
-            .children(weeks)
+            .child(grid)
     }
-}
-
-/// Weekday initials in column order from the first day, in the app language.
-fn weekday_letters(first_day: Weekday) -> [String; 7] {
-    let mut day = first_day;
-    std::array::from_fn(|_| {
-        let letter = app_base::format::weekday_name(day, app_base::format::WeekdayWidth::Letter);
-        day = day.succ();
-        letter
-    })
 }
 
 pub fn date_picker_button(
