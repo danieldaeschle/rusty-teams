@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Build a universal macOS binary (arm64 + x86_64) from a crate. Needs Xcode CLT only.
 # Wraps it in a .app bundle (icon, Info.plist) and zips that for distribution.
+# Also keeps the bare lipo binary for self-update (release asset *-macos-universal).
+#
+# Optional signing / notarization when Apple credentials are present:
+#   MACOS_CODESIGN_IDENTITY   e.g. "Developer ID Application: …"
+#   MACOS_NOTARY_PROFILE      notarytool keychain profile (from `xcrun notarytool store-credentials`)
+# Without those env vars the .app stays unsigned (fine for local / internal RC).
+#
 # Usage: scripts/build-macos.sh [crate-dir, default crates/app] [binary-or-example-name, default: the crate's only binary]
 set -euo pipefail
 repoRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,6 +15,7 @@ crateDir="$(realpath "${1:-$repoRoot/crates/app}")"
 binaryName="${2:-}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repoRoot/target}"
 export PATH="$HOME/.cargo/bin:$PATH"
+entitlements="$repoRoot/scripts/macos/RustyTeams.entitlements"
 targets=(aarch64-apple-darwin x86_64-apple-darwin)
 
 rustup target add "${targets[@]}" >/dev/null
@@ -98,8 +106,37 @@ cp "$iconset/icon_64x64.png" "$iconset/icon_32x32@2x.png"
 cp "$iconset/icon_256x256.png" "$iconset/icon_128x128@2x.png"
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/icon.icns"
 
-# ditto keeps the bundle intact (plain zip would not); the result is the release asset.
+# Developer ID signing when a certificate is configured in the build environment.
+if [ -n "${MACOS_CODESIGN_IDENTITY:-}" ]; then
+  echo "codesign with $MACOS_CODESIGN_IDENTITY"
+  codesign --force --options runtime --timestamp \
+    --entitlements "$entitlements" \
+    --sign "$MACOS_CODESIGN_IDENTITY" \
+    "$app/Contents/MacOS/$binary"
+  codesign --force --options runtime --timestamp \
+    --entitlements "$entitlements" \
+    --sign "$MACOS_CODESIGN_IDENTITY" \
+    "$app"
+  codesign --verify --deep --strict --verbose=2 "$app"
+fi
+
+# ditto keeps the bundle intact (plain zip would not); the result is the .app release asset.
 ditto -c -k --keepParent "$app" "$outputDirectory/teams-macos.zip"
 
+# Bare universal binary for in-app self-update (Mach-O fat; magic cafe babe).
+cp "$output" "$outputDirectory/teams-macos-universal"
+chmod +x "$outputDirectory/teams-macos-universal"
+
+if [ -n "${MACOS_CODESIGN_IDENTITY:-}" ] && [ -n "${MACOS_NOTARY_PROFILE:-}" ]; then
+  echo "notarize with profile $MACOS_NOTARY_PROFILE"
+  xcrun notarytool submit "$outputDirectory/teams-macos.zip" \
+    --keychain-profile "$MACOS_NOTARY_PROFILE" \
+    --wait
+  xcrun stapler staple "$app"
+  # Re-zip after staple so the published .app zip carries the ticket.
+  ditto -c -k --keepParent "$app" "$outputDirectory/teams-macos.zip"
+fi
+
 file "$output"
-ls -la "$output" "$app/Contents/MacOS/$binary" "$outputDirectory/teams-macos.zip"
+ls -la "$output" "$app/Contents/MacOS/$binary" \
+  "$outputDirectory/teams-macos.zip" "$outputDirectory/teams-macos-universal"

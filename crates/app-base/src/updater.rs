@@ -1,4 +1,7 @@
-#![cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#![cfg_attr(
+    not(any(windows, target_os = "linux", target_os = "macos")),
+    allow(dead_code)
+)]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -266,12 +269,28 @@ mod platform {
 /// build folder or a package location is left alone.
 pub fn self_update_allowed() -> bool {
     #[cfg(target_os = "linux")]
-    return std::env::current_exe().is_ok_and(|executable| {
-        crate::linux_desktop::Layout::current()
-            .is_some_and(|layout| crate::linux_desktop::is_installed(&executable, &layout))
-    });
-    #[cfg(not(target_os = "linux"))]
-    true
+    {
+        return std::env::current_exe().is_ok_and(|executable| {
+            crate::linux_desktop::Layout::current()
+                .is_some_and(|layout| crate::linux_desktop::is_installed(&executable, &layout))
+        });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return std::env::current_exe().is_ok_and(|executable| {
+            executable
+                .components()
+                .any(|part| part.as_os_str().to_string_lossy().ends_with(".app"))
+        });
+    }
+    #[cfg(windows)]
+    {
+        return true;
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        false
+    }
 }
 
 /// Reading the new exe once lets the virus scanner finish before the restart, which otherwise blocks process start for seconds.

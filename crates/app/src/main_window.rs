@@ -1,8 +1,9 @@
 //! Owns the main window so it can be closed into the tray and opened again.
 //!
-//! GPUI cannot hide a window on Wayland, so on Linux "close to tray" really closes
-//! the main window while the app (tray, notifications, calls) keeps running; the tray
-//! or a second start opens a fresh one. Windows hides the window natively instead.
+//! GPUI cannot hide a window on Wayland, so on Linux (and macOS, which reuses this
+//! path) "close to tray" really closes the main window while the app (tray,
+//! notifications, calls) keeps running; the tray or a second start opens a fresh one.
+//! Windows hides the window natively instead.
 
 use std::rc::Rc;
 

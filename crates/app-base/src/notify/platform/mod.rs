@@ -5,6 +5,11 @@ pub use windows_impl::*;
 
 #[cfg(target_os = "linux")]
 mod linux_notifications;
+#[cfg(any(windows, target_os = "macos"))]
+mod tray_icon_impl;
+#[cfg(any(windows, target_os = "macos"))]
+pub use tray_icon_impl::Tray;
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod linux_sound;
 #[cfg(target_os = "linux")]
