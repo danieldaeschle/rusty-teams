@@ -1361,9 +1361,9 @@ async fn drive(
     let mut software_audio: Option<SoftwareAudio> = None;
     let mut share_sound_wanted = false;
     let mut mic_settings = MicSettings::default();
-    crate::noise_stage::apply(mic_settings);
     let mut audio_disabled = false;
     let mut remote_audio: Option<RtcAudioTrack> = None;
+    // sync_software_audio arms/disarms the capture hook from the outgoing track state.
     sync_software_audio(
         &factory,
         options,
@@ -2233,12 +2233,13 @@ async fn drive(
                 }
                 Some(CallCommand::SetMicSettings(settings)) if !audio_disabled => {
                     mic_settings = settings;
-                    crate::noise_stage::apply(mic_settings);
+                    // Let sync_software_audio be the single authority for hook arming.
                     sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), false, &mut software_audio, mic_settings, control, timeline);
                 }
                 Some(CallCommand::SetMicSettings(settings)) => {
                     mic_settings = settings;
-                    crate::noise_stage::apply(mic_settings);
+                    // Audio is off both ways: prepare Auto if needed, keep the capture hook disarmed.
+                    crate::noise_stage::apply_for_outgoing(mic_settings, false);
                 }
                 Some(CallCommand::SelectOutput(choice)) => {
                     if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {

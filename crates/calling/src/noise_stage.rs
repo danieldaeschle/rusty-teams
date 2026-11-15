@@ -152,9 +152,12 @@ pub fn apply_for_outgoing(settings: MicSettings, device_track_outgoing: bool) {
     install_hook(should_arm_hook(settings, device_track_outgoing));
 }
 
-/// Drop the capture hook on hangup so the next call starts clean.
+/// Drop the capture hook on hangup and reset learned gate state so the next call starts clean.
 pub fn clear() {
     install_hook(false);
+    if let Ok(mut stage) = HOOK_STAGE.lock() {
+        *stage = NoiseStage::new();
+    }
 }
 
 pub struct NoiseStage {
@@ -471,6 +474,23 @@ mod tests {
 
         clear();
         assert!(!hook_armed());
+    }
+
+    #[test]
+    fn clear_resets_learned_gate_state() {
+        apply_for_outgoing(MicSettings::default(), true);
+        {
+            let mut stage = HOOK_STAGE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            stage.noise_floor = vec![999_999.0];
+            stage.gate_hangover = vec![GATE_HANGOVER_FRAMES];
+            stage.noise_frames = vec![GATE_NOISE_LEARN_FRAMES];
+        }
+        clear();
+        assert!(!hook_armed());
+        let stage = HOOK_STAGE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(stage.noise_floor.is_empty());
+        assert!(stage.gate_hangover.is_empty());
+        assert!(stage.noise_frames.is_empty());
     }
 
     #[test]
