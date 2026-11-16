@@ -36,6 +36,7 @@ pub mod remote_image;
 pub mod runtime;
 pub mod schedule_time;
 pub mod single_instance;
+pub mod status_choice;
 pub mod stickers;
 pub mod support;
 pub mod task_dialog;

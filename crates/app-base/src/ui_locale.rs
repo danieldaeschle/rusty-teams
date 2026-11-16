@@ -243,9 +243,8 @@ mod tests {
         apply_locale("en");
         assert_eq!(tr("tray.open"), "Open");
         assert_eq!(tr("tray.quit"), "Quit");
-        assert_eq!(tr("tray.mute_sound"), "Mute sound");
+        assert_eq!(tr("tray.notifications"), "Notifications");
         apply_locale("de");
-        assert_eq!(tr("tray.do_not_disturb"), "Nicht stören");
         assert_eq!(tr("tray.notifications"), "Benachrichtigungen");
     }
 

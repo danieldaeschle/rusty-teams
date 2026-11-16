@@ -65,8 +65,30 @@ pub struct ShareGeometry {
 pub enum TrayCommand {
     Toggle,
     Open,
-    ToggleSound,
-    ToggleDoNotDisturb,
-    Settings,
+    SetStatus(chatsvc::ForcedKind),
+    SetStatusDuration(crate::status_choice::StatusDuration),
+    ResetStatus,
+    Notifications,
     Quit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrayPresence {
+    pub title: String,
+    pub forced: Option<chatsvc::ForcedKind>,
+    pub mention: bool,
+}
+
+impl TrayPresence {
+    pub fn new(
+        title: impl Into<String>,
+        forced: Option<chatsvc::ForcedKind>,
+        mention: bool,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            forced,
+            mention,
+        }
+    }
 }
