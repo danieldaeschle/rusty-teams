@@ -1163,14 +1163,19 @@ impl Remote for Graph {
     async fn hosted_content(&self, url: &str) -> Result<Photo> {
         let ams_url = chatsvc::hosted_content_image_url(url);
         let url = ams_url.as_deref().unwrap_or(url);
-        if chatsvc::is_link_image_url(url) {
-            let image = Messages::new(self.session()).link_image(url).await?;
-            return Ok(Photo {
-                bytes: image.bytes,
-                content_type: image.content_type,
-            });
-        }
-        Ok(Graph::download_hosted_content(self, url).await?)
+        let image = if chatsvc::is_ams_image_url(url) {
+            chatsvc::ams::Ams::new(self.session())
+                .download_image(url)
+                .await?
+        } else if chatsvc::is_link_image_url(url) {
+            Messages::new(self.session()).link_image(url).await?
+        } else {
+            return Ok(Graph::download_hosted_content(self, url).await?);
+        };
+        Ok(Photo {
+            bytes: image.bytes,
+            content_type: image.content_type,
+        })
     }
 
     async fn external_image(&self, url: &str) -> Result<Photo> {

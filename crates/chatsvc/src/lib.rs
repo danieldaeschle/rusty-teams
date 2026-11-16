@@ -92,7 +92,10 @@ pub use language_settings::{
     LanguageSettings, LanguageSettingsClient, TranslationBehavior, authoring_patch, behavior_patch,
     parse_language_settings, target_patch,
 };
-pub use links::{LinkImage, LinkInfo, MessageLinks, hosted_content_image_url, is_link_image_url};
+pub use links::{
+    LinkImage, LinkInfo, MessageLinks, hosted_content_image_url, is_ams_image_url,
+    is_link_image_url,
+};
 pub use mask::mask_conversation_id;
 pub use members::{
     HistoryShare, INVALID_TOPIC_CHARACTER, MAX_HISTORY_DAYS, MAX_TOPIC_LENGTH, ThreadMembers,
