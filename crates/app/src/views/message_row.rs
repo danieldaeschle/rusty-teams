@@ -66,7 +66,6 @@ const BUBBLE_PADDING_Y: f32 = 8.;
 const META_BOTTOM_INSET: f32 = 4.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
-const TICK_BASELINE_DROP: f32 = 0.5;
 const SAVED_MARK_SIZE: f32 = 12.;
 const FORWARDED_SIZE: f32 = 11.;
 const IMPORTANCE_LABEL_SIZE: f32 = 12.;
@@ -500,11 +499,8 @@ fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
                 )
                 .into_any_element(),
             };
-            // The tick glyph ends about half a pixel above the time baseline (measured at 100 % and 125 %).
             let holder = div()
                 .id(ElementId::Name(format!("{}-receipt", row.key).into()))
-                .relative()
-                .top(px(TICK_BASELINE_DROP))
                 .child(check);
             meta.child(match row.receipt_label.clone() {
                 Some(label) => holder.tooltip(move |window, cx| {
