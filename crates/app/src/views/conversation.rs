@@ -277,6 +277,7 @@ pub struct ConversationView {
     scheduled_in_flight: HashSet<String>,
     drag_file_count: usize,
     sync_generation: u64,
+    rebuild_generation: u64,
     window_active: bool,
     pane: ChannelPane,
     recap: recap::RecapState,
@@ -296,6 +297,95 @@ pub struct ConversationView {
     find_subscription: Option<Subscription>,
     group_name: GroupNameSlot,
     _subscriptions: Vec<Subscription>,
+}
+
+struct RebuildPlan {
+    conversation_id: String,
+    is_chat: bool,
+    mode: ViewMode,
+    limit: usize,
+    loading_post: bool,
+    thread_root: Option<String>,
+    window: Option<(DateTime<Utc>, DateTime<Utc>, bool, bool)>,
+    syncing_messages: bool,
+    older_blocked: bool,
+    can_load_older: bool,
+    start: Option<StartInfo>,
+}
+
+struct LoadedRecords {
+    records: Vec<MessageRecord>,
+    sync_has_more: bool,
+}
+
+struct BuiltRows {
+    rows: Vec<Row>,
+    has_older: bool,
+    placeholders: bool,
+}
+
+fn load_records(store: &store::Store, plan: &RebuildPlan) -> LoadedRecords {
+    let sync_state = store.sync_state(&plan.conversation_id).ok().flatten();
+    let records = match (&plan.thread_root, plan.window) {
+        (Some(root_id), _) => store
+            .thread_messages(&plan.conversation_id, root_id)
+            .unwrap_or_default(),
+        (None, Some((oldest, newest, _, _))) => store
+            .messages_between(&plan.conversation_id, oldest, newest)
+            .unwrap_or_default(),
+        (None, None) if plan.is_chat => without_islands(
+            store
+                .messages(&plan.conversation_id, None, plan.limit)
+                .unwrap_or_default(),
+            sync_state.as_ref().and_then(|state| state.oldest_loaded),
+        ),
+        (None, None) => store
+            .messages(&plan.conversation_id, None, plan.limit)
+            .unwrap_or_default(),
+    };
+    LoadedRecords {
+        records,
+        sync_has_more: sync_state.as_ref().is_none_or(|state| state.has_more),
+    }
+}
+
+fn build_rows(plan: &RebuildPlan, loaded: &LoadedRecords, context: &RowContext) -> BuiltRows {
+    let records = &loaded.records;
+    let has_older = loaded.sync_has_more && !plan.older_blocked && plan.can_load_older;
+    let placeholders = records.is_empty()
+        && (plan.loading_post || plan.syncing_messages && plan.thread_root.is_none());
+    if placeholders {
+        return BuiltRows {
+            rows: placeholder_rows(),
+            has_older: false,
+            placeholders,
+        };
+    }
+    let (rows, has_older) = match &plan.mode {
+        ViewMode::Flat => match plan.window {
+            Some((_, _, has_older_window, has_newer_window)) => {
+                let mut rows = flat_rows(records, context, has_older_window);
+                if has_newer_window {
+                    rows.push(Row::LoadNewer);
+                }
+                (rows, has_older_window)
+            }
+            None => {
+                let mut rows = flat_rows(records, context, has_older);
+                if !has_older && let Some(start) = plan.start.clone() {
+                    rows.insert(0, Row::Start(start));
+                }
+                (rows, has_older)
+            }
+        },
+        ViewMode::ThreadList => (thread_list_rows(records, context, has_older), has_older),
+        ViewMode::Thread(root_id) => (thread_rows(records, root_id, context), false),
+    };
+    BuiltRows {
+        rows,
+        has_older,
+        placeholders,
+    }
 }
 
 fn open_limit(selection: &Selection) -> usize {
@@ -637,6 +727,7 @@ impl ConversationView {
             scheduled_in_flight: HashSet::new(),
             drag_file_count: 0,
             sync_generation: 0,
+            rebuild_generation: 0,
             window_active: window.is_window_active(),
             pane: ChannelPane::Posts,
             recap: recap::RecapState::default(),
@@ -738,7 +829,7 @@ impl ConversationView {
                     if self.shared_active() || self.recap_active() || self.channel_details_open {
                         self.refresh_shared_items(cx);
                     }
-                    self.rebuild(false, cx);
+                    self.rebuild_in_background(cx);
                     self.mark_read(ReadTrigger::Incoming, cx);
                     self.on_pins_changed(conversation_id, cx);
                 }
@@ -1716,23 +1807,81 @@ impl ConversationView {
 
     fn rebuild(&mut self, reset: bool, cx: &mut Context<Self>) {
         let started = std::time::Instant::now();
-        self.rebuild_rows(reset, cx);
+        self.rebuild_generation += 1;
+        match self.rebuild_plan(reset, cx) {
+            Some(plan) => {
+                let loaded = load_records(&self.app.read(cx).store, &plan);
+                let context = self.complete_context(&loaded.records, cx);
+                let built = build_rows(&plan, &loaded, &context);
+                self.finish_rebuild(plan, loaded, context, built, reset, cx);
+            }
+            None => self.rebuild_without_conversation(cx),
+        }
         app_base::diagnostics::record_if_slow("conversation rebuild", started.elapsed());
     }
 
-    fn rebuild_rows(&mut self, reset: bool, cx: &mut Context<Self>) {
-        let Some(current) = self.current.as_ref() else {
-            let mut rows: Vec<Row> = self
-                .pending
-                .iter()
-                .cloned()
-                .map(|row| Row::Message(Box::new(row)))
-                .collect();
-            assign_series(&mut rows);
-            self.apply_rows(rows, true, cx);
-            return;
+    fn rebuild_in_background(&mut self, cx: &mut Context<Self>) {
+        let Some(plan) = self.rebuild_plan(false, cx) else {
+            return self.rebuild(false, cx);
         };
-        let conversation_id = current.selection.conversation_id().to_owned();
+        self.rebuild_generation += 1;
+        let generation = self.rebuild_generation;
+        let store = self.app.read(cx).store.clone();
+        cx.spawn(async move |this, cx| {
+            let (plan, loaded) = cx
+                .background_spawn(async move {
+                    let loaded = load_records(&store, &plan);
+                    (plan, loaded)
+                })
+                .await;
+            let Ok(Some(context)) = this.update(cx, |view, cx| {
+                view.rebuild_still_current(generation, &plan)
+                    .then(|| view.complete_context(&loaded.records, cx))
+            }) else {
+                return;
+            };
+            let (plan, loaded, context, built) = cx
+                .background_spawn(async move {
+                    let built = build_rows(&plan, &loaded, &context);
+                    (plan, loaded, context, built)
+                })
+                .await;
+            this.update(cx, |view, cx| {
+                if view.rebuild_still_current(generation, &plan) {
+                    let started = std::time::Instant::now();
+                    view.finish_rebuild(plan, loaded, context, built, false, cx);
+                    app_base::diagnostics::record_if_slow(
+                        "conversation rebuild apply",
+                        started.elapsed(),
+                    );
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn rebuild_still_current(&self, generation: u64, plan: &RebuildPlan) -> bool {
+        generation == self.rebuild_generation
+            && self.current.as_ref().is_some_and(|current| {
+                current.selection.conversation_id() == plan.conversation_id
+                    && current.mode == plan.mode
+            })
+    }
+
+    fn rebuild_without_conversation(&mut self, cx: &mut Context<Self>) {
+        let mut rows: Vec<Row> = self
+            .pending
+            .iter()
+            .cloned()
+            .map(|row| Row::Message(Box::new(row)))
+            .collect();
+        assign_series(&mut rows);
+        self.apply_rows(rows, true, cx);
+    }
+
+    fn rebuild_plan(&self, reset: bool, cx: &App) -> Option<RebuildPlan> {
+        let current = self.current.as_ref()?;
         let limit = if reset {
             current.loaded_limit
         } else {
@@ -1740,52 +1889,46 @@ impl ConversationView {
                 .loaded_limit
                 .max(current.loaded_count + GROWTH_HEADROOM)
         };
-        let store = self.app.read(cx).store.clone();
         let thread_root = match &current.mode {
             ViewMode::Thread(root_id) => Some(root_id.clone()),
             ViewMode::Flat | ViewMode::ThreadList => None,
         };
-        let loading_post = thread_root.is_some() && thread_root == self.loading_post;
-        let sync_state = store.sync_state(&conversation_id).ok().flatten();
-        let window = current.detached.as_ref().map(|detached| {
-            (
-                detached.oldest,
-                detached.newest,
-                detached.older_cursor.is_some(),
-                detached.newer_cursor.is_some(),
-            )
-        });
-        let records: Vec<MessageRecord> = match (&thread_root, window) {
-            (Some(root_id), _) => store
-                .thread_messages(&conversation_id, root_id)
-                .unwrap_or_default(),
-            (None, Some((oldest, newest, _, _))) => store
-                .messages_between(&conversation_id, oldest, newest)
-                .unwrap_or_default(),
-            (None, None) if matches!(current.selection, Selection::Chat(_)) => without_islands(
-                store
-                    .messages(&conversation_id, None, limit)
-                    .unwrap_or_default(),
-                sync_state.as_ref().and_then(|state| state.oldest_loaded),
-            ),
-            (None, None) => store
-                .messages(&conversation_id, None, limit)
-                .unwrap_or_default(),
-        };
-        let sync_has_more = sync_state.as_ref().is_none_or(|state| state.has_more);
+        Some(RebuildPlan {
+            conversation_id: current.selection.conversation_id().to_owned(),
+            is_chat: matches!(current.selection, Selection::Chat(_)),
+            mode: current.mode.clone(),
+            limit,
+            loading_post: thread_root.is_some() && thread_root == self.loading_post,
+            thread_root,
+            window: current.detached.as_ref().map(|detached| {
+                (
+                    detached.oldest,
+                    detached.newest,
+                    detached.older_cursor.is_some(),
+                    detached.newer_cursor.is_some(),
+                )
+            }),
+            syncing_messages: current.sync.messages,
+            older_blocked: current.older_blocked,
+            can_load_older: self.app.read(cx).engine.is_some(),
+            start: self.start_info(cx),
+        })
+    }
+
+    fn complete_context(&self, records: &[MessageRecord], cx: &App) -> RowContext {
         let mut context = self.row_context(cx);
         let unnamed_ids: Vec<String> = records
             .iter()
             .flat_map(teams_core::reactions)
             .filter(|reaction| reaction.user_name.is_none())
             .filter_map(|reaction| reaction.user_id)
-            .chain(forward_sender_ids(&records))
+            .chain(forward_sender_ids(records))
             .filter(|user_id| !context.names.contains_key(user_id))
             .collect();
         for (user_id, name) in resolve_names(self.app.read(cx), &unnamed_ids) {
             context.names.entry(user_id).or_insert(name);
         }
-        for record in &records {
+        for record in records {
             if let (Some(user_id), Some(name)) = (&record.sender_id, &record.sender_name) {
                 context
                     .names
@@ -1793,54 +1936,33 @@ impl ConversationView {
                     .or_insert_with(|| name.clone());
             }
         }
-        let can_load_older = self.app.read(cx).engine.is_some();
-        let start = self.start_info(cx);
-        let current = self.current.as_mut().expect("checked above");
+        context
+    }
+
+    fn finish_rebuild(
+        &mut self,
+        plan: RebuildPlan,
+        loaded: LoadedRecords,
+        context: RowContext,
+        built: BuiltRows,
+        reset: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let records = loaded.records;
+        let current = self.current.as_mut().expect("checked by the plan");
         let first_unread = current.first_unread.clone();
         let posts_new_after = current.posts_new_after;
-        current.loaded_limit = limit;
-        if thread_root.is_none() {
+        current.loaded_limit = plan.limit;
+        if plan.thread_root.is_none() {
             current.loaded_count = records.len();
         }
-        let has_older = sync_has_more && !current.older_blocked && can_load_older;
-        let placeholders =
-            records.is_empty() && (loading_post || current.sync.messages && thread_root.is_none());
+        current.has_older = built.has_older;
         let in_feed = current.mode == ViewMode::ThreadList;
-        let appear_scope = format!("{conversation_id}/{:?}", current.mode);
-        let appear_live = !placeholders && !in_feed && window.is_none() && !current.sync.messages;
-        let mut rows = match &current.mode {
-            _ if placeholders => {
-                current.has_older = false;
-                placeholder_rows()
-            }
-            ViewMode::Flat => match window {
-                Some((_, _, has_older_window, has_newer_window)) => {
-                    current.has_older = has_older_window;
-                    let mut rows = flat_rows(&records, &context, has_older_window);
-                    if has_newer_window {
-                        rows.push(Row::LoadNewer);
-                    }
-                    rows
-                }
-                None => {
-                    current.has_older = has_older;
-                    let mut rows = flat_rows(&records, &context, has_older);
-                    if !has_older && let Some(start) = start {
-                        rows.insert(0, Row::Start(start));
-                    }
-                    rows
-                }
-            },
-            ViewMode::ThreadList => {
-                current.has_older = has_older;
-                thread_list_rows(&records, &context, has_older)
-            }
-            ViewMode::Thread(root_id) => {
-                current.has_older = false;
-                thread_rows(&records, root_id, &context)
-            }
-        };
-        let local: Vec<MessageRow> = if window.is_some() {
+        let appear_scope = format!("{}/{:?}", plan.conversation_id, current.mode);
+        let appear_live =
+            !built.placeholders && !in_feed && plan.window.is_none() && !current.sync.messages;
+        let mut rows = built.rows;
+        let local: Vec<MessageRow> = if plan.window.is_some() {
             Vec::new()
         } else {
             self.pending
