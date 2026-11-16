@@ -982,11 +982,18 @@ fn browser_rtp_line(
             format!("recv {}", rids.join(";")),
         ));
     }
+    // A rejected line still needs a format. Teams rejects with a static payload
+    // such as `34` that has no rtpmap, so fall back to the offered payload.
+    let formats = if kept.is_empty() && teams_line.port == "0" {
+        offered.formats.iter().take(1).cloned().collect()
+    } else {
+        kept
+    };
     Media {
         kind: offered.kind.clone(),
         port: teams_line.port.clone(),
         proto: offered.proto.clone(),
-        formats: kept,
+        formats,
         connection: teams_line
             .connection
             .clone()
@@ -1414,6 +1421,7 @@ mod tests {
         assert_eq!(bundle_group(lines.into_iter()), "BUNDLE 0 2");
     }
 
+    const ONE_TO_ONE_BROWSER_OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\na=msid-semantic: WMS stream\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=fingerprint:sha-256 AA\r\na=setup:actpass\r\na=mid:0\r\na=sendrecv\r\na=msid:stream track\r\na=rtcp-mux\r\na=rtpmap:111 opus/48000/2\r\na=ssrc:42 cname:abc\r\nm=video 9 UDP/TLS/RTP/SAVPF 102 103\r\nc=IN IP4 0.0.0.0\r\na=mid:1\r\na=inactive\r\na=rtcp-mux\r\na=rtpmap:102 H264/90000\r\na=rtpmap:103 rtx/90000\r\na=fmtp:103 apt=102\r\n";
     const AUDIO_ONLY_OFFER: &str = "v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\na=extmap-allow-mixed\r\na=msid-semantic: WMS stream\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111 63 9 0 8 13 110 126\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=ice-ufrag:u\r\na=ice-pwd:p\r\na=ice-options:trickle\r\na=fingerprint:sha-256 AA\r\na=setup:actpass\r\na=mid:0\r\na=extmap:1 urn:ietf:params:rtp-hdrext:ssrc-audio-level\r\na=extmap:2 http://www.webrtc.org/experiments/rtp-hdrext/abs-send-time\r\na=sendrecv\r\na=msid:stream track\r\na=rtcp-mux\r\na=rtpmap:111 opus/48000/2\r\na=rtcp-fb:111 transport-cc\r\na=fmtp:111 minptime=10;useinbandfec=1\r\na=rtpmap:63 red/48000/2\r\na=fmtp:63 111/111\r\na=rtpmap:9 G722/8000\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\na=rtpmap:13 CN/8000\r\na=rtpmap:110 telephone-event/48000\r\na=rtpmap:126 telephone-event/8000\r\na=ssrc:42 cname:abc\r\na=ssrc:42 msid:stream track\r\n";
 
     #[test]
@@ -1517,6 +1525,25 @@ mod tests {
                 && !browser.contains("label")
         );
     }
+    #[test]
+    fn a_rejected_answer_line_without_rtpmap_keeps_an_offered_format() {
+        let offer = to_teams_offer(
+            ONE_TO_ONE_BROWSER_OFFER,
+            &OfferPlan::default(),
+            &mut counter(),
+        )
+        .unwrap();
+        let answer = "v=0\r\no=- 7 0 IN IP4 52.112.0.1\r\ns=session\r\nc=IN IP4 52.112.0.1\r\nt=0 0\r\na=group:BUNDLE 0\r\nm=audio 3480 RTP/SAVP 111\r\nc=IN IP4 52.112.0.1\r\na=setup:passive\r\na=ice-ufrag:U\r\na=ice-pwd:P\r\na=rtcp-mux\r\na=mid:0\r\na=rtpmap:111 OPUS/48000/2\r\na=fingerprint:sha-256 BB\r\na=x-ssrc-range:1000-1000\r\nm=video 0 RTP/SAVP 34\r\na=mid:1\r\n";
+        let browser = to_browser_answer(answer, &offer, ONE_TO_ONE_BROWSER_OFFER)
+            .unwrap()
+            .replace("\r\n", "\n");
+        assert!(
+            browser.contains("m=video 0 UDP/TLS/RTP/SAVPF 102\n"),
+            "{browser}"
+        );
+        assert!(browser.contains("a=group:BUNDLE 0\n"));
+    }
+
     #[test]
     fn an_audio_offer_from_teams_gets_the_browser_shape_back() {
         let offer =
