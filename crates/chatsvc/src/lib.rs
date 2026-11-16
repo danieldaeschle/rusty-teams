@@ -44,6 +44,7 @@ pub mod sounds;
 pub mod substrate_search;
 pub mod team_admin;
 pub mod teams_cdn;
+pub mod tenants;
 pub mod thread_activity;
 pub mod transcripts;
 pub mod translate;
@@ -136,6 +137,7 @@ pub use substrate_search::{
 pub use team_admin::{
     ChannelEdit, ChannelPrivacy, ExistingChannel, Mailbox, NewChannel, TeamAdmin,
 };
+pub use tenants::{Tenant, list_tenants};
 pub use thread_activity::{ThreadActivity, ThreadActivityKind};
 pub use transcripts::{MeetingTranscript, TranscriptError, TranscriptTurn, Transcripts};
 pub use translate::{

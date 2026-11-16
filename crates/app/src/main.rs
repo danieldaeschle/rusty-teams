@@ -49,7 +49,6 @@ const WINDOW_MIN_WIDTH: f32 = 640.;
 const WINDOW_MIN_HEIGHT: f32 = 480.;
 const ENDPOINT_UNREGISTER_TIMEOUT: Duration = Duration::from_millis(800);
 const SINGLE_INSTANCE_NAME: &str = "rusty-teams";
-const DATABASE_FILE: &str = "cache.sqlite3";
 #[cfg(windows)]
 const WEBVIEW_FOLDER: &str = "WebView2";
 #[cfg(windows)]
@@ -107,6 +106,9 @@ fn parse_arguments() -> Arguments {
                     .next()
                     .and_then(|value| value.parse().ok())
                     .map(OpenTarget::Chat)
+            }
+            app_base::orgs::OPEN_CONVERSATION_FLAG => {
+                arguments.open_target = input.next().map(OpenTarget::Conversation)
             }
             "--open-channel" => {
                 arguments.open_target = input
@@ -234,6 +236,13 @@ fn main() {
     if arguments.demo {
         inline_video::configure(std::env::temp_dir().join(DEMO_WEBVIEW_FOLDER));
     }
+    let orgs = if arguments.demo {
+        app_base::orgs::Orgs::default()
+    } else {
+        app_base::orgs::Orgs::path()
+            .map(|path| app_base::orgs::Orgs::load(&path))
+            .unwrap_or_default()
+    };
     let store = if arguments.demo {
         let store = Store::open_in_memory().expect("in-memory store");
         demo::seed(&store);
@@ -242,7 +251,7 @@ fn main() {
         let path = arguments
             .database
             .clone()
-            .unwrap_or_else(|| data_path(DATABASE_FILE));
+            .unwrap_or_else(|| data_path(&orgs.database_file()));
         open_store(&path)
     };
     let store = Arc::new(store);
@@ -280,8 +289,14 @@ fn main() {
         #[cfg(not(windows))]
         let transport = transport(arguments.endpoint.as_deref(), arguments.database.as_deref());
         let activity = user_activity::track(user_input.clone());
-        let mut backend_events =
-            backend::start(store.clone(), transport, !arguments.read_only, activity);
+        let guest_tenant = orgs.active_guest().map(|org| org.id.clone());
+        let mut backend_events = backend::start(
+            store.clone(),
+            transport,
+            !arguments.read_only,
+            activity,
+            guest_tenant,
+        );
         app_base::runtime::handle().spawn(async move {
             while let Some(event) = backend_events.recv().await {
                 if ui_events.send(event).is_err() {
@@ -316,6 +331,7 @@ fn main() {
             let state = cx.new(|_| {
                 let mut state = AppState::new(store, mode);
                 state.start_on_channels = arguments.channels_tab;
+                state.orgs = orgs;
                 state
             });
             views::shell::install_globals(&state, user_input, cx);

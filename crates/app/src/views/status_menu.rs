@@ -7,11 +7,12 @@ use gpui_kit::component::{
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{ForcedAvailability, ForcedKind, PresenceStatus, WorkLocationKind};
 
 use super::avatar::{person_avatar, status_glyph, with_presence, with_presence_badge};
-use super::widgets::{menu_icon, symbol};
+use super::widgets::{count_badge, menu_icon, symbol};
 use crate::app_state::AppState;
 use crate::data::{Person, PresenceKind};
 use crate::i18n::tr;
@@ -195,12 +196,13 @@ fn status_menu(
         None => context.summary.label.to_owned(),
     };
     let submenu_context = context.clone();
-    popup
+    let popup = popup
         .min_w(px(MENU_WIDTH))
         .item(PopupMenuItem::element(move |_, cx| {
             header(&header_context, cx)
         }))
-        .separator()
+        .separator();
+    org_items(popup, &context.app, cx)
         .submenu_with_icon(
             Some(status_icon(context.summary.presence)),
             row_label,
@@ -217,6 +219,53 @@ fn status_menu(
                     message_app.update(cx, |state, cx| state.request_status_message(cx));
                 }),
         )
+}
+
+/// One row per organization of the account, the open one checked and the others with their
+/// count of chats with new messages; picking another org restarts on it.
+fn org_items(popup: PopupMenu, app: &Entity<AppState>, cx: &mut Context<PopupMenu>) -> PopupMenu {
+    let state = app.read(cx);
+    let rows: Vec<_> = state
+        .switchable_orgs()
+        .iter()
+        .map(|org| {
+            let label = if org.guest {
+                tr("status_menu.guest_org").replace("%{name}", &org.name)
+            } else {
+                org.name.clone()
+            };
+            (
+                org.clone(),
+                label,
+                state.orgs.is_active(org),
+                state.org_unread_count(org),
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return popup;
+    }
+    rows.into_iter()
+        .fold(popup, |popup, (org, label, active, unread)| {
+            let app = app.clone();
+            popup.item(
+                PopupMenuItem::element(move |_, _| {
+                    h_flex()
+                        .w_full()
+                        .gap(px(8.))
+                        .items_center()
+                        .child(div().flex_1().min_w_0().truncate().child(label.clone()))
+                        .when(unread > 0, |row| {
+                            row.child(count_badge(unread.min(u32::MAX as usize) as u32, false))
+                        })
+                })
+                .checked(active)
+                .on_click(move |_, _, cx| {
+                    app.update(cx, |state, cx| state.switch_org(&org, None, cx));
+                }),
+            )
+        })
+        .separator()
 }
 
 fn pause_item(

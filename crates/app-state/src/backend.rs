@@ -26,6 +26,7 @@ const REFRESH_SETTLE: Duration = Duration::from_secs(2);
 const PINS_INTERVAL: Duration = Duration::from_secs(90);
 const CALENDAR_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const CALENDAR_MIN_GAP: Duration = Duration::from_secs(30);
+const ORG_LIST_ATTEMPTS: usize = 5;
 const REALTIME_RETRY: Duration = Duration::from_secs(15);
 const ARRIVAL_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(1),
@@ -72,6 +73,8 @@ pub enum BackendEvent {
     Favorites(Vec<String>),
     Synced(DateTime<Utc>),
     LiveRetry(Arc<Notify>),
+    Orgs(Vec<app_base::orgs::Org>),
+    OrgMessage(crate::org_watch::OrgMessage),
 }
 
 impl BackendEvent {
@@ -95,6 +98,8 @@ impl BackendEvent {
             BackendEvent::Favorites(_) => "Favorites".into(),
             BackendEvent::Synced(_) => "Synced".into(),
             BackendEvent::LiveRetry(_) => "LiveRetry".into(),
+            BackendEvent::Orgs(_) => "Orgs".into(),
+            BackendEvent::OrgMessage(_) => "OrgMessage".into(),
         }
     }
 }
@@ -150,9 +155,17 @@ pub fn start(
     transport: Arc<dyn Transport>,
     ringable: bool,
     activity: watch::Receiver<bool>,
+    guest_tenant: Option<String>,
 ) -> mpsc::UnboundedReceiver<BackendEvent> {
     let (sender, receiver) = mpsc::unbounded_channel();
-    crate::runtime::handle().spawn(supervise(store, transport, ringable, activity, sender));
+    crate::runtime::handle().spawn(supervise(
+        store,
+        transport,
+        ringable,
+        activity,
+        guest_tenant,
+        sender,
+    ));
     receiver
 }
 
@@ -161,10 +174,11 @@ async fn supervise(
     transport: Arc<dyn Transport>,
     ringable: bool,
     activity: watch::Receiver<bool>,
+    guest_tenant: Option<String>,
     events: EventSender,
 ) {
     let _ = events.send(BackendEvent::Connection(ConnectionState::Connecting));
-    let session = loop {
+    let home = loop {
         match Session::with_transport(transport.clone(), SessionConfig::for_app()).await {
             Ok(session) => break session,
             Err(error) => {
@@ -172,6 +186,12 @@ async fn supervise(
                 tokio::time::sleep(CONNECT_RETRY).await;
             }
         }
+    };
+    tokio::spawn(org_list(home.clone(), guest_tenant.clone(), events.clone()));
+    // Calls stay on the home tenant's registration, like rings for the home org while a guest org is open.
+    let session = match &guest_tenant {
+        Some(tenant) => home.in_tenant(tenant),
+        None => home,
     };
     let build = || {
         SyncEngine::new(Graph::new(session.clone()), store.clone())
@@ -215,6 +235,49 @@ async fn supervise(
     tokio::spawn(pins_loop(session, events.clone()));
     tokio::spawn(presence_resubscribe_loop(engine.clone()));
     refresh_loop(engine, events, nudges).await;
+}
+
+/// Fetches the account's organizations once per start, retried a few times while sign-in settles,
+/// and keeps every org that is not open live for notifications.
+async fn org_list(home: Session, open_guest: Option<String>, events: EventSender) {
+    for _ in 0..ORG_LIST_ATTEMPTS {
+        match chatsvc::list_tenants(&home).await {
+            Ok(tenants) => {
+                let mut orgs = Vec::with_capacity(tenants.len());
+                for tenant in tenants {
+                    let org = app_base::orgs::Org {
+                        id: tenant.id,
+                        name: tenant.name,
+                        guest: tenant.guest,
+                    };
+                    let open = match &open_guest {
+                        Some(open) => *open == org.id,
+                        None => !org.guest,
+                    };
+                    if !open {
+                        let session = if org.guest {
+                            home.in_tenant(&org.id)
+                        } else {
+                            home.clone()
+                        };
+                        tokio::spawn(crate::org_watch::watch(
+                            session,
+                            org.clone(),
+                            tenant.user_id,
+                            events.clone(),
+                        ));
+                    }
+                    orgs.push(org);
+                }
+                let _ = events.send(BackendEvent::Orgs(orgs));
+                return;
+            }
+            Err(error) => {
+                crate::diagnostics::record(format!("orgs: tenant list not loaded: {error}"));
+                tokio::time::sleep(CONNECT_RETRY).await;
+            }
+        }
+    }
 }
 
 async fn forward_core_events(engine: Arc<Engine>, events: EventSender) {

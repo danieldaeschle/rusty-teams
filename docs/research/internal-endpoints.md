@@ -65,6 +65,7 @@ Token audiences (not requests): `crates/session/src/scope.rs` - `ic3.teams.offic
 | `/beta/me/calendarEvents/privateMeeting/schedulingService/create` | POST | `crates/chatsvc/src/calendar.rs` | Meet now | W | partly - `/me/onlineMeetings`; no ad-hoc chat unhide |
 | `/beta/chats/{id}/apps/chatentitlements` | GET | `crates/chatsvc/src/cards.rs` | apps entitled in a chat | R | partly - `/chats/{id}/installedApps` |
 | `/beta/commands/com.microsoft.teamspace.inputextension.giphy/execute?version=1.0` | POST | `crates/chatsvc/src/gifs.rs` | GIF search and trending | R | no |
+| `/beta/users/tenants` | GET | `crates/chatsvc/src/tenants.rs` | the account's home and guest tenants for the org switcher (`userType` member or guest) | R | no - Graph lists only the tenant of the token |
 | `/beta/users/fetchShortProfile?...&includeBots=true` | POST | `crates/chatsvc/src/bot_profiles.rs` | bot names and images | R | no |
 | `/beta/users/useraggregatesettings` | POST | `crates/chatsvc/src/language_settings.rs`, `crates/chatsvc/src/sound_settings.rs` | translation, voice and recording policy settings | R | no |
 | `/beta/users/languageAccountSettings` | PATCH | `crates/chatsvc/src/language_settings.rs` | translation preferences | W | no |

@@ -104,7 +104,12 @@ pub enum AppEvent {
     CallTone(chatsvc::sounds::CallTone),
     SoundSettings,
     ChatSettings,
-    FollowedStatus { user_id: String, text: &'static str },
+    FollowedStatus {
+        user_id: String,
+        text: &'static str,
+    },
+    /// A new message in an org that is not open in this window.
+    OrgMessage(crate::org_watch::OrgMessage),
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -133,6 +138,10 @@ pub struct AppState {
     pub collapsed: HashSet<String>,
     pub expanded_lists: HashSet<String>,
     pub start_on_channels: bool,
+    /// The account's organizations and the one this window shows.
+    pub orgs: app_base::orgs::Orgs,
+    /// Chats with new messages per org that is not open, for the account menu badge.
+    pub org_unread: HashMap<String, HashSet<String>>,
     pub pending_jump: Option<(String, String)>,
     pub cards: CardState,
     pub task_dialog: Option<TaskDialogState>,
@@ -310,6 +319,8 @@ impl AppState {
             collapsed: HashSet::new(),
             expanded_lists: HashSet::new(),
             start_on_channels: false,
+            orgs: app_base::orgs::Orgs::default(),
+            org_unread: HashMap::new(),
             pending_jump: None,
             cards: CardState::default(),
             task_dialog: None,
@@ -1268,6 +1279,18 @@ impl AppState {
                 self.live = live;
                 self.refresh_connection_banner(cx);
                 cx.emit(AppEvent::Status);
+            }
+            BackendEvent::Orgs(list) => {
+                self.take_org_list(list);
+                cx.notify();
+            }
+            BackendEvent::OrgMessage(message) => {
+                self.org_unread
+                    .entry(message.org.id.clone())
+                    .or_default()
+                    .insert(message.conversation_id.clone());
+                cx.emit(AppEvent::OrgMessage(message));
+                cx.notify();
             }
             BackendEvent::Favorites(ids) => {
                 self.favorite_ids = ids;

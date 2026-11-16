@@ -47,6 +47,7 @@ use crate::appearance::AppIcon;
 use crate::autostart::{self, StartupSettings};
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
+use crate::org_watch::OrgMessage;
 use crate::own_status;
 use crate::runtime;
 use crate::settings_section::SettingsSection;
@@ -461,6 +462,7 @@ impl NotificationCenter {
             AppEvent::Call => self.sync_call_sounds(cx),
             AppEvent::SoundSettings => self.on_account_sounds(cx),
             AppEvent::ChatSettings => self.on_account_notifications(cx),
+            AppEvent::OrgMessage(message) => self.present_org_message(message, cx),
             AppEvent::FollowedStatus { user_id, text } => {
                 self.present_status_change(user_id, text, cx)
             }
@@ -600,6 +602,24 @@ impl NotificationCenter {
             teams_core::DesktopNotifications::MatchAllChats,
             environment,
         )
+    }
+
+    fn present_org_message(&mut self, message: &OrgMessage, cx: &mut Context<Self>) {
+        let decision = self.own_feature_decision(cx);
+        if !decision.toast {
+            return;
+        }
+        let now = Instant::now();
+        let id = self.stack.push_org_message(message, now);
+        if let Some(model) = self.stack.get_mut(id) {
+            model.time = chrono::Local::now()
+                .format(crate::format::clock_format())
+                .to_string();
+        }
+        if decision.sound && self.throttle.allow(&message.conversation_id, now) {
+            self.play_notification_sound(cx);
+        }
+        self.sync_windows(cx);
     }
 
     fn present_status_change(&mut self, user_id: &str, text: &str, cx: &mut Context<Self>) {
@@ -1744,6 +1764,17 @@ impl NotificationCenter {
 
     pub fn activate(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.is_dismissed(id) {
+            return;
+        }
+        if let Some((org, conversation_id)) = self
+            .stack
+            .get(id)
+            .and_then(|toast| Some((toast.org.clone()?, toast.conversation_id.clone())))
+        {
+            self.drop_toast(id, cx);
+            self.app.update(cx, |state, cx| {
+                state.switch_org(&org, Some(&conversation_id), cx)
+            });
             return;
         }
         let Some((conversation_id, message_id, proposal_id)) = self.stack.get(id).map(|toast| {

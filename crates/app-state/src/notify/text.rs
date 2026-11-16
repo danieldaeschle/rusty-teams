@@ -32,7 +32,10 @@ pub fn describe(model: &ToastModel, preview_on: bool) -> ToastText {
         ChatKind::Group { .. } => model.chat_title.clone(),
         ChatKind::Direct | ChatKind::Channel { .. } => sender.to_owned(),
     };
-    let subtitle = subtitle_of(&model.kind);
+    let subtitle = match &model.org {
+        Some(org) => org.name.clone(),
+        None => subtitle_of(&model.kind),
+    };
     let body = match (&model.preview, preview_on) {
         (Preview::Text(text), false) if model.status_change => text.clone(),
         (_, false) => PREVIEW_OFF.to_owned(),
@@ -109,6 +112,7 @@ mod tests {
             agent: None,
             status_change: false,
             urgent: false,
+            org: None,
         }
     }
 
