@@ -57,16 +57,16 @@ impl StayAwake {
 
     #[cfg(not(windows))]
     pub fn new() -> Self {
+        // `cat` ends on EOF when this process dies, so a crash cannot leave the inhibitor behind.
         let inhibitor = std::process::Command::new("systemd-inhibit")
             .args([
                 "--what=idle:sleep",
                 "--who=Rusty Teams",
                 &format!("--why={REASON}"),
                 "--mode=block",
-                "sleep",
-                "infinity",
+                "cat",
             ])
-            .stdin(std::process::Stdio::null())
+            .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()

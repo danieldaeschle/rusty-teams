@@ -149,7 +149,8 @@ RtpSender::RtpSender(
       peer_connection_(std::move(peer_connection)) {}
 
 bool RtpSender::set_track(std::shared_ptr<MediaStreamTrack> track) const {
-  return sender_->SetTrack(track->rtc_track().get());
+  // An empty track clears the sender (clear_lines on a peer switch).
+  return sender_->SetTrack(track ? track->rtc_track().get() : nullptr);
 }
 
 std::shared_ptr<MediaStreamTrack> RtpSender::track() const {

@@ -213,8 +213,8 @@ fn pick_format(formats: &[CameraFormat], quality: VideoQuality) -> Option<Camera
 
 fn candidate_heights(quality: VideoQuality) -> Vec<u32> {
     match quality {
-        VideoQuality::P720 => vec![720, 540, 360],
-        VideoQuality::Auto | VideoQuality::P1080 => vec![1080, 720, 540, 360],
+        VideoQuality::Auto | VideoQuality::P720 => vec![720, 540, 360],
+        VideoQuality::P1080 => vec![1080, 720, 540, 360],
     }
 }
 
@@ -697,7 +697,7 @@ mod tests {
     }
 
     #[test]
-    fn a_c930e_like_list_picks_mjpeg_1080_for_auto() {
+    fn a_c930e_like_list_picks_mjpeg_720_for_auto() {
         let formats = [
             format(1920, 1080, FrameFormat::YUYV, 5),
             format(1280, 720, FrameFormat::YUYV, 10),
@@ -708,16 +708,20 @@ mod tests {
         ];
         assert_eq!(
             pick_format(&formats, VideoQuality::Auto),
-            Some(format(1920, 1080, FrameFormat::MJPEG, 30))
+            Some(format(1280, 720, FrameFormat::MJPEG, 30))
         );
         assert_eq!(
             pick_format(&formats, VideoQuality::P720),
             Some(format(1280, 720, FrameFormat::MJPEG, 30))
         );
+        assert_eq!(
+            pick_format(&formats, VideoQuality::P1080),
+            Some(format(1920, 1080, FrameFormat::MJPEG, 30))
+        );
     }
 
     #[test]
-    fn auto_prefers_1080p_nv12_over_720p() {
+    fn auto_prefers_720p_nv12_over_1080p() {
         let formats = [
             format(1920, 1080, FrameFormat::NV12, 30),
             format(640, 480, FrameFormat::NV12, 30),
@@ -726,7 +730,7 @@ mod tests {
         ];
         assert_eq!(
             pick_format(&formats, VideoQuality::Auto),
-            Some(format(1920, 1080, FrameFormat::NV12, 30))
+            Some(format(1280, 720, FrameFormat::NV12, 30))
         );
         assert_eq!(
             pick_format(&formats, VideoQuality::P720),
@@ -796,17 +800,19 @@ mod tests {
     }
 
     #[test]
-    fn auto_keeps_1080p_and_720_lock_scales_it_down() {
+    fn auto_and_720_scale_1080_down_while_1080_lock_keeps_it() {
         assert_eq!(
             fit_widescreen(gradient(1280, 720), VideoQuality::Auto).width(),
             1280
         );
-        let kept = fit_widescreen(gradient(1920, 1080), VideoQuality::Auto);
-        assert_eq!((kept.width(), kept.height()), (1920, 1080));
-        let scaled = fit_widescreen(gradient(1920, 1080), VideoQuality::P720);
-        assert_eq!((scaled.width(), scaled.height()), (1280, 720));
+        let auto = fit_widescreen(gradient(1920, 1080), VideoQuality::Auto);
+        assert_eq!((auto.width(), auto.height()), (1280, 720));
+        let locked = fit_widescreen(gradient(1920, 1080), VideoQuality::P720);
+        assert_eq!((locked.width(), locked.height()), (1280, 720));
+        let full = fit_widescreen(gradient(1920, 1080), VideoQuality::P1080);
+        assert_eq!((full.width(), full.height()), (1920, 1080));
         let wide = fit_widescreen(gradient(2560, 1440), VideoQuality::Auto);
-        assert_eq!((wide.width(), wide.height()), (1920, 1080));
+        assert_eq!((wide.width(), wide.height()), (1280, 720));
         let classic = fit_widescreen(gradient(640, 480), VideoQuality::Auto);
         assert_eq!((classic.width(), classic.height()), (640, 360));
     }

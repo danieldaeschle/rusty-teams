@@ -334,6 +334,12 @@ impl Signaling {
             .map(|_| ())
     }
 
+    pub async fn post_json_body(&self, label: &str, url: &str, body: Value) -> Result<Value> {
+        self.send(label, Method::Post, url, Some(body))
+            .await
+            .map(|response| response.body)
+    }
+
     pub async fn post_empty(&self, label: &str, url: &str) -> Result<()> {
         self.send(label, Method::Post, url, None).await.map(|_| ())
     }
@@ -947,6 +953,17 @@ impl Signaling {
         .map(|_| ())
     }
 
+    pub async fn end_call_leg(&self, call_leg_url: &str) -> Result<()> {
+        self.send(
+            "DELETE callLeg (hangup)",
+            Method::Delete,
+            call_leg_url,
+            Some(hangup_call_leg_body()),
+        )
+        .await
+        .map(|_| ())
+    }
+
     pub async fn reject_renegotiation(
         &self,
         url: &str,
@@ -1183,6 +1200,10 @@ pub fn end_for_all_body(from: &Participant) -> Value {
 
 pub fn decline_body() -> Value {
     json!({"callEnd": {"code": DECLINE_CODE, "subCode": 0, "phrase": "CallEndReasonLocalUserInitiated", "resultCategories": ["Success"]}})
+}
+
+pub fn hangup_call_leg_body() -> Value {
+    json!({"callEnd": {"code": 0, "subCode": 0, "phrase": "CallEndReasonLocalUserInitiated", "resultCategories": ["Success"]}})
 }
 
 pub fn ringing_body(from: &Participant) -> Value {
@@ -1838,6 +1859,13 @@ mod tests {
         let body = decline_body();
         assert_eq!(body["callEnd"]["code"], 603);
         assert_eq!(body["callEnd"]["resultCategories"], json!(["Success"]));
+    }
+
+    #[test]
+    fn hangup_call_leg_uses_success_end() {
+        let body = hangup_call_leg_body();
+        assert_eq!(body["callEnd"]["code"], 0);
+        assert_eq!(body["callEnd"]["phrase"], "CallEndReasonLocalUserInitiated");
     }
 
     #[test]

@@ -78,6 +78,12 @@ impl RtpTransceiver {
         self.sys_handle.direction().into()
     }
 
+    pub fn set_direction(&self, direction: RtpTransceiverDirection) -> Result<(), RtcError> {
+        self.sys_handle
+            .set_direction(direction.into())
+            .map_err(|e| unsafe { sys_err::ffi::RtcError::from(e.what()).into() })
+    }
+
     pub fn sender(&self) -> rtp_sender::RtpSender {
         rtp_sender::RtpSender { handle: RtpSender { sys_handle: self.sys_handle.sender() } }
     }

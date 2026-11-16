@@ -235,21 +235,29 @@ pub fn add_one_to_one_lines(
 /// Per-line direction told to the mixer through `updateMediaDescriptions`; no SDP renegotiation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MediaDescription {
-    pub mid: &'static str,
+    pub mid: String,
     pub direction: &'static str,
     pub label: Option<&'static str>,
 }
 
 impl MediaDescription {
     pub fn camera(sending: bool) -> Self {
-        Self::line(CAMERA_MID, sending, CAMERA_LINE_LABEL)
+        Self::camera_line(CAMERA_MID, sending)
     }
 
     pub fn share(sending: bool) -> Self {
-        Self::line(SHARE_MID, sending, SHARE_LINE_LABEL)
+        Self::share_line(SHARE_MID, sending)
     }
 
-    fn line(mid: &'static str, sending: bool, label: &'static str) -> Self {
+    pub fn camera_line(mid: impl Into<String>, sending: bool) -> Self {
+        Self::line(mid.into(), sending, CAMERA_LINE_LABEL)
+    }
+
+    pub fn share_line(mid: impl Into<String>, sending: bool) -> Self {
+        Self::line(mid.into(), sending, SHARE_LINE_LABEL)
+    }
+
+    fn line(mid: String, sending: bool, label: &'static str) -> Self {
         if sending {
             MediaDescription {
                 mid,
@@ -466,6 +474,16 @@ pub fn send_capabilities_body(
     sequence_number: u64,
     quality: VideoQuality,
 ) -> Value {
+    send_capabilities_body_for(CAMERA_MID, width, height, sequence_number, quality)
+}
+
+pub fn send_capabilities_body_for(
+    camera_mid: &str,
+    width: u32,
+    height: u32,
+    sequence_number: u64,
+    quality: VideoQuality,
+) -> Value {
     let ceiling = quality.capture_height().max(quality.capture_width());
     let width = width.min(ceiling);
     let height = height.min(ceiling);
@@ -488,7 +506,7 @@ pub fn send_capabilities_body(
     json!({
         "applyChannelParameters": {
             "multiChannelParameter": {
-                "mids": [CAMERA_MID],
+                "mids": [camera_mid],
                 "mediaParameter": capabilities.to_string(),
             },
         },
@@ -505,13 +523,23 @@ pub struct SendCapabilityReporter {
 
 impl SendCapabilityReporter {
     pub fn body_for(&mut self, size: (u32, u32), quality: VideoQuality) -> Option<Value> {
+        self.body_for_mid(CAMERA_MID, size, quality)
+    }
+
+    pub fn body_for_mid(
+        &mut self,
+        camera_mid: &str,
+        size: (u32, u32),
+        quality: VideoQuality,
+    ) -> Option<Value> {
         if self.last_size == Some(size) && self.last_quality == Some(quality) {
             return None;
         }
         self.last_size.replace(size);
         self.last_quality.replace(quality);
         self.sequence_number += 1;
-        Some(send_capabilities_body(
+        Some(send_capabilities_body_for(
+            camera_mid,
             size.0,
             size.1,
             self.sequence_number,
@@ -841,6 +869,10 @@ mod tests {
         assert_eq!(
             MediaDescription::share(true).wire(),
             json!({"mid": "11", "direction": "sendrecv", "label": "applicationsharing-video"})
+        );
+        assert_eq!(
+            MediaDescription::camera_line("7", true).wire(),
+            json!({"mid": "7", "direction": "sendrecv", "label": "main-video"})
         );
     }
 

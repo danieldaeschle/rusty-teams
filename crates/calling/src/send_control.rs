@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::time::Instant;
 
 use serde_json::Value;
 
@@ -253,8 +254,76 @@ pub fn capture_macroblocks(width: u32, height: u32) -> u32 {
     macroblocks(f64::from(width), f64::from(height))
 }
 
+const GOVERNOR_STRESS_RTT_MS: f64 = 400.0;
+const GOVERNOR_STRESS_LOSS_PCT: f64 = 5.0;
+const GOVERNOR_RECOVER_RTT_MS: f64 = 150.0;
+const GOVERNOR_FLOOR_BPS: u64 = 300_000;
+const GOVERNOR_CUT: f64 = 0.7;
+const GOVERNOR_RECOVER: f64 = 1.15;
+const GOVERNOR_STRESS_SAMPLES: u8 = 2;
+const GOVERNOR_RECOVER_WAIT_SECS: u64 = 4;
+
+#[derive(Debug, Default)]
+pub struct BitrateGovernor {
+    stress_streak: u8,
+    last_change: Option<Instant>,
+    cap_bps: Option<u64>,
+}
+
+impl BitrateGovernor {
+    pub fn observe(&mut self, now: Instant, rtt_ms: f64, loss_pct: f64, target_bps: u64) -> bool {
+        if target_bps == 0 {
+            return false;
+        }
+        let stressed = rtt_ms > GOVERNOR_STRESS_RTT_MS || loss_pct > GOVERNOR_STRESS_LOSS_PCT;
+        let recovering = rtt_ms < GOVERNOR_RECOVER_RTT_MS && loss_pct == 0.0;
+        if stressed {
+            self.stress_streak = self.stress_streak.saturating_add(1);
+            if self.stress_streak >= GOVERNOR_STRESS_SAMPLES {
+                let base = self.cap_bps.unwrap_or(target_bps);
+                let next = ((base as f64) * GOVERNOR_CUT).round() as u64;
+                let next = next.max(GOVERNOR_FLOOR_BPS).min(target_bps);
+                if self.cap_bps != Some(next) {
+                    self.cap_bps = Some(next);
+                    self.last_change = Some(now);
+                    return true;
+                }
+            }
+            return false;
+        }
+        self.stress_streak = 0;
+        let Some(cap) = self.cap_bps else {
+            return false;
+        };
+        if !recovering {
+            return false;
+        }
+        let ready = self
+            .last_change
+            .is_none_or(|at| now.duration_since(at).as_secs() >= GOVERNOR_RECOVER_WAIT_SECS);
+        if !ready {
+            return false;
+        }
+        let next = ((cap as f64) * GOVERNOR_RECOVER).round() as u64;
+        if next >= target_bps {
+            self.cap_bps = None;
+            self.last_change = Some(now);
+            return true;
+        }
+        self.cap_bps = Some(next.max(GOVERNOR_FLOOR_BPS));
+        self.last_change = Some(now);
+        true
+    }
+
+    pub fn cap_bps(&self) -> Option<u64> {
+        self.cap_bps
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use serde_json::json;
 
     use super::*;
@@ -446,5 +515,39 @@ mod tests {
         let mut keyframe = changed;
         keyframe[2] = "max-fs=3600;max-fps=3000;max-br=1500;rid=3;ssrc=1113;KeyFrame=1";
         assert!(filter.admit(&simulcast_request(5, keyframe)).is_some());
+    }
+
+    #[test]
+    fn bitrate_governor_cuts_after_two_stressed_samples() {
+        let mut governor = BitrateGovernor::default();
+        let start = Instant::now();
+        assert!(!governor.observe(start, 500.0, 0.0, 2_000_000));
+        assert!(governor.observe(start + Duration::from_secs(2), 500.0, 6.0, 2_000_000));
+        assert_eq!(governor.cap_bps(), Some(1_400_000));
+    }
+
+    #[test]
+    fn bitrate_governor_floors_at_300_kbps() {
+        let mut governor = BitrateGovernor::default();
+        let start = Instant::now();
+        assert!(!governor.observe(start, 500.0, 10.0, 400_000));
+        assert!(governor.observe(start + Duration::from_secs(2), 500.0, 10.0, 400_000));
+        assert_eq!(governor.cap_bps(), Some(300_000));
+    }
+
+    #[test]
+    fn bitrate_governor_recovers_after_clean_path() {
+        let mut governor = BitrateGovernor::default();
+        let start = Instant::now();
+        assert!(!governor.observe(start, 500.0, 8.0, 1_000_000));
+        assert!(governor.observe(start + Duration::from_secs(2), 500.0, 8.0, 1_000_000));
+        assert_eq!(governor.cap_bps(), Some(700_000));
+        assert!(!governor.observe(start + Duration::from_secs(3), 100.0, 0.0, 1_000_000));
+        assert!(governor.observe(start + Duration::from_secs(7), 100.0, 0.0, 1_000_000));
+        assert_eq!(governor.cap_bps(), Some(805_000));
+        assert!(governor.observe(start + Duration::from_secs(12), 100.0, 0.0, 1_000_000));
+        assert_eq!(governor.cap_bps(), Some(925_750));
+        assert!(governor.observe(start + Duration::from_secs(17), 100.0, 0.0, 1_000_000));
+        assert_eq!(governor.cap_bps(), None);
     }
 }

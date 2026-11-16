@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -7,6 +7,30 @@ use tokio::task::JoinHandle as TaskHandle;
 
 const STOP_WAIT: Duration = Duration::from_secs(2);
 const STOP_POLL: Duration = Duration::from_millis(5);
+
+static STOPPING: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
+
+fn wait_for_stopping_captures() {
+    let started = Instant::now();
+    loop {
+        let mut stopping = STOPPING
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (finished, running): (Vec<_>, Vec<_>) = std::mem::take(&mut *stopping)
+            .into_iter()
+            .partition(|thread| thread.is_finished());
+        *stopping = running;
+        let idle = stopping.is_empty();
+        drop(stopping);
+        for thread in finished {
+            let _ = thread.join();
+        }
+        if idle || started.elapsed() >= STOP_WAIT {
+            return;
+        }
+        std::thread::sleep(STOP_POLL);
+    }
+}
 
 /// A running frame source; dropping it stops the capture.
 pub enum Capture {
@@ -26,7 +50,10 @@ impl Capture {
         let thread_stop = stop.clone();
         let thread = std::thread::Builder::new()
             .name(name.to_owned())
-            .spawn(move || body(thread_stop))?;
+            .spawn(move || {
+                wait_for_stopping_captures();
+                body(thread_stop)
+            })?;
         Ok(Capture::Thread {
             stop,
             thread: Some(thread),
@@ -39,13 +66,11 @@ impl Drop for Capture {
         match self {
             Capture::Thread { stop, thread } => {
                 stop.store(true, Ordering::SeqCst);
-                let Some(thread) = thread.take() else { return };
-                let started = Instant::now();
-                while !thread.is_finished() && started.elapsed() < STOP_WAIT {
-                    std::thread::sleep(STOP_POLL);
-                }
-                if thread.is_finished() {
-                    let _ = thread.join();
+                if let Some(thread) = thread.take() {
+                    STOPPING
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(thread);
                 }
             }
             Capture::Task(task) => task.abort(),
