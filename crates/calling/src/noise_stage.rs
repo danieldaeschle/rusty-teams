@@ -9,7 +9,7 @@ use crate::audio::{FRAME_SAMPLES, SAMPLE_RATE};
 use crate::mic_processing::MicSettings;
 
 const PCM_SCALE: f32 = 32768.0;
-const ATTENUATION_LIMIT_DB: f32 = 40.0;
+const ATTENUATION_LIMIT_DB: f32 = 30.0;
 const MIN_LOCAL_SNR_DB: f32 = -15.0;
 const MAX_LOCAL_SNR_ERB_DB: f32 = 35.0;
 const MAX_LOCAL_SNR_DF_DB: f32 = 35.0;
@@ -117,8 +117,7 @@ fn capture_hook(channel_index: usize, samples: &mut [f32]) {
     };
     let started = Instant::now();
     stage.process(channel_index, samples);
-    if stage.budget.record(started.elapsed()) {
-        OVERLOADED.store(true, Ordering::Relaxed);
+    if stage.over_budget(started.elapsed()) {
         HOOK_ARMED.store(false, Ordering::Relaxed);
     }
 }
@@ -221,6 +220,15 @@ impl NoiseStage {
         for (sample, enhanced) in samples.iter_mut().zip(&self.output) {
             *sample = enhanced * PCM_SCALE;
         }
+    }
+
+    /// Reports and remembers for this call when frames keep running over their budget.
+    pub fn over_budget(&mut self, elapsed: Duration) -> bool {
+        let over = self.budget.record(elapsed);
+        if over {
+            OVERLOADED.store(true, Ordering::Relaxed);
+        }
+        over
     }
 
     pub fn process_pcm(&mut self, channel_index: usize, samples: &mut [i16]) {

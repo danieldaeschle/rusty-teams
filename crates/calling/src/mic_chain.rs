@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use libwebrtc::native::apm::AudioProcessingModule;
 
 use crate::audio::SAMPLE_RATE;
@@ -10,6 +12,7 @@ use crate::wav_dump::StageDumps;
 /// DeepFilterNet drops quiet laptop-mic speech as noise and takes about 6 dB off reverberant speech,
 /// so one AGC2 brings the level up before it and a second one restores the level after it.
 pub struct MicChain {
+    processing: ApmConfig,
     high_pass: Option<VoiceHighPass>,
     front: Option<AudioProcessingModule>,
     ml_noise: Option<NoiseStage>,
@@ -20,10 +23,17 @@ pub struct MicChain {
 
 impl MicChain {
     pub fn new(processing: ApmConfig, ml_noise: bool, dumps: Option<StageDumps>) -> MicChain {
+        let ml_wanted = ml_noise;
+        let ml_noise = ml_wanted && !crate::noise_stage::overloaded();
         if ml_noise {
             crate::noise_stage::prepare();
         }
+        let processing = ApmConfig {
+            noise_suppression: processing.noise_suppression || (ml_wanted && !ml_noise),
+            ..processing
+        };
         MicChain {
+            processing,
             high_pass: processing.high_pass_filter.then(VoiceHighPass::new),
             front: processing.front_module(),
             ml_noise: ml_noise.then(NoiseStage::new),
@@ -54,12 +64,23 @@ impl MicChain {
         }
         self.dump(3, frame);
         if let Some(noise_stage) = self.ml_noise.as_mut() {
+            let started = Instant::now();
             noise_stage.process_pcm(0, frame);
+            if noise_stage.over_budget(started.elapsed()) {
+                self.fall_back_to_webrtc_noise_suppression();
+            }
         }
         if let Some(output_gain) = self.output_gain.as_mut() {
             output_gain.process(frame);
         }
         self.dump(4, frame);
+    }
+
+    fn fall_back_to_webrtc_noise_suppression(&mut self) {
+        self.ml_noise = None;
+        self.lift = None;
+        self.processing.noise_suppression = true;
+        self.front = self.processing.front_module();
     }
 
     fn dump(&mut self, stage_index: usize, frame: &[i16]) {
@@ -74,6 +95,16 @@ mod tests {
     use super::*;
     use crate::audio::SineGenerator;
     use crate::mic_processing::MicSettings;
+
+    #[test]
+    fn a_slow_deep_filter_hands_over_to_webrtc_noise_suppression() {
+        let auto = MicSettings::default();
+        let mut chain = MicChain::new(auto.apm_config(), true, None);
+        chain.fall_back_to_webrtc_noise_suppression();
+        assert!(chain.ml_noise.is_none());
+        assert!(chain.processing.noise_suppression);
+        assert!(chain.front.is_some());
+    }
 
     #[test]
     fn off_leaves_the_frame_untouched() {
