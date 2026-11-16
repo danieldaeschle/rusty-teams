@@ -14,16 +14,21 @@ impl AppState {
         change: impl FnOnce(&mut CalendarPrefs),
         cx: &mut Context<Self>,
     ) {
-        let anchor = self.calendar_week.start;
         change(&mut self.calendar_prefs);
         save_calendar_prefs(&self.store, &self.calendar_prefs);
-        if let Some(anchor) = anchor {
-            // Week start or work days may have moved: re-anchor on the same date.
+        // The mailbox language can move the first day of week.
+        self.apply_regional_format();
+        self.reanchor_calendar(cx);
+        cx.notify();
+    }
+
+    /// Week start or work days may have moved: show the range that holds the same date.
+    pub(crate) fn reanchor_calendar(&mut self, cx: &mut Context<Self>) {
+        if let Some(anchor) = self.calendar_week.start {
             self.calendar_week.start = Some(self.calendar_span_start(anchor));
             self.request_calendar_scroll_to_now(cx);
             self.load_calendar_week(cx);
         }
-        cx.notify();
     }
 
     /// Read the mailbox work hours once the session is there and cache them.
@@ -142,7 +147,11 @@ mod tests {
                 state
                     .update_calendar_prefs(|prefs| prefs.mailbox_locale = Some("en-CH".into()), cx);
                 assert_eq!(state.calendar_layout().first_day, Weekday::Mon);
-                state.update_calendar_prefs(|prefs| prefs.first_day = Some(Weekday::Sat), cx);
+                let prefs = crate::regional::RegionalPrefs {
+                    first_day: Some(Weekday::Sat),
+                    ..state.regional_prefs
+                };
+                state.set_regional_prefs(prefs, cx);
                 assert_eq!(state.calendar_layout().first_day, Weekday::Sat);
             })
         });

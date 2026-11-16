@@ -103,6 +103,15 @@ pub fn tr_args(key: &str, args: &HashMap<String, String>) -> String {
     rust_i18n::replace_patterns(&tr(key), &patterns, &values)
 }
 
+/// `tr_with("regional.until", &[("time", "14:30")])` for a pattern with `%{time}`.
+pub fn tr_with(key: &str, args: &[(&str, &str)]) -> String {
+    let (patterns, values): (Vec<&str>, Vec<String>) = args
+        .iter()
+        .map(|(name, value)| (*name, (*value).to_owned()))
+        .unzip();
+    rust_i18n::replace_patterns(&tr(key), &patterns, &values)
+}
+
 /// Separator between an i18n key and a detail payload in `CallUpdate::Notice`.
 pub const NOTICE_DETAIL_SEP: char = '\u{1f}';
 

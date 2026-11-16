@@ -11,6 +11,7 @@ mod help;
 mod mcp;
 mod nav;
 mod notifications;
+mod regional;
 mod rows;
 
 #[cfg(test)]

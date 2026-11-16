@@ -225,6 +225,7 @@ pub struct AppState {
     pub demo_meetings: Vec<chatsvc::CalendarEvent>,
     pub calendar_week: crate::call::week::CalendarWeek,
     pub calendar_prefs: crate::call::calendar_prefs::CalendarPrefs,
+    pub regional_prefs: crate::regional::RegionalPrefs,
     /// Month the mini month shows after the user moved it; `None` follows the grid.
     pub calendar_mini_month: Option<chrono::NaiveDate>,
     /// Calendar list groups expanded with Show all (this session only).
@@ -296,6 +297,7 @@ impl AppState {
         let actions_on_right_click =
             crate::chat_settings_actions::stored_actions_on_right_click(&store);
         let calendar_prefs = crate::call::calendar_prefs::load_calendar_prefs(&store);
+        let regional_prefs = crate::regional_format::load_regional_prefs(&store);
         let mut state = AppState {
             store,
             engine: None,
@@ -404,6 +406,7 @@ impl AppState {
                 calendar_prefs.initial_span(),
             ),
             calendar_prefs,
+            regional_prefs,
             calendar_mini_month: None,
             calendar_expanded_groups: Vec::new(),
             mailbox_time_zone: None,

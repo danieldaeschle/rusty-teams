@@ -313,6 +313,8 @@ dependencies = [
  "calling",
  "chatsvc",
  "chrono",
+ "core-foundation 0.10.1",
+ "core-foundation-sys 0.8.7",
  "directories",
  "futures-channel",
  "futures-util",
