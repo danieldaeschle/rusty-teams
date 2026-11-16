@@ -108,8 +108,14 @@ impl Store {
              FROM message_search
              JOIN search_keys k ON k.id = message_search.rowid
              JOIN messages m ON m.conversation_id = k.conversation_id AND m.message_id = k.message_id
-             WHERE message_search MATCH ?1 AND (?2 IS NULL OR k.conversation_id = ?2)
-             ORDER BY m.created_at DESC LIMIT ?3",
+             WHERE message_search MATCH ?1
+               AND message_search.rowid IN (
+                   SELECT k.id FROM message_search
+                   JOIN search_keys k ON k.id = message_search.rowid
+                   JOIN messages m ON m.conversation_id = k.conversation_id AND m.message_id = k.message_id
+                   WHERE message_search MATCH ?1 AND (?2 IS NULL OR k.conversation_id = ?2)
+                   ORDER BY m.created_at DESC LIMIT ?3)
+             ORDER BY m.created_at DESC",
             HIGHLIGHT_START as u32, HIGHLIGHT_END as u32
         ))?;
         let hits = statement
@@ -144,8 +150,13 @@ impl Store {
              JOIN search_keys k ON k.id = message_search.rowid
              JOIN messages m ON m.conversation_id = k.conversation_id AND m.message_id = k.message_id
              WHERE message_search MATCH ?1
-               AND k.conversation_id IN (SELECT value FROM json_each(?2))
-             ORDER BY m.created_at DESC LIMIT ?3",
+               AND message_search.rowid IN (
+                   SELECT k.id FROM message_search
+                   JOIN search_keys k ON k.id = message_search.rowid
+                   JOIN messages m ON m.conversation_id = k.conversation_id AND m.message_id = k.message_id
+                   WHERE message_search MATCH ?1 AND k.conversation_id IN (SELECT value FROM json_each(?2))
+                   ORDER BY m.created_at DESC LIMIT ?3)
+             ORDER BY m.created_at DESC",
             HIGHLIGHT_START as u32, HIGHLIGHT_END as u32
         ))?;
         let hits = statement

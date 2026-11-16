@@ -260,30 +260,54 @@ impl Switcher {
         self.results = fuzzy::rank(query, &self.candidates, limit);
         self.results
             .sort_by_key(|candidate| candidate.group() != "Chats");
-        self.local_messages = if wants_messages {
-            let hits = self
-                .app
-                .read(cx)
-                .store
-                .search_messages(query, None, MAX_MESSAGE_RESULTS)
-                .unwrap_or_default();
-            let now = Local::now();
-            message_results(
-                hits,
-                &self.conversations,
-                now.date_naive(),
-                app_base::format::Zone::Local,
-            )
-        } else {
-            Vec::new()
-        };
-        self.messages = self.local_messages.clone();
+        self.local_messages.clear();
+        self.messages.clear();
         self.people.clear();
         self.highlighted = 0;
         self.generation += 1;
+        if wants_messages {
+            self.schedule_local_search(query.to_owned(), cx);
+        }
         if query.trim().chars().count() >= MIN_SERVER_QUERY_CHARS {
             self.schedule_server_search(query.trim().to_owned(), cx);
         }
+    }
+
+    fn schedule_local_search(&mut self, query: String, cx: &mut Context<Self>) {
+        let store = self.app.read(cx).store.clone();
+        let generation = self.generation;
+        cx.spawn(async move |this, cx| {
+            let hits = cx
+                .background_spawn(async move {
+                    store
+                        .search_messages(&query, None, MAX_MESSAGE_RESULTS)
+                        .unwrap_or_default()
+                })
+                .await;
+            this.update(cx, |switcher, cx| {
+                switcher.apply_local(generation, hits, cx)
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn apply_local(&mut self, generation: u64, hits: Vec<SearchHit>, cx: &mut Context<Self>) {
+        if generation != self.generation {
+            return;
+        }
+        self.local_messages = message_results(
+            hits,
+            &self.conversations,
+            Local::now().date_naive(),
+            app_base::format::Zone::Local,
+        );
+        self.messages = merge_messages(
+            &self.local_messages,
+            std::mem::take(&mut self.messages),
+            MAX_MESSAGE_RESULTS,
+        );
+        cx.notify();
     }
 
     fn schedule_server_search(&mut self, query: String, cx: &mut Context<Self>) {
