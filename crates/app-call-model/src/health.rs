@@ -71,7 +71,10 @@ pub fn level_text(level: NetworkLevel) -> &'static str {
 
 fn rate_text(kilobits_per_second: f64) -> String {
     if kilobits_per_second >= 1000. {
-        format!("{:.1} Mbps", kilobits_per_second / 1000.)
+        format!(
+            "{} Mbps",
+            app_base::format::decimal_label(kilobits_per_second / 1000., 1)
+        )
     } else {
         format!("{kilobits_per_second:.0} kbps")
     }
@@ -79,7 +82,13 @@ fn rate_text(kilobits_per_second: f64) -> String {
 
 pub fn network_rows(sample: &HealthSample) -> Vec<(&'static str, String)> {
     vec![
-        ("Packet loss", format!("{:.1}%", sample.loss_percent)),
+        (
+            "Packet loss",
+            format!(
+                "{}%",
+                app_base::format::decimal_label(sample.loss_percent, 1)
+            ),
+        ),
         ("Round trip", format!("{:.0} ms", sample.round_trip_ms)),
         ("Jitter", format!("{:.0} ms", sample.jitter_ms)),
         ("Sent", rate_text(sample.sent_kbps)),

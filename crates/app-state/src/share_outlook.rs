@@ -34,10 +34,12 @@ pub fn share_body(record: &MessageRecord, link: Option<&str>) -> String {
 }
 
 fn sent_label(sent_at: DateTime<Utc>) -> String {
-    sent_at
-        .with_timezone(&Local)
-        .format("%d/%m/%Y %H:%M")
-        .to_string()
+    let local = sent_at.with_timezone(&Local);
+    format!(
+        "{} {}",
+        crate::format::date_label(local.date_naive()),
+        local.format(crate::format::clock_format())
+    )
 }
 
 impl AppState {

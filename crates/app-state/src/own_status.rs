@@ -5,7 +5,7 @@ pub use app_base::status_choice::{
     STATUS_CHOICES, STATUS_DURATIONS, StatusDuration, choice_label, end_of_day, end_of_week,
     state_label,
 };
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, TimeZone, Utc};
 use gpui_kit::*;
 use teams_core::{
     ForcedAvailability, ForcedKind, PresenceStatus, StatusNote, WorkLocation, WorkLocationKind,
@@ -74,15 +74,15 @@ where
     Zone::Offset: std::fmt::Display,
 {
     let local = expires_at.with_timezone(&now.timezone());
-    if local.date_naive() == now.date_naive() {
-        format!("until {}", local.format(app_base::format::clock_format()))
+    let clock = local.format(app_base::format::clock_format()).to_string();
+    let time = if local.date_naive() == now.date_naive() {
+        clock
     } else {
-        format!(
-            "until {} {}",
-            local.format("%a"),
-            local.format(app_base::format::clock_format())
-        )
-    }
+        let weekday =
+            app_base::format::weekday_name(local.weekday(), app_base::format::WeekdayWidth::Short);
+        format!("{weekday} {clock}")
+    };
+    app_base::ui_locale::tr_with("regional.until", &[("time", &time)])
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

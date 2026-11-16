@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use app_base::ui_locale::tr_with;
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 
 use crate::rows::ReactionChip;
@@ -67,15 +68,19 @@ where
     let local = time.with_timezone(&now.timezone());
     let day = local.date_naive();
     let today = now.date_naive();
-    let clock = local.format(app_base::format::clock_format());
+    let clock = local.format(app_base::format::clock_format()).to_string();
+    let clock = ("clock", clock.as_str());
     if day == today {
-        format!("today at {clock}")
+        tr_with("regional.today_at", &[clock])
     } else if today.pred_opt() == Some(day) {
-        format!("yesterday at {clock}")
-    } else if day.year() == today.year() {
-        format!("{} at {clock}", local.format("%b %-d"))
+        tr_with("regional.yesterday_at", &[clock])
     } else {
-        format!("{} at {clock}", local.format("%b %-d, %Y"))
+        let date = if day.year() == today.year() {
+            app_base::format::day_month_label(day)
+        } else {
+            app_base::format::date_label(day)
+        };
+        tr_with("regional.date_at", &[("date", &date), clock])
     }
 }
 

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use app_base::format::Zone;
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, Utc};
 use store::MessageRecord;
 use teams_core::roster_event::RosterEvent;
 use teams_core::{CallEvent, CallPhase, CallType, ImageRef, format_duration};
@@ -10,7 +10,6 @@ use crate::format;
 
 const MAX_AVATARS: usize = 4;
 const RECAP_FALLBACK_TITLE: &str = "Meeting";
-const RECAP_DATE_FORMAT: &str = "%A, %-d %B %Y";
 const AUTO_STOP_SECONDS: i64 = 5;
 const WEEKDAY_STAMP_DAYS: i64 = 6;
 const OWN_NAME: &str = "You";
@@ -323,14 +322,21 @@ fn recap_date_line(
         });
     format!(
         "{} - {}",
-        clock.offset.at(slot.start).format(&format!(
-            "{RECAP_DATE_FORMAT} {}",
-            app_base::format::clock_format()
-        )),
+        recap_start_label(clock.offset.at(slot.start)),
         clock
             .offset
             .at(slot.end)
             .format(app_base::format::clock_format())
+    )
+}
+
+/// "Thursday, 16. November 2026 14:30" in the app language and regional format.
+fn recap_start_label(start: DateTime<FixedOffset>) -> String {
+    format!(
+        "{}, {} {}",
+        format::weekday_name(start.weekday(), format::WeekdayWidth::Full),
+        format::long_date_label(start.date_naive()),
+        start.format(format::clock_format())
     )
 }
 
@@ -341,7 +347,7 @@ fn notice_stamp(time: DateTime<Utc>, clock: &CallClock) -> String {
     if (2..=WEEKDAY_STAMP_DAYS).contains(&days_ago) {
         format!(
             "{} {}",
-            local.format("%A"),
+            format::weekday_name(local.weekday(), format::WeekdayWidth::Full),
             local.format(app_base::format::clock_format())
         )
     } else {
@@ -723,6 +729,8 @@ mod tests {
 
     #[test]
     fn recap_date_prefers_the_calendar_occurrence() {
+        // Day first, as the regional format of the United Kingdom writes it.
+        format::set_date_locale(Some("en-GB"));
         let started_at = Utc.with_ymd_and_hms(2026, 10, 15, 9, 46, 0).unwrap();
         let ended_at = Utc.with_ymd_and_hms(2026, 10, 15, 9, 55, 0).unwrap();
         let mut meeting = MeetingInfo::default();

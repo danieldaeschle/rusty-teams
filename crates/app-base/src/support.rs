@@ -277,9 +277,15 @@ pub fn format_bytes(size: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     if size >= MB {
-        format!("{:.1} MB", size as f64 / MB as f64)
+        format!(
+            "{} MB",
+            crate::format::decimal_label(size as f64 / MB as f64, 1)
+        )
     } else if size >= KB {
-        format!("{:.1} KB", size as f64 / KB as f64)
+        format!(
+            "{} KB",
+            crate::format::decimal_label(size as f64 / KB as f64, 1)
+        )
     } else {
         format!("{size} B")
     }

@@ -250,7 +250,7 @@ pub fn month_label(date: NaiveDate, today: NaiveDate) -> String {
     match months(today) - months(date) {
         0 => THIS_MONTH.to_owned(),
         1 => LAST_MONTH.to_owned(),
-        _ => date.format("%B %Y").to_string(),
+        _ => crate::format::month_year_label(date),
     }
 }
 
