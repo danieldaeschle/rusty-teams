@@ -28,7 +28,19 @@ impl From<chatsvc::Error> for Error {
         match error {
             chatsvc::Error::Session(inner) => Error::Graph(graph::Error::Session(inner)),
             chatsvc::Error::GifsDisabled => Error::GifsDisabled,
+            chatsvc::Error::AccessDenied => Error::Graph(graph::Error::NotAMember),
             other => Error::Folders(other.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn access_denied_is_not_a_member() {
+        let error = Error::from(chatsvc::Error::AccessDenied);
+        assert!(matches!(error, Error::Graph(graph::Error::NotAMember)));
     }
 }

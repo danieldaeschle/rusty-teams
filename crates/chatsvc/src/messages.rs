@@ -371,11 +371,72 @@ fn typing_body(active: bool) -> Value {
 pub(crate) fn ensure_success(answer: &ApiResponse) -> Result<()> {
     if answer.is_success() {
         Ok(())
+    } else if answer.status == 403 && acl_check_failed(&answer.body) {
+        Err(Error::AccessDenied)
     } else {
         Err(Error::Session(session::Error::api(
             answer.status,
             "chatsvc",
             answer.body.clone(),
         )))
+    }
+}
+
+/// `errorCode` 209 whose `message` is a JSON string with `subCode` `AclCheckFailed`.
+pub(crate) fn acl_check_failed(body: &Value) -> bool {
+    if body.get("errorCode").and_then(Value::as_i64) != Some(209) {
+        return false;
+    }
+    let Some(message) = body.get("message").and_then(Value::as_str) else {
+        return false;
+    };
+    serde_json::from_str::<Value>(message)
+        .ok()
+        .and_then(|inner| {
+            inner
+                .get("subCode")
+                .and_then(Value::as_str)
+                .map(|code| code == "AclCheckFailed")
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod acl_check_tests {
+    use serde_json::json;
+    use session::ApiResponse;
+
+    use super::{Error, acl_check_failed, ensure_success};
+
+    fn denied() -> serde_json::Value {
+        json!({
+            "errorCode": 209,
+            "message": "{\"subCode\":\"AclCheckFailed\",\"details\":\"The initiator 8:orgid:abc\"}"
+        })
+    }
+
+    #[test]
+    fn acl_check_failed_on_a_roster_denial() {
+        assert!(acl_check_failed(&denied()));
+        assert!(!acl_check_failed(
+            &json!({"errorCode": 209, "message": "{\"subCode\":\"Other\"}"})
+        ));
+        assert!(!acl_check_failed(&json!({"errorCode": 403})));
+    }
+
+    #[test]
+    fn ensure_success_maps_the_denial_and_keeps_other_403s() {
+        let denied = ApiResponse {
+            status: 403,
+            body: denied(),
+            retry_after: None,
+        };
+        assert!(matches!(ensure_success(&denied), Err(Error::AccessDenied)));
+        let other = ApiResponse {
+            status: 403,
+            body: json!({"error": "nope"}),
+            retry_after: None,
+        };
+        assert!(matches!(ensure_success(&other), Err(Error::Session(_))));
     }
 }

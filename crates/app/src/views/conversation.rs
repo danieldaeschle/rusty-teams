@@ -2230,6 +2230,7 @@ impl ConversationView {
                 }
                 self.mark_fetched_new(newest_cached, started_at, cx)
             }
+            Ok(Err(error)) if Self::denies_access(&error) => self.fail_access(generation, cx),
             Ok(Err(error)) => self.fail_sync(generation, short_error(&error), cx),
             Err(error) => self.fail_sync(generation, short_error(&error), cx),
         }
@@ -2261,6 +2262,24 @@ impl ConversationView {
             sync.receipts = false;
         }
         self.notice = Some(format!("Could not refresh: {error}"));
+    }
+
+    fn denies_access(error: &teams_core::Error) -> bool {
+        matches!(error, teams_core::Error::Graph(graph::Error::NotAMember))
+    }
+
+    fn fail_access(&mut self, generation: u64, _cx: &mut Context<Self>) {
+        let conversation_id = self
+            .current
+            .as_ref()
+            .map(|current| current.selection.conversation_id().to_owned())
+            .unwrap_or_default();
+        log::info!("chat access denied: {conversation_id} HTTP 403 AclCheckFailed");
+        if let Some(sync) = self.sync_of(generation) {
+            sync.failed = true;
+            sync.receipts = false;
+        }
+        self.notice = Some("No access to this chat".to_owned());
     }
 
     fn mark_fetched_new(
@@ -4891,5 +4910,15 @@ mod tests {
             8.
         );
         assert_eq!(typing_bottom_offset(Some(timeline), None), 8.);
+    }
+
+    #[test]
+    fn no_access_is_a_roster_denial_and_other_errors_still_refresh() {
+        assert!(ConversationView::denies_access(&teams_core::Error::Graph(
+            graph::Error::NotAMember
+        )));
+        assert!(!ConversationView::denies_access(
+            &teams_core::Error::Unsupported("refresh")
+        ));
     }
 }

@@ -351,6 +351,9 @@ mod tests {
             )))
         };
         assert!(is_permanent(&api(403)));
+        assert!(is_permanent(&teams_core::Error::Graph(
+            graph::Error::NotAMember
+        )));
         assert!(is_permanent(&api(400)));
         assert!(!is_permanent(&api(429)));
         assert!(!is_permanent(&api(503)));
