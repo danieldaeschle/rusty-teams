@@ -16,6 +16,9 @@ pub enum Error {
     VersionConflict,
     #[error("GIFs are disabled by the organization")]
     GifsDisabled,
+    /// HTTP 403, error code 209, sub-code `AclCheckFailed`: this account is not on the thread roster.
+    #[error("no access to this chat")]
+    AccessDenied,
     #[error("invalid event payload: {0}")]
     Decode(String),
 }
