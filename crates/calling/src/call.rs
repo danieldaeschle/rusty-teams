@@ -1363,7 +1363,6 @@ async fn drive(
     let mut mic_settings = MicSettings::default();
     let mut audio_disabled = false;
     let mut remote_audio: Option<RtcAudioTrack> = None;
-    // sync_software_audio arms/disarms the capture hook from the outgoing track state.
     sync_software_audio(
         &factory,
         options,
@@ -2233,12 +2232,10 @@ async fn drive(
                 }
                 Some(CallCommand::SetMicSettings(settings)) if !audio_disabled => {
                     mic_settings = settings;
-                    // Let sync_software_audio be the single authority for hook arming.
                     sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), false, &mut software_audio, mic_settings, control, timeline);
                 }
                 Some(CallCommand::SetMicSettings(settings)) => {
                     mic_settings = settings;
-                    // Audio is off both ways: prepare Auto if needed, keep the capture hook disarmed.
                     crate::noise_stage::apply_for_outgoing(mic_settings, false);
                 }
                 Some(CallCommand::SelectOutput(choice)) => {
@@ -4195,7 +4192,6 @@ fn sync_software_audio(
 ) {
     let running = software_audio.as_ref().map(|audio| audio.plan);
     if running == wanted && !restart {
-        // Keep the capture hook off while MicChain owns the mic (computer sound / Off / music).
         crate::noise_stage::apply_for_outgoing(mic_settings, software_audio.is_none());
         return;
     }
@@ -4266,7 +4262,9 @@ async fn tear_down(
     report: &mut CallReport,
     cancelled: bool,
 ) {
-    // Drop DeepFilterNet capture hook so the next call starts without a stale post-processor.
+    if crate::noise_stage::overloaded() {
+        timeline.record("noise suppression", "DeepFilterNet too slow, WebRTC only");
+    }
     crate::noise_stage::clear();
     for peer in &live.peers {
         peer.close();

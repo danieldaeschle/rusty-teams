@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, Once};
+use std::time::{Duration, Instant};
 
 use df::tract::{DfParams, DfTract, ReduceMask, RuntimeParams};
 use ndarray::{ArrayView2, ArrayViewMut2};
@@ -7,26 +8,20 @@ use ndarray::{ArrayView2, ArrayViewMut2};
 use crate::audio::{FRAME_SAMPLES, SAMPLE_RATE};
 use crate::mic_processing::MicSettings;
 
-/// WebRTC `AudioBuffer` full-band channels are FloatS16 (`[-32768, 32768]`).
 const PCM_SCALE: f32 = 32768.0;
-const ATTENUATION_LIMIT_DB: f32 = 30.0;
+const ATTENUATION_LIMIT_DB: f32 = 40.0;
 const MIN_LOCAL_SNR_DB: f32 = -15.0;
 const MAX_LOCAL_SNR_ERB_DB: f32 = 35.0;
 const MAX_LOCAL_SNR_DF_DB: f32 = 35.0;
 const WARM_UP_FRAMES: usize = 100;
-/// Keep the gate open briefly after speech so word endings are not cut.
-const GATE_HANGOVER_FRAMES: u32 = 20;
-/// Open when post-filter energy is this many times the learned residual-noise floor (~9 dB).
-const GATE_OPEN_OVER_NOISE: f32 = 8.0;
-/// Ignore a near-empty floor so the first frames after hangup do not stick open.
-const GATE_MIN_NOISE_ENERGY: f32 = 50.0;
-const GATE_NOISE_LEARN_FRAMES: u32 = 50;
+const FRAME_BUDGET: Duration = Duration::from_millis(6);
+const SLOW_FRAME_LIMIT: u32 = 5;
 
 static PROTOTYPE: Mutex<Option<DfTract>> = Mutex::new(None);
 static PREPARE: Once = Once::new();
 static HOOK_STAGE: Mutex<NoiseStage> = Mutex::new(NoiseStage::new());
 static HOOK_ARMED: AtomicBool = AtomicBool::new(false);
-static WRONG_FRAME_LOGGED: Once = Once::new();
+static OVERLOADED: AtomicBool = AtomicBool::new(false);
 
 fn load_model() -> Option<DfTract> {
     let mut model = DfTract::new(DfParams::default(), &runtime_params(ATTENUATION_LIMIT_DB))
@@ -109,17 +104,8 @@ fn ready_model() -> Option<DfTract> {
         .map(DfTract::fork)
 }
 
-fn energy_of(samples: &[f32]) -> f32 {
-    samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len().max(1) as f32
-}
-
-/// Whether Auto on the platform device track should install the capture post-processor hook.
-pub fn should_arm_hook(settings: MicSettings, device_track_outgoing: bool) -> bool {
+fn should_arm_hook(settings: MicSettings, device_track_outgoing: bool) -> bool {
     settings.ml_noise_suppression() && settings.uses_device_track() && device_track_outgoing
-}
-
-pub fn hook_armed() -> bool {
-    HOOK_ARMED.load(Ordering::Relaxed)
 }
 
 fn capture_hook(channel_index: usize, samples: &mut [f32]) {
@@ -129,7 +115,12 @@ fn capture_hook(channel_index: usize, samples: &mut [f32]) {
     let Ok(mut stage) = HOOK_STAGE.try_lock() else {
         return;
     };
+    let started = Instant::now();
     stage.process(channel_index, samples);
+    if stage.budget.record(started.elapsed()) {
+        OVERLOADED.store(true, Ordering::Relaxed);
+        HOOK_ARMED.store(false, Ordering::Relaxed);
+    }
 }
 
 fn install_hook(armed: bool) {
@@ -137,26 +128,47 @@ fn install_hook(armed: bool) {
     webrtc_sys::noise_hook::set_capture_hook(armed.then_some(capture_hook));
 }
 
-/// Prepare DeepFilterNet when Auto needs it, and arm the capture hook only while the
-/// Pulse / CoreAudio device track is the outgoing microphone.
-pub fn apply(settings: MicSettings) {
-    apply_for_outgoing(settings, settings.uses_device_track());
-}
-
-/// Same as [`apply`], but `device_track_outgoing` is false while MicChain owns the mic
-/// (Off, music mode, computer sound, Windows).
+/// Arms DeepFilterNet on the capture hook only while the Pulse / CoreAudio device track is the
+/// outgoing microphone. WebRTC's own noise suppression keeps running before it either way.
 pub fn apply_for_outgoing(settings: MicSettings, device_track_outgoing: bool) {
     if settings.ml_noise_suppression() {
         prepare();
     }
-    install_hook(should_arm_hook(settings, device_track_outgoing));
+    let armed =
+        should_arm_hook(settings, device_track_outgoing) && !OVERLOADED.load(Ordering::Relaxed);
+    install_hook(armed);
 }
 
-/// Drop the capture hook on hangup and reset learned gate state so the next call starts clean.
+/// True once the hook ran over its frame budget and switched itself off for this call.
+pub fn overloaded() -> bool {
+    OVERLOADED.load(Ordering::Relaxed)
+}
+
 pub fn clear() {
     install_hook(false);
+    OVERLOADED.store(false, Ordering::Relaxed);
     if let Ok(mut stage) = HOOK_STAGE.lock() {
         *stage = NoiseStage::new();
+    }
+}
+
+#[derive(Default)]
+struct FrameBudget {
+    slow_frames: u32,
+}
+
+impl FrameBudget {
+    const fn new() -> Self {
+        FrameBudget { slow_frames: 0 }
+    }
+
+    fn record(&mut self, elapsed: Duration) -> bool {
+        if elapsed > FRAME_BUDGET {
+            self.slow_frames += 1;
+        } else {
+            self.slow_frames = 0;
+        }
+        self.slow_frames >= SLOW_FRAME_LIMIT
     }
 }
 
@@ -165,11 +177,7 @@ pub struct NoiseStage {
     input: Vec<f32>,
     output: Vec<f32>,
     pcm: Vec<f32>,
-    gate_hangover: Vec<u32>,
-    noise_floor: Vec<f32>,
-    noise_frames: Vec<u32>,
-    /// When false, only DeepFilterNet runs (used by the attenuation-limit unit test).
-    pub gate: bool,
+    budget: FrameBudget,
 }
 
 impl NoiseStage {
@@ -179,79 +187,22 @@ impl NoiseStage {
             input: Vec::new(),
             output: Vec::new(),
             pcm: Vec::new(),
-            gate_hangover: Vec::new(),
-            noise_floor: Vec::new(),
-            noise_frames: Vec::new(),
-            gate: true,
+            budget: FrameBudget::new(),
         }
     }
 
-    fn ensure_channel(&mut self, channel_index: usize) {
+    pub fn process(&mut self, channel_index: usize, samples: &mut [f32]) {
+        if samples.len() != FRAME_SAMPLES {
+            return;
+        }
         while self.channels.len() <= channel_index {
             self.channels.push(None);
         }
-        while self.gate_hangover.len() <= channel_index {
-            self.gate_hangover.push(0);
+        let channel = &mut self.channels[channel_index];
+        if channel.is_none() {
+            *channel = ready_model();
         }
-        while self.noise_floor.len() <= channel_index {
-            self.noise_floor.push(GATE_MIN_NOISE_ENERGY);
-        }
-        while self.noise_frames.len() <= channel_index {
-            self.noise_frames.push(0);
-        }
-        if self.channels[channel_index].is_none() {
-            self.channels[channel_index] = ready_model();
-        }
-    }
-
-    /// Learns residual noise after DeepFilterNet; speech sits well above that floor and keeps a short hangover.
-    fn apply_gate(&mut self, channel_index: usize, samples: &mut [f32]) {
-        if !self.gate {
-            return;
-        }
-        while self.gate_hangover.len() <= channel_index {
-            self.gate_hangover.push(0);
-        }
-        while self.noise_floor.len() <= channel_index {
-            self.noise_floor.push(GATE_MIN_NOISE_ENERGY);
-        }
-        while self.noise_frames.len() <= channel_index {
-            self.noise_frames.push(0);
-        }
-        let frame_energy = energy_of(samples);
-        let floor = self.noise_floor[channel_index].max(GATE_MIN_NOISE_ENERGY);
-        let learning = self.noise_frames[channel_index] < GATE_NOISE_LEARN_FRAMES;
-        let near_floor = frame_energy <= floor * 2.0;
-        if learning || near_floor {
-            self.noise_floor[channel_index] = floor * 0.95 + frame_energy * 0.05;
-            self.noise_frames[channel_index] =
-                self.noise_frames[channel_index].saturating_add(1);
-        }
-        let open_at = self.noise_floor[channel_index].max(GATE_MIN_NOISE_ENERGY) * GATE_OPEN_OVER_NOISE;
-        if frame_energy > open_at {
-            self.gate_hangover[channel_index] = GATE_HANGOVER_FRAMES;
-            return;
-        }
-        if self.gate_hangover[channel_index] > 0 {
-            self.gate_hangover[channel_index] -= 1;
-            return;
-        }
-        samples.fill(0.0);
-    }
-
-    /// FloatS16 frames from the WebRTC capture hook (or converted PCM).
-    pub fn process(&mut self, channel_index: usize, samples: &mut [f32]) {
-        if samples.len() != FRAME_SAMPLES {
-            WRONG_FRAME_LOGGED.call_once(|| {
-                eprintln!(
-                    "noise stage: expected {FRAME_SAMPLES} samples at {SAMPLE_RATE} Hz, got {}",
-                    samples.len()
-                );
-            });
-            return;
-        }
-        self.ensure_channel(channel_index);
-        let Some(model) = self.channels[channel_index].as_mut() else {
+        let Some(model) = channel.as_mut() else {
             return;
         };
         self.input.clear();
@@ -270,7 +221,6 @@ impl NoiseStage {
         for (sample, enhanced) in samples.iter_mut().zip(&self.output) {
             *sample = enhanced * PCM_SCALE;
         }
-        self.apply_gate(channel_index, samples);
     }
 
     pub fn process_pcm(&mut self, channel_index: usize, samples: &mut [i16]) {
@@ -295,7 +245,6 @@ impl Default for NoiseStage {
 mod tests {
     use super::*;
     use crate::mic_processing::NoiseSuppression;
-    use std::time::{Duration, Instant};
 
     fn white_noise(frame_len: usize, amplitude: f32, state: &mut u32) -> Vec<f32> {
         (0..frame_len)
@@ -309,7 +258,7 @@ mod tests {
     }
 
     fn energy(samples: &[f32]) -> f32 {
-        energy_of(samples)
+        samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32
     }
 
     fn stage_with_model() -> NoiseStage {
@@ -342,7 +291,6 @@ mod tests {
         let model = DfTract::new(DfParams::default(), &runtime_params(6.0)).unwrap();
         let mut stage = NoiseStage {
             channels: vec![Some(model)],
-            gate: false,
             ..NoiseStage::new()
         };
         let mut state = 0x1234_5678_u32;
@@ -393,117 +341,49 @@ mod tests {
     }
 
     #[test]
-    fn speech_above_the_learned_noise_floor_stays_audible() {
-        let mut stage = NoiseStage::new();
-        // Teach the gate a quiet residual floor (as DeepFilterNet leaves after noise).
-        for _ in 0..GATE_NOISE_LEARN_FRAMES {
-            let mut residual = vec![20.0_f32; FRAME_SAMPLES];
-            stage.apply_gate(0, &mut residual);
+    fn a_short_slow_stretch_is_tolerated_and_a_long_one_trips_the_budget() {
+        let slow = FRAME_BUDGET * 2;
+        let fast = FRAME_BUDGET / 2;
+        let mut budget = FrameBudget::new();
+        for _ in 1..SLOW_FRAME_LIMIT {
+            assert!(!budget.record(slow));
         }
-        let speech_amp = 800.0_f32;
-        let mut speech: Vec<f32> = (0..FRAME_SAMPLES)
-            .map(|sample| {
-                if sample % 2 == 0 {
-                    speech_amp
-                } else {
-                    -speech_amp
-                }
-            })
-            .collect();
-        let before = energy(&speech);
-        stage.apply_gate(0, &mut speech);
-        assert!(
-            energy(&speech) > before * 0.9,
-            "speech above the noise floor must pass the gate"
-        );
+        assert!(!budget.record(fast));
+        for _ in 1..SLOW_FRAME_LIMIT {
+            assert!(!budget.record(slow));
+        }
+        assert!(budget.record(slow));
     }
 
     #[test]
-    fn residual_noise_is_gated_to_silence_after_hangover() {
-        let mut stage = stage_with_model();
-        let mut state = 0xabcdefu32;
-        for _ in 0..(GATE_HANGOVER_FRAMES + 30) {
-            let mut frame = white_noise(FRAME_SAMPLES, 3000.0, &mut state);
-            stage.process(0, &mut frame);
-        }
-        let mut quiet = white_noise(FRAME_SAMPLES, 3000.0, &mut state);
-        stage.process(0, &mut quiet);
-        assert!(
-            energy(&quiet) < 1.0,
-            "gated residual should be near silence, energy {}",
-            energy(&quiet)
-        );
-    }
-
-    #[test]
-    fn linux_auto_arms_the_hook_and_other_modes_do_not() {
-        clear();
+    fn only_linux_and_macos_auto_arm_the_hook_and_an_overload_keeps_it_off_until_hangup() {
         let auto = MicSettings::default();
-        // Windows never uses the device track, so Auto stays in MicChain even when
-        // the caller says the device track is outgoing. Linux and macOS arm the hook.
-        assert_eq!(should_arm_hook(auto, true), auto.uses_device_track());
-        assert!(!should_arm_hook(auto, false), "MicChain / computer sound");
-        apply_for_outgoing(auto, true);
-        assert_eq!(hook_armed(), auto.uses_device_track());
-
         let low = MicSettings {
             noise_suppression: NoiseSuppression::Low,
             music_mode: false,
         };
-        assert!(!should_arm_hook(low, true));
-        apply_for_outgoing(low, true);
-        assert!(!hook_armed());
-
-        let off = MicSettings {
-            noise_suppression: NoiseSuppression::Off,
-            music_mode: false,
-        };
-        assert!(!should_arm_hook(off, false));
-        apply_for_outgoing(off, false);
-        assert!(!hook_armed());
-
         let music = MicSettings {
             noise_suppression: NoiseSuppression::Auto,
             music_mode: true,
         };
-        assert!(!should_arm_hook(music, false));
-        apply_for_outgoing(music, false);
-        assert!(!hook_armed());
-
-        // Windows Auto never uses the device track, so the hook stays off.
-        assert!(!auto.uses_device_track_on(true));
+        assert!(!should_arm_hook(auto, false));
+        assert!(!should_arm_hook(low, true));
+        assert!(!should_arm_hook(music, true));
         assert!(!should_arm_hook(auto, auto.uses_device_track_on(true)));
 
         clear();
-        assert!(!hook_armed());
-    }
+        apply_for_outgoing(auto, true);
+        assert_eq!(HOOK_ARMED.load(Ordering::Relaxed), auto.uses_device_track());
 
-    #[test]
-    fn clear_resets_learned_gate_state() {
-        apply_for_outgoing(MicSettings::default(), true);
-        {
-            let mut stage = HOOK_STAGE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            stage.noise_floor = vec![999_999.0];
-            stage.gate_hangover = vec![GATE_HANGOVER_FRAMES];
-            stage.noise_frames = vec![GATE_NOISE_LEARN_FRAMES];
-        }
+        OVERLOADED.store(true, Ordering::Relaxed);
+        apply_for_outgoing(auto, true);
+        assert!(!HOOK_ARMED.load(Ordering::Relaxed));
+        assert!(overloaded());
+
         clear();
-        assert!(!hook_armed());
-        let stage = HOOK_STAGE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        assert!(stage.noise_floor.is_empty());
-        assert!(stage.gate_hangover.is_empty());
-        assert!(stage.noise_frames.is_empty());
-    }
-
-    #[test]
-    fn hook_and_mic_chain_never_arm_together() {
-        let auto = MicSettings::default();
-        // Device track outgoing arms the hook only where Auto stays on Pulse/CoreAudio.
-        assert_eq!(should_arm_hook(auto, true), auto.uses_device_track());
-        assert!(auto.ml_noise_suppression());
-        assert!(auto.uses_device_track_on(false));
-        assert!(!auto.uses_device_track_on(true));
-        // Software outgoing → MicChain may run ml, hook stays off.
-        assert!(!should_arm_hook(auto, false));
+        assert!(!overloaded());
+        apply_for_outgoing(auto, true);
+        assert_eq!(HOOK_ARMED.load(Ordering::Relaxed), auto.uses_device_track());
+        clear();
     }
 }
