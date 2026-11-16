@@ -557,6 +557,7 @@ impl AppShell {
             window_active: window.is_window_active(),
             composer_empty: conversation.composer_is_empty(cx),
             send_in_flight: conversation.send_in_flight(),
+            in_call: self.state.read(cx).call.is_some(),
         });
         // On Linux only the user restarts: the update dialog or the title bar button.
         if idle && cfg!(not(target_os = "linux")) {

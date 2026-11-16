@@ -41,10 +41,11 @@ pub struct IdleInputs {
     pub window_active: bool,
     pub composer_empty: bool,
     pub send_in_flight: bool,
+    pub in_call: bool,
 }
 
 pub fn is_idle(inputs: IdleInputs) -> bool {
-    !inputs.window_active && inputs.composer_empty && !inputs.send_in_flight
+    !inputs.window_active && inputs.composer_empty && !inputs.send_in_flight && !inputs.in_call
 }
 
 pub fn update_is_ready(running: &str, published: Option<&str>, update_exe_exists: bool) -> bool {
@@ -307,11 +308,12 @@ mod tests {
             window_active: false,
             composer_empty: true,
             send_in_flight: false,
+            in_call: false,
         }
     }
 
     #[test]
-    fn idle_needs_all_three_conditions() {
+    fn idle_needs_all_conditions_and_no_call() {
         assert!(is_idle(idle()));
         assert!(!is_idle(IdleInputs {
             window_active: true,
@@ -323,6 +325,10 @@ mod tests {
         }));
         assert!(!is_idle(IdleInputs {
             send_in_flight: true,
+            ..idle()
+        }));
+        assert!(!is_idle(IdleInputs {
+            in_call: true,
             ..idle()
         }));
     }
