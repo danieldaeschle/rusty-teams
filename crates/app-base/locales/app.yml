@@ -106,6 +106,9 @@ settings:
     calendar:
       en: Calendar
       de: Kalender
+    calendar_accounts:
+      en: Calendar accounts
+      de: Kalenderkonten
     devices:
       en: Devices
       de: Geräte
@@ -262,6 +265,12 @@ settings:
     section_google:
       en: GOOGLE
       de: GOOGLE
+    section_caldav:
+      en: CALDAV
+      de: CALDAV
+    section_ics:
+      en: ICS SUBSCRIPTIONS
+      de: ICS-ABOS
     section_home:
       en: HOME CALENDAR
       de: HAUPTKALENDER
@@ -271,6 +280,63 @@ settings:
     google_title:
       en: Google Calendar
       de: Google Kalender
+    caldav_title:
+      en: CalDAV calendar
+      de: CalDAV-Kalender
+    caldav_url:
+      en: Server URL
+      de: Server-URL
+    caldav_username:
+      en: Username
+      de: Benutzername
+    caldav_password:
+      en: App password
+      de: App-Passwort
+    caldav_connect:
+      en: Connect CalDAV
+      de: CalDAV verbinden
+    caldav_hint:
+      en: Use an app password. Templates fill a typical URL for Nextcloud, Fastmail, or iCloud.
+      de: Nutzen Sie ein App-Passwort. Vorlagen setzen eine typische URL für Nextcloud, Fastmail oder iCloud.
+    caldav_template_nextcloud:
+      en: Nextcloud
+      de: Nextcloud
+    caldav_template_fastmail:
+      en: Fastmail
+      de: Fastmail
+    caldav_template_icloud:
+      en: iCloud
+      de: iCloud
+    caldav_connected:
+      en: CalDAV account connected
+      de: CalDAV-Konto verbunden
+    caldav_connect_failed:
+      en: CalDAV connect failed
+      de: CalDAV-Verbindung fehlgeschlagen
+    caldav_readonly:
+      en: Read-only
+      de: Nur lesen
+    ics_title:
+      en: ICS subscription
+      de: ICS-Abo
+    ics_url:
+      en: ICS URL
+      de: ICS-URL
+    ics_name:
+      en: Display name
+      de: Anzeigename
+    ics_connect:
+      en: Add subscription
+      de: Abo hinzufügen
+    ics_hint:
+      en: Read-only. For holidays or shared calendar links (including Proton share links).
+      de: Nur lesen. Für Feiertage oder geteilte Kalenderlinks (auch Proton-Share-Links).
+    ics_connected:
+      en: ICS subscription added
+      de: ICS-Abo hinzugefügt
+    ics_connect_failed:
+      en: ICS subscription failed
+      de: ICS-Abo fehlgeschlagen
     connect_button:
       en: Connect Google
       de: Google verbinden
@@ -308,17 +374,17 @@ settings:
       en: Outlook (Microsoft mailbox)
       de: Outlook (Microsoft-Postfach)
     dual_write_when_google_home:
-      en: Dual-write when home is Google
-      de: Zusätzlich schreiben, wenn der Hauptkalender Google ist
+      en: Also write when home is not Outlook
+      de: Zusätzlich schreiben, wenn der Hauptkalender nicht Outlook ist
     outlook_home_detail:
-      en: Default when no Google home is chosen
-      de: Standard, wenn kein Google-Hauptkalender gewählt ist
+      en: Default when no other home calendar is chosen
+      de: Standard, wenn kein anderer Hauptkalender gewählt ist
     no_extra_targets:
       en: No extra write targets
       de: Keine weiteren Schreibziele
     connect_then_dual_write:
-      en: Connect Google, then enable dual-write on a calendar above.
-      de: Google verbinden, dann oben Dual-Write für einen Kalender einschalten.
+      en: Connect another account, then enable dual-write on a calendar above.
+      de: Weiteres Konto verbinden, dann oben Dual-Write für einen Kalender einschalten.
     section_view:
       en: VIEW
       de: ANSICHT

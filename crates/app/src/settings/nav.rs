@@ -9,13 +9,14 @@ use crate::settings_section::SettingsSection;
 use crate::theme;
 use crate::views::widgets::icon;
 
-pub const TEAMS_GROUP: [SettingsSection; 7] = [
+pub const TEAMS_GROUP: [SettingsSection; 8] = [
     SettingsSection::General,
     SettingsSection::Notifications,
     SettingsSection::Appearance,
     SettingsSection::Chats,
     SettingsSection::Calls,
     SettingsSection::Calendar,
+    SettingsSection::CalendarAccounts,
     SettingsSection::Devices,
 ];
 pub const RUSTY_GROUP: [SettingsSection; 2] = [SettingsSection::Agents, SettingsSection::Mcp];
@@ -27,14 +28,21 @@ const ITEM_RADIUS: f32 = 6.;
 const ITEM_ICON: f32 = 16.;
 const NAV_PADDING_X: f32 = 12.;
 
-const CALENDAR_TERMS: [&str; 10] = [
+const CALENDAR_VIEW_TERMS: [&str; 5] = [
     "settings.calendar.default_view",
     "settings.calendar.work_days",
     "settings.calendar.work_hours",
     "settings.calendar.time_scale",
     "settings.calendar.weekend",
+];
+
+const CALENDAR_ACCOUNTS_TERMS: [&str; 9] = [
     "settings.calendar.google_title",
     "settings.calendar.connect_button",
+    "settings.calendar.caldav_title",
+    "settings.calendar.caldav_connect",
+    "settings.calendar.ics_title",
+    "settings.calendar.ics_connect",
     "settings.calendar.section_home",
     "settings.calendar.section_write",
     "settings.calendar.outlook_mailbox",
@@ -82,7 +90,11 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.chats.markdown"),
         ],
         SettingsSection::Calls => vec![tr("settings.calls.ringtones")],
-        SettingsSection::Calendar => CALENDAR_TERMS.iter().map(|key| tr(key)).collect(),
+        SettingsSection::Calendar => CALENDAR_VIEW_TERMS.iter().map(|key| tr(key)).collect(),
+        SettingsSection::CalendarAccounts => CALENDAR_ACCOUNTS_TERMS
+            .iter()
+            .map(|key| tr(key))
+            .collect(),
         SettingsSection::Devices => vec![
             "Speaker".to_owned(),
             "Microphone".to_owned(),
@@ -137,6 +149,7 @@ pub fn label(section: SettingsSection) -> String {
         SettingsSection::Chats => tr("settings.nav.chats"),
         SettingsSection::Calls => tr("settings.nav.calls"),
         SettingsSection::Calendar => tr("settings.nav.calendar"),
+        SettingsSection::CalendarAccounts => tr("settings.nav.calendar_accounts"),
         SettingsSection::Devices => tr("settings.nav.devices"),
         SettingsSection::Agents => tr("settings.nav.agents"),
         SettingsSection::Mcp => tr("settings.nav.mcp"),
@@ -153,6 +166,7 @@ fn icon_name(section: SettingsSection) -> IconName {
         SettingsSection::Chats => IconName::MessageSquare,
         SettingsSection::Calls => IconName::Phone,
         SettingsSection::Calendar => IconName::Calendar,
+        SettingsSection::CalendarAccounts => IconName::Calendar,
         SettingsSection::Devices => IconName::Headphones,
         SettingsSection::Agents => IconName::Bot,
         SettingsSection::Mcp => IconName::Plug,
@@ -177,6 +191,7 @@ fn element_id(section: SettingsSection) -> &'static str {
         SettingsSection::Chats => "settings-nav-chats",
         SettingsSection::Calls => "settings-nav-calls",
         SettingsSection::Calendar => "settings-nav-calendar",
+        SettingsSection::CalendarAccounts => "settings-nav-calendar-accounts",
         SettingsSection::Devices => "settings-nav-devices",
         SettingsSection::Agents => "settings-nav-agents",
         SettingsSection::Mcp => "settings-nav-mcp",
@@ -424,7 +439,8 @@ mod tests {
                 "settings.chats.enter_to",
                 "settings.chats.markdown",
             ],
-            SettingsSection::Calendar => &super::CALENDAR_TERMS,
+            SettingsSection::Calendar => &super::CALENDAR_VIEW_TERMS,
+            SettingsSection::CalendarAccounts => &super::CALENDAR_ACCOUNTS_TERMS,
             _ => &[],
         }
     }
@@ -433,6 +449,11 @@ mod tests {
     fn every_search_term_names_a_setting_on_its_page() {
         let _guard = crate::i18n::locale_test_lock();
         apply_locale("en");
+        let calendar_accounts_source = concat!(
+            include_str!("calendar.rs"),
+            "\n",
+            include_str!("caldav_form.rs"),
+        );
         let pages = [
             (SettingsSection::General, include_str!("general.rs")),
             (
@@ -442,6 +463,7 @@ mod tests {
             (SettingsSection::Appearance, include_str!("appearance.rs")),
             (SettingsSection::Devices, include_str!("devices.rs")),
             (SettingsSection::Calendar, include_str!("calendar.rs")),
+            (SettingsSection::CalendarAccounts, calendar_accounts_source),
         ];
         for (section, source) in pages {
             for key in search_term_keys(section) {

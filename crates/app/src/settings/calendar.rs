@@ -18,11 +18,9 @@ use crate::call::calendar_prefs::{CalendarPrefs, DefaultView, TimeScale, Weekend
 use crate::i18n::tr;
 use crate::theme;
 
-pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
-    let accounts = app.read(cx).calendar_accounts();
-    let pending = app.read(cx).google_connect_pending().is_some();
+pub fn render_view(app: &Entity<AppState>, cx: &App) -> Div {
     let prefs = app.read(cx).calendar_prefs.clone();
-    let mut body = v_flex()
+    v_flex()
         .w_full()
         .child(caption(tr("settings.calendar.section_view")))
         .children(view_rows(
@@ -30,10 +28,36 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             &prefs,
             app.read(cx).calendar_layout().first_day,
         ))
+}
+
+pub fn render_accounts(
+    app: &Entity<AppState>,
+    caldav: Option<&Entity<super::caldav_form::CalDavForm>>,
+    ics: Option<&Entity<super::caldav_form::IcsForm>>,
+    cx: &App,
+) -> Div {
+    let accounts = app.read(cx).calendar_accounts();
+    let pending = app.read(cx).google_connect_pending().is_some();
+    let mut body = v_flex()
+        .w_full()
         .child(caption(tr("settings.calendar.section_google")))
         .child(connect_row(app, accounts.has_google(), pending));
     for account in &accounts.google_accounts {
         body = body.child(account_block(app, account, &accounts));
+    }
+    body = body.child(caption(tr("settings.calendar.section_caldav")));
+    for account in &accounts.caldav_accounts {
+        body = body.child(caldav_account_block(app, account, &accounts));
+    }
+    if let Some(form) = caldav {
+        body = body.child(form.clone());
+    }
+    body = body.child(caption(tr("settings.calendar.section_ics")));
+    for subscription in &accounts.ics_subscriptions {
+        body = body.child(ics_block(app, subscription));
+    }
+    if let Some(form) = ics {
+        body = body.child(form.clone());
     }
     body = body
         .child(caption(tr("settings.calendar.section_home")))
@@ -60,7 +84,7 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
                 })
             }),
         );
-    } else if accounts.google_accounts.is_empty() {
+    } else if accounts.google_accounts.is_empty() && accounts.caldav_accounts.is_empty() {
         body = body.child(control_row(
             tr("settings.calendar.no_extra_targets"),
             tr("settings.calendar.connect_then_dual_write"),
@@ -207,6 +231,113 @@ fn tr_args_write(summary: &str) -> String {
     crate::i18n::tr_args("settings.calendar.also_write_to", &args)
 }
 
+fn caldav_account_block(
+    app: &Entity<AppState>,
+    account: &store::CalDavAccount,
+    accounts: &store::CalendarAccounts,
+) -> Div {
+    let disconnect_app = app.clone();
+    let account_id = account.id.clone();
+    let mut block = v_flex().w_full().child(control_row(
+        format!("{} · {}", account.display_name, account.url),
+        tr("settings.calendar.caldav_title"),
+        text_button(
+            format!("settings-caldav-disconnect-{}", account.id),
+            tr("settings.calendar.disconnect"),
+        )
+        .on_click(move |_, _, cx| {
+            disconnect_app.update(cx, |state, cx| {
+                state.disconnect_caldav_account(&account_id, cx)
+            })
+        }),
+    ));
+    for calendar in &account.calendars {
+        let toggle_app = app.clone();
+        let account_id = account.id.clone();
+        let calendar_id = calendar.id.clone();
+        let write_ref = CalendarRef::caldav(&account.id, &calendar.id);
+        let is_home = accounts.home.key() == write_ref.key();
+        let is_write = accounts
+            .write_targets
+            .iter()
+            .any(|target| target.key() == write_ref.key());
+        let detail = if calendar.writable {
+            tr("settings.calendar.show_in_grid")
+        } else {
+            tr("settings.calendar.caldav_readonly")
+        };
+        block = block.child(
+            toggle_row(
+                format!("settings-caldav-cal-{}", calendar.id),
+                calendar.summary.clone(),
+                detail,
+                theme::text_muted(),
+                calendar.selected,
+            )
+            .on_click(move |_, _, cx| {
+                toggle_app.update(cx, |state, cx| {
+                    state.toggle_caldav_calendar_selected(&account_id, &calendar_id, cx)
+                })
+            }),
+        );
+        if calendar.writable && !is_home {
+            let write_app = app.clone();
+            let target = write_ref;
+            block = block.child(
+                toggle_row(
+                    format!("settings-caldav-write-{}", calendar.id),
+                    tr_args_write(&calendar.summary),
+                    "",
+                    theme::text_muted(),
+                    is_write,
+                )
+                .on_click(move |_, _, cx| {
+                    write_app.update(cx, |state, cx| {
+                        state.toggle_write_target(target.clone(), cx)
+                    })
+                }),
+            );
+        }
+    }
+    block
+}
+
+fn ics_block(app: &Entity<AppState>, subscription: &store::IcsSubscription) -> Div {
+    let disconnect = app.clone();
+    let toggle = app.clone();
+    let id = subscription.id.clone();
+    let id_toggle = subscription.id.clone();
+    v_flex()
+        .w_full()
+        .child(control_row(
+            subscription.summary.clone(),
+            subscription.url.clone(),
+            text_button(
+                format!("settings-ics-disconnect-{}", subscription.id),
+                tr("settings.calendar.disconnect"),
+            )
+            .on_click(move |_, _, cx| {
+                disconnect.update(cx, |state, cx| {
+                    state.disconnect_ics_subscription(&id, cx)
+                })
+            }),
+        ))
+        .child(
+            toggle_row(
+                format!("settings-ics-selected-{}", subscription.id),
+                tr("settings.calendar.show_in_grid"),
+                tr("settings.calendar.caldav_readonly"),
+                theme::text_muted(),
+                subscription.selected,
+            )
+            .on_click(move |_, _, cx| {
+                toggle.update(cx, |state, cx| {
+                    state.toggle_ics_subscription_selected(&id_toggle, cx)
+                })
+            }),
+        )
+}
+
 fn home_choices(app: &Entity<AppState>, accounts: &store::CalendarAccounts) -> Div {
     let mut choices = v_flex().w_full();
     let outlook_app = app.clone();
@@ -239,6 +370,28 @@ fn home_choices(app: &Entity<AppState>, accounts: &store::CalendarAccounts) -> D
                         calendar.summary
                     ),
                     account.email.clone(),
+                    theme::text_muted(),
+                    selected,
+                )
+                .on_click(move |_, _, cx| {
+                    home_app.update(cx, |state, cx| state.set_home_calendar(target.clone(), cx))
+                }),
+            );
+        }
+    }
+    for account in &accounts.caldav_accounts {
+        for calendar in &account.calendars {
+            if !calendar.writable {
+                continue;
+            }
+            let home_app = app.clone();
+            let target = CalendarRef::caldav(&account.id, &calendar.id);
+            let selected = accounts.home.key() == target.key();
+            choices = choices.child(
+                toggle_row(
+                    format!("settings-home-caldav-{}", calendar.id),
+                    format!("CalDAV · {}", calendar.summary),
+                    account.username.clone(),
                     theme::text_muted(),
                     selected,
                 )

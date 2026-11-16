@@ -6,11 +6,12 @@ use crate::cards::{CardTransport, DEFAULT_MT_REGION, SessionCardTransport, space
 use crate::error::{Error, Result};
 
 mod availability;
+mod merge;
 mod reminders;
 mod schedule;
 
 pub use availability::{BusyTime, PersonSchedule, parse_schedules};
-
+pub use merge::{HomeCalendar, merge_calendar_events, normalize_join_url};
 pub use reminders::{Reminder, parse_reminders};
 pub use schedule::{
     Attendee, CreatedEvent, NewEvent, Repeat, Reply, new_event_body, new_event_body_with_join,
@@ -45,6 +46,9 @@ pub enum CalendarSource {
     #[default]
     Outlook,
     Google,
+    CalDav,
+    /// Read-only ICS subscription (holidays, shared links).
+    Ics,
 }
 
 impl CalendarSource {
@@ -52,7 +56,13 @@ impl CalendarSource {
         match self {
             CalendarSource::Outlook => "Outlook",
             CalendarSource::Google => "Google",
+            CalendarSource::CalDav => "CalDAV",
+            CalendarSource::Ics => "ICS",
         }
+    }
+
+    pub fn is_outlook(self) -> bool {
+        matches!(self, CalendarSource::Outlook)
     }
 }
 

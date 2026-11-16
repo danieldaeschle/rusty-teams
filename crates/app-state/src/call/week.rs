@@ -274,15 +274,44 @@ impl AppState {
                     }),
                 }
             }
+            let mut caldav_count = None;
+            if accounts.has_caldav() {
+                match crate::caldav_sync::fetch_caldav_events(&mut fetched_accounts, from, to).await
+                {
+                    Ok(events) => {
+                        let _ = store::merge_caldav_metadata(&store, &fetched_accounts);
+                        caldav_count = Some(events.len());
+                        combined.extend(events);
+                    }
+                    Err(error) => failures.push(CalendarLoadFailure {
+                        source: CalendarSource::CalDav,
+                        message: error,
+                    }),
+                }
+            }
+            if accounts.has_ics() {
+                match crate::ics_sync::fetch_ics_events(&accounts, from, to).await {
+                    Ok(events) => combined.extend(events),
+                    Err(error) => failures.push(CalendarLoadFailure {
+                        source: CalendarSource::Ics,
+                        message: error,
+                    }),
+                }
+            }
             crate::diagnostics::record(load_summary(
                 from,
                 to,
                 outlook_count,
                 google_count,
+                caldav_count,
                 started.elapsed().as_millis(),
                 &failures,
             ));
-            (chatsvc::merge_calendar_events(combined), failures)
+            let home = home_calendar(&accounts);
+            (
+                chatsvc::merge_calendar_events(combined, home),
+                failures,
+            )
         });
         cx.spawn(async move |this, cx| {
             let loaded = receiver.await.unwrap_or_else(|_| {
@@ -337,16 +366,18 @@ pub(crate) fn load_summary(
     to: chrono::DateTime<chrono::Utc>,
     outlook: Option<usize>,
     google: Option<usize>,
+    caldav: Option<usize>,
     elapsed_ms: u128,
     failures: &[CalendarLoadFailure],
 ) -> String {
     let count = |value: Option<usize>| value.map_or_else(|| "-".to_owned(), |n| n.to_string());
     let mut line = format!(
-        "calendar grid: {}..{} outlook={} google={} in {elapsed_ms} ms",
+        "calendar grid: {}..{} outlook={} google={} caldav={} in {elapsed_ms} ms",
         from.format("%Y-%m-%dT%H:%MZ"),
         to.format("%Y-%m-%dT%H:%MZ"),
         count(outlook),
         count(google),
+        count(caldav),
     );
     for failure in failures {
         line.push_str(&format!(
@@ -356,6 +387,20 @@ pub(crate) fn load_summary(
         ));
     }
     line
+}
+
+fn home_calendar(accounts: &store::CalendarAccounts) -> Option<chatsvc::HomeCalendar<'_>> {
+    use store::CalendarProvider;
+    let source = match accounts.home.provider {
+        CalendarProvider::Outlook => CalendarSource::Outlook,
+        CalendarProvider::Google => CalendarSource::Google,
+        CalendarProvider::CalDav => CalendarSource::CalDav,
+    };
+    Some(chatsvc::HomeCalendar {
+        source,
+        account_id: accounts.home.account_id.as_str(),
+        calendar_id: accounts.home.calendar_id.as_str(),
+    })
 }
 
 fn retain_peek_details(previous: &[CalendarEvent], events: &mut [CalendarEvent]) {
@@ -642,8 +687,8 @@ mod tests {
             message: "client_secret is missing".into(),
         }];
         assert_eq!(
-            load_summary(from, to, Some(3), None, 412, &failures),
-            "calendar grid: 2026-11-15T23:00Z..2026-11-20T23:00Z outlook=3 google=- in 412 ms; \
+            load_summary(from, to, Some(3), None, None, 412, &failures),
+            "calendar grid: 2026-11-15T23:00Z..2026-11-20T23:00Z outlook=3 google=- caldav=- in 412 ms; \
              Google failed: client_secret is missing"
         );
     }

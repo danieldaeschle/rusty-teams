@@ -355,7 +355,7 @@ impl AppState {
             .iter()
             .chain(self.calendar_week.events.iter())
             .find(|event| event.object_id == event_id)
-            .is_none_or(|event| event.source == chatsvc::CalendarSource::Outlook)
+            .is_some_and(|event| event.source == chatsvc::CalendarSource::Outlook)
     }
 }
 

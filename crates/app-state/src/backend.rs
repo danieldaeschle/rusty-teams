@@ -585,7 +585,20 @@ async fn calendar_loop(session: Session, store: Arc<Store>, events: EventSender)
         if combined.is_empty() && outlook_failed && !accounts.has_google() {
             continue;
         }
-        let merged = chatsvc::merge_calendar_events(combined);
+        let home = {
+            use store::CalendarProvider;
+            let source = match accounts.home.provider {
+                CalendarProvider::Outlook => chatsvc::CalendarSource::Outlook,
+                CalendarProvider::Google => chatsvc::CalendarSource::Google,
+                CalendarProvider::CalDav => chatsvc::CalendarSource::CalDav,
+            };
+            Some(chatsvc::HomeCalendar {
+                source,
+                account_id: accounts.home.account_id.as_str(),
+                calendar_id: accounts.home.calendar_id.as_str(),
+            })
+        };
+        let merged = chatsvc::merge_calendar_events(combined, home);
         if events.send(BackendEvent::Calendar(merged)).is_err() {
             return;
         }

@@ -316,6 +316,20 @@ impl AppState {
                         let _ = store::save_calendar_accounts(&store, &accounts);
                         result
                     }
+                    chatsvc::CalendarSource::CalDav => {
+                        let mut accounts = store::load_calendar_accounts(&store);
+                        let account =
+                            account_id.ok_or_else(|| "CalDAV account missing".to_owned())?;
+                        let href = event_id.split('#').next().unwrap_or(&event_id).to_owned();
+                        let result =
+                            crate::caldav_sync::delete_caldav_event(&mut accounts, &account, &href)
+                                .await;
+                        let _ = store::save_calendar_accounts(&store, &accounts);
+                        result
+                    }
+                    chatsvc::CalendarSource::Ics => {
+                        Err("Read-only ICS subscriptions cannot delete events".into())
+                    }
                 }
             }
         });
@@ -543,6 +557,25 @@ impl AppState {
                         .await;
                         let _ = store::save_calendar_accounts(&store, &accounts);
                         result
+                    }
+                    chatsvc::CalendarSource::CalDav => {
+                        let mut accounts = store::load_calendar_accounts(&store);
+                        let account =
+                            account_id.ok_or_else(|| "CalDAV account missing".to_owned())?;
+                        let href = event_id.split('#').next().unwrap_or(&event_id).to_owned();
+                        let result = crate::caldav_sync::respond_caldav_event(
+                            &mut accounts,
+                            &account,
+                            &href,
+                            reply,
+                        )
+                        .await
+                        .map(|_| ());
+                        let _ = store::save_calendar_accounts(&store, &accounts);
+                        result
+                    }
+                    chatsvc::CalendarSource::Ics => {
+                        Err("Read-only ICS subscriptions cannot RSVP".into())
                     }
                 }
             }

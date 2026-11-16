@@ -116,6 +116,40 @@ pub fn control_row(
         .child(control)
 }
 
+/// Label above a full-width control. Use for text inputs so `Input::size_full`
+/// does not squeeze a horizontal title to zero width.
+pub fn stacked_field(
+    title: impl Into<SharedString>,
+    detail: impl Into<SharedString>,
+    control: impl IntoElement,
+) -> Div {
+    let detail = detail.into();
+    v_flex()
+        .w_full()
+        .px(px(ROW_INSET))
+        .py(px(ROW_PADDING))
+        .gap(px(6.))
+        .rounded(px(ROW_RADIUS))
+        .child(
+            div()
+                .text_size(px(14.))
+                .line_height(px(20.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::text())
+                .child(title.into()),
+        )
+        .when(!detail.is_empty(), |column| {
+            column.child(
+                div()
+                    .text_size(px(12.))
+                    .line_height(px(16.))
+                    .text_color(theme::text_muted())
+                    .child(detail),
+            )
+        })
+        .child(div().w_full().child(control))
+}
+
 pub fn toggle_row(
     id: impl Into<ElementId>,
     title: impl Into<SharedString>,

@@ -254,6 +254,57 @@ pub fn calendar_index(event: &CalendarEvent, accounts: &store::CalendarAccounts)
             .zip(event.calendar_id.as_deref())
             .and_then(|(account, calendar)| google_calendar_index(accounts, account, calendar))
             .unwrap_or(1),
+        chatsvc::CalendarSource::CalDav => {
+            let google_len = accounts
+                .google_accounts
+                .iter()
+                .map(|account| account.calendars.len())
+                .sum::<usize>();
+            event
+                .account_id
+                .as_deref()
+                .zip(event.calendar_id.as_deref())
+                .and_then(|(account_id, calendar_id)| {
+                    accounts
+                        .caldav_accounts
+                        .iter()
+                        .flat_map(|account| {
+                            account
+                                .calendars
+                                .iter()
+                                .map(move |calendar| (account.id.as_str(), calendar.id.as_str()))
+                        })
+                        .position(|(account, calendar)| {
+                            account == account_id && calendar == calendar_id
+                        })
+                        .map(|position| position + 1 + google_len)
+                })
+                .unwrap_or(1 + google_len)
+        }
+        chatsvc::CalendarSource::Ics => {
+            let offset = 1
+                + accounts
+                    .google_accounts
+                    .iter()
+                    .map(|account| account.calendars.len())
+                    .sum::<usize>()
+                + accounts
+                    .caldav_accounts
+                    .iter()
+                    .map(|account| account.calendars.len())
+                    .sum::<usize>();
+            event
+                .account_id
+                .as_deref()
+                .and_then(|id| {
+                    accounts
+                        .ics_subscriptions
+                        .iter()
+                        .position(|subscription| subscription.id == id)
+                        .map(|position| position + offset)
+                })
+                .unwrap_or(offset)
+        }
     }
 }
 
