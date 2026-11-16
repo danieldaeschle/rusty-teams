@@ -18,7 +18,8 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::{ChannelTabRecord, MessageRecord, OutboxState, OutboxTarget, is_bot_id};
 use teams_core::{
-    ExecuteAction, FileCard, JumpPlan, LinkPreview, WindowDirection, is_notes_chat, without_islands,
+    ExecuteAction, FileCard, ImageRef, JumpPlan, LinkPreview, WindowDirection, is_notes_chat,
+    without_islands,
 };
 
 mod channel_details;
@@ -518,6 +519,36 @@ impl ConversationView {
         };
         self.app
             .update(cx, |state, cx| state.request_image_viewer(request, cx));
+    }
+
+    /// Downloads a Teams video clip into the image cache, then opens it in the system player.
+    fn play_clip(&mut self, url: String, cx: &mut Context<Self>) {
+        let Some(engine) = self.app.read(cx).engine.clone() else {
+            return;
+        };
+        let clip = ImageRef {
+            id: url.clone(),
+            url,
+            width: None,
+            height: None,
+            alt: None,
+        };
+        let fetched = runtime::spawn(async move { engine.fetch_image(&clip).await });
+        cx.spawn(async move |this, cx| {
+            let Ok(outcome) = fetched.await else {
+                return;
+            };
+            this.update(cx, |this, cx| match outcome {
+                Ok(Some(path)) => cx.open_with_system(&path),
+                Ok(None) => {}
+                Err(error) => this.show_notice(
+                    &format!("Could not play the video: {}", short_error(&error)),
+                    cx,
+                ),
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn activate_file(

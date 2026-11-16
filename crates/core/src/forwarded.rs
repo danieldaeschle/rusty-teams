@@ -360,6 +360,37 @@ mod tests {
     }
 
     #[test]
+    fn a_forwarded_video_clip_shows_its_thumbnail_and_plays_the_clip() {
+        const CLIP: &str = "https://eu-api.asm.skype.com/v1/objects/0-weu-d19-abc/views/video";
+        let mut record = forwarded_record();
+        let content = serde_json::json!({
+            "originalMessageId": "1792149081221",
+            "originalMessageContent": format!(
+                r#"<p><video src="{CLIP}" itemtype="http://schema.skype.com/AMSVideo" width="720" height="1280"></video></p>"#
+            ),
+        });
+        record.attachments_json = serde_json::json!([{
+            "content_type": FORWARDED_CONTENT_TYPE,
+            "id": "1792149081221",
+            "content": content.to_string(),
+        }])
+        .to_string();
+        let found = crate::stored::images(&record);
+        let [clip] = found.as_slice() else {
+            panic!("expected the clip thumbnail, got {found:?}");
+        };
+        assert_eq!((clip.width, clip.height), (Some(720), Some(1280)));
+        assert_eq!(clip.video_url().as_deref(), Some(CLIP));
+        let spans = linked_message_spans_with(&record, &|_| None, &no_forward_header);
+        let [Span::BlockQuote(children)] = spans.as_slice() else {
+            panic!("expected one forward blockquote, got {spans:?}");
+        };
+        assert!(children.contains(&Span::Image {
+            hosted_content_url: clip.url.clone()
+        }));
+    }
+
+    #[test]
     fn a_deleted_forward_is_not_forwarded() {
         let mut record = forwarded_record();
         record.deleted = true;

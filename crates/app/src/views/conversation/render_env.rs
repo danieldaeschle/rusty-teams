@@ -311,9 +311,12 @@ impl RenderEnv {
             let (open_view, open_key) = (view.clone(), message.key.clone());
             let (share_view, share_key) = (view.clone(), message.key.clone());
             ImageActions {
-                open: Rc::new(move |url: &str, cx: &mut App| {
+                open: Rc::new(move |image: &ImageRef, cx: &mut App| {
                     open_view
-                        .update(cx, |this, cx| this.open_image_viewer(&open_key, url, cx))
+                        .update(cx, |this, cx| match image.video_url() {
+                            Some(clip) => this.play_clip(clip, cx),
+                            None => this.open_image_viewer(&open_key, &image.url, cx),
+                        })
                         .ok();
                 }),
                 share: Some(Rc::new(move |cx: &mut App| {

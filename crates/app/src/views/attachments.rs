@@ -35,9 +35,11 @@ const LOCAL_IMAGE_PREFIX: &str = "../hostedContents/";
 const LOCAL_IMAGE_SUFFIX: &str = "/$value";
 
 pub type FileActivate = Rc<dyn Fn(usize, &mut App)>;
+/// Opens the image viewer, or plays the clip for a video thumbnail.
+pub type ImageOpen = Rc<dyn Fn(&ImageRef, &mut App)>;
 #[derive(Clone)]
 pub struct ImageActions {
-    pub open: Rc<dyn Fn(&str, &mut App)>,
+    pub open: ImageOpen,
     pub share: Option<ImageShare>,
 }
 
@@ -116,6 +118,7 @@ fn image_view(
 ) -> AnyElement {
     let (width, height) = image_size(image, directory, sent_preview);
     let image_id = ElementId::Name(format!("{id}-image").into());
+    let clip = image.video_url().is_some();
     let frame = div()
         .id(ElementId::Name(id.into()))
         .relative()
@@ -128,6 +131,17 @@ fn image_view(
     let Some(entry) = directory.image(&image.url) else {
         if let Some(sent) = sent_preview {
             return frame.child(local_image(sent, image_id)).into_any_element();
+        }
+        if clip {
+            let (image, open_image) = (image.clone(), open_image.cloned());
+            return frame
+                .bg(theme::code_surface())
+                .cursor_pointer()
+                .child(play_badge())
+                .when_some(open_image, |frame, actions| {
+                    frame.on_click(move |_, _, cx| (actions.open)(&image, cx))
+                })
+                .into_any_element();
         }
         return frame
             .flex()
@@ -147,7 +161,7 @@ fn image_view(
     };
     let path = entry.path.clone();
     let share = open_image.and_then(|actions| actions.share.clone());
-    let (url, open_image) = (image.url.clone(), open_image.cloned());
+    let (image, open_image) = (image.clone(), open_image.cloned());
     let frame = frame
         .cursor_pointer()
         .child(
@@ -162,10 +176,11 @@ fn image_view(
                     })
                 }),
         )
+        .when(clip, |frame| frame.child(play_badge()))
         .on_click({
             let path = path.clone();
             move |_, _, cx| match &open_image {
-                Some(actions) => (actions.open)(&url, cx),
+                Some(actions) => (actions.open)(&image, cx),
                 None => cx.open_with_system(&path),
             }
         });
@@ -325,23 +340,26 @@ fn file_preview(card: &FileCard, id: &str, directory: &Directory) -> Option<Stat
                     cx.stop_propagation();
                 }
             })
-            .child(
-                h_flex()
-                    .absolute()
-                    .inset_0()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        h_flex()
-                            .size(px(PLAY_BUTTON_SIZE))
-                            .rounded_full()
-                            .items_center()
-                            .justify_center()
-                            .bg(black().opacity(0.5))
-                            .child(icon(IconName::Play, 18., theme::white())),
-                    ),
-            )
+            .child(play_badge())
     }))
+}
+
+/// A round play button centered over a video preview.
+fn play_badge() -> Div {
+    h_flex()
+        .absolute()
+        .inset_0()
+        .items_center()
+        .justify_center()
+        .child(
+            h_flex()
+                .size(px(PLAY_BUTTON_SIZE))
+                .rounded_full()
+                .items_center()
+                .justify_center()
+                .bg(black().opacity(0.5))
+                .child(icon(IconName::Play, 18., theme::white())),
+        )
 }
 
 fn file_view(
