@@ -21,6 +21,21 @@ const SHORTCUT_MIN_WIDTH: f32 = 200.;
 const SEARCH_HINT: &str = "Search chats, people and channels";
 const SHORTCUT_HINT: &str = "Ctrl K";
 const APP_ICON_SIZE: f32 = 18.;
+/// Frame of one macOS traffic light button (14 x 14 since macOS 26).
+const TRAFFIC_LIGHT_SIZE: f32 = 14.;
+const TRAFFIC_LIGHT_LEFT: f32 = 9.;
+
+/// Base options for a window that renders a [`TitleBar`] of [`TITLE_BAR_HEIGHT`], with the macOS traffic lights centered in it.
+pub fn window_options() -> WindowOptions {
+    let mut options = TitleBar::window_options();
+    if let Some(titlebar) = options.titlebar.as_mut() {
+        titlebar.traffic_light_position = Some(point(
+            px(TRAFFIC_LIGHT_LEFT),
+            px((TITLE_BAR_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.),
+        ));
+    }
+    options
+}
 
 pub fn app_icon_image(app_icon: AppIcon) -> Arc<Image> {
     static IMAGES: [OnceLock<Arc<Image>>; AppIcon::ALL.len()] =
