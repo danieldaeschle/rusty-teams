@@ -530,6 +530,9 @@ impl SidebarView {
         let changed = self.tab != tab;
         self.tab = tab;
         if changed {
+            if tab != SidebarTab::Calendar {
+                self.state.update(cx, |state, _| state.close_calendar());
+            }
             self.restore_last_view(tab, cx);
             cx.emit(SidebarEvent::TabChanged);
         }

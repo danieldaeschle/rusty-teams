@@ -265,6 +265,10 @@ mod frames {
     ];
     const AGENTS_LIST: &str = "shell/islands/sidebar/agents";
     const CALENDAR: &str = "shell/islands/calendar";
+    use crate::views::calendar_picker::{CALENDAR_PANE_TAG, MINI_MONTH_TAG};
+    use crate::views::calendar_view::{
+        CALENDAR_DAY_HEADERS_TAG, CALENDAR_HEADER_TAG, CALENDAR_NEW_MEETING_TAG,
+    };
     const CHAT_FILTER_TAGS: &[&str] = &[FILTER_TAG, FILTER_PILLS_TAG];
     const CHAT_FILTER_OPEN_TAGS: &[&str] = &[FILTER_INPUT_TAG, FILTER_EMPTY_TAG];
     const FIND_TAGS: &[&str] = &[
@@ -633,6 +637,11 @@ mod frames {
                 &ACTIVITY_PROPOSALS_TAG,
                 &AGENTS_LIST,
                 &CALENDAR,
+                &CALENDAR_HEADER_TAG,
+                &CALENDAR_DAY_HEADERS_TAG,
+                &CALENDAR_NEW_MEETING_TAG,
+                &CALENDAR_PANE_TAG,
+                &MINI_MONTH_TAG,
                 &CALL_TRANSCRIPT,
                 &MENU,
                 &RECAP_TAB,
@@ -1043,6 +1052,11 @@ mod frames {
                             !matches!(*path, "shell/islands/sidebar" | "shell/islands/main")
                         });
                         expected.push(CALENDAR);
+                        expected.extend([CALENDAR_HEADER_TAG, CALENDAR_DAY_HEADERS_TAG]);
+                        // The calendar list pane hides on narrow windows.
+                        if width >= crate::views::calendar_view::COMPACT_HEADER_WIDTH {
+                            expected.extend([CALENDAR_PANE_TAG, MINI_MONTH_TAG]);
+                        }
                     }
                     "prejoin" => expected.extend(PREJOIN_TAGS),
                     _ => {}
@@ -1063,6 +1077,21 @@ mod frames {
                         found.push((
                             "shell/islands/rail:gap".to_owned(),
                             format!("first island starts {gap} px after the rail, expected 0"),
+                        ));
+                    }
+                }
+                if screen_name == "calendar"
+                    && let (Some(header), Some(button)) = (
+                        bounds_of(CALENDAR_HEADER_TAG),
+                        bounds_of(CALENDAR_NEW_MEETING_TAG),
+                    )
+                {
+                    let overflow = f32::from(button.origin.x + button.size.width)
+                        - f32::from(header.origin.x + header.size.width);
+                    if overflow > TOLERANCE {
+                        found.push((
+                            CALENDAR_HEADER_TAG.to_owned(),
+                            format!("header controls overflow by {overflow} px"),
                         ));
                     }
                 }
@@ -1915,6 +1944,7 @@ mod frames {
     const MENU_ITEMS_SCANNED: usize = 40;
     const MENU_CHAT: &str = "demo-chat-release";
     const THEME_SELECT: &str = "settings-theme";
+    const CALENDAR_DEFAULT_VIEW_SELECT: &str = "settings-calendar-default-view";
 
     struct MenuRow {
         index: usize,
@@ -2136,17 +2166,22 @@ mod frames {
 
     #[gpui_kit::test]
     fn settings_select_list_lines_up_with_its_trigger(cx: &mut TestAppContext) {
+        select_list_lines_up(cx, SettingsSection::Appearance, THEME_SELECT);
+    }
+
+    #[gpui_kit::test]
+    fn calendar_default_view_list_lines_up_with_its_trigger(cx: &mut TestAppContext) {
+        select_list_lines_up(cx, SettingsSection::Calendar, CALENDAR_DEFAULT_VIEW_SELECT);
+    }
+
+    fn select_list_lines_up(cx: &mut TestAppContext, section: SettingsSection, id: &str) {
         let (handle, state) = mount(cx);
         let mut visual = VisualTestContext::from_window(handle, cx);
         visual.simulate_resize(size(px(1280.), px(800.)));
-        visual.update(|_, cx| {
-            state.update(cx, |state, cx| {
-                state.open_settings(SettingsSection::Appearance, cx)
-            })
-        });
-        let select: &'static str = Box::leak(select_selector(THEME_SELECT).into_boxed_str());
+        visual.update(|_, cx| state.update(cx, |state, cx| state.open_settings(section, cx)));
+        let select: &'static str = Box::leak(select_selector(id).into_boxed_str());
         collect(&mut visual, Some(select));
-        let trigger = visual.debug_bounds(select).expect("theme select rendered");
+        let trigger = visual.debug_bounds(select).expect("select rendered");
         visual.simulate_click(trigger.center(), Default::default());
         collect(&mut visual, Some(MENU));
         let menu = visual.debug_bounds(MENU).expect("list rendered");

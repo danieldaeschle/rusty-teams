@@ -1,6 +1,7 @@
 use app_base::format::clock_format;
+use app_base::format::{WeekdayWidth, weekday_name};
 use chatsvc::CalendarEvent;
-use chrono::{Datelike, FixedOffset, NaiveDate};
+use chrono::{Datelike, FixedOffset, NaiveDate, Weekday};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -10,7 +11,6 @@ use crate::call::week_grid::{WeekDay, is_effective_all_day, month_shown};
 use crate::theme;
 
 pub const MONTH_GRID_TAG: &str = "shell/islands/calendar/month";
-const WEEKDAY_NAMES: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const WEEKDAY_HEADER_HEIGHT: f32 = 32.;
 const VISIBLE_EVENTS: usize = 3;
 const DAY_NUMBER_SIZE: f32 = 24.;
@@ -31,10 +31,12 @@ fn day_events(day: &WeekDay) -> Vec<usize> {
 }
 
 fn more_label(hidden: usize) -> String {
-    format!("+{hidden} more")
+    let mut args = std::collections::HashMap::new();
+    args.insert("count".to_owned(), hidden.to_string());
+    app_base::ui_locale::tr_args("calendar.view.more", &args)
 }
 
-fn event_chip(event: &CalendarEvent, offset: FixedOffset) -> Div {
+fn event_chip(event: &CalendarEvent, color: Hsla, offset: FixedOffset) -> Div {
     let all_day = is_effective_all_day(event, offset);
     let time = (!all_day).then(|| {
         event
@@ -50,8 +52,8 @@ fn event_chip(event: &CalendarEvent, offset: FixedOffset) -> Div {
         .px(px(6.))
         .gap(px(6.))
         .items_center()
-        .rounded(px(4.))
-        .bg(theme::accent().opacity(if all_day { 0.28 } else { 0.14 }))
+        .rounded(px(6.))
+        .bg(color.opacity(if all_day { 0.28 } else { 0.14 }))
         .text_size(px(11.5))
         .text_color(theme::text())
         .children(time.map(|time| div().flex_none().text_color(theme::text_soft()).child(time)))
@@ -79,6 +81,7 @@ fn day_cell(
     state: &Entity<AppState>,
     day: &WeekDay,
     events: &[CalendarEvent],
+    colors: &[Hsla],
     shown_month: NaiveDate,
     today: NaiveDate,
     offset: FixedOffset,
@@ -89,7 +92,14 @@ fn day_cell(
     let indexes = day_events(day);
     let hidden = indexes.len().saturating_sub(VISIBLE_EVENTS);
     let number = if date.day() == 1 {
-        date.format("%b %-d").to_string()
+        format!(
+            "{} {}",
+            app_base::format::month_name(date)
+                .chars()
+                .take(3)
+                .collect::<String>(),
+            date.day()
+        )
     } else {
         date.day().to_string()
     };
@@ -136,8 +146,8 @@ fn day_cell(
             indexes
                 .iter()
                 .take(VISIBLE_EVENTS)
-                .filter_map(|index| events.get(*index))
-                .map(|event| event_chip(event, offset)),
+                .filter_map(|index| Some((events.get(*index)?, *colors.get(*index)?)))
+                .map(|(event, color)| event_chip(event, color, offset)),
         )
         .when(hidden > 0, |cell| {
             cell.child(
@@ -161,13 +171,16 @@ fn vertical_line() -> Div {
     div().w(px(1.)).h_full().flex_none().bg(theme::border())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn month_grid(
     state: &Entity<AppState>,
     start: NaiveDate,
     days: &[WeekDay],
     events: &[CalendarEvent],
+    colors: &[Hsla],
     today: NaiveDate,
     offset: FixedOffset,
+    weekdays: [Weekday; 7],
 ) -> Div {
     let shown_month = month_shown(start);
     let mut rows = v_flex().flex_1().min_h_0().w_full();
@@ -177,7 +190,15 @@ pub fn month_grid(
             if position > 0 {
                 row = row.child(vertical_line());
             }
-            row = row.child(day_cell(state, day, events, shown_month, today, offset));
+            row = row.child(day_cell(
+                state,
+                day,
+                events,
+                colors,
+                shown_month,
+                today,
+                offset,
+            ));
         }
         rows = rows.child(horizontal_line()).child(row);
     }
@@ -191,13 +212,13 @@ pub fn month_grid(
                 .h(px(WEEKDAY_HEADER_HEIGHT))
                 .flex_none()
                 .w_full()
-                .children(WEEKDAY_NAMES.iter().map(|name| {
+                .children(weekdays.iter().map(|day| {
                     div()
                         .flex_1()
                         .px(px(10.))
                         .text_size(px(12.))
                         .text_color(theme::text_muted())
-                        .child(*name)
+                        .child(weekday_name(*day, WeekdayWidth::Short))
                 })),
         )
         .child(rows)
@@ -224,6 +245,11 @@ mod tests {
             blocks: vec![block(2, 600), block(1, 540)],
         };
         assert_eq!(day_events(&day), [4, 1, 2]);
+        let _guard = crate::i18n::locale_test_lock();
+        app_base::ui_locale::apply_locale("en");
         assert_eq!(more_label(2), "+2 more");
+        app_base::ui_locale::apply_locale("de");
+        assert_eq!(more_label(2), "+2 weitere");
+        app_base::ui_locale::apply_locale("en");
     }
 }

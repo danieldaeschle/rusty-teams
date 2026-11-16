@@ -178,6 +178,28 @@ pub fn save_calendar_accounts(store: &Store, accounts: &CalendarAccounts) -> Res
     store.set_meta(CALENDAR_ACCOUNTS_KEY, &accounts.to_json())
 }
 
+/// Save Google tokens refreshed during a fetch without touching anything else.
+///
+/// A fetch works on a copy of the accounts it read before it started. Saving that copy
+/// back would undo a calendar toggle the user made meanwhile, so only tokens are merged
+/// into the accounts as they are stored now.
+pub fn merge_google_tokens(store: &Store, fetched: &CalendarAccounts) -> Result<()> {
+    let mut current = load_calendar_accounts(store);
+    let mut changed = false;
+    for account in &mut current.google_accounts {
+        if let Some(fresh) = fetched.google_account(&account.id)
+            && fresh.tokens != account.tokens
+        {
+            account.tokens = fresh.tokens.clone();
+            changed = true;
+        }
+    }
+    if changed {
+        save_calendar_accounts(store, &current)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +260,38 @@ mod tests {
         assert!(!accounts.has_google());
         assert_eq!(accounts.home.provider, CalendarProvider::Outlook);
         assert!(accounts.write_targets.is_empty());
+    }
+
+    #[test]
+    fn token_merge_keeps_a_toggle_made_during_the_fetch() {
+        let directory = tempdir().unwrap();
+        let store = Store::open(&directory.path().join("db.sqlite")).unwrap();
+        let mut stored = CalendarAccounts::default();
+        stored.google_accounts.push(GoogleAccount {
+            id: "g1".into(),
+            email: "me@example.com".into(),
+            calendars: vec![GoogleCalendarInfo {
+                id: "work".into(),
+                summary: "Work".into(),
+                selected: true,
+                primary: false,
+            }],
+            tokens: GoogleTokenSet::default(),
+        });
+        save_calendar_accounts(&store, &stored).unwrap();
+        // The fetch starts from this copy and refreshes the token.
+        let mut fetched = load_calendar_accounts(&store);
+        fetched.google_accounts[0].tokens.access_token = "fresh".into();
+        // Meanwhile the user turns the calendar off and Outlook off.
+        stored.google_accounts[0].calendars[0].selected = false;
+        stored.outlook_selected = false;
+        save_calendar_accounts(&store, &stored).unwrap();
+
+        merge_google_tokens(&store, &fetched).unwrap();
+
+        let merged = load_calendar_accounts(&store);
+        assert!(!merged.outlook_selected);
+        assert!(!merged.google_accounts[0].calendars[0].selected);
+        assert_eq!(merged.google_accounts[0].tokens.access_token, "fresh");
     }
 }

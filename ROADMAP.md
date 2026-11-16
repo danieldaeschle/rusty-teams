@@ -2,7 +2,7 @@
 
 Feature parity with the Microsoft Teams desktop client.
 
-**Parity: 87 %** (103 done, 21 partial, 6 missing of 130). Partial counts half.
+**Parity: 87 %** (103 done, 22 partial, 6 missing of 131). Partial counts half.
 
 ## By area
 
@@ -18,7 +18,7 @@ Feature parity with the Microsoft Teams desktop client.
 | [Search and navigation](#search-and-navigation) | 100 % | 6 | 0 | 0 |
 | [Presence and people](#presence-and-people) | 100 % | 4 | 0 | 0 |
 | [Look and settings](#look-and-settings) | 100 % | 5 | 0 | 0 |
-| [Calls and meetings](#calls-and-meetings) | 63 % | 17 | 19 | 6 |
+| [Calls and meetings](#calls-and-meetings) | 63 % | 17 | 20 | 6 |
 
 ## Next
 
@@ -202,7 +202,8 @@ Feature parity with the Microsoft Teams desktop client.
 | Schedule a meeting | Partial | Calls tab "New meeting": title, people chips, date, start, end (next half hour, 30 min), Repeat (does not repeat, daily, weekdays, weekly), details, Teams meeting always on. Outlook-only home keeps Graph `POST /me/events` with `isOnlineMeeting`. With Google home or extra write targets: Teams join link first, then inserts per target (Outlook with join in location; Google `events.insert`). Settings > Calendar chooses home + dual-write. Body builders unit tested; live Google create needs `TEAMS_GOOGLE_CLIENT_ID` |
 | Answer meeting invitations | Partial | Upcoming rows of invited meetings show Accepted / Tentative / Declined / Respond as a menu with "Send a response" (default on); own meetings say Organizer. Outlook: Graph `accept` / `tentativelyAccept` / `decline` (+ iCalUId fallback). Google: Calendar API attendee `responseStatus` patch with `sendUpdates`. Source shown on calendar blocks |
 | Meeting start reminder | Partial | Toast 5 min before the start of an Upcoming meeting: title, time, Join, Snooze (back at the start or first join). Corner X dismisses for good. Outlook: Snooze and X go to Graph snoozeReminder / dismissReminder; reminderView every 60 s near a meeting. Google: snooze/dismiss stay local only. Live state (green dot) from polled live-meeting state. One chime at the start or first join; quiet with sound off and during Do not disturb or a call. Ctrl+Shift+J joins from the latest. Driven by the polled calendar (Outlook + optional Google merge); push event 128 not wired |
-| Google Calendar accounts | Partial | Settings > Calendar: Connect Google (OAuth Desktop + PKCE, env `TEAMS_GOOGLE_CLIENT_ID` / optional secret), list calendars, home calendar, extra write targets. Poll merges with Outlook by iCal UID / Teams join URL. Disconnect clears tokens. Manual smoke still needed against a real Google account |
+| Google Calendar accounts | Partial | Settings > Calendar: Connect Google (OAuth Desktop + PKCE; release builds ship the project client, no user env). Waiting row while the browser finishes (reopen / copy link / cancel). List calendars, home calendar, extra write targets. Poll merges with Outlook by iCal UID / Teams join URL. Disconnect clears tokens. Manual smoke still needed against a real Google account |
+| Calendar view | Partial | Day, Work week, Week, Month like Teams. Settings > Calendar: default view (Last used by default, the span survives a restart), first day of week (mailbox language region as in Outlook, override), work days and hours read from and saved to the Outlook mailbox, time scale 15/30/60 min, this or next week on a day off. Grid: day number over the weekday name, hour and lighter minor lines, off-hours shaded, now line across the week, title and organizer on one line, series icon, calendar colours. Calendar list pane: mini month, Add calendar, collapsible groups with group check box, Show all. Loads through the sign-in session (no wait for the calling engine), refreshes on the calendar poll, shows loading and a Retry notice per failed source. Demo and unit tested; live check against a real account still open |
 | Pre-join screen | Partial | Join from Upcoming, chat, Join with ID, link or reminder opens a screen in the chat pane: camera preview, camera and mic switches, background menu, camera, microphone and speaker selects, "Computer audio" or "Don't use audio" (audio off in both directions), Join now, Cancel. Camera, mic and devices remembered. 1:1 calls and Meet now skip it. Checked in the demo only |
 | Narrow windows in a call | Done | Controls that do not fit move into "..." (View, Reactions, Raise hand, People, Chat; mic, camera, share, "..." and Leave always stay). Below 960 px, or when a side panel would leave the call under 720 px, the chat list hides; still too narrow, the panel overlays the call. Layout guard checks 640x480, 1280x800, 1920x1080 |
 | Give and take control | Missing | Protocol known (main-channel data channel, action codes 0-11); needs a second person and a security review |

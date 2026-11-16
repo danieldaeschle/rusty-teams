@@ -1,9 +1,10 @@
 use chatsvc::{CalendarEvent, ResponseType, ShowAs};
+
+pub use crate::calendar_prefs::WeekendWorkWeek;
 use chrono::{
     DateTime, Datelike, Duration, FixedOffset, Months, NaiveDate, NaiveTime, Utc, Weekday,
 };
 
-pub const WORK_WEEK_DAYS: i64 = 5;
 pub const MINUTES_PER_DAY: i64 = 24 * 60;
 pub const MONTH_GRID_DAYS: i64 = 42;
 
@@ -23,11 +24,62 @@ pub struct WeekDay {
     pub blocks: Vec<WeekBlock>,
 }
 
-pub fn week_start(date: NaiveDate) -> NaiveDate {
-    date - Duration::days(i64::from(date.weekday().num_days_from_monday()))
+/// How weeks are laid out: first day, work days, and what Work week shows on a day off.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeekLayout {
+    pub first_day: Weekday,
+    pub work_days: Vec<Weekday>,
+    pub weekend: WeekendWorkWeek,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+impl Default for WeekLayout {
+    fn default() -> Self {
+        WeekLayout {
+            first_day: Weekday::Mon,
+            work_days: vec![
+                Weekday::Mon,
+                Weekday::Tue,
+                Weekday::Wed,
+                Weekday::Thu,
+                Weekday::Fri,
+            ],
+            weekend: WeekendWorkWeek::NextWeek,
+        }
+    }
+}
+
+impl WeekLayout {
+    pub fn is_work_day(&self, day: Weekday) -> bool {
+        self.work_days.contains(&day)
+    }
+
+    /// Work days, or Monday to Friday when none are set (an empty work week shows nothing).
+    fn effective_work_days(&self) -> Vec<Weekday> {
+        if self.work_days.is_empty() {
+            WeekLayout::default().work_days
+        } else {
+            self.work_days.clone()
+        }
+    }
+
+    /// The seven weekdays in order from the first day.
+    pub fn weekdays(&self) -> [Weekday; 7] {
+        let mut day = self.first_day;
+        std::array::from_fn(|_| {
+            let current = day;
+            day = day.succ();
+            current
+        })
+    }
+}
+
+pub fn week_start(date: NaiveDate, first_day: Weekday) -> NaiveDate {
+    let back = (7 + date.weekday().num_days_from_monday() - first_day.num_days_from_monday()) % 7;
+    date - Duration::days(i64::from(back))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CalendarSpan {
     Day,
     #[default]
@@ -44,34 +96,31 @@ impl CalendarSpan {
         CalendarSpan::Month,
     ];
 
-    pub fn label(self) -> &'static str {
+    /// Locale key of the span's name (`calendar.view.span_*`).
+    pub fn label_key(self) -> &'static str {
         match self {
-            CalendarSpan::Day => "Day",
-            CalendarSpan::WorkWeek => "Work week",
-            CalendarSpan::Week => "Week",
-            CalendarSpan::Month => "Month",
+            CalendarSpan::Day => "calendar.view.span_day",
+            CalendarSpan::WorkWeek => "calendar.view.span_work_week",
+            CalendarSpan::Week => "calendar.view.span_week",
+            CalendarSpan::Month => "calendar.view.span_month",
         }
     }
 
-    pub fn days(self) -> i64 {
-        match self {
-            CalendarSpan::Day => 1,
-            CalendarSpan::WorkWeek => WORK_WEEK_DAYS,
-            CalendarSpan::Week => 7,
-            CalendarSpan::Month => MONTH_GRID_DAYS,
-        }
+    pub fn label(self) -> String {
+        app_base::ui_locale::tr(self.label_key())
     }
 
-    pub fn start_for(self, date: NaiveDate) -> NaiveDate {
+    /// First date of the range that contains `date`.
+    pub fn start_for(self, date: NaiveDate, layout: &WeekLayout) -> NaiveDate {
         match self {
             CalendarSpan::Day => date,
-            CalendarSpan::WorkWeek => work_week_for(date),
-            CalendarSpan::Week => week_start(date),
-            CalendarSpan::Month => month_grid_start(date),
+            CalendarSpan::WorkWeek => work_week_for(date, layout),
+            CalendarSpan::Week => week_start(date, layout.first_day),
+            CalendarSpan::Month => month_grid_start(date, layout.first_day),
         }
     }
 
-    pub fn shifted(self, start: NaiveDate, steps: i32) -> NaiveDate {
+    pub fn shifted(self, start: NaiveDate, steps: i32, layout: &WeekLayout) -> NaiveDate {
         match self {
             CalendarSpan::Day => start + Duration::days(i64::from(steps)),
             CalendarSpan::WorkWeek | CalendarSpan::Week => {
@@ -84,15 +133,37 @@ impl CalendarSpan {
                 } else {
                     month.checked_sub_months(Months::new(steps.unsigned_abs()))
                 };
-                month_grid_start(moved.unwrap_or(month))
+                month_grid_start(moved.unwrap_or(month), layout.first_day)
             }
         }
     }
 
-    pub fn title(self, start: NaiveDate) -> String {
+    pub fn title(self, start: NaiveDate, layout: &WeekLayout) -> String {
         match self {
-            CalendarSpan::Month => month_shown(start).format("%B %Y").to_string(),
-            _ => range_label(start, self.days()),
+            CalendarSpan::Month => app_base::format::month_year_label(month_shown(start)),
+            _ => {
+                let dates = visible_dates(self, start, layout);
+                let first = dates.first().copied().unwrap_or(start);
+                let last = dates.last().copied().unwrap_or(start);
+                app_base::format::calendar_range_label(first, last)
+            }
+        }
+    }
+}
+
+/// The dates a span draws, in column order. Work week keeps only work days.
+pub fn visible_dates(span: CalendarSpan, start: NaiveDate, layout: &WeekLayout) -> Vec<NaiveDate> {
+    let run = |days: i64| (0..days).map(|day| start + Duration::days(day)).collect();
+    match span {
+        CalendarSpan::Day => vec![start],
+        CalendarSpan::Week => run(7),
+        CalendarSpan::Month => run(MONTH_GRID_DAYS),
+        CalendarSpan::WorkWeek => {
+            let work_days = layout.effective_work_days();
+            (0..7)
+                .map(|day| start + Duration::days(day))
+                .filter(|date| work_days.contains(&date.weekday()))
+                .collect()
         }
     }
 }
@@ -101,8 +172,8 @@ pub fn first_of_month(date: NaiveDate) -> NaiveDate {
     date.with_day(1).unwrap_or(date)
 }
 
-pub fn month_grid_start(date: NaiveDate) -> NaiveDate {
-    week_start(first_of_month(date))
+pub fn month_grid_start(date: NaiveDate, first_day: Weekday) -> NaiveDate {
+    week_start(first_of_month(date), first_day)
 }
 
 /// The grid starts up to six days before the 1st, so a week in is always inside the shown month.
@@ -110,11 +181,19 @@ pub fn month_shown(grid_start: NaiveDate) -> NaiveDate {
     first_of_month(grid_start + Duration::weeks(1))
 }
 
-/// On a weekend the work week view shows the coming week, as Outlook does.
-pub fn work_week_for(today: NaiveDate) -> NaiveDate {
-    match today.weekday() {
-        Weekday::Sat | Weekday::Sun => week_start(today) + Duration::weeks(1),
-        _ => week_start(today),
+/// Start of the week Work week shows for `today`.
+///
+/// On a day off with no work day left in this week, Outlook and Teams show the
+/// coming week; `WeekendWorkWeek::ThisWeek` keeps the current one.
+pub fn work_week_for(today: NaiveDate, layout: &WeekLayout) -> NaiveDate {
+    let week = week_start(today, layout.first_day);
+    let work_days = layout.effective_work_days();
+    let work_left = (0..7)
+        .map(|day| week + Duration::days(day))
+        .any(|date| date >= today && work_days.contains(&date.weekday()));
+    match layout.weekend {
+        WeekendWorkWeek::NextWeek if !work_left => week + Duration::weeks(1),
+        _ => week,
     }
 }
 
@@ -123,6 +202,16 @@ pub fn local_midnight(date: NaiveDate, offset: FixedOffset) -> DateTime<Utc> {
         .and_then(|local| local.and_local_timezone(offset).single())
         .map(|local| local.with_timezone(&Utc))
         .unwrap_or_else(|| date.and_hms_opt(0, 0, 0).unwrap_or_default().and_utc())
+}
+
+/// UTC range from the first date's midnight to the midnight after the last date.
+pub fn dates_range(dates: &[NaiveDate], offset: FixedOffset) -> (DateTime<Utc>, DateTime<Utc>) {
+    let first = dates.first().copied().unwrap_or_default();
+    let last = dates.last().copied().unwrap_or(first);
+    (
+        local_midnight(first, offset),
+        local_midnight(last + Duration::days(1), offset),
+    )
 }
 
 pub fn week_range(
@@ -134,6 +223,38 @@ pub fn week_range(
         local_midnight(start, offset),
         local_midnight(start + Duration::days(days), offset),
     )
+}
+
+/// Position of a Google calendar in the calendar list; Outlook is 0.
+pub fn google_calendar_index(
+    accounts: &store::CalendarAccounts,
+    account_id: &str,
+    calendar_id: &str,
+) -> Option<usize> {
+    accounts
+        .google_accounts
+        .iter()
+        .flat_map(|account| {
+            account
+                .calendars
+                .iter()
+                .map(move |calendar| (account.id.as_str(), calendar.id.as_str()))
+        })
+        .position(|(account, calendar)| account == account_id && calendar == calendar_id)
+        .map(|position| position + 1)
+}
+
+/// Calendar list position that colours an event (merged events keep Outlook's colour).
+pub fn calendar_index(event: &CalendarEvent, accounts: &store::CalendarAccounts) -> usize {
+    match event.source {
+        chatsvc::CalendarSource::Outlook => 0,
+        chatsvc::CalendarSource::Google => event
+            .account_id
+            .as_deref()
+            .zip(event.calendar_id.as_deref())
+            .and_then(|(account, calendar)| google_calendar_index(accounts, account, calendar))
+            .unwrap_or(1),
+    }
 }
 
 pub fn shown_in_calendar(event: &CalendarEvent) -> bool {
@@ -161,13 +282,12 @@ pub fn is_effective_all_day(event: &CalendarEvent, offset: FixedOffset) -> bool 
 
 pub fn week_days(
     events: &[CalendarEvent],
-    start: NaiveDate,
-    days: i64,
+    dates: &[NaiveDate],
     offset: FixedOffset,
 ) -> Vec<WeekDay> {
-    (0..days)
-        .map(|day| {
-            let date = start + Duration::days(day);
+    dates
+        .iter()
+        .map(|&date| {
             let (day_start, day_end) = week_range(date, 1, offset);
             let mut all_day = Vec::new();
             let mut spans = Vec::new();
@@ -233,10 +353,6 @@ fn close_cluster(blocks: &mut [WeekBlock], lanes: usize) {
     }
 }
 
-pub fn range_label(start: NaiveDate, days: i64) -> String {
-    app_base::format::calendar_range_label(start, start + Duration::days(days - 1))
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventLook {
     Busy,
@@ -254,7 +370,7 @@ pub fn event_look(event: &CalendarEvent) -> EventLook {
 
 pub fn hour_label(hour: u32, twelve_hour: bool) -> String {
     if !twelve_hour {
-        return hour.to_string();
+        return format!("{hour:02}:00");
     }
     match hour {
         0 => "12 AM".to_owned(),
@@ -298,40 +414,113 @@ mod tests {
         FixedOffset::east_opt(0).unwrap()
     }
 
+    fn run(start: NaiveDate, days: i64) -> Vec<NaiveDate> {
+        (0..days).map(|day| start + Duration::days(day)).collect()
+    }
+
+    fn nov(day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 11, day).unwrap()
+    }
+
+    fn layout() -> WeekLayout {
+        WeekLayout::default()
+    }
+
+    fn sunday_first() -> WeekLayout {
+        WeekLayout {
+            first_day: Weekday::Sun,
+            ..WeekLayout::default()
+        }
+    }
+
     #[test]
     fn month_view_steps_whole_months_from_a_monday_grid() {
-        let date = |day| NaiveDate::from_ymd_opt(2026, 11, day).unwrap();
-        let start = CalendarSpan::Month.start_for(date(18));
+        let layout = layout();
+        let start = CalendarSpan::Month.start_for(nov(18), &layout);
         assert_eq!(start, NaiveDate::from_ymd_opt(2026, 10, 26).unwrap());
-        assert_eq!(CalendarSpan::Month.title(start), "November 2026");
-        let next = CalendarSpan::Month.shifted(start, 1);
-        assert_eq!(next, NaiveDate::from_ymd_opt(2026, 11, 30).unwrap());
-        assert_eq!(CalendarSpan::Month.title(next), "December 2026");
-        let back = CalendarSpan::Month.shifted(start, -11);
-        assert_eq!(CalendarSpan::Month.title(back), "December 2025");
+        assert_eq!(month_shown(start), nov(1));
+        let next = CalendarSpan::Month.shifted(start, 1, &layout);
+        assert_eq!(next, nov(30));
+        let back = CalendarSpan::Month.shifted(start, -11, &layout);
         assert_eq!(
-            CalendarSpan::Week.shifted(date(2), -1),
-            date(2) - Duration::weeks(1)
+            month_shown(back),
+            NaiveDate::from_ymd_opt(2025, 12, 1).unwrap()
+        );
+        assert_eq!(
+            CalendarSpan::Week.shifted(nov(2), -1, &layout),
+            nov(2) - Duration::weeks(1)
+        );
+    }
+
+    #[test]
+    fn a_sunday_first_week_and_month_start_on_sunday() {
+        let layout = sunday_first();
+        assert_eq!(CalendarSpan::Week.start_for(nov(18), &layout), nov(15));
+        assert_eq!(
+            visible_dates(CalendarSpan::Week, nov(15), &layout),
+            run(nov(15), 7)
+        );
+        assert_eq!(
+            CalendarSpan::Month.start_for(nov(18), &layout),
+            NaiveDate::from_ymd_opt(2026, 11, 1).unwrap()
+        );
+        assert_eq!(layout.weekdays()[0], Weekday::Sun);
+        assert_eq!(layout.weekdays()[6], Weekday::Sat);
+    }
+
+    #[test]
+    fn a_saturday_first_week_starts_on_saturday() {
+        let layout = WeekLayout {
+            first_day: Weekday::Sat,
+            ..WeekLayout::default()
+        };
+        assert_eq!(CalendarSpan::Week.start_for(nov(18), &layout), nov(14));
+        assert_eq!(week_start(nov(14), Weekday::Sat), nov(14));
+    }
+
+    #[test]
+    fn work_week_shows_only_the_work_days_even_with_gaps() {
+        let layout = WeekLayout {
+            work_days: vec![Weekday::Mon, Weekday::Tue, Weekday::Thu],
+            ..WeekLayout::default()
+        };
+        let start = CalendarSpan::WorkWeek.start_for(nov(18), &layout);
+        assert_eq!(
+            visible_dates(CalendarSpan::WorkWeek, start, &layout),
+            [nov(16), nov(17), nov(19)]
+        );
+    }
+
+    #[test]
+    fn on_sunday_work_week_shows_next_or_this_week() {
+        let next = layout();
+        assert_eq!(CalendarSpan::WorkWeek.start_for(nov(15), &next), nov(16));
+        let this = WeekLayout {
+            weekend: WeekendWorkWeek::ThisWeek,
+            ..WeekLayout::default()
+        };
+        assert_eq!(CalendarSpan::WorkWeek.start_for(nov(15), &this), nov(9));
+        // Sunday-first weeks still have work days ahead on Sunday.
+        assert_eq!(
+            CalendarSpan::WorkWeek.start_for(nov(15), &sunday_first()),
+            nov(15)
+        );
+        assert_eq!(
+            visible_dates(CalendarSpan::WorkWeek, nov(15), &sunday_first()),
+            run(nov(16), 5)
         );
     }
 
     #[test]
     fn the_week_starts_on_monday() {
-        let sunday = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
+        let sunday = nov(15);
+        assert_eq!(week_start(sunday, Weekday::Mon), nov(9));
         assert_eq!(
-            week_start(sunday),
-            NaiveDate::from_ymd_opt(2026, 11, 9).unwrap()
+            week_start(week_start(sunday, Weekday::Mon), Weekday::Mon),
+            nov(9)
         );
-        assert_eq!(week_start(week_start(sunday)), week_start(sunday));
-        assert_eq!(
-            work_week_for(sunday),
-            NaiveDate::from_ymd_opt(2026, 11, 16).unwrap()
-        );
-        let friday = NaiveDate::from_ymd_opt(2026, 11, 13).unwrap();
-        assert_eq!(
-            work_week_for(friday),
-            NaiveDate::from_ymd_opt(2026, 11, 9).unwrap()
-        );
+        assert_eq!(work_week_for(sunday, &layout()), nov(16));
+        assert_eq!(work_week_for(nov(13), &layout()), nov(9));
     }
 
     #[test]
@@ -343,7 +532,7 @@ mod tests {
             event(13, 0, 30),
         ];
         let monday = NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
-        let days = week_days(&events, monday, WORK_WEEK_DAYS, utc());
+        let days = week_days(&events, &run(monday, 5), utc());
         assert_eq!(days.len(), 5);
         let lanes: Vec<(usize, usize, usize)> = days[0]
             .blocks
@@ -363,7 +552,7 @@ mod tests {
         all_day.all_day = true;
         let late = event(23, 30, 60);
         let monday = NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
-        let days = week_days(&[declined, all_day, late], monday, 2, utc());
+        let days = week_days(&[declined, all_day, late], &run(monday, 2), utc());
         assert!(days[0].blocks.iter().all(|block| block.event_index != 0));
         assert_eq!(days[0].all_day, [1]);
         assert_eq!(days[0].blocks[0].end_minute, MINUTES_PER_DAY);
@@ -381,7 +570,7 @@ mod tests {
         let monday = NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
         assert!(is_effective_all_day(&holiday, utc()));
         assert!(!is_effective_all_day(&meeting, utc()));
-        let days = week_days(&[holiday, meeting], monday, 1, utc());
+        let days = week_days(&[holiday, meeting], &run(monday, 1), utc());
         assert_eq!(days[0].all_day, [0]);
         assert_eq!(days[0].blocks.len(), 1);
         assert_eq!(days[0].blocks[0].event_index, 1);
@@ -393,7 +582,7 @@ mod tests {
         let conference = event(0, 0, 4 * 24 * 60 - 1);
         assert!(is_effective_all_day(&conference, utc()));
         let monday = NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
-        let days = week_days(&[conference], monday, 5, utc());
+        let days = week_days(&[conference], &run(monday, 5), utc());
         assert!(days.iter().all(|day| day.blocks.is_empty()));
         assert_eq!(days[0].all_day, [0]);
         assert_eq!(days[3].all_day, [0]);
@@ -401,39 +590,73 @@ mod tests {
 
     #[test]
     fn spans_start_and_step_like_teams() {
-        let wednesday = NaiveDate::from_ymd_opt(2026, 11, 11).unwrap();
-        let monday = NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
-        assert_eq!(CalendarSpan::Day.start_for(wednesday), wednesday);
-        assert_eq!(CalendarSpan::WorkWeek.start_for(wednesday), monday);
-        assert_eq!(CalendarSpan::Week.start_for(wednesday), monday);
-        let sunday = NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
-        assert_eq!(CalendarSpan::Week.start_for(sunday), monday);
+        let layout = layout();
+        let (wednesday, monday) = (nov(11), nov(9));
+        assert_eq!(CalendarSpan::Day.start_for(wednesday, &layout), wednesday);
+        assert_eq!(CalendarSpan::WorkWeek.start_for(wednesday, &layout), monday);
+        assert_eq!(CalendarSpan::Week.start_for(wednesday, &layout), monday);
+        assert_eq!(CalendarSpan::Week.start_for(nov(15), &layout), monday);
         assert_eq!(
-            CalendarSpan::Day.shifted(wednesday, 1),
+            CalendarSpan::Day.shifted(wednesday, 1, &layout),
             wednesday + Duration::days(1)
         );
-        assert_eq!(CalendarSpan::Week.days(), 7);
+        assert_eq!(visible_dates(CalendarSpan::Week, monday, &layout).len(), 7);
+        assert_eq!(
+            visible_dates(CalendarSpan::WorkWeek, monday, &layout).len(),
+            5
+        );
+        assert_eq!(
+            dates_range(&run(monday, 5), utc()),
+            (
+                local_midnight(monday, utc()),
+                local_midnight(nov(14), utc())
+            )
+        );
+    }
+
+    #[test]
+    fn events_take_the_colour_index_of_their_calendar() {
+        use store::{CalendarAccounts, GoogleAccount, GoogleCalendarInfo, GoogleTokenSet};
+        let calendar = |id: &str| GoogleCalendarInfo {
+            id: id.into(),
+            summary: id.into(),
+            selected: true,
+            primary: false,
+        };
+        let accounts = CalendarAccounts {
+            google_accounts: vec![
+                GoogleAccount {
+                    id: "a".into(),
+                    email: "a@example.com".into(),
+                    calendars: vec![calendar("primary"), calendar("family")],
+                    tokens: GoogleTokenSet::default(),
+                },
+                GoogleAccount {
+                    id: "b".into(),
+                    email: "b@example.com".into(),
+                    calendars: vec![calendar("work")],
+                    tokens: GoogleTokenSet::default(),
+                },
+            ],
+            ..CalendarAccounts::default()
+        };
+        let mut google = event(9, 0, 30);
+        google.source = chatsvc::CalendarSource::Google;
+        google.account_id = Some("b".into());
+        google.calendar_id = Some("work".into());
+        assert_eq!(calendar_index(&google, &accounts), 3);
+        google.account_id = Some("a".into());
+        google.calendar_id = Some("family".into());
+        assert_eq!(calendar_index(&google, &accounts), 2);
+        assert_eq!(calendar_index(&event(9, 0, 30), &accounts), 0);
     }
 
     #[test]
     fn labels_read_like_teams() {
-        let monday = NaiveDate::from_ymd_opt(2026, 11, 30).unwrap();
-        assert_eq!(range_label(monday, 5), "November 30 - December 4, 2026");
-        assert_eq!(
-            range_label(NaiveDate::from_ymd_opt(2026, 11, 9).unwrap(), 5),
-            "November 9-13, 2026"
-        );
-        assert_eq!(
-            range_label(NaiveDate::from_ymd_opt(2026, 12, 28).unwrap(), 7),
-            "December 28, 2026 - January 3, 2027"
-        );
-        assert_eq!(
-            range_label(NaiveDate::from_ymd_opt(2026, 11, 9).unwrap(), 1),
-            "November 9, 2026"
-        );
         assert_eq!(hour_label(0, true), "12 AM");
         assert_eq!(hour_label(13, true), "1 PM");
-        assert_eq!(hour_label(13, false), "13");
+        assert_eq!(hour_label(13, false), "13:00");
+        assert_eq!(hour_label(7, false), "07:00");
     }
 
     #[test]

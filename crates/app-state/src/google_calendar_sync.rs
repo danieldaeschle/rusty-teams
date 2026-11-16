@@ -33,6 +33,10 @@ pub async fn fetch_google_events(
             .filter(|calendar| calendar.selected)
             .map(|calendar| (calendar.id.clone(), calendar.summary.clone()))
             .collect();
+        // Every calendar turned off (group check box): the account shows nothing.
+        if calendars.is_empty() && !account.calendars.is_empty() {
+            continue;
+        }
         let calendars = if calendars.is_empty() {
             vec![(
                 "primary".to_owned(),

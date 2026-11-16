@@ -1,3 +1,4 @@
+use super::calendar_prefs::TimeScale;
 use super::week_grid::CalendarSpan;
 
 /// Fraction of the hour-grid viewport used to keep «now» below the top edge.
@@ -26,6 +27,31 @@ pub fn now_scroll_offset_y(
     let bias = (viewport * bias_fraction.clamp(0., 1.)).clamp(0., viewport);
     let min_offset = -(day_height - viewport).max(0.);
     (bias - now_y).clamp(min_offset, 0.)
+}
+
+/// Height of one hour row for a time scale; finer scales get taller rows.
+pub fn hour_height(scale: TimeScale) -> f32 {
+    match scale {
+        TimeScale::Min15 => 120.,
+        TimeScale::Min30 => 96.,
+        TimeScale::Min60 => 64.,
+    }
+}
+
+/// Minutes shown above work start when the grid opens on a range without today.
+pub const WORK_START_LEAD_MINUTES: i64 = 30;
+
+/// Vertical scroll offset (negative Y) that puts work start, minus a short lead, at the top.
+pub fn work_start_scroll_offset_y(
+    work_start_minute: i64,
+    hour_height: f32,
+    viewport_height: f32,
+) -> f32 {
+    let day_height = 24. * hour_height;
+    let target =
+        (work_start_minute - WORK_START_LEAD_MINUTES).clamp(0, 24 * 60) as f32 / 60. * hour_height;
+    let min_offset = -(day_height - viewport_height.max(0.)).max(0.);
+    (-target).clamp(min_offset, 0.)
 }
 
 pub fn shows_hour_grid(span: CalendarSpan) -> bool {
@@ -68,6 +94,22 @@ mod tests {
         let now_y = 12. * hour_height;
         let bias = viewport * NOW_BIAS_FRACTION;
         assert!((offset - (bias - now_y)).abs() < 0.01);
+    }
+
+    #[test]
+    fn work_start_sits_at_the_top_with_a_short_lead() {
+        let hour = hour_height(TimeScale::Min30);
+        assert_eq!(work_start_scroll_offset_y(8 * 60, hour, 480.), -7.5 * hour);
+        assert_eq!(work_start_scroll_offset_y(0, hour, 480.), 0.);
+        // A late start never scrolls past the end of the day.
+        let late = work_start_scroll_offset_y(23 * 60 + 30, hour, 480.);
+        assert_eq!(late, -(24. * hour - 480.));
+    }
+
+    #[test]
+    fn finer_time_scales_get_taller_rows() {
+        assert!(hour_height(TimeScale::Min15) > hour_height(TimeScale::Min30));
+        assert!(hour_height(TimeScale::Min30) > hour_height(TimeScale::Min60));
     }
 
     #[test]

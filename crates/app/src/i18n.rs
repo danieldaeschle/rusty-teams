@@ -1,15 +1,17 @@
 pub use app_base::ui_locale::{tr, tr_args};
 
+/// Serialises tests that set the global UI language (`rust_i18n` keeps one locale per process).
+#[cfg(test)]
+pub(crate) fn locale_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|error| error.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::{Mutex, MutexGuard};
-
     use app_base::ui_locale::{apply_locale, tr};
 
-    fn locale_test_lock() -> MutexGuard<'static, ()> {
-        static LOCK: Mutex<()> = Mutex::new(());
-        LOCK.lock().unwrap_or_else(|error| error.into_inner())
-    }
+    use super::locale_test_lock;
 
     #[test]
     fn ui_locale_settings_common_actions() {

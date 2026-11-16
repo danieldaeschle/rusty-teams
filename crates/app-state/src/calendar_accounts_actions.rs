@@ -1,3 +1,4 @@
+use app_base::ui_locale::{tr, tr_args};
 use chrono::Utc;
 use gpui_kit::Context;
 use store::{
@@ -17,6 +18,10 @@ use crate::runtime;
 impl AppState {
     pub fn calendar_accounts(&self) -> CalendarAccounts {
         load_calendar_accounts(&self.store)
+    }
+
+    pub fn google_connect_pending(&self) -> Option<&str> {
+        self.google_connect_pending.as_deref()
     }
 
     pub fn disconnect_google_account(&mut self, account_id: &str, cx: &mut Context<Self>) {
@@ -71,6 +76,24 @@ impl AppState {
         cx.notify();
     }
 
+    /// Group check box: turn every calendar of one Google account on or off.
+    pub fn set_google_account_selected(
+        &mut self,
+        account_id: &str,
+        on: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let mut accounts = load_calendar_accounts(&self.store);
+        if let Some(account) = accounts.google_account_mut(account_id) {
+            for calendar in &mut account.calendars {
+                calendar.selected = on;
+            }
+        }
+        let _ = save_calendar_accounts(&self.store, &accounts);
+        self.refresh_calendar(cx);
+        cx.notify();
+    }
+
     pub fn toggle_outlook_calendar_selected(&mut self, cx: &mut Context<Self>) {
         let mut accounts = load_calendar_accounts(&self.store);
         accounts.outlook_selected = !accounts.outlook_selected;
@@ -80,17 +103,31 @@ impl AppState {
         cx.notify();
     }
 
+    pub fn reopen_google_connect(&mut self, cx: &mut Context<Self>) {
+        if let Some(url) = self.google_connect_pending.clone() {
+            crate::external_browser::open_url(cx, &self.store, &url);
+        }
+    }
+
+    pub fn cancel_google_connect(&mut self, cx: &mut Context<Self>) {
+        self.google_connect_generation = self.google_connect_generation.wrapping_add(1);
+        self.google_connect_pending = None;
+        self.raise_notice(tr("settings.calendar.sign_in_cancelled"), None, cx);
+        cx.notify();
+    }
+
     pub fn connect_google_calendar(&mut self, cx: &mut Context<Self>) {
+        if self.google_connect_pending.is_some() {
+            self.reopen_google_connect(cx);
+            return;
+        }
         let Some(oauth) = client_id_from_env() else {
-            self.raise_notice(
-                "Set TEAMS_GOOGLE_CLIENT_ID (and optional TEAMS_GOOGLE_CLIENT_SECRET) to connect Google Calendar."
-                    .to_owned(),
-                None,
-                cx,
-            );
+            self.raise_notice(tr("settings.calendar.not_in_build"), None, cx);
             return;
         };
         let store = self.store.clone();
+        self.google_connect_generation = self.google_connect_generation.wrapping_add(1);
+        let generation = self.google_connect_generation;
         cx.spawn(async move |this, cx| {
             let prepared = runtime::spawn({
                 let oauth = oauth.clone();
@@ -106,51 +143,85 @@ impl AppState {
             let (authorize_url, pending, listener, oauth) = match prepared.await {
                 Ok(Ok(value)) => value,
                 Ok(Err(error)) => {
-                    this.update(cx, |state, cx| state.raise_notice(error, None, cx))
-                        .ok();
+                    this.update(cx, |state, cx| {
+                        clear_google_connect_if(state, generation);
+                        state.raise_notice(error, None, cx);
+                    })
+                    .ok();
                     return;
                 }
                 Err(_) => {
                     this.update(cx, |state, cx| {
-                        state.raise_notice("Could not start Google sign-in.".to_owned(), None, cx)
+                        clear_google_connect_if(state, generation);
+                        state.raise_notice(tr("settings.calendar.sign_in_start_failed"), None, cx);
                     })
                     .ok();
                     return;
                 }
             };
-            this.update(cx, |state, cx| {
-                crate::external_browser::open_url(cx, &state.store, &authorize_url);
-            })
-            .ok();
+            let still_current = this
+                .update(cx, |state, cx| {
+                    if state.google_connect_generation != generation {
+                        return false;
+                    }
+                    state.google_connect_pending = Some(authorize_url.clone());
+                    crate::external_browser::open_url(cx, &state.store, &authorize_url);
+                    cx.notify();
+                    true
+                })
+                .unwrap_or(false);
+            if !still_current {
+                return;
+            }
             let finished = runtime::spawn(async move {
                 finish_google_connect(oauth, pending, listener, store).await
             });
             match finished.await {
                 Ok(Ok(email)) => {
                     this.update(cx, |state, cx| {
-                        state.raise_notice(
-                            format!("Google Calendar connected ({email})."),
-                            None,
-                            cx,
-                        );
+                        if state.google_connect_generation != generation {
+                            return;
+                        }
+                        state.google_connect_pending = None;
+                        let mut args = std::collections::HashMap::new();
+                        args.insert("email".to_owned(), email);
+                        state.raise_notice(tr_args("settings.calendar.connected", &args), None, cx);
                         state.refresh_calendar(cx);
                         cx.notify();
                     })
                     .ok();
                 }
                 Ok(Err(error)) => {
-                    this.update(cx, |state, cx| state.raise_notice(error, None, cx))
-                        .ok();
+                    this.update(cx, |state, cx| {
+                        if state.google_connect_generation != generation {
+                            return;
+                        }
+                        state.google_connect_pending = None;
+                        state.raise_notice(error, None, cx);
+                        cx.notify();
+                    })
+                    .ok();
                 }
                 Err(_) => {
                     this.update(cx, |state, cx| {
-                        state.raise_notice("Google sign-in was cancelled.".to_owned(), None, cx)
+                        if state.google_connect_generation != generation {
+                            return;
+                        }
+                        state.google_connect_pending = None;
+                        state.raise_notice(tr("settings.calendar.sign_in_cancelled"), None, cx);
+                        cx.notify();
                     })
                     .ok();
                 }
             }
         })
         .detach();
+    }
+}
+
+fn clear_google_connect_if(state: &mut AppState, generation: u64) {
+    if state.google_connect_generation == generation {
+        state.google_connect_pending = None;
     }
 }
 

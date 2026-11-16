@@ -1,7 +1,9 @@
 pub mod agenda;
 pub mod background;
 pub mod bubbles;
+pub mod calendar_list;
 pub mod calendar_now;
+pub mod calendar_prefs;
 pub mod caption_style;
 pub mod demo;
 pub mod demo_scene;

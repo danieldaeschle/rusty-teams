@@ -316,6 +316,69 @@ settings:
     connect_then_dual_write:
       en: Connect Google, then enable dual-write on a calendar above.
       de: Google verbinden, dann oben Dual-Write für einen Kalender einschalten.
+    section_view:
+      en: VIEW
+      de: ANSICHT
+    default_view:
+      en: Default view
+      de: Standardansicht
+    default_view_detail:
+      en: The view the calendar opens in
+      de: Die Ansicht, in der der Kalender öffnet
+    last_used:
+      en: Last used
+      de: Zuletzt verwendet
+    first_day:
+      en: First day of week
+      de: Erster Wochentag
+    first_day_detail:
+      en: Week, work week and month start on this day
+      de: Woche, Arbeitswoche und Monat beginnen an diesem Tag
+    first_day_regional:
+      en: "As in Outlook (%{day})"
+      de: "Wie in Outlook (%{day})"
+    work_days:
+      en: Work days
+      de: Arbeitstage
+    work_hours:
+      en: Work hours
+      de: Arbeitszeit
+    mailbox_detail:
+      en: Saved to your Outlook mailbox, like in Teams and Outlook
+      de: Wird wie in Teams und Outlook in Ihrem Outlook-Postfach gespeichert
+    work_start:
+      en: Start
+      de: Beginn
+    work_end:
+      en: End
+      de: Ende
+    time_scale:
+      en: Time scale
+      de: Zeitskala
+    time_scale_detail:
+      en: Height of a grid row
+      de: Höhe einer Rasterzeile
+    minutes:
+      en: "%{count} minutes"
+      de: "%{count} Minuten"
+    weekend:
+      en: Work week on a non-work day
+      de: Arbeitswoche an arbeitsfreien Tagen
+    weekend_detail:
+      en: What Today shows in Work week when today is not a work day
+      de: Was Heute in der Arbeitswoche zeigt, wenn heute kein Arbeitstag ist
+    weekend_next:
+      en: Show next week
+      de: Nächste Woche zeigen
+    weekend_this:
+      en: Show this week
+      de: Diese Woche zeigen
+    work_hours_not_saved:
+      en: Work hours were not saved to your mailbox.
+      de: Die Arbeitszeit wurde nicht im Postfach gespeichert.
+    connect_in_settings:
+      en: "Connect Google in Settings › Calendar"
+      de: "Google unter Einstellungen › Kalender verbinden"
     google_label:
       en: Google
       de: Google
@@ -1289,6 +1352,172 @@ calendar:
     no_title:
       en: (No title)
       de: (Kein Titel)
+  view:
+    title:
+      en: Calendar
+      de: Kalender
+    today:
+      en: Today
+      de: Heute
+    span_day:
+      en: Day
+      de: Tag
+    span_work_week:
+      en: Work week
+      de: Arbeitswoche
+    span_week:
+      en: Week
+      de: Woche
+    span_month:
+      en: Month
+      de: Monat
+    previous_day:
+      en: Go to previous day
+      de: Zum vorherigen Tag
+    previous_week:
+      en: Go to previous week
+      de: Zur vorherigen Woche
+    previous_month:
+      en: Go to previous month
+      de: Zum vorherigen Monat
+    next_day:
+      en: Go to next day
+      de: Zum nächsten Tag
+    next_week:
+      en: Go to next week
+      de: Zur nächsten Woche
+    next_month:
+      en: Go to next month
+      de: Zum nächsten Monat
+    join_with_id:
+      en: Join with an ID
+      de: Mit einer ID teilnehmen
+    meet_now:
+      en: Meet now
+      de: Jetzt besprechen
+    new_meeting:
+      en: New meeting
+      de: Neue Besprechung
+    toggle_pane:
+      en: Show or hide the calendar list
+      de: Kalenderliste ein- oder ausblenden
+    loading:
+      en: Loading…
+      de: Wird geladen…
+    source_failed:
+      en: "%{source} couldn't be loaded."
+      de: "%{source} konnte nicht geladen werden."
+    more:
+      en: "+%{count} more"
+      de: "+%{count} weitere"
+    copy_join_info:
+      en: Copy join info
+      de: Teilnahmeinformationen kopieren
+    chat_with_participants:
+      en: Chat with participants
+      de: Mit Teilnehmern chatten
+    previous_month_short:
+      en: Previous month
+      de: Vorheriger Monat
+    next_month_short:
+      en: Next month
+      de: Nächster Monat
+    add_calendar:
+      en: Add calendar
+      de: Kalender hinzufügen
+    my_calendars:
+      en: My calendars
+      de: Meine Kalender
+    show_all:
+      en: Show all
+      de: Alle anzeigen
+    show_fewer:
+      en: Show fewer
+      de: Weniger anzeigen
+    series:
+      en: Series
+      de: Serie
+  weekday:
+    mon:
+      en: Monday
+      de: Montag
+    tue:
+      en: Tuesday
+      de: Dienstag
+    wed:
+      en: Wednesday
+      de: Mittwoch
+    thu:
+      en: Thursday
+      de: Donnerstag
+    fri:
+      en: Friday
+      de: Freitag
+    sat:
+      en: Saturday
+      de: Samstag
+    sun:
+      en: Sunday
+      de: Sonntag
+  weekday_short:
+    mon:
+      en: Mon
+      de: Mo
+    tue:
+      en: Tue
+      de: Di
+    wed:
+      en: Wed
+      de: Mi
+    thu:
+      en: Thu
+      de: Do
+    fri:
+      en: Fri
+      de: Fr
+    sat:
+      en: Sat
+      de: Sa
+    sun:
+      en: Sun
+      de: So
+  month:
+    m01:
+      en: January
+      de: Januar
+    m02:
+      en: February
+      de: Februar
+    m03:
+      en: March
+      de: März
+    m04:
+      en: April
+      de: April
+    m05:
+      en: May
+      de: Mai
+    m06:
+      en: June
+      de: Juni
+    m07:
+      en: July
+      de: Juli
+    m08:
+      en: August
+      de: August
+    m09:
+      en: September
+      de: September
+    m10:
+      en: October
+      de: Oktober
+    m11:
+      en: November
+      de: November
+    m12:
+      en: December
+      de: Dezember
 agents:
   start:
     new_session:

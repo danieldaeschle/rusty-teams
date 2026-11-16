@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use app_base::format::{self, clock_format};
+use app_base::format::{self, WeekdayWidth, clock_format, weekday_name};
 use chatsvc::{CalendarEvent, ResponseType, join_info_text};
-use chrono::{DateTime, Local, NaiveDate, Offset, Timelike, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -22,26 +22,49 @@ use super::rsvp_menu::rsvp_menu;
 use super::scroll_edge::scroll_offset;
 use crate::app_state::AppState;
 use crate::call::calendar_now::{
-    DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION,
-    now_scroll_offset_y, offset_differs, shows_hour_grid,
+    DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION, hour_height,
+    now_scroll_offset_y, offset_differs, shows_hour_grid, work_start_scroll_offset_y,
 };
+use crate::call::week::CalendarLoadFailure;
 use crate::call::week_grid::{
-    CalendarSpan, EventLook, WeekBlock, WeekDay, event_look, hour_label, month_shown, week_days,
+    CalendarSpan, EventLook, WeekBlock, WeekDay, WeekLayout, calendar_index, event_look,
+    hour_label, month_shown, week_days,
 };
 use crate::i18n::tr;
 use crate::theme;
+use crate::views::widgets::icon;
 
-const HOUR_HEIGHT: f32 = 120.;
-const QUARTERS_PER_HOUR: usize = 4;
-const QUARTER_LINE_OPACITY: f32 = 0.45;
 const GUTTER_WIDTH: f32 = 50.;
 const HEADER_HEIGHT: f32 = 52.;
 const DAY_HEADER_HEIGHT: f32 = 56.;
 const ALL_DAY_HEIGHT: f32 = 26.;
 const BLOCK_GAP: f32 = 2.;
-const CANCELED_PREFIX: &str = "Canceled: ";
-const COPY_JOIN_INFO: &str = "Copy join info";
-const COMPACT_HEADER_WIDTH: f32 = 960.;
+const MINOR_LINE_OPACITY: f32 = 0.45;
+const OFF_HOURS_OPACITY: f32 = 0.85;
+const NOW_ELSEWHERE_OPACITY: f32 = 0.4;
+pub const CALENDAR_HEADER_TAG: &str = "shell/islands/calendar/header";
+pub const CALENDAR_DAY_HEADERS_TAG: &str = "shell/islands/calendar/day-headers";
+pub const CALENDAR_NEW_MEETING_TAG: &str = "shell/islands/calendar/header/new-meeting";
+pub const COMPACT_HEADER_WIDTH: f32 = 960.;
+/// Header widths below which button labels give way to icons (German labels are longest).
+const SECONDARY_LABELS_WIDTH: f32 = 1080.;
+const PRIMARY_LABELS_WIDTH: f32 = 780.;
+
+/// Which header buttons keep their text at a given header width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeaderLabels {
+    /// Today, view and New meeting.
+    pub primary: bool,
+    /// Join with an ID and Meet now.
+    pub secondary: bool,
+}
+
+pub fn header_labels(header_width: f32) -> HeaderLabels {
+    HeaderLabels {
+        primary: header_width >= PRIMARY_LABELS_WIDTH,
+        secondary: header_width >= SECONDARY_LABELS_WIDTH,
+    }
+}
 const BUSY_FILL_OPACITY: f32 = 0.28;
 const FREE_FILL_OPACITY: f32 = 0.12;
 const STATUS_BAR_WIDTH: f32 = 4.;
@@ -61,6 +84,9 @@ pub struct CalendarView {
     last_programmatic_offset: f32,
     skip_manual_check: bool,
     clock_running: bool,
+    /// Row height of one hour and minor lines per hour, from the time scale.
+    hour_height: f32,
+    steps_per_hour: usize,
     _observation: Subscription,
     _agent_observation: Option<Subscription>,
 }
@@ -78,6 +104,8 @@ impl CalendarView {
             last_programmatic_offset: 0.,
             skip_manual_check: false,
             clock_running: false,
+            hour_height: hour_height(Default::default()),
+            steps_per_hour: 2,
             _observation: observation,
             _agent_observation: agent_observation,
         }
@@ -92,26 +120,41 @@ impl CalendarView {
         let offset = now_scroll_offset_y(
             local.hour(),
             local.minute(),
-            HOUR_HEIGHT,
+            self.hour_height,
             Self::grid_viewport_height(window),
             NOW_BIAS_FRACTION,
         );
+        self.set_programmatic_offset(offset);
+    }
+
+    /// A range without today opens at work start instead of midnight.
+    fn align_scroll_to_work_start(&mut self, work_start_minute: i64, window: &Window) {
+        let offset = work_start_scroll_offset_y(
+            work_start_minute,
+            self.hour_height,
+            Self::grid_viewport_height(window),
+        );
+        self.set_programmatic_offset(offset);
+    }
+
+    fn set_programmatic_offset(&mut self, offset: f32) {
         self.scroll.set_offset(point(px(0.), px(offset)));
         self.last_programmatic_offset = offset;
         self.skip_manual_check = true;
     }
 
     fn sync_follow_from_state(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let (scroll_to_now, span, today_visible) = {
+        let (scroll_to_now, span, today_visible, work_start) = {
             let state = self.state.read(cx);
-            let start = state.calendar_start();
-            let today = Local::now().date_naive();
-            let today_visible = start <= today
-                && today < start + chrono::Duration::days(state.calendar_week.span.days());
+            let today_visible = state.calendar_shows_today();
+            let prefs = &state.calendar_prefs;
+            self.hour_height = hour_height(prefs.time_scale);
+            self.steps_per_hour = prefs.time_scale.steps_per_hour() as usize;
             (
                 state.calendar_scroll_to_now,
                 state.calendar_week.span,
                 today_visible,
+                prefs.work_hours.minute_range().0,
             )
         };
         if !shows_hour_grid(span) {
@@ -121,7 +164,12 @@ impl CalendarView {
         self.ensure_clock(cx);
         if scroll_to_now != self.seen_scroll_to_now {
             self.seen_scroll_to_now = scroll_to_now;
-            self.follow_now.request_align();
+            if today_visible {
+                self.follow_now.request_align();
+            } else {
+                self.align_scroll_to_work_start(work_start, window);
+                return;
+            }
         }
         if self.skip_manual_check {
             self.skip_manual_check = false;
@@ -180,33 +228,60 @@ impl CalendarView {
         cx.notify();
     }
 
-    fn header(&self, start: NaiveDate, span: CalendarSpan, compact: bool) -> impl IntoElement {
+    fn header(
+        &self,
+        start: NaiveDate,
+        span: CalendarSpan,
+        dates: &[NaiveDate],
+        layout: &WeekLayout,
+        compact: bool,
+        labels: HeaderLabels,
+    ) -> impl IntoElement {
         let span_state = self.state.clone();
-        let label = |text: &'static str| (!compact).then_some(text);
+        let label = |key: &'static str| labels.primary.then(|| tr(key));
+        let secondary = |key: &'static str| labels.secondary.then(|| tr(key));
         let (today, back, forward) = (self.state.clone(), self.state.clone(), self.state.clone());
         let (join_state, meet_state, new_state) =
             (self.state.clone(), self.state.clone(), self.state.clone());
+        let pane_state = self.state.clone();
+        let (back_tip, forward_tip) = match span {
+            CalendarSpan::Day => ("calendar.view.previous_day", "calendar.view.next_day"),
+            CalendarSpan::Month => ("calendar.view.previous_month", "calendar.view.next_month"),
+            _ => ("calendar.view.previous_week", "calendar.view.next_week"),
+        };
         h_flex()
+            .debug_selector(|| CALENDAR_HEADER_TAG.into())
             .h(px(HEADER_HEIGHT))
             .flex_none()
             .items_center()
             .gap(px(8.))
             .px(px(16.))
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(px(16.))
-                    .font_weight(FontWeight::BOLD)
-                    .mr(px(8.))
-                    .child("Calendar"),
-            )
+            .when(!compact, |header| {
+                header.child(
+                    Button::new("calendar-pane-toggle")
+                        .small()
+                        .ghost()
+                        .icon(IconName::PanelLeft)
+                        .tooltip(tr("calendar.view.toggle_pane"))
+                        .on_click(move |_, _, cx| {
+                            pane_state.update(cx, |state, cx| {
+                                state.update_calendar_prefs(
+                                    |prefs| prefs.pane_hidden = !prefs.pane_hidden,
+                                    cx,
+                                )
+                            })
+                        }),
+                )
+            })
             .child(
                 Button::new("calendar-today")
                     .small()
                     .outline()
                     .icon(IconName::Calendar)
-                    .when_some(label("Today"), |button, text| button.label(text))
-                    .tooltip("Today")
+                    .when_some(label("calendar.view.today"), |button, text| {
+                        button.label(text)
+                    })
+                    .tooltip(tr("calendar.view.today"))
                     .on_click(move |_, _, cx| {
                         today.update(cx, |state, cx| state.calendar_to_today(cx))
                     }),
@@ -216,11 +291,7 @@ impl CalendarView {
                     .small()
                     .ghost()
                     .icon(IconName::ChevronLeft)
-                    .tooltip(match span {
-                        CalendarSpan::Day => "Go to previous day",
-                        CalendarSpan::Month => "Go to previous month",
-                        _ => "Go to previous week",
-                    })
+                    .tooltip(tr(back_tip))
                     .on_click(move |_, _, cx| {
                         back.update(cx, |state, cx| state.shift_calendar_week(-1, cx))
                     }),
@@ -230,20 +301,16 @@ impl CalendarView {
                     .small()
                     .ghost()
                     .icon(IconName::ChevronRight)
-                    .tooltip(match span {
-                        CalendarSpan::Day => "Go to next day",
-                        CalendarSpan::Month => "Go to next month",
-                        _ => "Go to next week",
-                    })
+                    .tooltip(tr(forward_tip))
                     .on_click(move |_, _, cx| {
                         forward.update(cx, |state, cx| state.shift_calendar_week(1, cx))
                     }),
             )
             .child(h_flex().flex_1().min_w_0().child(date_picker_button(
                 &self.state,
-                span.title(start),
-                start,
-                span.days(),
+                span.title(start, layout),
+                dates.to_vec(),
+                layout.first_day,
                 if span == CalendarSpan::Month {
                     month_shown(start)
                 } else {
@@ -254,7 +321,8 @@ impl CalendarView {
                 Button::new("calendar-span")
                     .small()
                     .ghost()
-                    .label(span.label())
+                    .icon(IconName::LayoutGrid)
+                    .when(labels.primary, |button| button.label(span.label()))
                     .dropdown_caret(true)
                     .dropdown_menu(move |menu, _, _| {
                         CalendarSpan::ALL.iter().fold(menu, |menu, &choice| {
@@ -276,8 +344,10 @@ impl CalendarView {
                     .small()
                     .outline()
                     .icon(IconName::Hash)
-                    .when_some(label("Join with an ID"), |button, text| button.label(text))
-                    .tooltip("Join with an ID")
+                    .when_some(secondary("calendar.view.join_with_id"), |button, text| {
+                        button.label(text)
+                    })
+                    .tooltip(tr("calendar.view.join_with_id"))
                     .on_click(move |_, window, cx| {
                         open_join_with_id(join_state.clone(), window, cx)
                     }),
@@ -287,25 +357,32 @@ impl CalendarView {
                     .small()
                     .outline()
                     .icon(IconName::Video)
-                    .when_some(label("Meet now"), |button, text| button.label(text))
-                    .tooltip("Meet now")
+                    .when_some(secondary("calendar.view.meet_now"), |button, text| {
+                        button.label(text)
+                    })
+                    .tooltip(tr("calendar.view.meet_now"))
                     .on_click(move |_, _, cx| {
                         meet_state.update(cx, |state, cx| state.start_meet_now(cx))
                     }),
             )
             .child(
                 Button::new("calendar-new-meeting")
+                    .debug_selector(|| CALENDAR_NEW_MEETING_TAG.into())
                     .small()
                     .primary()
                     .icon(IconName::Plus)
-                    .when_some(label("New meeting"), |button, text| button.label(text))
-                    .tooltip("New meeting")
+                    .when_some(label("calendar.view.new_meeting"), |button, text| {
+                        button.label(text)
+                    })
+                    .tooltip(tr("calendar.view.new_meeting"))
                     .on_click(move |_, window, cx| open_new_meeting(new_state.clone(), window, cx)),
             )
     }
 
+    /// Day number above the full weekday name; today in the accent colour with its bar.
     fn day_headers(&self, days: &[WeekDay], today: NaiveDate) -> impl IntoElement {
         h_flex()
+            .debug_selector(|| CALENDAR_DAY_HEADERS_TAG.into())
             .h(px(DAY_HEADER_HEIGHT))
             .flex_none()
             .border_b_1()
@@ -313,10 +390,10 @@ impl CalendarView {
             .child(div().w(px(GUTTER_WIDTH)).flex_none())
             .children(days.iter().map(|day| {
                 let is_today = day.date == today;
-                let color = if is_today {
-                    theme::accent_text()
+                let (number_color, name_color) = if is_today {
+                    (theme::accent_text(), theme::accent_text())
                 } else {
-                    theme::text_soft()
+                    (theme::text(), theme::text_soft())
                 };
                 v_flex()
                     .relative()
@@ -342,14 +419,16 @@ impl CalendarView {
                         div()
                             .text_size(px(20.))
                             .line_height(px(24.))
-                            .text_color(color)
+                            .text_color(number_color)
+                            .when(is_today, |number| number.font_weight(FontWeight::SEMIBOLD))
                             .child(format::calendar_day_number(day.date)),
                     )
                     .child(
                         div()
                             .text_size(px(12.))
-                            .text_color(color)
-                            .child(day.date.format("%a").to_string()),
+                            .text_color(name_color)
+                            .truncate()
+                            .child(weekday_name(day.date.weekday(), WeekdayWidth::Full)),
                     )
             }))
     }
@@ -358,6 +437,7 @@ impl CalendarView {
         &self,
         days: &[WeekDay],
         events: &[CalendarEvent],
+        colors: &[Hsla],
         send_response: bool,
     ) -> Option<Div> {
         if days.iter().all(|day| day.all_day.is_empty()) {
@@ -379,6 +459,7 @@ impl CalendarView {
                         .border_color(theme::border())
                         .children(day.all_day.iter().map(|&index| {
                             let event = events[index].clone();
+                            let color = colors[index];
                             let open_state = self.state.clone();
                             let (menu_state, menu_event) = (self.state.clone(), event.clone());
                             // Day-qualified id: multi-day all-day chips share object_id.
@@ -391,8 +472,8 @@ impl CalendarView {
                                 .px(px(6.))
                                 .flex()
                                 .items_center()
-                                .rounded(px(4.))
-                                .bg(event_fill(event_look(&event)))
+                                .rounded(px(6.))
+                                .bg(event_fill(event_look(&event), color))
                                 .text_size(px(12.))
                                 .truncate()
                                 .cursor_pointer()
@@ -417,21 +498,22 @@ impl CalendarView {
         &self,
         block: &WeekBlock,
         event: &CalendarEvent,
+        color: Hsla,
         day: NaiveDate,
         send_response: bool,
     ) -> impl IntoElement {
-        let top = block.start_minute as f32 / 60. * HOUR_HEIGHT;
-        let height = ((block.end_minute - block.start_minute) as f32 / 60. * HOUR_HEIGHT
+        let top = block.start_minute as f32 / 60. * self.hour_height;
+        let height = ((block.end_minute - block.start_minute) as f32 / 60. * self.hour_height
             - BLOCK_GAP)
             .max(14.);
         let width = 1. / block.lanes as f32;
         let compact = height < 36.;
         let small = height < SMALL_TITLE_HEIGHT;
         let title_size = if small { 10. } else { 12. };
-        let title_line = if small { 14. } else { 18. };
-        let pad_y = if compact { 1. } else { 4. };
-        // Fill the block: long titles use the free height instead of clamping to 2 lines.
-        let title_lines = (((height - pad_y * 2.) / title_line).floor() as usize).clamp(1, 8);
+        let title_line = if small { 14. } else { 16. };
+        let pad_y = if compact { 1. } else { 3. };
+        // Title and organizer flow as one text; tall blocks wrap it over more lines.
+        let lines = (((height - pad_y * 2.) / title_line).floor() as usize).clamp(1, 8);
         let look = event_look(event);
         // Join on the block whenever a Teams link exists (same as detail dialog).
         // Skip on tiny blocks — the button would crush the title.
@@ -465,13 +547,13 @@ impl CalendarView {
                     .size_full()
                     .items_start()
                     .overflow_hidden()
-                    .rounded(px(4.))
-                    .bg(event_fill(look))
+                    .rounded(px(6.))
+                    .bg(event_fill(look, color))
                     .when(event.cancelled, |block| block.opacity(0.6))
                     .cursor_pointer()
-                    .children(status_bar(look))
+                    .children(status_bar(look, color))
                     .child(
-                        v_flex()
+                        div()
                             .flex_1()
                             .min_w_0()
                             .pl(px(5.))
@@ -479,28 +561,20 @@ impl CalendarView {
                             .h_full()
                             .py(px(pad_y))
                             .overflow_hidden()
-                            .when(compact, |body| body.justify_center())
-                            .child(
-                                div()
-                                    .text_size(px(title_size))
-                                    .line_height(px(title_line))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(title_color)
-                                    .when(compact, |title| title.truncate())
-                                    .when(!compact, |title| title.line_clamp(title_lines))
-                                    .child(event_title(event)),
-                            )
-                            .when(!compact && title_lines > 2, |body| {
-                                body.children(event.organizer_name.clone().map(|organizer| {
-                                    div()
-                                        .text_size(px(12.))
-                                        .line_height(px(16.))
-                                        .text_color(detail_color)
-                                        .truncate()
-                                        .child(organizer)
-                                }))
-                            }),
+                            .text_size(px(title_size))
+                            .line_height(px(title_line))
+                            .text_color(detail_color)
+                            .line_clamp(lines)
+                            .text_ellipsis()
+                            .child(title_and_organizer(event, title_color)),
                     )
+                    .when(event.series, |block| {
+                        block.child(div().flex_none().pt(px(pad_y + 1.)).pr(px(4.)).child(icon(
+                            IconName::Repeat,
+                            12.,
+                            detail_color,
+                        )))
+                    })
                     .when(can_join, |block| {
                         block.child(
                             div().flex_none().pr(px(4.)).pt(px(3.)).child(
@@ -533,21 +607,30 @@ impl CalendarView {
             })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn grid(
         &self,
         days: &[WeekDay],
         events: &[CalendarEvent],
+        colors: &[Hsla],
+        layout: &WeekLayout,
+        work_minutes: (i64, i64),
         today: NaiveDate,
         now: DateTime<Utc>,
         send_response: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let total_height = 24. * HOUR_HEIGHT;
+        let row = self.hour_height;
+        let steps = self.steps_per_hour;
+        let total_height = 24. * row;
         let twelve_hour = clock_format().contains("%p") || clock_format().contains("%P");
         let now_minute = {
             let local = now.with_timezone(&Local);
             local.hour() * 60 + local.minute()
         };
+        let now_top = now_minute as f32 / 60. * row;
+        let today_shown = days.iter().any(|day| day.date == today);
+        let minute_y = |minute: i64| minute as f32 / 60. * row;
         div()
             .id("calendar-grid")
             .flex_1()
@@ -565,18 +648,38 @@ impl CalendarView {
                             .flex_none()
                             .children((0..24).map(|hour| {
                                 div()
-                                    .h(px(HOUR_HEIGHT))
-                                    .pt(px(4.))
+                                    .h(px(row))
+                                    .pt(px(2.))
+                                    .pr(px(8.))
                                     .flex()
-                                    .justify_center()
-                                    .text_size(px(12.))
-                                    .text_color(theme::text_soft())
+                                    .justify_end()
+                                    .text_size(px(11.))
+                                    .text_color(theme::text_muted())
                                     .when(hour > 0, |label| {
                                         label.child(hour_label(hour, twelve_hour))
                                     })
                             })),
                     )
                     .children(days.iter().map(|day| {
+                        let work_day = layout.is_work_day(day.date.weekday());
+                        let (work_start, work_end) = work_minutes;
+                        let shade = |top: f32, height: f32| {
+                            div()
+                                .absolute()
+                                .top(px(top))
+                                .left_0()
+                                .right_0()
+                                .h(px(height))
+                                .bg(theme::background().opacity(OFF_HOURS_OPACITY))
+                        };
+                        let shading = if work_day {
+                            vec![
+                                shade(0., minute_y(work_start)),
+                                shade(minute_y(work_end), total_height - minute_y(work_end)),
+                            ]
+                        } else {
+                            vec![shade(0., total_height)]
+                        };
                         div()
                             .relative()
                             .flex_1()
@@ -584,31 +687,41 @@ impl CalendarView {
                             .h_full()
                             .border_l_1()
                             .border_color(theme::border())
-                            .children((1..24 * QUARTERS_PER_HOUR).map(|quarter| {
+                            .children(shading)
+                            .children((1..24 * steps).map(|step| {
                                 let line = div()
                                     .absolute()
-                                    .top(
-                                        px(quarter as f32 * HOUR_HEIGHT / QUARTERS_PER_HOUR as f32),
-                                    )
+                                    .top(px(step as f32 * row / steps as f32))
                                     .left_0()
-                                    .right_0();
-                                if quarter % QUARTERS_PER_HOUR == 0 {
-                                    line.h(px(1.)).bg(theme::border())
+                                    .right_0()
+                                    .h(px(1.));
+                                if step % steps == 0 {
+                                    line.bg(theme::border())
                                 } else {
-                                    line.h(px(1.))
-                                        .bg(theme::border().opacity(QUARTER_LINE_OPACITY))
+                                    line.bg(theme::border().opacity(MINOR_LINE_OPACITY))
                                 }
                             }))
                             .children(day.blocks.iter().map(|block| {
                                 self.event_block(
                                     block,
                                     &events[block.event_index],
+                                    colors[block.event_index],
                                     day.date,
                                     send_response,
                                 )
                             }))
+                            .when(today_shown && day.date != today, |column| {
+                                column.child(
+                                    div()
+                                        .absolute()
+                                        .top(px(now_top))
+                                        .left_0()
+                                        .right_0()
+                                        .h(px(1.))
+                                        .bg(theme::accent().opacity(NOW_ELSEWHERE_OPACITY)),
+                                )
+                            })
                             .when(day.date == today, |column| {
-                                let now_top = now_minute as f32 / 60. * HOUR_HEIGHT;
                                 column
                                     .child(
                                         div()
@@ -634,6 +747,66 @@ impl CalendarView {
     }
 }
 
+/// Loading line and one notice per failed source, under the calendar header.
+fn load_notices(
+    state: &Entity<AppState>,
+    failures: &[CalendarLoadFailure],
+    loading: bool,
+) -> Vec<Div> {
+    let mut rows = Vec::new();
+    if loading {
+        rows.push(
+            h_flex()
+                .flex_none()
+                .px(px(16.))
+                .pb(px(6.))
+                .text_size(px(12.))
+                .text_color(theme::text_muted())
+                .child(tr("calendar.view.loading")),
+        );
+    }
+    for failure in failures {
+        let retry = state.clone();
+        let mut args = std::collections::HashMap::new();
+        args.insert("source".to_owned(), failure.source.label().to_owned());
+        rows.push(
+            h_flex()
+                .flex_none()
+                .mx(px(16.))
+                .mb(px(6.))
+                .px(px(12.))
+                .py(px(6.))
+                .gap(px(12.))
+                .items_center()
+                .rounded(px(6.))
+                .bg(theme::red_tint())
+                .text_size(px(13.))
+                .text_color(theme::text())
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(crate::i18n::tr_args("calendar.view.source_failed", &args)),
+                )
+                .child(
+                    Button::new(SharedString::from(format!(
+                        "calendar-retry-{}",
+                        failure.source.label()
+                    )))
+                    .xsmall()
+                    .outline()
+                    .label(tr("common.retry"))
+                    .tooltip(failure.message.clone())
+                    .on_click(move |_, _, cx| {
+                        retry.update(cx, |state, cx| state.retry_calendar_week(cx))
+                    }),
+                ),
+        );
+    }
+    rows
+}
+
 fn event_menu(
     menu: PopupMenu,
     state: &Entity<AppState>,
@@ -647,18 +820,20 @@ fn event_menu(
         .filter(|_| event.online && !event.cancelled)
     {
         let (join_state, subject) = (state.clone(), event.subject.clone());
-        menu = menu.item(PopupMenuItem::new("Join").icon(IconName::Video).on_click(
-            move |_, _, cx| {
-                join_state.update(cx, |state, cx| {
-                    state.join_calendar_meeting(Some(&join_url), &subject, cx)
-                })
-            },
-        ));
+        menu = menu.item(
+            PopupMenuItem::new(tr("common.join"))
+                .icon(IconName::Video)
+                .on_click(move |_, _, cx| {
+                    join_state.update(cx, |state, cx| {
+                        state.join_calendar_meeting(Some(&join_url), &subject, cx)
+                    })
+                }),
+        );
     }
     if let Some(join_url) = event.join_url.as_deref().filter(|_| event.online) {
         let info = join_info_text(join_url, event.dial_in.as_ref());
         menu = menu.item(
-            PopupMenuItem::new(COPY_JOIN_INFO)
+            PopupMenuItem::new(tr("calendar.view.copy_join_info"))
                 .icon(IconName::Copy)
                 .on_click(move |_, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(info.clone()))
@@ -668,7 +843,7 @@ fn event_menu(
     if let Some(thread_id) = event.thread_id.clone() {
         let chat_state = state.clone();
         menu = menu.item(
-            PopupMenuItem::new("Chat with participants")
+            PopupMenuItem::new(tr("calendar.view.chat_with_participants"))
                 .icon(IconName::MessageSquare)
                 .on_click(move |_, _, cx| {
                     chat_state.update(cx, |state, cx| {
@@ -689,31 +864,49 @@ fn event_menu(
     )
 }
 
-fn event_fill(look: EventLook) -> Hsla {
+fn event_fill(look: EventLook, color: Hsla) -> Hsla {
     match look {
-        EventLook::Busy => theme::accent().opacity(BUSY_FILL_OPACITY),
-        EventLook::Free | EventLook::Tentative => theme::accent().opacity(FREE_FILL_OPACITY),
+        EventLook::Busy => color.opacity(BUSY_FILL_OPACITY),
+        EventLook::Free | EventLook::Tentative => color.opacity(FREE_FILL_OPACITY),
     }
 }
 
-fn status_bar(look: EventLook) -> Option<Div> {
+fn status_bar(look: EventLook, color: Hsla) -> Option<Div> {
     let bar = div().flex_none().w(px(STATUS_BAR_WIDTH)).h_full();
     match look {
-        EventLook::Busy => Some(bar.bg(theme::accent())),
+        EventLook::Busy => Some(bar.bg(color)),
         EventLook::Tentative => Some(
-            bar.bg(theme::accent().opacity(BUSY_FILL_OPACITY)).child(
-                div()
-                    .size_full()
-                    .bg(pattern_slash(theme::accent(), HATCH_STRIPE, HATCH_GAP)),
-            ),
+            bar.bg(color.opacity(BUSY_FILL_OPACITY))
+                .child(
+                    div()
+                        .size_full()
+                        .bg(pattern_slash(color, HATCH_STRIPE, HATCH_GAP)),
+                ),
         ),
         EventLook::Free => None,
     }
 }
 
+/// "Daily Standup Zulal Fouque": bold title, organizer right after it on the same line.
+fn title_and_organizer(event: &CalendarEvent, title_color: Hsla) -> StyledText {
+    let title = event_title(event);
+    let text = match event.organizer_name.as_deref() {
+        Some(organizer) if !organizer.is_empty() => format!("{title} {organizer}"),
+        _ => title.clone(),
+    };
+    StyledText::new(text).with_highlights([(
+        0..title.len(),
+        HighlightStyle {
+            color: Some(title_color),
+            font_weight: Some(FontWeight::SEMIBOLD),
+            ..Default::default()
+        },
+    )])
+}
+
 fn event_title(event: &CalendarEvent) -> String {
     let subject = if event.cancelled {
-        format!("{CANCELED_PREFIX}{}", event.subject)
+        format!("{}{}", tr("calendar.peek.canceled_prefix"), event.subject)
     } else {
         event.subject.clone()
     };
@@ -744,18 +937,39 @@ fn source_label(event: &CalendarEvent) -> String {
 
 impl Render for CalendarView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let compact = f32::from(window.viewport_size().width) < COMPACT_HEADER_WIDTH;
+        let window_width = f32::from(window.viewport_size().width);
+        let compact = window_width < COMPACT_HEADER_WIDTH;
         self.sync_follow_from_state(window, cx);
         let state = self.state.read(cx);
         let start = state.calendar_start();
         let events = state.calendar_week.events.clone();
         let send_response = state.rsvp_send_response;
+        let failures = state.calendar_week.failures.clone();
+        let loading = state.calendar_week.loading && events.is_empty();
         let offset = Local::now().offset().fix();
         let span = state.calendar_week.span;
-        let days = week_days(&events, start, span.days(), offset);
+        let layout = state.calendar_layout();
+        let dates = state.calendar_dates();
+        let days = week_days(&events, &dates, offset);
         let today = Local::now().date_naive();
         let now = Utc::now();
-        let show_picker = !compact;
+        let accounts = state.calendar_accounts();
+        let colors: Vec<Hsla> = events
+            .iter()
+            .map(|event| theme::calendar_color(calendar_index(event, &accounts)))
+            .collect();
+        let work_minutes = state.calendar_prefs.work_hours.minute_range();
+        let show_picker = !compact && !state.calendar_prefs.pane_hidden;
+        // Width left for the header: window minus rail, island gaps and the pane.
+        let header_width = window_width
+            - app_ui_kit::layout::RAIL_WIDTH
+            - 2. * app_ui_kit::layout::ISLAND_GAP
+            - if show_picker {
+                calendar_picker::PICKER_WIDTH
+            } else {
+                0.
+            };
+        let labels = header_labels(header_width);
         h_flex()
             .debug_selector(|| "shell/islands/calendar".into())
             .flex_1()
@@ -773,7 +987,8 @@ impl Render for CalendarView {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(self.header(start, span, compact))
+                    .child(self.header(start, span, &dates, &layout, compact, labels))
+                    .children(load_notices(&self.state, &failures, loading))
                     .children(meeting_proposal_cards(cx))
                     .map(|calendar| {
                         if span == CalendarSpan::Month {
@@ -782,16 +997,43 @@ impl Render for CalendarView {
                                 start,
                                 &days,
                                 &events,
+                                &colors,
                                 today,
                                 offset,
+                                layout.weekdays(),
                             ))
                         } else {
                             calendar
                                 .child(self.day_headers(&days, today))
-                                .children(self.all_day_row(&days, &events, send_response))
-                                .child(self.grid(&days, &events, today, now, send_response, cx))
+                                .children(self.all_day_row(&days, &events, &colors, send_response))
+                                .child(self.grid(
+                                    &days,
+                                    &events,
+                                    &colors,
+                                    &layout,
+                                    work_minutes,
+                                    today,
+                                    now,
+                                    send_response,
+                                    cx,
+                                ))
                         }
                     }),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::header_labels;
+
+    #[test]
+    fn header_buttons_drop_their_text_as_the_header_narrows() {
+        let wide = header_labels(1300.);
+        assert!(wide.primary && wide.secondary);
+        let middle = header_labels(900.);
+        assert!(middle.primary && !middle.secondary);
+        let narrow = header_labels(600.);
+        assert!(!narrow.primary && !narrow.secondary);
     }
 }

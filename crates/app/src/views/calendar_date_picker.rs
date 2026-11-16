@@ -1,45 +1,44 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use chrono::{Datelike, Duration, Local, Months, NaiveDate};
+use chrono::{Local, Months, NaiveDate, Weekday};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::popover::{Popover, PopoverState};
 use gpui_kit::component::{h_flex, v_flex};
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use super::calendar_mini_month::mini_month_grid;
 use crate::app_state::AppState;
-use crate::call::week_grid::{MONTH_GRID_DAYS, first_of_month, month_grid_start};
+use crate::call::week_grid::first_of_month;
 use crate::theme;
 
 pub const DATE_PICKER_TAG: &str = "shell/islands/calendar/date-picker";
-const WEEKDAY_LETTERS: [&str; 7] = ["M", "T", "W", "T", "F", "S", "S"];
 const CELL_SIZE: f32 = 32.;
 const PICKER_PADDING: f32 = 12.;
 
 pub struct DatePicker {
     app: Entity<AppState>,
     month: NaiveDate,
-    shown_start: NaiveDate,
-    shown_days: i64,
+    shown: Vec<NaiveDate>,
+    first_day: Weekday,
     popover: WeakEntity<PopoverState>,
 }
 
 impl DatePicker {
     fn new(
         app: Entity<AppState>,
-        shown_start: NaiveDate,
-        shown_days: i64,
+        shown: Vec<NaiveDate>,
+        first_day: Weekday,
         month: NaiveDate,
         popover: WeakEntity<PopoverState>,
     ) -> Self {
         DatePicker {
             app,
             month: first_of_month(month),
-            shown_start,
-            shown_days,
+            shown,
+            first_day,
             popover,
         }
     }
@@ -61,55 +60,25 @@ impl DatePicker {
             .update(cx, |popover, cx| popover.dismiss(window, cx))
             .ok();
     }
-
-    fn day_cell(&self, date: NaiveDate, today: NaiveDate, cx: &mut Context<Self>) -> Stateful<Div> {
-        let in_month = date.month() == self.month.month();
-        let shown =
-            self.shown_start <= date && date < self.shown_start + Duration::days(self.shown_days);
-        let is_today = date == today;
-        div()
-            .id(SharedString::from(format!("date-picker-{date}")))
-            .size(px(CELL_SIZE))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_full()
-            .cursor_pointer()
-            .text_size(px(12.))
-            .text_color(if in_month {
-                theme::text()
-            } else {
-                theme::text_faint()
-            })
-            .when(shown && !is_today, |cell| cell.bg(theme::popup_hover()))
-            .when(is_today, |cell| {
-                cell.bg(theme::accent()).text_color(theme::on_accent())
-            })
-            .when(!is_today, |cell| {
-                cell.hover(|cell| cell.bg(theme::border_strong()))
-            })
-            .child(date.day().to_string())
-            .on_click(cx.listener(move |this, _, window, cx| this.pick(date, window, cx)))
-    }
 }
 
 impl Render for DatePicker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let today = Local::now().date_naive();
-        let start = month_grid_start(self.month);
-        let days: Vec<NaiveDate> = (0..MONTH_GRID_DAYS)
-            .map(|offset| start + Duration::days(offset))
-            .collect();
-        let weeks = days
-            .chunks(7)
-            .map(|week| {
-                h_flex().children(
-                    week.iter()
-                        .map(|date| self.day_cell(*date, today, cx))
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let picker = cx.entity().downgrade();
+        let grid = mini_month_grid(
+            "date-picker",
+            self.month,
+            &self.shown,
+            self.first_day,
+            today,
+            CELL_SIZE,
+            Rc::new(move |date, window, cx| {
+                picker
+                    .update(cx, |picker, cx| picker.pick(date, window, cx))
+                    .ok();
+            }),
+        );
         v_flex()
             .debug_selector(|| DATE_PICKER_TAG.into())
             .p(px(PICKER_PADDING))
@@ -125,7 +94,7 @@ impl Render for DatePicker {
                             .text_size(px(14.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
-                            .child(self.month.format("%B %Y").to_string()),
+                            .child(app_base::format::month_year_label(self.month)),
                     )
                     .child(
                         h_flex()
@@ -134,7 +103,7 @@ impl Render for DatePicker {
                                     .small()
                                     .ghost()
                                     .icon(IconName::ChevronLeft)
-                                    .tooltip("Previous month")
+                                    .tooltip(crate::i18n::tr("calendar.view.previous_month_short"))
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.move_month(false, cx)),
                                     ),
@@ -144,32 +113,22 @@ impl Render for DatePicker {
                                     .small()
                                     .ghost()
                                     .icon(IconName::ChevronRight)
-                                    .tooltip("Next month")
+                                    .tooltip(crate::i18n::tr("calendar.view.next_month_short"))
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.move_month(true, cx)),
                                     ),
                             ),
                     ),
             )
-            .child(h_flex().children(WEEKDAY_LETTERS.iter().map(|letter| {
-                div()
-                    .size(px(CELL_SIZE))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(11.))
-                    .text_color(theme::text_muted())
-                    .child(*letter)
-            })))
-            .children(weeks)
+            .child(grid)
     }
 }
 
 pub fn date_picker_button(
     app: &Entity<AppState>,
     title: String,
-    shown_start: NaiveDate,
-    shown_days: i64,
+    shown: Vec<NaiveDate>,
+    first_day: Weekday,
     month: NaiveDate,
 ) -> AnyElement {
     let app = app.clone();
@@ -196,7 +155,8 @@ pub fn date_picker_button(
             }
             let popover = cx.entity().downgrade();
             let app = app.clone();
-            let created = cx.new(|_| DatePicker::new(app, shown_start, shown_days, month, popover));
+            let created =
+                cx.new(|_| DatePicker::new(app, shown.clone(), first_day, month, popover));
             *picker.borrow_mut() = Some(created.clone());
             created
         })
