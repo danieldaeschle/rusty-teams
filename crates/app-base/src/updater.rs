@@ -266,7 +266,8 @@ mod platform {
 
 /// Whether this build may replace itself from GitHub releases. On Linux only the copy
 /// installed in `~/.local/share/rusty-teams` updates; a binary run from a
-/// build folder or a package location is left alone.
+/// build folder or a package location is left alone. On macOS only an unsigned `.app`
+/// may swap its Mach-O; a signed or notarized bundle would fail Gatekeeper after that.
 pub fn self_update_allowed() -> bool {
     #[cfg(target_os = "linux")]
     {
@@ -278,9 +279,10 @@ pub fn self_update_allowed() -> bool {
     #[cfg(target_os = "macos")]
     {
         return std::env::current_exe().is_ok_and(|executable| {
-            executable
-                .components()
-                .any(|part| part.as_os_str().to_string_lossy().ends_with(".app"))
+            let Some(bundle) = app_bundle(&executable) else {
+                return false;
+            };
+            macos_self_update_ok(&executable, bundle_is_signed(bundle))
         });
     }
     #[cfg(windows)]
@@ -290,6 +292,33 @@ pub fn self_update_allowed() -> bool {
     #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         false
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn app_bundle(executable: &Path) -> Option<&Path> {
+    executable.ancestors().find(|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".app"))
+    })
+}
+
+/// `signed` is the `codesign` result for the bundle. A signed Mach-O must stay put.
+#[cfg(any(test, target_os = "macos"))]
+fn macos_self_update_ok(executable: &Path, signed: bool) -> bool {
+    app_bundle(executable).is_some() && !signed
+}
+
+#[cfg(target_os = "macos")]
+fn bundle_is_signed(bundle: &Path) -> bool {
+    match Command::new("/usr/bin/codesign")
+        .args(["--verify", "--strict"])
+        .arg(bundle)
+        .output()
+    {
+        Ok(output) => output.status.success(),
+        Err(_) => true,
     }
 }
 
@@ -359,6 +388,15 @@ mod tests {
         assert!(!update_is_ready("a-1", Some("b-2"), false));
         assert!(!update_is_ready("a-1", None, true));
         assert!(!update_is_ready("a-1", Some("  \n"), true));
+    }
+
+    #[test]
+    fn macos_self_update_stays_off_for_a_signed_bundle() {
+        let executable = Path::new("/Applications/RustyTeams.app/Contents/MacOS/teams");
+        assert!(macos_self_update_ok(executable, false));
+        assert!(!macos_self_update_ok(executable, true));
+        assert!(!macos_self_update_ok(Path::new("/tmp/teams"), false));
+        assert!(app_bundle(executable).is_some());
     }
 
     #[test]

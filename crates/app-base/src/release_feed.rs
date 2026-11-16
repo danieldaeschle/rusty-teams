@@ -33,6 +33,11 @@ const EXECUTABLE_MAGIC: &[u8] = b"\x7fELF";
 const ASSET_SUFFIX: &str = "-macos-universal";
 #[cfg(target_os = "macos")]
 const EXECUTABLE_MAGIC: &[u8] = b"\xca\xfe\xba\xbe";
+/// Other targets still compile. The suffix matches no release asset, so the feed stays idle.
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+const ASSET_SUFFIX: &str = "-unsupported";
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+const EXECUTABLE_MAGIC: &[u8] = b"\0unsupported";
 const PARTIAL_SUFFIX: &str = ".partial";
 const DOWNLOAD_CHUNK: usize = 64 * 1024;
 const SHA256_PREFIX: &str = "sha256:";
