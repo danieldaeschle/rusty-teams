@@ -116,11 +116,14 @@ pub fn message_payload(
     } else {
         Urgency::Normal
     };
-    let mut actions = vec![DesktopAction {
-        id: action::MARK_READ,
-        label: labels.mark_read.clone(),
-    }];
-    if model.agent.is_none() && !model.status_change {
+    let mut actions = Vec::new();
+    if model.org.is_none() {
+        actions.push(DesktopAction {
+            id: action::MARK_READ,
+            label: labels.mark_read.clone(),
+        });
+    }
+    if model.agent.is_none() && !model.status_change && model.org.is_none() {
         actions.push(DesktopAction {
             id: action::REPLY,
             label: labels.reply.clone(),
@@ -260,6 +263,7 @@ mod tests {
             agent: None,
             status_change: false,
             urgent,
+            org: None,
         }
     }
 
@@ -284,6 +288,21 @@ mod tests {
         let model = toast(false, true, Preview::Text("down".into()));
         let payload = message_payload(&model, true, &message_labels());
         assert_eq!(payload.urgency, Urgency::Critical);
+    }
+
+    #[test]
+    fn a_message_from_another_org_offers_no_actions() {
+        let mut model = toast(false, false, Preview::Text("hi".into()));
+        model.org = Some(app_base::orgs::Org {
+            id: "guest".into(),
+            name: "Guest Org".into(),
+            guest: true,
+        });
+        assert!(
+            message_payload(&model, true, &message_labels())
+                .actions
+                .is_empty()
+        );
     }
 
     #[test]

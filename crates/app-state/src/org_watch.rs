@@ -35,6 +35,10 @@ pub(crate) async fn watch(
     me: Option<String>,
     events: mpsc::UnboundedSender<BackendEvent>,
 ) {
+    let me = match me {
+        Some(me) => Some(me),
+        None => own_object_id(&session).await,
+    };
     let listing = ChatListing::new(&session);
     let conversations = Conversations::new(&session);
     let mut muted: HashMap<String, bool> = HashMap::new();
@@ -85,6 +89,16 @@ pub(crate) async fn watch(
             )),
         }
         tokio::time::sleep(RETRY).await;
+    }
+}
+
+async fn own_object_id(session: &Session) -> Option<String> {
+    match graph::Graph::new(session.clone()).me().await {
+        Ok(user) => Some(user.id.to_ascii_lowercase()),
+        Err(error) => {
+            crate::diagnostics::record(format!("orgs: own id in another org not read: {error}"));
+            None
+        }
     }
 }
 
