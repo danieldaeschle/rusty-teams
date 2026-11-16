@@ -240,7 +240,7 @@ fn mute_badge() -> Div {
         .justify_center()
         .rounded_full()
         .bg(theme::red())
-        .child(icon(IconName::MicOff, 13., theme::white()))
+        .child(icon(IconName::MicOff, 14., theme::white()))
 }
 
 struct NamePlate {
