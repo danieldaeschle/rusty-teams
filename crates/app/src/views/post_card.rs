@@ -282,6 +282,8 @@ fn message_block(
         timeline,
         agent_run,
         reaction_proposal,
+        open_context,
+        context_menu,
         ..
     } = actions;
     let note = delivery_note(row, delivery, index);
@@ -371,9 +373,19 @@ fn message_block(
         .when_some(hovered, |block, hovered| {
             block.on_hover(move |is_hovered, _, cx| hovered(*is_hovered, cx))
         })
-        .when_some(reply, |block, reply| {
-            block.on_mouse_down(MouseButton::Right, move |_, _, cx| reply(cx))
+        .map(|block| match (open_context, reply) {
+            (Some(open_context), _) => {
+                block.on_mouse_down(MouseButton::Right, move |event, _, cx| {
+                    cx.stop_propagation();
+                    open_context(event.position, cx)
+                })
+            }
+            (None, Some(reply)) => {
+                block.on_mouse_down(MouseButton::Right, move |_, _, cx| reply(cx))
+            }
+            (None, None) => block,
         })
+        .children(context_menu)
         .child(layout)
         .when_some(menu, |block, menu| {
             block.child(placed_toolbar(

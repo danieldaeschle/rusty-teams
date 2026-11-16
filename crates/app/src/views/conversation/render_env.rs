@@ -289,12 +289,14 @@ impl RenderEnv {
             let (view, key, handle) = (view.clone(), message.key.clone(), window.window_handle());
             boxed(move |cx| {
                 let (view, key) = (view.clone(), key.clone());
-                handle
-                    .update(cx, move |_, window, cx| {
-                        view.update(cx, |this, cx| this.begin_reply(&key, window, cx))
-                            .ok();
-                    })
-                    .ok();
+                cx.defer(move |cx| {
+                    handle
+                        .update(cx, move |_, window, cx| {
+                            view.update(cx, |this, cx| this.begin_reply(&key, window, cx))
+                                .ok();
+                        })
+                        .ok();
+                });
             })
         });
         let files = (is_real && !message.deleted && !message.files.is_empty())
@@ -535,17 +537,43 @@ impl RenderEnv {
             .as_ref()
             .filter(|(open_root, _)| *open_root == root_key)
             .map(|(_, composer)| self.inline_reply_editor(composer));
+        let mut root = self.message_actions(&post.root, window, cx);
+        let mut replies: Vec<RowActions> = post
+            .replies
+            .iter()
+            .map(|reply| self.message_actions(reply, window, cx))
+            .collect();
+        if !is_local {
+            for actions in std::iter::once(&mut root).chain(replies.iter_mut()) {
+                if actions.reply.is_some() {
+                    actions.reply = Some(self.reply_in_thread(root_key.clone(), window));
+                }
+            }
+        }
         PostActions {
-            root: self.message_actions(&post.root, window, cx),
-            replies: post
-                .replies
-                .iter()
-                .map(|reply| self.message_actions(reply, window, cx))
-                .collect(),
+            root,
+            replies,
             open_thread,
             open_reply,
             reply_editor,
         }
+    }
+
+    fn reply_in_thread(&self, root_key: String, window: &Window) -> Box<dyn Fn(&mut App)> {
+        let (view, handle) = (self.view.clone(), window.window_handle());
+        boxed(move |cx| {
+            let (view, root_key) = (view.clone(), root_key.clone());
+            cx.defer(move |cx| {
+                handle
+                    .update(cx, move |_, window, cx| {
+                        view.update(cx, |this, cx| {
+                            this.open_reply_editor(root_key, None, window, cx)
+                        })
+                        .ok();
+                    })
+                    .ok();
+            });
+        })
     }
 
     fn inline_reply_editor(&self, composer: &Entity<Composer>) -> AnyElement {
