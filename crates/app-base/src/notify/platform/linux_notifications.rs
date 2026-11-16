@@ -74,6 +74,7 @@ pub struct DesktopNotifications {
     commands: Sender<Command>,
     events: Mutex<Receiver<NotificationEvent>>,
     startup: Mutex<Option<Startup>>,
+    worker_gone: AtomicBool,
 }
 
 struct Startup {
@@ -109,11 +110,16 @@ impl DesktopNotifications {
                 ready: ready_rx,
                 since: Instant::now(),
             })),
+            worker_gone: AtomicBool::new(false),
         })
     }
 
     /// Without a notification daemon the caller falls back to its own toast windows.
     pub fn failed(&self) -> bool {
+        if self.worker_gone.load(Ordering::Relaxed) {
+            log_missing_once("notification worker stopped");
+            return true;
+        }
         let Ok(mut startup) = self.startup.lock() else {
             return true;
         };
@@ -135,7 +141,13 @@ impl DesktopNotifications {
     }
 
     pub fn sync(&self, visible: Vec<BusNotification>, close: Vec<String>) {
-        let _ = self.commands.send(Command::Sync { visible, close });
+        if self
+            .commands
+            .send(Command::Sync { visible, close })
+            .is_err()
+        {
+            self.worker_gone.store(true, Ordering::Relaxed);
+        }
     }
 
     pub fn poll(&self) -> Vec<NotificationEvent> {
@@ -209,7 +221,7 @@ async fn worker(
 
     let mut by_replace: HashMap<String, Published> = HashMap::new();
     let mut by_dbus: HashMap<u32, String> = HashMap::new();
-    let mut supports_inline_reply = caps.iter().any(|cap| cap == "inline-reply");
+    let supports_inline_reply = caps.iter().any(|cap| cap == "inline-reply");
 
     let mut action_stream = match receive_signal(&connection, "ActionInvoked").await {
         Ok(stream) => stream,
@@ -259,23 +271,28 @@ async fn worker(
                 }
             }
             _ = tokio::time::sleep(Duration::from_millis(40)) => {
-                match commands.try_recv() {
-                    Ok(Command::Shutdown) | Err(TryRecvError::Disconnected) => break,
-                    Err(TryRecvError::Empty) => {}
-                    Ok(Command::Sync { visible, close }) => {
-                        if let Ok(caps) = get_capabilities(&connection).await {
-                            supports_inline_reply = caps.iter().any(|cap| cap == "inline-reply");
+                let mut latest = None;
+                let mut close = Vec::new();
+                loop {
+                    match commands.try_recv() {
+                        Ok(Command::Shutdown) | Err(TryRecvError::Disconnected) => return,
+                        Err(TryRecvError::Empty) => break,
+                        Ok(Command::Sync { visible, close: closing }) => {
+                            close.extend(closing);
+                            latest = Some(visible);
                         }
-                        apply_sync(
-                            &connection,
-                            &mut by_replace,
-                            &mut by_dbus,
-                            visible,
-                            close,
-                            supports_inline_reply,
-                        )
-                        .await;
                     }
+                }
+                if let Some(visible) = latest {
+                    apply_sync(
+                        &connection,
+                        &mut by_replace,
+                        &mut by_dbus,
+                        visible,
+                        close,
+                        supports_inline_reply,
+                    )
+                    .await;
                 }
             }
         }
