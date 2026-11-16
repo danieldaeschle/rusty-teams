@@ -3,10 +3,10 @@ mod windows_impl;
 #[cfg(windows)]
 pub use windows_impl::*;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-mod linux_sound;
 #[cfg(target_os = "linux")]
 mod linux_notifications;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod linux_sound;
 #[cfg(target_os = "linux")]
 mod linux_tray;
 #[cfg(not(windows))]

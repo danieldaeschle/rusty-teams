@@ -1,11 +1,9 @@
-//! Desktop notifications on Linux through `org.freedesktop.Notifications`.
-
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use zbus::Connection;
@@ -18,9 +16,10 @@ const SERVICE: &str = "org.freedesktop.Notifications";
 const PATH: &str = "/org/freedesktop/Notifications";
 const INTERFACE: &str = "org.freedesktop.Notifications";
 
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(3);
+
 static MISSING_DAEMON_LOGGED: AtomicBool = AtomicBool::new(false);
 
-/// RGBA image attached as the freedesktop `image-data` hint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationImage {
     pub width: u32,
@@ -28,7 +27,6 @@ pub struct NotificationImage {
     pub rgba: Vec<u8>,
 }
 
-/// One notification the session bus should show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BusNotification {
     pub logical_key: String,
@@ -44,17 +42,14 @@ pub struct BusNotification {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotificationEvent {
-    /// Default activation or a named action (not inline-reply text).
     Action {
         logical_key: String,
         action_id: String,
     },
-    /// Inline reply text from the shell.
     Reply {
         logical_key: String,
         text: String,
     },
-    /// User or shell closed the notification (reason 2 = dismissed by user).
     Closed {
         logical_key: String,
         reason: u32,
@@ -75,10 +70,15 @@ struct Published {
     fingerprint: u64,
 }
 
-/// Linux desktop notification client. Poll from the UI tick like the tray.
 pub struct DesktopNotifications {
     commands: Sender<Command>,
     events: Mutex<Receiver<NotificationEvent>>,
+    startup: Mutex<Option<Startup>>,
+}
+
+struct Startup {
+    ready: Receiver<Result<(), String>>,
+    since: Instant,
 }
 
 impl DesktopNotifications {
@@ -102,20 +102,36 @@ impl DesktopNotifications {
                 runtime.block_on(worker(command_rx, event_tx, ready_tx));
             })
             .ok()?;
-        match ready_rx.recv_timeout(Duration::from_secs(3)) {
-            Ok(Ok(())) => Some(Self {
-                commands: command_tx,
-                events: Mutex::new(event_rx),
-            }),
-            Ok(Err(error)) => {
-                log_missing_once(&error);
-                None
+        Some(Self {
+            commands: command_tx,
+            events: Mutex::new(event_rx),
+            startup: Mutex::new(Some(Startup {
+                ready: ready_rx,
+                since: Instant::now(),
+            })),
+        })
+    }
+
+    /// Without a notification daemon the caller falls back to its own toast windows.
+    pub fn failed(&self) -> bool {
+        let Ok(mut startup) = self.startup.lock() else {
+            return true;
+        };
+        let Some(pending) = startup.as_ref() else {
+            return false;
+        };
+        let error = match pending.ready.try_recv() {
+            Ok(Ok(())) => {
+                *startup = None;
+                return false;
             }
-            Err(_) => {
-                log_missing_once("notification worker did not start");
-                None
-            }
-        }
+            Err(TryRecvError::Empty) if pending.since.elapsed() < STARTUP_TIMEOUT => return false,
+            Ok(Err(error)) => error,
+            Err(TryRecvError::Empty) => "notification daemon did not answer".to_owned(),
+            Err(TryRecvError::Disconnected) => "notification worker did not start".to_owned(),
+        };
+        log_missing_once(&error);
+        true
     }
 
     pub fn sync(&self, visible: Vec<BusNotification>, close: Vec<String>) {
@@ -205,9 +221,7 @@ async fn worker(
     let mut replied_stream = receive_signal(&connection, "NotificationReplied")
         .await
         .ok();
-    let mut closed_stream = receive_signal(&connection, "NotificationClosed")
-        .await
-        .ok();
+    let mut closed_stream = receive_signal(&connection, "NotificationClosed").await.ok();
 
     loop {
         tokio::select! {
@@ -287,8 +301,10 @@ async fn apply_sync(
             by_replace.remove(&replace_key);
         }
     }
-    let visible_keys: std::collections::HashSet<_> =
-        visible.iter().map(|note| note.replace_key.clone()).collect();
+    let visible_keys: std::collections::HashSet<_> = visible
+        .iter()
+        .map(|note| note.replace_key.clone())
+        .collect();
     by_replace.retain(|key, published| {
         if visible_keys.contains(key) {
             true
@@ -330,16 +346,13 @@ async fn apply_sync(
 
 async fn get_capabilities(connection: &Connection) -> Result<Vec<String>, String> {
     let reply = connection
-        .call_method(
-            Some(SERVICE),
-            PATH,
-            Some(INTERFACE),
-            "GetCapabilities",
-            &(),
-        )
+        .call_method(Some(SERVICE), PATH, Some(INTERFACE), "GetCapabilities", &())
         .await
         .map_err(|error| error.to_string())?;
-    reply.body().deserialize().map_err(|error| error.to_string())
+    reply
+        .body()
+        .deserialize()
+        .map_err(|error| error.to_string())
 }
 
 async fn close_notification(connection: &Connection, id: u32) -> Result<(), String> {
@@ -367,7 +380,6 @@ async fn notify(
     actions.push(String::new());
     for (id, label) in &note.actions {
         let id = if id == "inline-reply" && !supports_inline_reply {
-            // Shell has no inline reply field; treat as open-chat.
             "reply-open"
         } else {
             id.as_str()
@@ -416,7 +428,10 @@ async fn notify(
         )
         .await
         .map_err(|error| error.to_string())?;
-    reply.body().deserialize().map_err(|error| error.to_string())
+    reply
+        .body()
+        .deserialize()
+        .map_err(|error| error.to_string())
 }
 
 async fn receive_signal(
@@ -491,7 +506,6 @@ fn inhibit_runtime() -> Option<&'static tokio::runtime::Runtime> {
         .as_ref()
 }
 
-/// Reads the optional `Inhibited` property (Plasma / modern GNOME). Missing → false.
 pub fn notifications_inhibited() -> bool {
     let Some(runtime) = inhibit_runtime() else {
         return false;

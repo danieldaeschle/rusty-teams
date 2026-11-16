@@ -8,10 +8,18 @@ use store::Sidebar;
 use teams_core::{ForcedAvailability, ForcedKind};
 
 use super::badge::{Badge, badge_for};
+#[cfg(target_os = "linux")]
+use super::desktop_payload::{
+    self, DesktopKey, DesktopPayload, MeetingLabels, MessageLabels, RingLabels, action,
+};
 use super::incoming::IncomingTracker;
 use super::layout::{self, MEETING_HEIGHT, Slot, ring_height};
 use super::meeting_view::MeetingToastView;
 use super::platform::{self, NativeHandle, Tray, TrayCommand, WorkArea};
+#[cfg(target_os = "linux")]
+use super::platform::{
+    BusNotification, DesktopNotifications, NotificationEvent, NotificationImage,
+};
 use super::ring_view::RingView;
 use super::rules::{
     ChatKind, Decision, Environment, Incoming, Preview, Settings, SoundThrottle, decide,
@@ -25,16 +33,7 @@ use super::stack::{
     AgentToast, AgentToastKind, FADE_IN, FAST_FADE, ReplyState, SENT_DURATION, SLOW_FADE,
     ToastModel, ToastStack,
 };
-#[cfg(target_os = "linux")]
-use super::desktop_payload::{
-    self, DesktopKey, DesktopPayload, MeetingLabels, MessageLabels, RingLabels, action,
-};
-#[cfg(target_os = "linux")]
-use super::platform::{
-    BusNotification, DesktopNotifications, NotificationEvent, NotificationImage,
-};
 use super::taskbar::taskbar_badge_count;
-#[cfg(not(target_os = "linux"))]
 use super::text::describe;
 use super::toast::{PillView, ToastView};
 use super::urgent_repeat::UrgentRepeats;
@@ -48,7 +47,6 @@ use crate::appearance::AppIcon;
 use crate::autostart::{self, StartupSettings};
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
-use crate::own_status::{self, StatusDuration};
 use crate::runtime;
 use crate::settings_section::SettingsSection;
 use crate::single_instance;
@@ -119,12 +117,10 @@ pub struct NotificationCenter {
     tray_do_not_disturb: bool,
     #[cfg(target_os = "linux")]
     desktop: Option<DesktopNotifications>,
-    /// Logical keys to CloseNotification on the next desktop sync (dismiss / open / ring gone).
     #[cfg(target_os = "linux")]
     desktop_close: Vec<String>,
     #[cfg(target_os = "linux")]
     desktop_published: HashSet<String>,
-    /// Decoded 64×64 notification avatars, keyed by user id and source fingerprint.
     #[cfg(target_os = "linux")]
     desktop_avatar_cache: HashMap<String, (u64, NotificationImage)>,
     app_icon: AppIcon,
@@ -816,63 +812,58 @@ impl NotificationCenter {
 
     fn sync_windows(&mut self, cx: &mut Context<Self>) {
         #[cfg(target_os = "linux")]
-        {
-            // `tick` polls desktop events once per frame; sync only publishes.
+        if self.desktop.is_some() {
             self.sync_desktop(cx);
             return;
         }
-        #[cfg(not(target_os = "linux"))]
-        {
-            let visible = self.visible_ids();
-            let stale: Vec<u64> = self
-                .windows
-                .keys()
-                .filter(|id| !visible.contains(id))
-                .copied()
-                .collect();
-            for id in stale {
-                self.close_window(id, cx);
-            }
-            let call_toasts = self.call_toasts(cx);
-            let stale_call_toasts: Vec<CallToast> = self
-                .call_windows
-                .keys()
-                .filter(|key| !call_toasts.iter().any(|(toast, _)| toast == *key))
-                .copied()
-                .collect();
-            for key in stale_call_toasts {
-                self.close_call_window(key, cx);
-            }
-            let area = self.work_area(cx);
-            let mut heights: Vec<f32> = self
-                .stack
-                .visible()
-                .iter()
-                .map(|toast| {
-                    let lines = match &toast.agent {
-                        Some(agent) => wrapped_lines(&agent.body, layout::AGENT_BODY_WIDTH, cx),
-                        None => preview_lines(
-                            &describe(toast, shows_preview(&self.settings)).preview,
-                            cx,
-                        ),
-                    };
-                    layout::toast_height(toast, lines)
-                })
-                .collect();
-            heights.extend(call_toasts.iter().map(|(_, height)| *height));
-            let with_hide_all = visible.len() > 1 || self.stack.queued_count() > 0;
-            let slots = layout::stack_slots(area, self.settings.corner, &heights, with_hide_all);
-            for (id, slot) in visible.iter().zip(slots.toasts.iter()) {
-                self.place_toast(*id, *slot, area, cx);
-            }
-            for ((key, _), slot) in call_toasts
-                .iter()
-                .zip(slots.toasts.iter().skip(visible.len()))
-            {
-                self.place_call_toast(*key, *slot, area, cx);
-            }
-            self.sync_pill(slots.pill, area, cx);
+        let visible = self.visible_ids();
+        let stale: Vec<u64> = self
+            .windows
+            .keys()
+            .filter(|id| !visible.contains(id))
+            .copied()
+            .collect();
+        for id in stale {
+            self.close_window(id, cx);
         }
+        let call_toasts = self.call_toasts(cx);
+        let stale_call_toasts: Vec<CallToast> = self
+            .call_windows
+            .keys()
+            .filter(|key| !call_toasts.iter().any(|(toast, _)| toast == *key))
+            .copied()
+            .collect();
+        for key in stale_call_toasts {
+            self.close_call_window(key, cx);
+        }
+        let area = self.work_area(cx);
+        let mut heights: Vec<f32> = self
+            .stack
+            .visible()
+            .iter()
+            .map(|toast| {
+                let lines = match &toast.agent {
+                    Some(agent) => wrapped_lines(&agent.body, layout::AGENT_BODY_WIDTH, cx),
+                    None => {
+                        preview_lines(&describe(toast, shows_preview(&self.settings)).preview, cx)
+                    }
+                };
+                layout::toast_height(toast, lines)
+            })
+            .collect();
+        heights.extend(call_toasts.iter().map(|(_, height)| *height));
+        let with_hide_all = visible.len() > 1 || self.stack.queued_count() > 0;
+        let slots = layout::stack_slots(area, self.settings.corner, &heights, with_hide_all);
+        for (id, slot) in visible.iter().zip(slots.toasts.iter()) {
+            self.place_toast(*id, *slot, area, cx);
+        }
+        for ((key, _), slot) in call_toasts
+            .iter()
+            .zip(slots.toasts.iter().skip(visible.len()))
+        {
+            self.place_call_toast(*key, *slot, area, cx);
+        }
+        self.sync_pill(slots.pill, area, cx);
     }
 
     fn place_call_toast(
@@ -1176,9 +1167,17 @@ impl NotificationCenter {
             || self.app.read(cx).rings.is_ringing()
             || !self.app.read(cx).meeting_toasts.is_empty();
         #[cfg(target_os = "linux")]
-        let needs_sync = needs_sync
-            || !self.desktop_close.is_empty()
-            || !self.desktop_published.is_empty();
+        let needs_sync =
+            needs_sync || !self.desktop_close.is_empty() || !self.desktop_published.is_empty();
+        #[cfg(target_os = "linux")]
+        if self
+            .desktop
+            .as_ref()
+            .is_some_and(DesktopNotifications::failed)
+        {
+            self.desktop = None;
+            self.desktop_published.clear();
+        }
         // Poll desktop actions before sync so dismiss/reply land in the same tick.
         #[cfg(target_os = "linux")]
         if self.desktop.is_some() {
@@ -1361,7 +1360,8 @@ impl NotificationCenter {
             if let Some(user_id) = toast.sender_id.as_deref() {
                 used_avatars.insert(user_id.to_owned());
             }
-            let image = self.avatar_notification_image(self.app.read(cx), toast.sender_id.as_deref());
+            let image =
+                self.avatar_notification_image(self.app.read(cx), toast.sender_id.as_deref());
             let payload = desktop_payload::message_payload(toast, preview_on, &message_labels);
             visible_logical.insert(payload.key.replace_token());
             visible.push(Self::to_bus(payload, image));
@@ -1385,7 +1385,6 @@ impl NotificationCenter {
             if visible_logical.contains(previous) {
                 continue;
             }
-            // Rings and meetings must leave the shell when the call/reminder ends.
             if previous.starts_with("ring:") || previous.starts_with("meeting:") {
                 close.push(previous.clone());
             }
@@ -1419,13 +1418,11 @@ impl NotificationCenter {
                     logical_key,
                     reason,
                 } => {
-                    // Reason 2 = dismissed by the user in the shell.
-                    if reason == 2
+                    if reason == CLOSED_BY_USER
                         && let Some(DesktopKey::Meeting(toast_id)) = parse_logical_key(&logical_key)
                     {
-                        self.app.update(cx, |state, cx| {
-                            state.dismiss_meeting_toast(toast_id, cx)
-                        });
+                        self.app
+                            .update(cx, |state, cx| state.dismiss_meeting_toast(toast_id, cx));
                     }
                 }
             }
@@ -1433,7 +1430,12 @@ impl NotificationCenter {
     }
 
     #[cfg(target_os = "linux")]
-    fn handle_desktop_action(&mut self, logical_key: &str, action_id: &str, cx: &mut Context<Self>) {
+    fn handle_desktop_action(
+        &mut self,
+        logical_key: &str,
+        action_id: &str,
+        cx: &mut Context<Self>,
+    ) {
         let Some(key) = parse_logical_key(logical_key) else {
             return;
         };
@@ -1851,7 +1853,6 @@ fn own_do_not_disturb(state: &AppState) -> bool {
     own_presence(state) == PresenceKind::DoNotDisturb
 }
 
-
 fn sync_loop(handle: &mut Option<SoundHandle>, audible: bool, tone: CallTone, cx: &App) {
     match (audible, handle.is_some()) {
         (true, false) => *handle = Some(sound_cache::start(tone.file_name(), true, cx)),
@@ -1897,6 +1898,9 @@ fn wrapped_lines(text: &str, width: f32, cx: &App) -> usize {
         })
         .sum()
 }
+
+#[cfg(target_os = "linux")]
+const CLOSED_BY_USER: u32 = 2;
 
 #[cfg(target_os = "linux")]
 fn parse_logical_key(key: &str) -> Option<DesktopKey> {

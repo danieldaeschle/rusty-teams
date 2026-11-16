@@ -1,14 +1,8 @@
-//! Pure desktop-notification payloads (no D-Bus). Linux maps these to
-//! `org.freedesktop.Notifications`; Windows keeps the GPUI card.
-
-use super::stack::{
-    MENTION_DURATION, MESSAGE_DURATION, ToastModel,
-};
+use super::stack::{MENTION_DURATION, MESSAGE_DURATION, ToastModel};
 use super::text::describe;
-use crate::call::reminder::MeetingToast;
 use crate::call::ReminderPhase;
+use crate::call::reminder::MeetingToast;
 
-/// Action ids used on the bus and when dispatching back into the notification center.
 pub mod action {
     pub const DEFAULT: &str = "default";
     pub const MARK_READ: &str = "mark-read";
@@ -53,7 +47,6 @@ pub struct DesktopAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopPayload {
     pub key: DesktopKey,
-    /// Stable replace key across updates (conversation, ring id, meeting event).
     pub replace_key: String,
     pub summary: String,
     pub body: String,
