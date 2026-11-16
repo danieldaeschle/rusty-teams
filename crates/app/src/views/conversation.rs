@@ -118,6 +118,7 @@ pub const HEADER_DIVIDER: &str = "shell/islands/main/divider-header";
 pub const TIMELINE_TAG: &str = "shell/islands/main/timeline";
 pub const FEED_EDGE_TAG: &str = "shell/islands/main/timeline/divider-feed";
 const SENT_PREVIEWS_KEPT: usize = 16;
+const HOVER_LEAVE_GRACE: Duration = Duration::from_millis(250);
 const POSTED_WITHOUT_BANNER: &str = "Posted, but Teams did not take the banner.";
 const QUIET_RETRY_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
@@ -251,6 +252,7 @@ pub struct ConversationView {
     pending_reactions: PendingReactions,
     downloads: Downloads,
     hovered_message: Option<String>,
+    hover_leave_serial: u64,
     toolbar_hovered: Option<String>,
     context_menu: Option<OpenContextMenu>,
     context_serial: u64,
@@ -701,6 +703,7 @@ impl ConversationView {
             pending_reactions: HashMap::new(),
             downloads: Downloads::default(),
             hovered_message: None,
+            hover_leave_serial: 0,
             toolbar_hovered: None,
             context_menu: None,
             context_serial: 0,
@@ -3019,23 +3022,20 @@ impl ConversationView {
         if hovered && matches!(slot, HoverSlot::Row) {
             self.request_post_follow(key, cx);
         }
-        let target = match slot {
-            HoverSlot::Row => &mut self.hovered_message,
-            HoverSlot::Toolbar => &mut self.toolbar_hovered,
-        };
-        if hovered {
-            *target = Some(key.to_owned());
-        } else if target.as_deref() == Some(key) {
-            *target = None;
+        if !hovered {
+            if self.hovered_message.as_deref() == Some(key)
+                || self.toolbar_hovered.as_deref() == Some(key)
+            {
+                self.leave_hover_later(key.to_owned(), cx);
+            }
+            return;
         }
-        if !hovered
-            && matches!(slot, HoverSlot::Row)
-            && self.toolbar_hovered.as_deref() == Some(key)
-        {
-            self.toolbar_hovered = None;
+        self.hover_leave_serial += 1;
+        match slot {
+            HoverSlot::Row => self.hovered_message = Some(key.to_owned()),
+            HoverSlot::Toolbar => self.toolbar_hovered = Some(key.to_owned()),
         }
-        if hovered
-            && matches!(slot, HoverSlot::Row)
+        if matches!(slot, HoverSlot::Row)
             && self
                 .toolbar_hovered
                 .as_deref()
@@ -3050,6 +3050,31 @@ impl ConversationView {
             self.toolbar_suppressed = None;
         }
         cx.notify();
+    }
+
+    fn leave_hover_later(&mut self, key: String, cx: &mut Context<Self>) {
+        self.hover_leave_serial += 1;
+        let serial = self.hover_leave_serial;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(HOVER_LEAVE_GRACE).await;
+            this.update(cx, |this, cx| {
+                if this.hover_leave_serial != serial {
+                    return;
+                }
+                if this.hovered_message.as_deref() == Some(key.as_str()) {
+                    this.hovered_message = None;
+                }
+                if this.toolbar_hovered.as_deref() == Some(key.as_str()) {
+                    this.toolbar_hovered = None;
+                }
+                if this.toolbar_suppressed.as_deref() == Some(key.as_str()) {
+                    this.toolbar_suppressed = None;
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn suppress_toolbar(&mut self, key: &str, cx: &mut Context<Self>) {
@@ -4671,7 +4696,9 @@ fn runway(content: impl IntoElement, comfy: bool) -> AnyElement {
 mod tests {
     use std::sync::Arc;
 
-    use super::{DropTarget, drop_overlay_text, typing_bottom_offset};
+    use super::{
+        DropTarget, HOVER_LEAVE_GRACE, HoverSlot, drop_overlay_text, typing_bottom_offset,
+    };
 
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{AppContext as _, TestAppContext, WindowOptions};
@@ -4708,6 +4735,45 @@ mod tests {
             detail,
             "2 files. Images go into the message. Files can be added once the chat exists."
         );
+    }
+
+    #[gpui_kit::test]
+    fn the_toolbar_outlives_a_short_leave_and_moves_at_once(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        crate::demo::seed(&store);
+        let view = cx.update(|cx| {
+            let app = cx.new(|_| AppState::new(store, Mode::default()));
+            gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+                cx.new(|cx| ConversationView::new(app, window, cx))
+            })
+            .unwrap()
+            .1
+        });
+        let hover = |cx: &mut TestAppContext, slot: HoverSlot, key: &str, hovered: bool| {
+            cx.update(|cx| view.update(cx, |this, cx| this.set_hover(slot, key, hovered, cx)));
+        };
+        let shown = |cx: &mut TestAppContext| {
+            cx.update(|cx| {
+                let this = view.read(cx);
+                (this.hovered_message.clone(), this.toolbar_hovered.clone())
+            })
+        };
+        hover(cx, HoverSlot::Row, "a", true);
+        hover(cx, HoverSlot::Row, "a", false);
+        assert_eq!(shown(cx).0.as_deref(), Some("a"));
+        hover(cx, HoverSlot::Toolbar, "a", true);
+        cx.executor().advance_clock(HOVER_LEAVE_GRACE * 2);
+        assert_eq!(shown(cx), (Some("a".into()), Some("a".into())));
+        hover(cx, HoverSlot::Toolbar, "a", false);
+        cx.executor().advance_clock(HOVER_LEAVE_GRACE * 2);
+        assert_eq!(shown(cx), (None, None));
+        hover(cx, HoverSlot::Row, "a", true);
+        hover(cx, HoverSlot::Row, "a", false);
+        hover(cx, HoverSlot::Row, "b", true);
+        assert_eq!(shown(cx).0.as_deref(), Some("b"));
+        cx.executor().advance_clock(HOVER_LEAVE_GRACE * 2);
+        assert_eq!(shown(cx).0.as_deref(), Some("b"));
     }
 
     #[gpui_kit::test]
