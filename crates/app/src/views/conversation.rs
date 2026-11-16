@@ -2230,7 +2230,7 @@ impl ConversationView {
                 }
                 self.mark_fetched_new(newest_cached, started_at, cx)
             }
-            Ok(Err(error)) if Self::denies_access(&error) => self.fail_access(generation, cx),
+            Ok(Err(error)) if Self::denies_access(&error) => self.fail_access(generation),
             Ok(Err(error)) => self.fail_sync(generation, short_error(&error), cx),
             Err(error) => self.fail_sync(generation, short_error(&error), cx),
         }
@@ -2268,13 +2268,7 @@ impl ConversationView {
         matches!(error, teams_core::Error::Graph(graph::Error::NotAMember))
     }
 
-    fn fail_access(&mut self, generation: u64, _cx: &mut Context<Self>) {
-        let conversation_id = self
-            .current
-            .as_ref()
-            .map(|current| current.selection.conversation_id().to_owned())
-            .unwrap_or_default();
-        log::info!("chat access denied: {conversation_id} HTTP 403 AclCheckFailed");
+    fn fail_access(&mut self, generation: u64) {
         if let Some(sync) = self.sync_of(generation) {
             sync.failed = true;
             sync.receipts = false;
