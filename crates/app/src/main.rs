@@ -202,6 +202,7 @@ fn main() {
             .unwrap_or_else(|| data_path(diagnostics::DIAGNOSTICS_FILE)),
     );
     let _ = diagnostics::enable_from_override();
+    store::report_slow_locks_to(|message| diagnostics::record(message));
     #[cfg(target_os = "linux")]
     app_base::linux_fonts::hide_system_color_emoji();
     let arguments = parse_arguments();

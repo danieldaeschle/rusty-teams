@@ -1,5 +1,8 @@
+use std::ops::{Deref, DerefMut};
+use std::panic::Location;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::{Duration, Instant};
 
 use directories::ProjectDirs;
 use rusqlite::Connection;
@@ -9,6 +12,20 @@ use crate::migrations;
 
 pub const DATA_DIR_NAME: &str = "ms-teams-linux";
 const DATABASE_FILE: &str = "cache.sqlite3";
+const SLOW_WAIT: Duration = Duration::from_millis(50);
+const SLOW_HOLD: Duration = Duration::from_millis(100);
+
+static SLOW_LOCK_REPORTER: OnceLock<fn(String)> = OnceLock::new();
+
+pub fn report_slow_locks_to(reporter: fn(String)) {
+    let _ = SLOW_LOCK_REPORTER.set(reporter);
+}
+
+fn report_slow_lock(message: String) {
+    if let Some(reporter) = SLOW_LOCK_REPORTER.get() {
+        reporter(message);
+    }
+}
 
 pub fn default_database_path() -> Result<PathBuf> {
     let directories = ProjectDirs::from("", "", DATA_DIR_NAME).ok_or(Error::NoDataDirectory)?;
@@ -58,9 +75,66 @@ impl Store {
             .pragma_query_value(None, "user_version", |row| row.get(0))?)
     }
 
-    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, Connection>> {
-        self.connection.lock().map_err(|_| Error::Poisoned)
+    #[track_caller]
+    pub(crate) fn lock(&self) -> Result<StoreGuard<'_>> {
+        let location = Location::caller();
+        let asked = Instant::now();
+        let connection = self.connection.lock().map_err(|_| Error::Poisoned)?;
+        let waited = asked.elapsed();
+        if waited >= SLOW_WAIT {
+            report_slow_lock(format!(
+                "store lock waited {} ms at {location} on {}",
+                waited.as_millis(),
+                thread_label()
+            ));
+        }
+        Ok(StoreGuard {
+            connection,
+            location,
+            taken: Instant::now(),
+        })
     }
+}
+
+pub(crate) struct StoreGuard<'a> {
+    connection: MutexGuard<'a, Connection>,
+    location: &'static Location<'static>,
+    taken: Instant,
+}
+
+impl Deref for StoreGuard<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        &self.connection
+    }
+}
+
+impl DerefMut for StoreGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.connection
+    }
+}
+
+impl Drop for StoreGuard<'_> {
+    fn drop(&mut self) {
+        let held = self.taken.elapsed();
+        if held >= SLOW_HOLD {
+            report_slow_lock(format!(
+                "store lock held {} ms at {} on {}",
+                held.as_millis(),
+                self.location,
+                thread_label()
+            ));
+        }
+    }
+}
+
+fn thread_label() -> String {
+    let thread = std::thread::current();
+    thread
+        .name()
+        .map_or_else(|| format!("{:?}", thread.id()), str::to_owned)
 }
 
 pub(crate) fn json_ids(ids: &[String]) -> String {
