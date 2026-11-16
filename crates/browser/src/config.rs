@@ -6,12 +6,10 @@ use crate::error::BrowserError;
 
 pub const PROFILE_NAME: &str = "rusty-teams-chrome";
 pub const FIREFOX_PROFILE_NAME: &str = "rusty-teams-firefox";
-/// Path to the sign-in browser executable, overriding the search. Firefox-family names run over WebDriver BiDi.
-pub const BROWSER_OVERRIDE_ENV: &str = "RUSTY_TEAMS_SIGN_IN_BROWSER";
 pub const DEFAULT_PORT: u16 = 9222;
 const CHROME_RELATIVE: &str = r"Google\Chrome\Application\chrome.exe";
 const WINDOWS_VARIABLES: [&str; 4] = ["LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "TEMP"];
-const LINUX_CHROME_NAMES: [&str; 5] = [
+pub(crate) const LINUX_CHROME_NAMES: [&str; 5] = [
     "google-chrome",
     "google-chrome-stable",
     "chromium",
@@ -21,7 +19,7 @@ const LINUX_CHROME_NAMES: [&str; 5] = [
 const MACOS_CHROME_NAMES: [&str; 3] = ["google-chrome", "chromium", "chrome"];
 /// Chromium-based browsers in order of preference; each one gets its own profile, so the user's
 /// everyday browser stays untouched.
-const MACOS_CHROME_APP_PATHS: [&str; 6] = [
+pub(crate) const MACOS_CHROME_APP_PATHS: [&str; 6] = [
     "Google Chrome.app/Contents/MacOS/Google Chrome",
     "Chromium.app/Contents/MacOS/Chromium",
     "Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
@@ -30,13 +28,14 @@ const MACOS_CHROME_APP_PATHS: [&str; 6] = [
     "Vivaldi.app/Contents/MacOS/Vivaldi",
 ];
 /// Firefox-based browsers, tried only when no Chromium browser is installed.
-const MACOS_FIREFOX_APP_PATHS: [&str; 4] = [
+pub(crate) const MACOS_FIREFOX_APP_PATHS: [&str; 4] = [
     "Firefox.app/Contents/MacOS/firefox",
     "Zen.app/Contents/MacOS/zen",
     "LibreWolf.app/Contents/MacOS/librewolf",
     "Floorp.app/Contents/MacOS/floorp",
 ];
-const LINUX_FIREFOX_NAMES: [&str; 5] = ["firefox", "zen-browser", "zen", "librewolf", "floorp"];
+pub(crate) const LINUX_FIREFOX_NAMES: [&str; 5] =
+    ["firefox", "zen-browser", "zen", "librewolf", "floorp"];
 
 /// The protocol family of the sign-in browser: Chromium speaks CDP, Firefox WebDriver BiDi.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,9 +131,6 @@ impl Config {
                 .collect(),
             Platform::Wsl => wsl_windows_variables()?,
         };
-        let override_path = std::env::var_os(BROWSER_OVERRIDE_ENV)
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from);
         let base = directories::BaseDirs::new();
         let linux_data_dir = base.as_ref().map(|dirs| dirs.data_dir().to_path_buf());
         let home_dir = base.as_ref().map(|dirs| dirs.home_dir().to_path_buf());
@@ -155,24 +151,24 @@ impl Config {
             },
         )?;
         let path_variable = std::env::var_os("PATH").unwrap_or_default();
-        Ok(config.select_browser(
-            override_path,
-            home_dir.as_deref(),
-            &path_variable,
-            &|path| path.is_file(),
-        ))
+        let chosen = crate::sign_in_choice::chosen_executable(platform, home_dir.as_deref());
+        Ok(
+            config.select_browser(chosen, home_dir.as_deref(), &path_variable, &|path| {
+                path.is_file()
+            }),
+        )
     }
 
-    /// Picks the sign-in browser: the override path, else the first Chromium browser, else the
-    /// first Firefox-based one on Linux and macOS. A Firefox browser gets its own profile.
+    /// Uses `chosen` as the sign-in browser, else the first Chromium browser, else the first
+    /// Firefox-based one on Linux and macOS. A Firefox browser gets its own profile.
     pub(crate) fn select_browser(
         mut self,
-        override_path: Option<PathBuf>,
+        chosen: Option<PathBuf>,
         home_dir: Option<&Path>,
         path_variable: &std::ffi::OsStr,
         exists: &dyn Fn(&Path) -> bool,
     ) -> Config {
-        if let Some(path) = override_path {
+        if let Some(path) = chosen {
             self.engine = Engine::of_executable(&path);
             self.search = BrowserSearch::Files(vec![path]);
         } else if find_browser(&self.search, path_variable, exists).is_err()
@@ -304,7 +300,7 @@ fn firefox_search(platform: Platform, home_dir: Option<&Path>) -> Option<Browser
     }
 }
 
-fn application_roots(home_dir: Option<&Path>) -> impl Iterator<Item = PathBuf> {
+pub(crate) fn application_roots(home_dir: Option<&Path>) -> impl Iterator<Item = PathBuf> {
     std::iter::once(PathBuf::from("/Applications"))
         .chain(home_dir.map(|home| home.join("Applications")))
 }
@@ -689,9 +685,9 @@ mod tests {
         Config::resolve(Platform::Macos, 9222, &inputs).unwrap()
     }
 
-    fn select(installed: &[&str], override_path: Option<&str>) -> Config {
+    fn select(installed: &[&str], chosen: Option<&str>) -> Config {
         macos_config().select_browser(
-            override_path.map(PathBuf::from),
+            chosen.map(PathBuf::from),
             Some(Path::new("/Users/joe")),
             &OsString::new(),
             &|path| {
@@ -731,12 +727,12 @@ mod tests {
     }
 
     #[test]
-    fn the_override_picks_the_browser_and_its_engine() {
+    fn the_chosen_browser_sets_the_engine() {
         let helium = "/Applications/Helium.app/Contents/MacOS/Helium";
         let firefox = select(&[helium], Some("/opt/zen/zen"));
         assert_eq!(firefox.engine, Engine::Firefox);
         let BrowserSearch::Files(files) = &firefox.search else {
-            panic!("expected the override path")
+            panic!("expected the chosen path")
         };
         assert_eq!(files, &[PathBuf::from("/opt/zen/zen")]);
         assert_eq!(select(&[], Some(helium)).engine, Engine::Chromium);

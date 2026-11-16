@@ -410,12 +410,21 @@ settings:
     close_to_tray_detail:
       en: The title bar X hides the window to the tray
       de: Das X in der Titelleiste blendet das Fenster ins Infobereich-Symbol aus
+    sign_in_browser:
+      en: Teams session browser
+      de: Browser der Teams-Sitzung
+    sign_in_browser_detail:
+      en: Teams runs in its own profile of this browser, hidden after sign-in. Automatic takes your default browser if it is Chromium- or Firefox-based. Changing it restarts the app.
+      de: Teams läuft in einem eigenen Profil dieses Browsers, nach der Anmeldung verborgen. Automatisch nimmt Ihren Standardbrowser, wenn er auf Chromium oder Firefox basiert. Eine Änderung startet die App neu.
+    sign_in_browser_automatic:
+      en: Automatic
+      de: Automatisch
     external_browser:
       en: Open links and Google sign-in with
       de: Links und Google-Anmeldung öffnen mit
     external_browser_detail:
-      en: Does not change the Teams session browser (that is a Chromium or Firefox browser such as Chrome, Edge, Helium, Firefox or Zen).
-      de: Ändert nicht den Browser der Teams-Sitzung (das ist ein Chromium- oder Firefox-Browser wie Chrome, Edge, Helium, Firefox oder Zen).
+      en: Does not change the Teams session browser.
+      de: Ändert nicht den Browser der Teams-Sitzung.
     external_browser_system:
       en: System default
       de: Systemstandard
