@@ -414,8 +414,8 @@ settings:
       en: Open links and Google sign-in with
       de: Links und Google-Anmeldung öffnen mit
     external_browser_detail:
-      en: Does not change the Teams session browser (that needs a Chromium browser such as Chrome, Edge, Brave or Helium).
-      de: Ändert nicht den Browser der Teams-Sitzung (dafür bleibt ein Chromium-Browser wie Chrome, Edge, Brave oder Helium nötig).
+      en: Does not change the Teams session browser (that is a Chromium or Firefox browser such as Chrome, Edge, Helium, Firefox or Zen).
+      de: Ändert nicht den Browser der Teams-Sitzung (das ist ein Chromium- oder Firefox-Browser wie Chrome, Edge, Helium, Firefox oder Zen).
     external_browser_system:
       en: System default
       de: Systemstandard
@@ -1623,8 +1623,8 @@ auth:
       en: Finishing sign-in…
       de: Anmeldung wird abgeschlossen…
     browser_failed:
-      en: Could not open a Chromium browser (Chrome, Edge, Brave, Helium)
-      de: Kein Chromium-Browser konnte geöffnet werden (Chrome, Edge, Brave, Helium)
+      en: Could not open a browser for sign-in (Chrome, Edge, Brave, Helium, Firefox, Zen)
+      de: Kein Browser für die Anmeldung konnte geöffnet werden (Chrome, Edge, Brave, Helium, Firefox, Zen)
     browser_still_loading_hint:
       en: The Teams logo in the browser means the login page is still loading
       de: Das Teams-Logo im Browser heisst, die Anmeldeseite lädt noch

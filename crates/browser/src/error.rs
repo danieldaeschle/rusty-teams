@@ -14,6 +14,8 @@ pub enum BrowserError {
     StartTimeout { port: u16, seconds: u64 },
     #[error("chrome on port {port} did not close within {seconds}s")]
     StopTimeout { port: u16, seconds: u64 },
+    #[error("the browser on port {0} holds a WebDriver session of another process")]
+    SessionTaken(u16),
     #[error("http: {0}")]
     Http(String),
     #[error("devtools: {0}")]

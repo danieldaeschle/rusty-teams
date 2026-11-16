@@ -225,7 +225,7 @@ pub fn stop() {
 }
 
 struct LinuxTransport {
-    inner: session::CdpTransport,
+    inner: Arc<dyn session::Transport>,
     browser: browser::Browser,
     init_done: watch::Receiver<bool>,
     headless_notify: Arc<Notify>,
@@ -239,7 +239,7 @@ impl LinuxTransport {
         headless_notify: Arc<Notify>,
     ) -> Self {
         LinuxTransport {
-            inner: session::CdpTransport::new(endpoint),
+            inner: browser::session_transport(&browser, endpoint),
             browser,
             init_done,
             headless_notify,

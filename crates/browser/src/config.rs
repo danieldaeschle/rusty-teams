@@ -5,6 +5,9 @@ use std::process::Command;
 use crate::error::BrowserError;
 
 pub const PROFILE_NAME: &str = "rusty-teams-chrome";
+pub const FIREFOX_PROFILE_NAME: &str = "rusty-teams-firefox";
+/// Path to the sign-in browser executable, overriding the search. Firefox-family names run over WebDriver BiDi.
+pub const BROWSER_OVERRIDE_ENV: &str = "RUSTY_TEAMS_SIGN_IN_BROWSER";
 pub const DEFAULT_PORT: u16 = 9222;
 const CHROME_RELATIVE: &str = r"Google\Chrome\Application\chrome.exe";
 const WINDOWS_VARIABLES: [&str; 4] = ["LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "TEMP"];
@@ -26,6 +29,31 @@ const MACOS_CHROME_APP_PATHS: [&str; 6] = [
     "Helium.app/Contents/MacOS/Helium",
     "Vivaldi.app/Contents/MacOS/Vivaldi",
 ];
+/// Firefox-based browsers, tried only when no Chromium browser is installed.
+const MACOS_FIREFOX_APP_PATHS: [&str; 4] = [
+    "Firefox.app/Contents/MacOS/firefox",
+    "Zen.app/Contents/MacOS/zen",
+    "LibreWolf.app/Contents/MacOS/librewolf",
+    "Floorp.app/Contents/MacOS/floorp",
+];
+const LINUX_FIREFOX_NAMES: [&str; 5] = ["firefox", "zen-browser", "zen", "librewolf", "floorp"];
+
+/// The protocol family of the sign-in browser: Chromium speaks CDP, Firefox WebDriver BiDi.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Engine {
+    Chromium,
+    Firefox,
+}
+
+impl Engine {
+    pub fn of_executable(path: &Path) -> Engine {
+        if crate::process::is_firefox_image(&path.to_string_lossy()) {
+            Engine::Firefox
+        } else {
+            Engine::Chromium
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
@@ -60,7 +88,7 @@ impl Platform {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum ChromeSearch {
+pub(crate) enum BrowserSearch {
     Files(Vec<PathBuf>),
     Named(Vec<String>),
     /// Absolute install paths first, then PATH names (macOS Application bundles + CLI).
@@ -73,12 +101,13 @@ pub(crate) enum ChromeSearch {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub platform: Platform,
+    pub engine: Engine,
     pub port: u16,
     pub profile: String,
     pub mode_file: PathBuf,
     profile_parent: String,
     mode_parent: PathBuf,
-    pub(crate) chrome_search: ChromeSearch,
+    pub(crate) search: BrowserSearch,
 }
 
 pub struct ConfigInputs<'a> {
@@ -103,6 +132,9 @@ impl Config {
                 .collect(),
             Platform::Wsl => wsl_windows_variables()?,
         };
+        let override_path = std::env::var_os(BROWSER_OVERRIDE_ENV)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
         let base = directories::BaseDirs::new();
         let linux_data_dir = base.as_ref().map(|dirs| dirs.data_dir().to_path_buf());
         let home_dir = base.as_ref().map(|dirs| dirs.home_dir().to_path_buf());
@@ -112,16 +144,48 @@ impl Config {
             }
             _ => windows_path.to_owned(),
         };
-        Config::resolve(
+        let config = Config::resolve(
             platform,
             DEFAULT_PORT,
             &ConfigInputs {
                 windows_variables,
                 linux_data_dir,
-                home_dir,
+                home_dir: home_dir.clone(),
                 to_local: &to_local,
             },
-        )
+        )?;
+        let path_variable = std::env::var_os("PATH").unwrap_or_default();
+        Ok(config.select_browser(
+            override_path,
+            home_dir.as_deref(),
+            &path_variable,
+            &|path| path.is_file(),
+        ))
+    }
+
+    /// Picks the sign-in browser: the override path, else the first Chromium browser, else the
+    /// first Firefox-based one on Linux and macOS. A Firefox browser gets its own profile.
+    pub(crate) fn select_browser(
+        mut self,
+        override_path: Option<PathBuf>,
+        home_dir: Option<&Path>,
+        path_variable: &std::ffi::OsStr,
+        exists: &dyn Fn(&Path) -> bool,
+    ) -> Config {
+        if let Some(path) = override_path {
+            self.engine = Engine::of_executable(&path);
+            self.search = BrowserSearch::Files(vec![path]);
+        } else if find_browser(&self.search, path_variable, exists).is_err()
+            && let Some(search) = firefox_search(self.platform, home_dir)
+            && find_browser(&search, path_variable, exists).is_ok()
+        {
+            self.engine = Engine::Firefox;
+            self.search = search;
+        }
+        if self.engine == Engine::Firefox {
+            self = self.with_profile_name(FIREFOX_PROFILE_NAME);
+        }
+        self
     }
 
     pub fn resolve(
@@ -139,6 +203,7 @@ impl Config {
                     .ok_or_else(|| BrowserError::Environment("no XDG data directory".into()))?;
                 Config {
                     platform,
+                    engine: Engine::Chromium,
                     port,
                     // Built with the platform's '/' like with_profile_name, not the
                     // host's separator: the string is a Linux path whoever builds it.
@@ -146,7 +211,7 @@ impl Config {
                     mode_file: data_dir.join(format!("{PROFILE_NAME}.mode")),
                     profile_parent: path_text(&data_dir),
                     mode_parent: data_dir,
-                    chrome_search: ChromeSearch::Named(
+                    search: BrowserSearch::Named(
                         LINUX_CHROME_NAMES
                             .iter()
                             .map(|name| (*name).to_owned())
@@ -158,23 +223,18 @@ impl Config {
                 let data_dir = inputs.linux_data_dir.clone().ok_or_else(|| {
                     BrowserError::Environment("no Application Support directory".into())
                 })?;
-                let mut files = Vec::new();
-                for root in [PathBuf::from("/Applications")]
-                    .into_iter()
-                    .chain(inputs.home_dir.iter().map(|home| home.join("Applications")))
-                {
-                    for relative in MACOS_CHROME_APP_PATHS {
-                        files.push(root.join(relative));
-                    }
-                }
+                let files = application_roots(inputs.home_dir.as_deref())
+                    .flat_map(|root| MACOS_CHROME_APP_PATHS.map(|relative| root.join(relative)))
+                    .collect();
                 Config {
                     platform,
+                    engine: Engine::Chromium,
                     port,
                     profile: format!("{}/{}", path_text(&data_dir), PROFILE_NAME),
                     mode_file: data_dir.join(format!("{PROFILE_NAME}.mode")),
                     profile_parent: path_text(&data_dir),
                     mode_parent: data_dir,
-                    chrome_search: ChromeSearch::FilesThenNamed {
+                    search: BrowserSearch::FilesThenNamed {
                         files,
                         names: MACOS_CHROME_NAMES
                             .iter()
@@ -195,12 +255,13 @@ impl Config {
                     .collect();
                 Config {
                     platform,
+                    engine: Engine::Chromium,
                     port,
                     profile: format!("{local}\\{PROFILE_NAME}"),
                     mode_file: PathBuf::from(to_local(&format!("{local}\\{PROFILE_NAME}.mode"))),
                     profile_parent: local.clone(),
                     mode_parent: PathBuf::from(to_local(local)),
-                    chrome_search: ChromeSearch::Files(candidates),
+                    search: BrowserSearch::Files(candidates),
                 }
             }
         };
@@ -223,10 +284,29 @@ impl Config {
         self
     }
 
-    pub fn chrome_executable(&self) -> Result<PathBuf, BrowserError> {
+    pub fn executable(&self) -> Result<PathBuf, BrowserError> {
         let path_variable = std::env::var_os("PATH").unwrap_or_default();
-        find_chrome(&self.chrome_search, &path_variable, &|path| path.is_file())
+        find_browser(&self.search, &path_variable, &|path| path.is_file())
     }
+}
+
+fn firefox_search(platform: Platform, home_dir: Option<&Path>) -> Option<BrowserSearch> {
+    let names = || LINUX_FIREFOX_NAMES.iter().map(|name| (*name).to_owned());
+    match platform {
+        Platform::Linux => Some(BrowserSearch::Named(names().collect())),
+        Platform::Macos => Some(BrowserSearch::FilesThenNamed {
+            files: application_roots(home_dir)
+                .flat_map(|root| MACOS_FIREFOX_APP_PATHS.map(|relative| root.join(relative)))
+                .collect(),
+            names: names().collect(),
+        }),
+        Platform::Windows | Platform::Wsl => None,
+    }
+}
+
+fn application_roots(home_dir: Option<&Path>) -> impl Iterator<Item = PathBuf> {
+    std::iter::once(PathBuf::from("/Applications"))
+        .chain(home_dir.map(|home| home.join("Applications")))
 }
 
 fn path_text(path: &Path) -> String {
@@ -243,32 +323,33 @@ fn find_named_chrome(
         .find(|candidate| exists(candidate))
 }
 
-pub(crate) fn find_chrome(
-    search: &ChromeSearch,
+pub(crate) fn find_browser(
+    search: &BrowserSearch,
     path_variable: &std::ffi::OsStr,
     exists: &dyn Fn(&Path) -> bool,
 ) -> Result<PathBuf, BrowserError> {
     match search {
-        ChromeSearch::Files(candidates) => candidates
+        BrowserSearch::Files(candidates) => candidates
             .iter()
             .find(|candidate| exists(candidate))
             .cloned()
             .ok_or_else(|| {
                 BrowserError::ChromeNotFound("not under Program Files or LocalAppData".into())
             }),
-        ChromeSearch::Named(names) => {
+        BrowserSearch::Named(names) => {
             find_named_chrome(names, path_variable, exists).ok_or_else(|| {
                 BrowserError::ChromeNotFound(format!("none of {} on PATH", names.join(", ")))
             })
         }
-        ChromeSearch::FilesThenNamed { files, names } => files
+        BrowserSearch::FilesThenNamed { files, names } => files
             .iter()
             .find(|candidate| exists(candidate))
             .cloned()
             .or_else(|| find_named_chrome(names, path_variable, exists))
             .ok_or_else(|| {
                 BrowserError::ChromeNotFound(
-                    "no Chrome, Chromium, Edge, Brave, Helium or Vivaldi under /Applications, ~/Applications, or PATH".into(),
+                    "no Chromium or Firefox browser under /Applications, ~/Applications, or PATH"
+                        .into(),
                 )
             }),
     }
@@ -388,7 +469,7 @@ mod tests {
             config.mode_file,
             PathBuf::from("/mnt/c/Users/me/AppData/Local/rusty-teams-chrome.mode")
         );
-        let ChromeSearch::Files(files) = &config.chrome_search else {
+        let BrowserSearch::Files(files) = &config.search else {
             panic!("expected files")
         };
         assert_eq!(
@@ -416,7 +497,7 @@ mod tests {
             config.profile,
             r"C:\Users\me\AppData\Local\rusty-teams-chrome"
         );
-        let ChromeSearch::Files(files) = &config.chrome_search else {
+        let BrowserSearch::Files(files) = &config.search else {
             panic!("expected files")
         };
         let expected = [
@@ -443,7 +524,7 @@ mod tests {
             to_local: &to_local,
         };
         let config = Config::resolve(Platform::Windows, 9222, &inputs).unwrap();
-        let ChromeSearch::Files(files) = &config.chrome_search else {
+        let BrowserSearch::Files(files) = &config.search else {
             panic!("expected files")
         };
         assert_eq!(
@@ -496,7 +577,7 @@ mod tests {
             config.mode_file,
             PathBuf::from("/Users/joe/Library/Application Support/rusty-teams-chrome.mode")
         );
-        let ChromeSearch::FilesThenNamed { files, names } = &config.chrome_search else {
+        let BrowserSearch::FilesThenNamed { files, names } = &config.search else {
             panic!("expected files then named")
         };
         assert_eq!(
@@ -531,7 +612,7 @@ mod tests {
 
     #[test]
     fn finds_macos_chrome_under_applications_before_path() {
-        let search = ChromeSearch::FilesThenNamed {
+        let search = BrowserSearch::FilesThenNamed {
             files: vec![
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into(),
                 "/Users/joe/Applications/Chromium.app/Contents/MacOS/Chromium".into(),
@@ -539,7 +620,7 @@ mod tests {
             names: vec!["google-chrome".into()],
         };
         let path = std::env::join_paths(["/usr/local/bin"]).unwrap();
-        let found = find_chrome(&search, &path, &|candidate| {
+        let found = find_browser(&search, &path, &|candidate| {
             candidate.ends_with("Google Chrome") || candidate.ends_with("google-chrome")
         })
         .unwrap();
@@ -577,22 +658,87 @@ mod tests {
 
     #[test]
     fn finds_first_existing_candidate() {
-        let search = ChromeSearch::Files(vec!["/a/chrome.exe".into(), "/b/chrome.exe".into()]);
-        let found = find_chrome(&search, &OsString::new(), &|path| path.starts_with("/b")).unwrap();
+        let search = BrowserSearch::Files(vec!["/a/chrome.exe".into(), "/b/chrome.exe".into()]);
+        let found =
+            find_browser(&search, &OsString::new(), &|path| path.starts_with("/b")).unwrap();
         assert_eq!(found, PathBuf::from("/b/chrome.exe"));
-        assert!(find_chrome(&search, &OsString::new(), &|_| false).is_err());
+        assert!(find_browser(&search, &OsString::new(), &|_| false).is_err());
     }
 
     #[test]
     fn finds_named_chrome_on_path_in_name_priority_per_directory() {
-        let search = ChromeSearch::Named(vec!["google-chrome".into(), "chromium".into()]);
+        let search = BrowserSearch::Named(vec!["google-chrome".into(), "chromium".into()]);
         // join_paths picks the host's PATH separator so split_paths splits it here too.
         let path = std::env::join_paths(["/usr/local/bin", "/usr/bin"]).unwrap();
-        let found = find_chrome(&search, &path, &|candidate| {
+        let found = find_browser(&search, &path, &|candidate| {
             candidate == Path::new("/usr/bin/chromium")
                 || candidate == Path::new("/usr/bin/google-chrome")
         })
         .unwrap();
         assert_eq!(found, PathBuf::from("/usr/bin/google-chrome"));
+    }
+
+    fn macos_config() -> Config {
+        let to_local = |path: &str| path.to_owned();
+        let inputs = ConfigInputs {
+            windows_variables: HashMap::new(),
+            linux_data_dir: Some(PathBuf::from("/Users/joe/Library/Application Support")),
+            home_dir: Some(PathBuf::from("/Users/joe")),
+            to_local: &to_local,
+        };
+        Config::resolve(Platform::Macos, 9222, &inputs).unwrap()
+    }
+
+    fn select(installed: &[&str], override_path: Option<&str>) -> Config {
+        macos_config().select_browser(
+            override_path.map(PathBuf::from),
+            Some(Path::new("/Users/joe")),
+            &OsString::new(),
+            &|path| {
+                installed
+                    .iter()
+                    .any(|installed| path == Path::new(installed))
+            },
+        )
+    }
+
+    #[test]
+    fn a_chromium_browser_wins_over_firefox() {
+        let config = select(
+            &[
+                "/Applications/Helium.app/Contents/MacOS/Helium",
+                "/Applications/Zen.app/Contents/MacOS/zen",
+            ],
+            None,
+        );
+        assert_eq!(config.engine, Engine::Chromium);
+        assert!(config.profile.ends_with(PROFILE_NAME));
+    }
+
+    #[test]
+    fn firefox_is_the_fallback_with_its_own_profile() {
+        let zen = "/Users/joe/Applications/Zen.app/Contents/MacOS/zen";
+        let config = select(&[zen], None);
+        assert_eq!(config.engine, Engine::Firefox);
+        assert_eq!(
+            config.profile,
+            "/Users/joe/Library/Application Support/rusty-teams-firefox"
+        );
+        let found = find_browser(&config.search, &OsString::new(), &|path| {
+            path == Path::new(zen)
+        });
+        assert_eq!(found.unwrap(), PathBuf::from(zen));
+    }
+
+    #[test]
+    fn the_override_picks_the_browser_and_its_engine() {
+        let helium = "/Applications/Helium.app/Contents/MacOS/Helium";
+        let firefox = select(&[helium], Some("/opt/zen/zen"));
+        assert_eq!(firefox.engine, Engine::Firefox);
+        let BrowserSearch::Files(files) = &firefox.search else {
+            panic!("expected the override path")
+        };
+        assert_eq!(files, &[PathBuf::from("/opt/zen/zen")]);
+        assert_eq!(select(&[], Some(helium)).engine, Engine::Chromium);
     }
 }
