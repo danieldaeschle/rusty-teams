@@ -234,6 +234,7 @@ fn external_browser_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
             .collect();
         vec![
             caption(tr("settings.caption.browser")).into_any_element(),
+            sign_in_browser_row(),
             control_row(
                 tr("settings.general.external_browser"),
                 tr("settings.general.external_browser_detail"),
@@ -241,6 +242,84 @@ fn external_browser_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
             )
             .into_any_element(),
         ]
+    }
+}
+
+/// The browser the Teams session runs in. Changing it restarts the app, which stops the old
+/// browser on the way out and starts the new one.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn sign_in_browser_row() -> AnyElement {
+    use std::sync::LazyLock;
+
+    use browser::{InstalledBrowser, SignInBrowser};
+
+    static INSTALLED: LazyLock<Vec<InstalledBrowser>> = LazyLock::new(browser::installed_browsers);
+    static AUTOMATIC: LazyLock<Option<String>> = LazyLock::new(|| {
+        browser::automatic_browser(&INSTALLED).map(|browser| browser.name.clone())
+    });
+
+    let saved = SignInBrowser::load();
+    let automatic_label = match AUTOMATIC.as_deref() {
+        Some(name) => format!(
+            "{} ({name})",
+            tr("settings.general.sign_in_browser_automatic")
+        ),
+        None => tr("settings.general.sign_in_browser_automatic"),
+    };
+    let options = std::iter::once((SignInBrowser::Automatic, automatic_label)).chain(
+        INSTALLED.iter().map(|browser| {
+            (
+                SignInBrowser::Program(browser.path.clone()),
+                browser.name.clone(),
+            )
+        }),
+    );
+    let mut current_label = None;
+    let choices: Vec<Choice> = options
+        .map(|(option, label)| {
+            let is_selected = option == saved;
+            if is_selected {
+                current_label = Some(label.clone());
+            }
+            Choice::new(label, is_selected, move |cx| {
+                if is_selected {
+                    return;
+                }
+                match option.save() {
+                    Ok(()) => restart_app(cx),
+                    Err(error) => {
+                        app_base::diagnostics::record(format!("sign-in browser not saved: {error}"))
+                    }
+                }
+            })
+        })
+        .collect();
+    let current_label =
+        current_label.unwrap_or_else(|| tr("settings.general.sign_in_browser_automatic"));
+    control_row(
+        tr("settings.general.sign_in_browser"),
+        tr("settings.general.sign_in_browser_detail"),
+        select("settings-sign-in-browser", current_label, false, choices),
+    )
+    .into_any_element()
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn restart_app(cx: &mut App) {
+    let spawned = std::env::current_exe().and_then(|exe| {
+        std::process::Command::new(exe)
+            .args(std::env::args_os().skip(1))
+            .env(
+                app_base::updater::RELAUNCH_ENV,
+                std::process::id().to_string(),
+            )
+            .spawn()
+    });
+    match spawned {
+        Ok(_) => cx.quit(),
+        Err(error) => app_base::diagnostics::record(format!(
+            "restart for the sign-in browser failed: {error}"
+        )),
     }
 }
 

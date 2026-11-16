@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 use crate::config::Platform;
 use crate::error::BrowserError;
@@ -54,14 +55,25 @@ fn listener_pid(platform: Platform, port: u16) -> Result<u32, BrowserError> {
     pid.ok_or_else(|| BrowserError::Cdp(format!("no process listens on port {port}")))
 }
 
-pub(crate) fn is_chrome_image(image_name: &str) -> bool {
-    // macOS `ps -o comm=` may return a full path; match on the basename.
+/// Lowercased basename: macOS `ps -o comm=` may return a full path.
+fn image_base(image_name: &str) -> String {
     let trimmed = image_name.trim().trim_matches('"');
     let base = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed).trim();
-    let lowered = base.to_ascii_lowercase();
+    base.to_ascii_lowercase()
+}
+
+pub(crate) fn is_chrome_image(image_name: &str) -> bool {
+    let lowered = image_base(image_name);
     lowered.starts_with("chrome")
         || lowered.starts_with("google chrome")
         || lowered.starts_with("chromium")
+}
+
+pub(crate) fn is_firefox_image(image_name: &str) -> bool {
+    let lowered = image_base(image_name);
+    ["firefox", "zen", "librewolf", "floorp"]
+        .iter()
+        .any(|name| lowered.starts_with(name))
 }
 
 fn process_image_name(platform: Platform, pid: &str) -> Result<String, BrowserError> {
@@ -76,18 +88,56 @@ fn process_image_name(platform: Platform, pid: &str) -> Result<String, BrowserEr
     Ok(output.split(',').next().unwrap_or_default().to_owned())
 }
 
+const EXIT_WAIT: Duration = Duration::from_secs(10);
+const EXIT_POLL: Duration = Duration::from_millis(100);
+
+/// Asks the browser holding `port` to quit with SIGTERM and waits until the process is gone, so
+/// its profile is free again. Firefox on macOS keeps running after WebDriver BiDi `browser.close`.
+pub(crate) fn terminate_listener(platform: Platform, port: u16) -> Result<(), BrowserError> {
+    let pid = browser_listener_pid(platform, port)?;
+    if !platform.uses_unix_paths() {
+        return kill_pid(platform, &pid);
+    }
+    Command::new("kill").args(["-TERM", &pid]).output()?;
+    let deadline = Instant::now() + EXIT_WAIT;
+    while Instant::now() < deadline {
+        let alive = Command::new("kill")
+            .args(["-0", &pid])
+            .output()?
+            .status
+            .success();
+        if !alive {
+            return Ok(());
+        }
+        std::thread::sleep(EXIT_POLL);
+    }
+    Err(BrowserError::Cdp(format!(
+        "pid {pid} did not exit after SIGTERM"
+    )))
+}
+
 pub(crate) fn kill_listener(platform: Platform, port: u16) -> Result<(), BrowserError> {
+    let pid = browser_listener_pid(platform, port)?;
+    kill_pid(platform, &pid)
+}
+
+/// The PID listening on `port`, only when it is a browser: never signal anything else.
+fn browser_listener_pid(platform: Platform, port: u16) -> Result<String, BrowserError> {
     let pid = listener_pid(platform, port)?.to_string();
     let image_name = process_image_name(platform, &pid)?;
-    if !is_chrome_image(&image_name) {
+    if !is_chrome_image(&image_name) && !is_firefox_image(&image_name) {
         return Err(BrowserError::Cdp(format!(
-            "port {port} is held by a non-Chrome process, not killing it"
+            "port {port} is held by a process that is no known browser, not killing it"
         )));
     }
+    Ok(pid)
+}
+
+fn kill_pid(platform: Platform, pid: &str) -> Result<(), BrowserError> {
     let (program, arguments): (&str, Vec<&str>) = match platform {
-        Platform::Linux | Platform::Macos => ("kill", vec!["-KILL", &pid]),
-        Platform::Windows => ("taskkill", vec!["/PID", &pid, "/T", "/F"]),
-        Platform::Wsl => ("taskkill.exe", vec!["/PID", &pid, "/T", "/F"]),
+        Platform::Linux | Platform::Macos => ("kill", vec!["-KILL", pid]),
+        Platform::Windows => ("taskkill", vec!["/PID", pid, "/T", "/F"]),
+        Platform::Wsl => ("taskkill.exe", vec!["/PID", pid, "/T", "/F"]),
     };
     let status = Command::new(program).args(arguments).output()?.status;
     if status.success() {
@@ -123,6 +173,18 @@ mod tests {
             "/Applications/Firefox.app/Contents/MacOS/firefox"
         ));
         assert!(!is_chrome_image(""));
+    }
+
+    #[test]
+    fn firefox_family_images_are_recognised() {
+        assert!(is_firefox_image(
+            "/Applications/Firefox.app/Contents/MacOS/firefox"
+        ));
+        assert!(is_firefox_image("/Applications/Zen.app/Contents/MacOS/zen"));
+        assert!(is_firefox_image("zen-browser\n"));
+        assert!(is_firefox_image("librewolf"));
+        assert!(!is_firefox_image("/usr/bin/chromium"));
+        assert!(!is_firefox_image(""));
     }
 
     #[test]

@@ -410,12 +410,21 @@ settings:
     close_to_tray_detail:
       en: The title bar X hides the window to the tray
       de: Das X in der Titelleiste blendet das Fenster ins Infobereich-Symbol aus
+    sign_in_browser:
+      en: Teams session browser
+      de: Browser der Teams-Sitzung
+    sign_in_browser_detail:
+      en: Teams runs in its own profile of this browser, hidden after sign-in. Automatic takes your default browser if it is Chromium- or Firefox-based. Changing it restarts the app.
+      de: Teams läuft in einem eigenen Profil dieses Browsers, nach der Anmeldung verborgen. Automatisch nimmt Ihren Standardbrowser, wenn er auf Chromium oder Firefox basiert. Eine Änderung startet die App neu.
+    sign_in_browser_automatic:
+      en: Automatic
+      de: Automatisch
     external_browser:
       en: Open links and Google sign-in with
       de: Links und Google-Anmeldung öffnen mit
     external_browser_detail:
-      en: Does not change the Teams session browser (that needs a Chromium browser such as Chrome, Edge, Brave or Helium).
-      de: Ändert nicht den Browser der Teams-Sitzung (dafür bleibt ein Chromium-Browser wie Chrome, Edge, Brave oder Helium nötig).
+      en: Does not change the Teams session browser.
+      de: Ändert nicht den Browser der Teams-Sitzung.
     external_browser_system:
       en: System default
       de: Systemstandard
@@ -1623,8 +1632,8 @@ auth:
       en: Finishing sign-in…
       de: Anmeldung wird abgeschlossen…
     browser_failed:
-      en: Could not open a Chromium browser (Chrome, Edge, Brave, Helium)
-      de: Kein Chromium-Browser konnte geöffnet werden (Chrome, Edge, Brave, Helium)
+      en: Could not open a browser for sign-in (Chrome, Edge, Brave, Helium, Firefox, Zen)
+      de: Kein Browser für die Anmeldung konnte geöffnet werden (Chrome, Edge, Brave, Helium, Firefox, Zen)
     browser_still_loading_hint:
       en: The Teams logo in the browser means the login page is still loading
       de: Das Teams-Logo im Browser heisst, die Anmeldeseite lädt noch

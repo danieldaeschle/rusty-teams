@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::config::{Config, Platform};
+use crate::config::{Config, Engine, Platform};
 use crate::error::BrowserError;
 
 #[derive(Debug, Clone)]
@@ -13,6 +13,11 @@ pub struct LaunchRequest {
 pub trait Launcher: Send + Sync {
     fn spawn(&self, request: &LaunchRequest) -> Result<(), BrowserError>;
     fn kill_listener(&self, port: u16) -> Result<(), BrowserError>;
+
+    /// Lets the browser on `port` quit cleanly and returns once it is gone.
+    fn terminate_listener(&self, port: u16) -> Result<(), BrowserError> {
+        self.kill_listener(port)
+    }
 }
 
 pub struct ArgumentSpec<'a> {
@@ -53,6 +58,42 @@ pub fn chrome_arguments(spec: &ArgumentSpec) -> Vec<String> {
     }
     arguments.extend(spec.start_urls.iter().cloned());
     arguments
+}
+
+/// Firefox keeps its own user agent: headless Firefox does not mark itself, so Microsoft accepts it.
+pub fn firefox_arguments(spec: &ArgumentSpec) -> Vec<String> {
+    let mut arguments = vec![
+        format!("--remote-debugging-port={}", spec.port),
+        "--profile".into(),
+        spec.profile.into(),
+        "--no-remote".into(),
+    ];
+    if spec.headless {
+        arguments.extend(["--headless".into(), "--window-size=1400,1000".into()]);
+    }
+    arguments.extend(spec.start_urls.iter().cloned());
+    arguments
+}
+
+/// Prefs for the app's own Firefox profile: no first-run pages, no restored tabs, no quit prompts,
+/// no Safe Mode.
+const FIREFOX_PREFS: &str = r#"user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("browser.startup.page", 0);
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.tabs.warnOnClose", false);
+user_pref("browser.warnOnQuit", false);
+user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);
+user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);
+// A browser the app stopped hard counts as a startup crash; Safe Mode would hang a headless start.
+user_pref("toolkit.startup.max_resumed_crashes", -1);
+user_pref("zen.welcome-screen.seen", true);
+"#;
+
+fn write_firefox_prefs(profile: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(profile)?;
+    std::fs::write(Path::new(profile).join("user.js"), FIREFOX_PREFS)
 }
 
 pub fn user_agent(platform: Platform, major: u32) -> String {
@@ -147,18 +188,32 @@ impl SystemLauncher {
 
 impl Launcher for SystemLauncher {
     fn spawn(&self, request: &LaunchRequest) -> Result<(), BrowserError> {
-        let executable = self.config.chrome_executable()?;
-        let agent = user_agent(
-            self.config.platform,
-            chrome_major(self.config.platform, &executable),
-        );
-        let arguments = chrome_arguments(&ArgumentSpec {
-            port: self.config.port,
-            profile: &self.config.profile,
-            headless: request.headless,
-            user_agent: &agent,
-            start_urls: &request.start_urls,
-        });
+        let executable = self.config.executable()?;
+        let arguments = match self.config.engine {
+            Engine::Chromium => {
+                let agent = user_agent(
+                    self.config.platform,
+                    chrome_major(self.config.platform, &executable),
+                );
+                chrome_arguments(&ArgumentSpec {
+                    port: self.config.port,
+                    profile: &self.config.profile,
+                    headless: request.headless,
+                    user_agent: &agent,
+                    start_urls: &request.start_urls,
+                })
+            }
+            Engine::Firefox => {
+                write_firefox_prefs(&self.config.profile)?;
+                firefox_arguments(&ArgumentSpec {
+                    port: self.config.port,
+                    profile: &self.config.profile,
+                    headless: request.headless,
+                    user_agent: "",
+                    start_urls: &request.start_urls,
+                })
+            }
+        };
         let mut command = Command::new(&executable);
         strip_app_fontconfig(&mut command);
         command
@@ -179,6 +234,10 @@ impl Launcher for SystemLauncher {
 
     fn kill_listener(&self, port: u16) -> Result<(), BrowserError> {
         crate::process::kill_listener(self.config.platform, port)
+    }
+
+    fn terminate_listener(&self, port: u16) -> Result<(), BrowserError> {
+        crate::process::terminate_listener(self.config.platform, port)
     }
 }
 
@@ -245,6 +304,26 @@ mod tests {
                 .any(|argument| argument.contains("headless") || argument.contains("user-agent"))
         );
         assert_eq!(&arguments[4..], ["https://a/", "https://b/"]);
+    }
+
+    #[test]
+    fn firefox_arguments_use_bidi_port_own_profile_and_no_user_agent() {
+        let urls = vec!["https://teams.cloud.microsoft/".to_owned()];
+        let headless = firefox_arguments(&spec(true, &urls));
+        assert_eq!(
+            headless,
+            [
+                "--remote-debugging-port=9222",
+                "--profile",
+                r"C:\p\rusty-teams-chrome",
+                "--no-remote",
+                "--headless",
+                "--window-size=1400,1000",
+                "https://teams.cloud.microsoft/",
+            ]
+        );
+        let visible = firefox_arguments(&spec(false, &urls));
+        assert!(!visible.iter().any(|argument| argument.contains("headless")));
     }
 
     #[test]

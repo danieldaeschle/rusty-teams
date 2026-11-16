@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::config::Config;
+use crate::bidi::Bidi;
+use crate::config::{Config, Engine};
 use crate::error::BrowserError;
 use crate::http;
 use crate::launch::{LaunchRequest, Launcher, SystemLauncher};
@@ -74,6 +75,8 @@ struct Inner {
     timeouts: Timeouts,
     operation: Mutex<()>,
     wanted: AtomicBool,
+    /// Set for a Firefox browser, which speaks WebDriver BiDi instead of CDP.
+    bidi: Option<Bidi>,
 }
 
 #[derive(Clone)]
@@ -114,8 +117,10 @@ impl Browser {
         launcher: Arc<dyn Launcher>,
         timeouts: Timeouts,
     ) -> Browser {
+        let bidi = (config.engine == Engine::Firefox).then(|| Bidi::new(config.port));
         Browser {
             inner: Arc::new(Inner {
+                bidi,
                 config,
                 launcher,
                 timeouts,
@@ -129,15 +134,20 @@ impl Browser {
         &self.inner.config
     }
 
+    /// The shared BiDi session of a Firefox browser; `None` for Chromium.
+    pub fn bidi(&self) -> Option<&Bidi> {
+        self.inner.bidi.as_ref()
+    }
+
     pub async fn status(&self) -> Result<Status, BrowserError> {
-        let Some(_) = self.version().await else {
+        if !self.is_running().await {
             return Ok(Status {
                 running: false,
                 mode: Mode::Visible,
                 tabs: Vec::new(),
                 login_state: LoginState::Unknown,
             });
-        };
+        }
         let tabs = self.tabs().await?;
         Ok(Status {
             running: true,
@@ -148,7 +158,12 @@ impl Browser {
     }
 
     pub async fn is_running(&self) -> bool {
-        self.version().await.is_some()
+        if self.inner.bidi.is_none() {
+            return self.version().await.is_some();
+        }
+        http::request(self.inner.config.port, "GET", "/", Duration::from_secs(2))
+            .await
+            .is_ok_and(|response| response.status == 200)
     }
 
     pub async fn probe_renderer(&self) -> RendererState {
@@ -158,6 +173,14 @@ impl Browser {
         let Some(tab) = targets::app_tab(&tabs, App::Teams) else {
             return RendererState::NoTab;
         };
+        if let Some(bidi) = &self.inner.bidi {
+            let probe =
+                tokio::time::timeout(self.inner.timeouts.probe, bidi.evaluate(&tab.id, "1+1"));
+            return match probe.await {
+                Ok(Ok(_)) => RendererState::Ok,
+                _ => RendererState::Hung,
+            };
+        }
         let url = format!(
             "ws://127.0.0.1:{}/devtools/page/{}",
             self.inner.config.port, tab.id
@@ -177,6 +200,9 @@ impl Browser {
     }
 
     pub async fn tabs(&self) -> Result<Vec<Tab>, BrowserError> {
+        if let Some(bidi) = &self.inner.bidi {
+            return bidi.tabs().await;
+        }
         let response =
             http::request(self.inner.config.port, "GET", "/json/list", HTTP_TIMEOUT).await?;
         targets::parse_tabs(&response.body)
@@ -186,6 +212,7 @@ impl Browser {
         let _guard = self.inner.operation.lock().await;
         self.inner.wanted.store(true, Ordering::SeqCst);
         if self.is_running().await {
+            self.adopt_session_locked().await?;
             return self.ensure_tabs_locked().await;
         }
         match self.launch_locked(true).await {
@@ -208,6 +235,12 @@ impl Browser {
         else {
             return self.open_tab(app).await;
         };
+        if let Some(bidi) = &self.inner.bidi {
+            let navigate = bidi.navigate(&tab.id, app.start_url());
+            return tokio::time::timeout(CDP_TIMEOUT, navigate)
+                .await
+                .map_err(|_| BrowserError::Cdp("browsingContext.navigate timed out".into()))?;
+        }
         let url = format!(
             "ws://127.0.0.1:{}/devtools/page/{}",
             self.inner.config.port, tab.id
@@ -241,11 +274,18 @@ impl Browser {
         if tab.parked {
             return false;
         }
+        let expression = "(() => { let access = false, refresh = false; for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i) || ''; if (key.includes('accesstoken')) access = true; if (key.includes('refreshtoken')) refresh = true; } return access && refresh; })()";
+        if let Some(bidi) = &self.inner.bidi {
+            let evaluate = tokio::time::timeout(
+                self.inner.timeouts.probe,
+                bidi.evaluate(&tab.id, expression),
+            );
+            return matches!(evaluate.await, Ok(Ok(Value::Bool(true))));
+        }
         let url = format!(
             "ws://127.0.0.1:{}/devtools/page/{}",
             self.inner.config.port, tab.id
         );
-        let expression = "(() => { let access = false, refresh = false; for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i) || ''; if (key.includes('accesstoken')) access = true; if (key.includes('refreshtoken')) refresh = true; } return access && refresh; })()";
         let params = json!({ "expression": expression, "returnByValue": true });
         cdp_call(&url, "Runtime.evaluate", params, self.inner.timeouts.probe)
             .await
@@ -339,6 +379,12 @@ impl Browser {
 
     async fn try_dedupe_app_tabs(&self) -> Result<(), BrowserError> {
         let tabs = self.tabs().await?;
+        if let Some(bidi) = &self.inner.bidi {
+            for id in targets::closable_tab_ids(&tabs, &Default::default()) {
+                bidi.close_tab(&id).await?;
+            }
+            return Ok(());
+        }
         let info = self
             .version()
             .await
@@ -359,6 +405,11 @@ impl Browser {
     }
 
     async fn open_tab(&self, app: App) -> Result<(), BrowserError> {
+        if let Some(bidi) = &self.inner.bidi {
+            return tokio::time::timeout(OPEN_TAB_TIMEOUT, bidi.open_tab(app.start_url()))
+                .await
+                .map_err(|_| BrowserError::Cdp("opening the app tab timed out".into()))?;
+        }
         let path = format!("/json/new?{}", app.start_url());
         let response =
             http::request(self.inner.config.port, "PUT", &path, OPEN_TAB_TIMEOUT).await?;
@@ -427,11 +478,38 @@ impl Browser {
         })
     }
 
-    async fn stop_locked(&self, kill_fallback: bool) -> Result<(), BrowserError> {
-        let Some(info) = self.version().await else {
+    /// A Firefox that still holds the session of an earlier, crashed app run cannot be driven;
+    /// restart it so this process gets the session.
+    async fn adopt_session_locked(&self) -> Result<(), BrowserError> {
+        let Some(bidi) = &self.inner.bidi else {
             return Ok(());
         };
-        close_over_cdp(&info.websocket_url).await;
+        match bidi.connect().await {
+            Err(BrowserError::SessionTaken(_)) => {
+                self.stop_locked(true).await?;
+                self.launch_locked(true).await
+            }
+            outcome => outcome,
+        }
+    }
+
+    /// Asks the browser to quit: Chromium over CDP, Firefox with SIGTERM, which also works while
+    /// another process holds its BiDi session.
+    async fn close_gracefully(&self) {
+        if self.inner.bidi.is_some() {
+            let launcher = self.inner.launcher.clone();
+            let port = self.inner.config.port;
+            let _ = tokio::task::spawn_blocking(move || launcher.terminate_listener(port)).await;
+        } else if let Some(info) = self.version().await {
+            close_over_cdp(&info.websocket_url).await;
+        }
+    }
+
+    async fn stop_locked(&self, kill_fallback: bool) -> Result<(), BrowserError> {
+        if !self.is_running().await {
+            return Ok(());
+        }
+        self.close_gracefully().await;
         let timeouts = &self.inner.timeouts;
         if !self.wait_until_stopped().await && kill_fallback {
             let launcher = self.inner.launcher.clone();

@@ -120,7 +120,7 @@ fn https_host(url: &str) -> Option<String> {
     (parsed.scheme() == "https").then(|| parsed.host_str().map(str::to_owned))?
 }
 
-fn tab_from_url(id: String, url: &str) -> Tab {
+pub(crate) fn tab_from_url(id: String, url: &str) -> Tab {
     let host = Url::parse(url)
         .ok()
         .and_then(|parsed| parsed.host_str().map(str::to_owned));

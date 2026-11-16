@@ -1098,6 +1098,7 @@ dependencies = [
  "futures-util",
  "serde",
  "serde_json",
+ "session",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
