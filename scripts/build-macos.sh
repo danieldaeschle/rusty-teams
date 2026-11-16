@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build a universal macOS binary (arm64 + x86_64) from a crate. Needs Xcode CLT only.
 # Wraps it in a .app bundle (icon, Info.plist) and zips that for distribution.
-# Also keeps the bare lipo binary for self-update (release asset *-macos-universal).
+# The published artifact is the `.app` zip. There is no in-app Mach-O swap.
 #
 # Optional signing / notarization when Apple credentials are present:
 #   MACOS_CODESIGN_IDENTITY   e.g. "Developer ID Application: …"
@@ -123,10 +123,6 @@ fi
 # ditto keeps the bundle intact (plain zip would not); the result is the .app release asset.
 ditto -c -k --keepParent "$app" "$outputDirectory/teams-macos.zip"
 
-# Bare universal binary for in-app self-update (Mach-O fat; magic cafe babe).
-cp "$output" "$outputDirectory/teams-macos-universal"
-chmod +x "$outputDirectory/teams-macos-universal"
-
 if [ -n "${MACOS_CODESIGN_IDENTITY:-}" ] && [ -n "${MACOS_NOTARY_PROFILE:-}" ]; then
   echo "notarize with profile $MACOS_NOTARY_PROFILE"
   xcrun notarytool submit "$outputDirectory/teams-macos.zip" \
@@ -139,4 +135,4 @@ fi
 
 file "$output"
 ls -la "$output" "$app/Contents/MacOS/$binary" \
-  "$outputDirectory/teams-macos.zip" "$outputDirectory/teams-macos-universal"
+  "$outputDirectory/teams-macos.zip"
