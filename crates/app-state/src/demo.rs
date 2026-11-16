@@ -37,6 +37,9 @@ const STAGING_SIZE: (usize, usize) = (960, 540);
 const LINK_IMAGE_KEY: &str =
     "https://de-prod.asyncgw.teams.microsoft.com/urlp/v1/url/image/Thumbnail?url=demo";
 const LINK_IMAGE_SIZE: (u32, u32) = (320, 180);
+const DEMO_CLIP_URL: &str = "https://eu-api.asm.skype.com/v1/objects/0-weu-d1-democlip/views/video";
+const DEMO_CLIP_THUMBNAIL_KEY: &str =
+    "https://eu-api.asm.skype.com/v1/objects/0-weu-d1-democlip/views/thumbnail";
 const PRIORITY_CHAT: &str = "demo-chat-priya";
 const BOT_CHAT: &str = "demo-chat-wiki-bot";
 const BOT_NAME: &str = "Wiki Bot";
@@ -1085,6 +1088,7 @@ pub fn seed_directory(state: &mut AppState) {
         if std::fs::write(&path, png).is_ok() {
             state.directory.set_image(STAGING_IMAGE_KEY, &path);
             state.directory.set_image(LINK_IMAGE_KEY, &path);
+            state.directory.set_image(DEMO_CLIP_THUMBNAIL_KEY, &path);
         }
         let _ = SEARCHABLE_GIFS.set(demo_gifs::generate(&directory_path));
         state.directory.set_image(
@@ -1318,6 +1322,23 @@ fn with_importance(mut record: MessageRecord, importance: MessageImportance) -> 
 fn with_subject(mut record: MessageRecord, subject: &str) -> MessageRecord {
     record.subject = Some(subject.to_owned());
     record
+}
+
+/// A Graph forward of a Teams video clip, as Teams sends a forwarded phone recording.
+fn forwarded_clip_attachments(message_id: &str, sender_id: &str) -> String {
+    let content = serde_json::json!({
+        "originalMessageId": message_id,
+        "originalMessageContent": format!(
+            r#"<p><video src="{DEMO_CLIP_URL}" itemscope="" itemtype="http://schema.skype.com/AMSVideo" width="720" height="1280" data-duration="PT12S" alt="Media"></video></p>"#
+        ),
+        "originalMessageSender": {"user": {"id": sender_id, "displayName": null}},
+    });
+    serde_json::json!([{
+        "content_type": "forwardedMessageReference",
+        "id": message_id,
+        "content": content.to_string(),
+    }])
+    .to_string()
 }
 
 fn with_attachments(mut record: MessageRecord, attachments_json: &str) -> MessageRecord {
@@ -1856,6 +1877,19 @@ fn release_messages() -> Vec<MessageRecord> {
             "<p>Context from the old planning chat.</p><attachment id=\"1789000000000\"></attachment>",
             r#"[{"content_type":"forwardedMessageReference","name":null,"url":null,"text":null,"id":"1789000000000","content":null,"unavailable":true}]"#,
             false,
+        ),
+        with_attachments(
+            message(
+                chat,
+                "m5f",
+                None,
+                (PRIYA_ID, priya_name),
+                at(0, 12, 45),
+                "<attachment id=\"1791000000000\"></attachment>",
+                "[]",
+                false,
+            ),
+            &forwarded_clip_attachments("1791000000000", TOBIAS_ID),
         ),
         message(
             chat,
