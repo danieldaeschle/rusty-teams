@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use session::{App, Scope, Session};
 
 use crate::error::{Error, Result};
+use crate::links::{LinkImage, decoded_image};
 use crate::messages::ensure_success;
 use crate::pins::transport::{CSA_RESOURCE, CSA_SCOPE, skype_fetch_answer};
 
@@ -11,6 +12,10 @@ const AMS_BASE: &str = "https://de-prod.asyncgw.teams.microsoft.com/";
 const UPLOAD_BODY: &str = concat!(
     include_str!("../assets/skype_token.js"),
     include_str!("../assets/ams_upload.js")
+);
+const DOWNLOAD_BODY: &str = concat!(
+    include_str!("../assets/skype_token.js"),
+    include_str!("../assets/ams_download.js")
 );
 const FULL_SIZE_VIEW: &str = "/views/imgpsh_fullsize";
 
@@ -78,6 +83,23 @@ impl Ams {
         let answer = skype_fetch_answer(answer);
         ensure_success(&answer)?;
         uploaded_image(&answer.body)
+    }
+
+    /// Reads an AMS image view such as `.../v1/objects/{id}/views/imgo` with the Skype token.
+    pub async fn download_image(&self, url: &str) -> Result<LinkImage> {
+        let answer = self
+            .session
+            .run_with_token(
+                App::Teams,
+                &Scope::new(CSA_RESOURCE, CSA_SCOPE),
+                DOWNLOAD_BODY,
+                &json!({ "url": url }),
+                false,
+            )
+            .await?;
+        let answer = skype_fetch_answer(answer);
+        ensure_success(&answer)?;
+        decoded_image(&answer.body)
     }
 }
 

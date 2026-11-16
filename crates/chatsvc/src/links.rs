@@ -11,6 +11,7 @@ pub const LINK_PROXY_HOST_SUFFIX: &str = ".asyncgw.teams.microsoft.com";
 const LIST_VIEW: &str = "msnp24Equivalent";
 const HOSTED_CONTENTS_SEGMENT: &str = "/hostedContents/";
 const HOSTED_URL_KEY: &str = ",url=";
+const AMS_HOST_SUFFIX: &str = ".asm.skype.com";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageLinks {
@@ -51,7 +52,16 @@ pub fn hosted_content_image_url(graph_url: &str) -> Option<String> {
         .ok()?;
     let decoded = String::from_utf8(bytes).ok()?;
     let (_, url) = decoded.split_once(HOSTED_URL_KEY)?;
-    is_link_image_url(url).then(|| url.to_owned())
+    (is_link_image_url(url) || is_ams_image_url(url)).then(|| url.to_owned())
+}
+
+/// An AMS object view (`https://*.asm.skype.com/v1/objects/...`), the inline images of chat service messages.
+pub fn is_ams_image_url(url: &str) -> bool {
+    url.strip_prefix("https://")
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(host, path)| {
+            host.ends_with(AMS_HOST_SUFFIX) && path.starts_with("v1/objects/")
+        })
 }
 
 pub fn parse_message_links(body: &Value) -> Vec<MessageLinks> {
@@ -150,25 +160,28 @@ impl<T: MessageTransport> Messages<T> {
         }
         let answer = self.transport.send(Request::binary_get(url)).await?;
         ensure_success(&answer)?;
-        let encoded = answer
-            .body
-            .get("base64")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let bytes = STANDARD
-            .decode(encoded.as_bytes())
-            .map_err(|error| Error::UnexpectedAnswer(error.to_string()))?;
-        let content_type = answer
-            .body
-            .get("contentType")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        Ok(LinkImage {
-            bytes,
-            content_type,
-        })
+        decoded_image(&answer.body)
     }
+}
+
+/// An image answer shaped `{base64, contentType}`.
+pub(crate) fn decoded_image(body: &Value) -> Result<LinkImage> {
+    let encoded = body
+        .get("base64")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let bytes = STANDARD
+        .decode(encoded.as_bytes())
+        .map_err(|error| Error::UnexpectedAnswer(error.to_string()))?;
+    let content_type = body
+        .get("contentType")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    Ok(LinkImage {
+        bytes,
+        content_type,
+    })
 }
 
 #[cfg(test)]
@@ -190,6 +203,26 @@ mod tests {
             )),
             None
         );
+    }
+
+    #[test]
+    fn ams_object_views_are_recognized_inside_hosted_content_ids() {
+        let ams = "https://eu-api.asm.skype.com/v1/objects/0-frca-d14-abc/views/imgo";
+        assert!(is_ams_image_url(ams));
+        let id = STANDARD.encode(format!("id=x_0-frca-d14-abc,type=1,url={ams}"));
+        assert_eq!(
+            hosted_content_image_url(&format!(
+                "https://graph.microsoft.com/v1.0/teams/t/channels/c/messages/1/hostedContents/{id}/$value"
+            ))
+            .as_deref(),
+            Some(ams)
+        );
+        assert!(!is_ams_image_url(
+            "https://evil.example/v1/objects/a/views/imgo"
+        ));
+        assert!(!is_ams_image_url(
+            "https://eu-api.asm.skype.com/v1/users/me"
+        ));
     }
 
     #[test]
