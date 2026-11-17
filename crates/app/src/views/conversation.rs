@@ -166,6 +166,27 @@ enum HoverSlot {
     Toolbar,
 }
 
+/// Where the pointer is right now. A move from a row onto its toolbar reports the toolbar
+/// enter before the row leave, so a leave only starts the grace when neither part holds it.
+#[derive(Default)]
+struct PointerOn {
+    row: Option<String>,
+    toolbar: Option<String>,
+}
+
+impl PointerOn {
+    fn slot(&mut self, slot: HoverSlot) -> &mut Option<String> {
+        match slot {
+            HoverSlot::Row => &mut self.row,
+            HoverSlot::Toolbar => &mut self.toolbar,
+        }
+    }
+
+    fn holds(&self, key: &str) -> bool {
+        self.row.as_deref() == Some(key) || self.toolbar.as_deref() == Some(key)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ViewMode {
     Flat,
@@ -254,6 +275,7 @@ pub struct ConversationView {
     downloads: Downloads,
     hovered_message: Option<String>,
     hover_leave_serial: u64,
+    pointer_on: PointerOn,
     toolbar_hovered: Option<String>,
     context_menu: Option<OpenContextMenu>,
     context_serial: u64,
@@ -735,6 +757,7 @@ impl ConversationView {
             downloads: Downloads::default(),
             hovered_message: None,
             hover_leave_serial: 0,
+            pointer_on: PointerOn::default(),
             toolbar_hovered: None,
             context_menu: None,
             context_serial: 0,
@@ -1165,6 +1188,7 @@ impl ConversationView {
                 .update(cx, |composer, cx| composer.focus(window, cx));
         }
         self.hovered_message = None;
+        self.pointer_on = PointerOn::default();
         self.apply_pending_jump(cx);
     }
 
@@ -1181,6 +1205,7 @@ impl ConversationView {
             self.toolbar_pinned = None;
             self.toolbar_suppressed = None;
             self.hovered_message = None;
+            self.pointer_on = PointerOn::default();
             self.sync_generation += 1;
             self.draft.update(cx, |draft, cx| draft.reset(window, cx));
             self.composer
@@ -3066,14 +3091,20 @@ impl ConversationView {
         if hovered && matches!(slot, HoverSlot::Row) {
             self.request_post_follow(key, cx);
         }
+        let pointer = self.pointer_on.slot(slot);
         if !hovered {
-            if self.hovered_message.as_deref() == Some(key)
-                || self.toolbar_hovered.as_deref() == Some(key)
+            if pointer.as_deref() == Some(key) {
+                *pointer = None;
+            }
+            if !self.pointer_on.holds(key)
+                && (self.hovered_message.as_deref() == Some(key)
+                    || self.toolbar_hovered.as_deref() == Some(key))
             {
                 self.leave_hover_later(key.to_owned(), cx);
             }
             return;
         }
+        *pointer = Some(key.to_owned());
         self.hover_leave_serial += 1;
         match slot {
             HoverSlot::Row => self.hovered_message = Some(key.to_owned()),
@@ -3102,7 +3133,7 @@ impl ConversationView {
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(HOVER_LEAVE_GRACE).await;
             this.update(cx, |this, cx| {
-                if this.hover_leave_serial != serial {
+                if this.hover_leave_serial != serial || this.pointer_on.holds(&key) {
                     return;
                 }
                 if this.hovered_message.as_deref() == Some(key.as_str()) {
@@ -3122,6 +3153,7 @@ impl ConversationView {
     }
 
     fn suppress_toolbar(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.pointer_on.toolbar = None;
         if self.toolbar_hovered.as_deref() == Some(key) {
             self.toolbar_hovered = None;
         }
@@ -4818,6 +4850,11 @@ mod tests {
         assert_eq!(shown(cx).0.as_deref(), Some("b"));
         cx.executor().advance_clock(HOVER_LEAVE_GRACE * 2);
         assert_eq!(shown(cx).0.as_deref(), Some("b"));
+        hover(cx, HoverSlot::Row, "c", true);
+        hover(cx, HoverSlot::Toolbar, "c", true);
+        hover(cx, HoverSlot::Row, "c", false);
+        cx.executor().advance_clock(HOVER_LEAVE_GRACE * 2);
+        assert_eq!(shown(cx).1.as_deref(), Some("c"));
     }
 
     #[gpui_kit::test]
