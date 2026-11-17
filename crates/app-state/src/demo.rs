@@ -1997,6 +1997,16 @@ fn release_messages() -> Vec<MessageRecord> {
             "[]",
             false,
         ),
+        message(
+            chat,
+            "m12",
+            None,
+            (LEA_ID, lea_name),
+            at(0, 13, 52),
+            "<p><strong>1\u{fe0f}\u{20e3}Freeze the branch</strong></p><p><strong>2\u{fe0f}\u{20e3}Tag the release</strong></p><p>3\u{fe0f}\u{20e3} Publish the notes</p>",
+            "[]",
+            false,
+        ),
     ]
 }
 

@@ -392,6 +392,47 @@ pub fn keycap_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
     ranges
 }
 
+/// gpui applies a font override only to a run that lies inside it, so every cut range gets runs of its own.
+pub fn split_highlights(
+    highlights: Vec<(std::ops::Range<usize>, HighlightStyle)>,
+    cuts: &[std::ops::Range<usize>],
+    text_len: usize,
+) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
+    if cuts.is_empty() {
+        return highlights;
+    }
+    let mut covered = Vec::new();
+    let mut cursor = 0;
+    for (range, style) in highlights {
+        if cursor < range.start {
+            covered.push((cursor..range.start, HighlightStyle::default()));
+        }
+        cursor = cursor.max(range.end);
+        covered.push((range, style));
+    }
+    if cursor < text_len {
+        covered.push((cursor..text_len, HighlightStyle::default()));
+    }
+    let mut points: Vec<usize> = cuts.iter().flat_map(|cut| [cut.start, cut.end]).collect();
+    points.sort_unstable();
+    covered
+        .into_iter()
+        .flat_map(|(range, style)| {
+            let mut start = range.start;
+            let mut pieces = Vec::new();
+            for &point in points
+                .iter()
+                .filter(|&&point| range.start < point && point < range.end)
+            {
+                pieces.push((start..point, style));
+                start = point;
+            }
+            pieces.push((start..range.end, style));
+            pieces
+        })
+        .collect()
+}
+
 fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement {
     let highlights = inline
         .segments
@@ -420,6 +461,7 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
         )
         .collect();
     font_overrides.sort_by_key(|(range, _)| range.start);
+    let keycaps = keycap_ranges(&inline.text);
     let emoji = inline.emoji();
     let highlights = highlights
         .into_iter()
@@ -482,11 +524,15 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
         .w_full()
         .text_color(theme::text())
         .child(
-            SelectableRichText::new(ElementId::Name(id.into()), inline.text.clone(), highlights)
-                .links(inline.links())
-                .font_overrides(font_overrides)
-                .pills(pills)
-                .inline_images(inline_images),
+            SelectableRichText::new(
+                ElementId::Name(id.into()),
+                inline.text.clone(),
+                split_highlights(highlights, &keycaps, inline.text.len()),
+            )
+            .links(inline.links())
+            .font_overrides(font_overrides)
+            .pills(pills)
+            .inline_images(inline_images),
         )
         .into_any_element()
 }
@@ -619,8 +665,22 @@ fn luminance(color: Rgba) -> f32 {
 mod tests {
     use gpui_kit::{Rgba, rgb};
 
-    use super::{MIN_CONTRAST, contrast, keycap_ranges, readable};
+    use super::{MIN_CONTRAST, contrast, keycap_ranges, readable, split_highlights};
     use app_base::theme;
+    use gpui_kit::{FontWeight, HighlightStyle};
+
+    #[test]
+    fn a_keycap_inside_bold_text_gets_runs_of_its_own() {
+        let bold = HighlightStyle {
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        };
+        let split = split_highlights(vec![(0..10, bold)], &[2..9, 12..15], 20);
+        let ranges: Vec<_> = split.iter().map(|(range, _)| range.clone()).collect();
+        assert_eq!(ranges, [0..2, 2..9, 9..10, 10..12, 12..15, 15..20]);
+        assert_eq!(split[1].1, bold);
+        assert_eq!(split[4].1, HighlightStyle::default());
+    }
 
     #[test]
     fn keycap_sequences_cover_the_base_the_selector_and_the_keycap() {
