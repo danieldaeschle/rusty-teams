@@ -502,6 +502,9 @@ impl AdaptiveCard {
     }
 
     fn from_value(root: &Value) -> Option<AdaptiveCard> {
+        if let Some(converted) = crate::legacy_card::as_adaptive_card(root) {
+            return Self::from_value(&converted);
+        }
         let object = root.as_object()?;
         let mut items = parse_items(object.get("body"));
         let actions = parse_actions(object.get("actions"));

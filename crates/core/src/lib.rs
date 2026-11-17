@@ -41,6 +41,7 @@ mod image_size;
 mod images;
 mod italic;
 mod jumbo;
+mod legacy_card;
 mod library;
 mod link_sync;
 mod links;

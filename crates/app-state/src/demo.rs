@@ -1420,7 +1420,32 @@ fn bot_messages() -> Vec<MessageRecord> {
             bot_card_message(&format!("c{minute}"), at(0, 15, minute), chart_card)
         },
     ));
+    let mut webhook = bot_card_message("w1", at(0, 16, 0), &connector_card());
+    webhook.attachments_json = webhook.attachments_json.replace(
+        "application/vnd.microsoft.card.adaptive",
+        "application/vnd.microsoft.teams.card.o365connector",
+    );
+    messages.push(webhook);
     messages
+}
+
+fn connector_card() -> serde_json::Value {
+    serde_json::json!({
+        "@type": "MessageCard",
+        "summary": "Build failed",
+        "title": "Pipeline main",
+        "sections": [{
+            "activityTitle": "Build 128 failed",
+            "activitySubtitle": "on agent 3",
+            "facts": [{"name": "Branch", "value": "main"}, {"name": "Duration", "value": "4 min"}],
+            "text": "See the log for details."
+        }],
+        "potentialAction": [{
+            "@type": "OpenUri",
+            "name": "Open log",
+            "targets": [{"os": "default", "uri": "https://example.com/ci/128"}]
+        }]
+    })
 }
 
 fn bot_card_message(id: &str, time: DateTime<Utc>, card: &serde_json::Value) -> MessageRecord {
