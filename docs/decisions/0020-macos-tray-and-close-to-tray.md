@@ -1,11 +1,9 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-15
 ---
 
-# ADR 0018: macOS tray and close-to-tray match Linux
-
-Upstream already shipped Linux desktop toasts as ADR 0015, so this macOS tray note is 0018.
+# ADR 0020: macOS tray and close-to-tray match Linux
 
 ## Context
 
