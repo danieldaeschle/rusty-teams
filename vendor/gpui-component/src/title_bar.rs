@@ -335,7 +335,8 @@ impl RenderOnce for TitleBar {
                 .items_center()
                 .justify_between()
                 .h(TITLE_BAR_HEIGHT)
-                .pl(TITLE_BAR_LEFT_PADDING)
+                // The macOS traffic lights are hidden in fullscreen, so their inset goes too.
+                .when(!window.is_fullscreen(), |this| this.pl(TITLE_BAR_LEFT_PADDING))
                 .border_b_1()
                 .border_color(cx.theme().title_bar_border)
                 .bg(default_title_bar_background(

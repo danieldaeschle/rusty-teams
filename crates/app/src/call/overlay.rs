@@ -347,7 +347,7 @@ impl CallWindows {
         self.stage_opening = true;
         let controller = cx.entity();
         let app = self.app.clone();
-        let mut options = gpui_kit::component::TitleBar::window_options();
+        let mut options = crate::views::title_bar::window_options();
         options.window_bounds = Some(WindowBounds::Windowed(Bounds::centered(
             None,
             size(px(CALL_WINDOW_SIZE.0), px(CALL_WINDOW_SIZE.1)),
