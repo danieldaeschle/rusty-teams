@@ -1002,7 +1002,7 @@ pub fn seed_directory(state: &mut AppState) {
     state.own_email = DEMO_USER_EMAIL.to_owned();
     state.own_time_zone = Some(DEMO_TIME_ZONE.to_owned());
     state.translation.settings = Some(language_settings());
-    state.apply_date_locale();
+    state.apply_regional_format();
     state.translation.languages = language_list();
     let directory = &mut state.directory;
     directory.me = Some(Person {

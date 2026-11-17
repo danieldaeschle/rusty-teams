@@ -19,16 +19,13 @@ const DESCRIPTION_LINES: usize = 3;
 pub fn when_label(start: DateTime<Utc>, end: DateTime<Utc>) -> String {
     let (start, end) = (start.with_timezone(&Local), end.with_timezone(&Local));
     let clock = crate::format::clock_format();
+    let day = |time: DateTime<Local>| crate::format::weekday_date_label(time.date_naive());
     let end_text = if end.date_naive() == start.date_naive() {
         end.format(clock).to_string()
     } else {
-        format!("{} {}", end.format("%a %-d %b,"), end.format(clock))
+        format!("{} {}", day(end), end.format(clock))
     };
-    format!(
-        "{} {} - {end_text}",
-        start.format("%a %-d %b,"),
-        start.format(clock)
-    )
+    format!("{} {} - {end_text}", day(start), start.format(clock))
 }
 
 fn description_excerpt(description: &str) -> Option<String> {

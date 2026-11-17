@@ -27,9 +27,8 @@ const ITEM_RADIUS: f32 = 6.;
 const ITEM_ICON: f32 = 16.;
 const NAV_PADDING_X: f32 = 12.;
 
-const CALENDAR_TERMS: [&str; 11] = [
+const CALENDAR_TERMS: [&str; 10] = [
     "settings.calendar.default_view",
-    "settings.calendar.first_day",
     "settings.calendar.work_days",
     "settings.calendar.work_hours",
     "settings.calendar.time_scale",
@@ -67,6 +66,9 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.notifications.send_test"),
         ],
         SettingsSection::Appearance => vec![
+            tr("settings.appearance.region.title"),
+            tr("settings.appearance.clock.title"),
+            tr("settings.appearance.first_day.title"),
             tr("settings.appearance.theme"),
             tr("settings.appearance.color_scheme"),
             tr("settings.appearance.app_icon"),

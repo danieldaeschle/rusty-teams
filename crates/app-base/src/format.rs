@@ -38,6 +38,14 @@ const SUNDAY_FIRST_LOCALES: [&str; 13] = [
 ];
 /// Arabic regions that start on Monday instead of Saturday.
 const ARABIC_MONDAY_LOCALES: [&str; 2] = ["ar-ma", "ar-tn"];
+/// Languages that write a decimal comma (CLDR), except the locales below.
+const DECIMAL_COMMA_LANGUAGES: [&str; 17] = [
+    "de", "fr", "it", "es", "pt", "nl", "sv", "da", "nb", "no", "fi", "pl", "cs", "sk", "ru", "tr",
+    "uk",
+];
+const DECIMAL_POINT_LOCALES: [&str; 4] = ["de-ch", "de-li", "it-ch", "es-mx"];
+const TWELVE_HOUR_CLOCK: &str = "%-I:%M %p";
+const TWENTY_FOUR_HOUR_CLOCK: &str = "%H:%M";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DateStyle {
@@ -45,30 +53,20 @@ pub struct DateStyle {
     day_month_year: &'static str,
     clock: &'static str,
     first_day: Weekday,
+    decimal: char,
 }
 
 thread_local! {
     static DATE_STYLE: Cell<Option<DateStyle>> = const { Cell::new(None) };
 }
 
+/// The regional format every label below uses; [`crate::regional::resolve`] builds it.
+pub fn set_date_style(style: Option<DateStyle>) {
+    DATE_STYLE.with(|current| current.set(style));
+}
+
 pub fn set_date_locale(locale: Option<&str>) {
-    DATE_STYLE.with(|style| style.set(locale.map(date_style)));
-}
-
-/// Teams desktop formats dates and times with the OS regional format, not the account language.
-pub fn os_regional_locale() -> Option<String> {
-    sys_locale::get_locale()
-        .as_deref()
-        .and_then(normalize_locale)
-}
-
-fn normalize_locale(raw: &str) -> Option<String> {
-    let tag = raw
-        .split(['.', '@'])
-        .next()
-        .unwrap_or_default()
-        .replace('_', "-");
-    (!tag.is_empty() && tag != "C" && tag != "POSIX").then_some(tag)
+    set_date_style(locale.map(date_style));
 }
 
 fn current_date_style() -> Option<DateStyle> {
@@ -98,10 +96,37 @@ fn first_day_for(locale: &str, language: &str) -> Weekday {
 }
 
 pub fn clock_format() -> &'static str {
-    current_date_style().map_or("%H:%M", |style| style.clock)
+    current_date_style().map_or(TWENTY_FOUR_HOUR_CLOCK, |style| style.clock)
 }
 
 impl DateStyle {
+    /// The same patterns with a forced clock; a 12-hour region keeps its own am/pm spelling.
+    pub fn with_twelve_hour(self, twelve_hour: bool) -> DateStyle {
+        let clock = match (twelve_hour, self.twelve_hour()) {
+            (true, true) | (false, false) => self.clock,
+            (true, false) => TWELVE_HOUR_CLOCK,
+            (false, true) => TWENTY_FOUR_HOUR_CLOCK,
+        };
+        DateStyle { clock, ..self }
+    }
+
+    pub fn with_first_day(self, first_day: Weekday) -> DateStyle {
+        DateStyle { first_day, ..self }
+    }
+
+    pub fn twelve_hour(&self) -> bool {
+        self.clock.contains("%p") || self.clock.contains("%P")
+    }
+
+    pub fn first_day(&self) -> Weekday {
+        self.first_day
+    }
+
+    /// chrono pattern of the clock, such as `%H:%M`.
+    pub fn clock(&self) -> &'static str {
+        self.clock
+    }
+
     fn month_first(&self) -> bool {
         self.day_month.starts_with("%-m")
     }
@@ -221,11 +246,58 @@ pub fn date_style(locale: &str) -> DateStyle {
         language if PADDED_DOT_LOCALES.contains(&language) => ("%d.%m", "%d.%m.%Y"),
         _ => ("%d/%m", "%d/%m/%Y"),
     };
+    let decimal_comma = DECIMAL_COMMA_LANGUAGES.contains(&language)
+        && !DECIMAL_POINT_LOCALES.contains(&locale.as_str());
     DateStyle {
         day_month,
         day_month_year,
         clock,
         first_day: first_day_for(&locale, language),
+        decimal: if decimal_comma { ',' } else { '.' },
+    }
+}
+
+/// "16.11." / "11/16": numeric day and month of the regional format.
+pub fn day_month_label(date: NaiveDate) -> String {
+    date.format(current_date_style().map_or("%b %-d", |style| style.day_month))
+        .to_string()
+}
+
+/// "16.11.2026" / "11/16/2026": numeric date of the regional format.
+pub fn date_label(date: NaiveDate) -> String {
+    date.format(current_date_style().map_or("%b %-d, %Y", |style| style.day_month_year))
+        .to_string()
+}
+
+/// "Mon, 16.11." / "Mon, 11/16": short weekday in the app language, date in the regional format.
+pub fn weekday_date_label(date: NaiveDate) -> String {
+    format!(
+        "{}, {}",
+        weekday_name(date.weekday(), WeekdayWidth::Short),
+        day_month_label(date)
+    )
+}
+
+/// "16. November 2026" / "November 16, 2026" / "16 November 2026".
+pub fn long_date_label(date: NaiveDate) -> String {
+    let style = current_date_style();
+    let month = month_name(date);
+    let day = date.day();
+    if style.is_none_or(|style| style.month_first()) {
+        format!("{month} {day}, {}", date.year())
+    } else if style.is_some_and(|style| style.day_month.ends_with('.')) {
+        format!("{day}. {month} {}", date.year())
+    } else {
+        format!("{day} {month} {}", date.year())
+    }
+}
+
+/// A number with `decimals` places and the regional decimal separator: "1,5" in Austria.
+pub fn decimal_label(value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    match current_date_style().map_or('.', |style| style.decimal) {
+        '.' => text,
+        separator => text.replace('.', &separator.to_string()),
     }
 }
 
@@ -276,18 +348,6 @@ pub fn badge_text(count: u32) -> String {
     }
 }
 
-fn weekday_label(weekday: Weekday) -> &'static str {
-    match weekday {
-        Weekday::Mon => "Mon",
-        Weekday::Tue => "Tue",
-        Weekday::Wed => "Wed",
-        Weekday::Thu => "Thu",
-        Weekday::Fri => "Fri",
-        Weekday::Sat => "Sat",
-        Weekday::Sun => "Sun",
-    }
-}
-
 pub fn file_size_label(bytes: u64) -> String {
     const KIB: f64 = 1024.;
     let value = bytes as f64;
@@ -296,7 +356,7 @@ pub fn file_size_label(bytes: u64) -> String {
     } else if value < KIB * KIB {
         format!("{:.0} KB", value / KIB)
     } else {
-        format!("{:.1} MB", value / (KIB * KIB))
+        format!("{} MB", decimal_label(value / (KIB * KIB), 1))
     }
 }
 
@@ -323,7 +383,7 @@ pub fn list_time_label_in(
             .format(style.map_or("%H:%M", |style| style.clock))
             .to_string()
     } else if days_ago <= WEEKDAY_WINDOW_DAYS {
-        weekday_label(local.weekday()).to_owned()
+        weekday_name(local.weekday(), WeekdayWidth::Short)
     } else {
         local
             .format(style.map_or("%b %-d", |style| style.day_month))
@@ -375,9 +435,12 @@ pub fn post_time_label_in(
     if days_ago <= 0 {
         clock.to_string()
     } else if days_ago == 1 {
-        format!("Yesterday {clock}")
+        format!("{} {clock}", crate::ui_locale::tr("regional.yesterday"))
     } else if days_ago <= WEEKDAY_WINDOW_DAYS {
-        format!("{} {clock}", weekday_label(local.weekday()))
+        format!(
+            "{} {clock}",
+            weekday_name(local.weekday(), WeekdayWidth::Short)
+        )
     } else if let Some(style) = style {
         let date = if same_year {
             style.day_month
@@ -394,14 +457,14 @@ pub fn post_time_label_in(
 
 pub fn day_label(day: NaiveDate, today: NaiveDate) -> String {
     if day == today {
-        "Today".to_owned()
+        crate::ui_locale::tr("regional.today")
     } else if today.pred_opt() == Some(day) {
-        "Yesterday".to_owned()
+        crate::ui_locale::tr("regional.yesterday")
     } else {
         format!(
             "{}, {}",
-            weekday_label(day.weekday()),
-            day.format("%b %-d, %Y")
+            weekday_name(day.weekday(), WeekdayWidth::Short),
+            long_date_label(day)
         )
     }
 }
@@ -511,16 +574,6 @@ mod tests {
     }
 
     #[test]
-    fn os_locale_names_become_language_tags() {
-        assert_eq!(normalize_locale("en-GB").as_deref(), Some("en-GB"));
-        assert_eq!(normalize_locale("en_GB.UTF-8").as_deref(), Some("en-GB"));
-        assert_eq!(normalize_locale("de_DE@euro").as_deref(), Some("de-DE"));
-        assert_eq!(normalize_locale("C"), None);
-        assert_eq!(normalize_locale("POSIX"), None);
-        assert_eq!(normalize_locale(""), None);
-    }
-
-    #[test]
     fn the_clock_follows_the_display_language() {
         set_date_locale(Some("en-US"));
         assert_eq!(clock_format(), "%-I:%M %p");
@@ -608,6 +661,7 @@ mod tests {
 
     #[test]
     fn list_time_is_clock_today_weekday_this_week_date_before() {
+        let _guard = crate::ui_locale::locale_test_lock();
         assert_eq!(list_time_label(utc(7, 13), today(), zero()), "13:05");
         assert_eq!(list_time_label(utc(5, 13), today(), zero()), "Mon");
         assert_eq!(list_time_label(utc(6, 9), today(), zero()), "Tue");
@@ -633,6 +687,7 @@ mod tests {
 
     #[test]
     fn post_time_adds_the_day_when_not_today() {
+        let _guard = crate::ui_locale::locale_test_lock();
         assert_eq!(post_time_label(utc(7, 13), today(), zero()), "13:05");
         assert_eq!(
             post_time_label(utc(6, 9), today(), zero()),
@@ -679,11 +734,12 @@ mod tests {
 
     #[test]
     fn day_labels() {
+        let _guard = crate::ui_locale::locale_test_lock();
         assert_eq!(day_label(today(), today()), "Today");
         assert_eq!(day_label(today().pred_opt().unwrap(), today()), "Yesterday");
         assert_eq!(
             day_label(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(), today()),
-            "Thu, Oct 1, 2026"
+            "Thu, October 1, 2026"
         );
     }
 }

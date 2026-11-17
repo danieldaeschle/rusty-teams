@@ -126,8 +126,6 @@ impl WorkHours {
 pub struct CalendarPrefs {
     pub default_view: DefaultView,
     pub last_span: CalendarSpan,
-    /// `None` follows the regional format.
-    pub first_day: Option<Weekday>,
     pub time_scale: TimeScale,
     pub weekend_work_week: WeekendWorkWeek,
     pub pane_hidden: bool,
@@ -143,14 +141,10 @@ impl CalendarPrefs {
         self.default_view.span().unwrap_or(self.last_span)
     }
 
-    pub fn first_day_or(&self, regional: Weekday) -> Weekday {
-        self.first_day.unwrap_or(regional)
-    }
-
-    /// Week layout for the grid; `regional` is the regional format's first day.
-    pub fn layout(&self, regional: Weekday) -> WeekLayout {
+    /// Week layout for the grid; the first day comes from the regional format.
+    pub fn layout(&self, first_day: Weekday) -> WeekLayout {
         WeekLayout {
-            first_day: self.first_day_or(regional),
+            first_day,
             work_days: self.work_hours.days.clone(),
             weekend: self.weekend_work_week,
         }
@@ -170,6 +164,12 @@ impl CalendarPrefs {
 
     pub fn from_json(text: &str) -> Self {
         serde_json::from_str(text).unwrap_or_default()
+    }
+
+    /// The first day of week this record kept before it moved to the regional format.
+    pub fn legacy_first_day(json: &str) -> Option<Weekday> {
+        let value: serde_json::Value = serde_json::from_str(json).ok()?;
+        serde_json::from_value(value.get("first_day")?.clone()).ok()
     }
 
     pub fn to_json(&self) -> String {
@@ -227,7 +227,6 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let mut prefs = CalendarPrefs {
             default_view: DefaultView::Month,
-            first_day: Some(Weekday::Sun),
             time_scale: TimeScale::Min15,
             pane_hidden: true,
             ..CalendarPrefs::default()
@@ -236,6 +235,20 @@ mod tests {
         prefs.work_hours.days = vec![Weekday::Mon, Weekday::Tue, Weekday::Thu];
         save_calendar_prefs(&store, &prefs);
         assert_eq!(load_calendar_prefs(&store), prefs);
+    }
+
+    #[test]
+    fn the_old_first_day_is_read_once_it_left_the_struct() {
+        let json = r#"{"default_view":"month","first_day":"Sun"}"#;
+        assert_eq!(CalendarPrefs::legacy_first_day(json), Some(Weekday::Sun));
+        assert_eq!(
+            CalendarPrefs::legacy_first_day(r#"{"first_day":null}"#),
+            None
+        );
+        assert_eq!(
+            CalendarPrefs::from_json(json).default_view,
+            DefaultView::Month
+        );
     }
 
     #[test]

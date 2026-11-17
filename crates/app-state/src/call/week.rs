@@ -51,19 +51,10 @@ impl CalendarWeek {
 }
 
 impl AppState {
-    /// Week layout from the calendar settings and the regional first day.
+    /// Week layout from the calendar settings and the regional format's first day.
     pub fn calendar_layout(&self) -> WeekLayout {
-        self.calendar_prefs.layout(self.default_first_day())
-    }
-
-    /// First day of week without an override: the mailbox language's region, as in
-    /// Outlook and Teams, else the regional format.
-    pub fn default_first_day(&self) -> Weekday {
         self.calendar_prefs
-            .mailbox_locale
-            .as_deref()
-            .map(app_base::format::first_day_for_locale)
-            .unwrap_or_else(app_base::format::regional_first_day)
+            .layout(app_base::format::regional_first_day())
     }
 
     pub fn calendar_start(&self) -> NaiveDate {

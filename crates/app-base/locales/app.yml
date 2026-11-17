@@ -243,6 +243,9 @@ settings:
     language:
       en: LANGUAGE
       de: SPRACHE
+    regional_format:
+      en: REGIONAL FORMAT
+      de: REGIONALES FORMAT
     theme:
       en: THEME
       de: DESIGN
@@ -328,15 +331,6 @@ settings:
     last_used:
       en: Last used
       de: Zuletzt verwendet
-    first_day:
-      en: First day of week
-      de: Erster Wochentag
-    first_day_detail:
-      en: Week, work week and month start on this day
-      de: Woche, Arbeitswoche und Monat beginnen an diesem Tag
-    first_day_regional:
-      en: "As in Outlook (%{day})"
-      de: "Wie in Outlook (%{day})"
     work_days:
       en: Work days
       de: Arbeitstage
@@ -569,6 +563,42 @@ settings:
       german:
         en: Deutsch
         de: Deutsch
+    region:
+      title:
+        en: Region
+        de: Region
+      detail:
+        en: Date and number format, also when the app language differs
+        de: Datums- und Zahlenformat, auch bei anderer App-Sprache
+      follow_system:
+        en: "Follow system (%{region})"
+        de: "Systemeinstellung folgen (%{region})"
+    clock:
+      title:
+        en: Time format
+        de: Zeitformat
+      detail:
+        en: Times in chats, calendar and notifications
+        de: Uhrzeiten in Chats, Kalender und Benachrichtigungen
+      auto:
+        en: "Automatic (%{example})"
+        de: "Automatisch (%{example})"
+      hours_24:
+        en: "24-hour (%{example})"
+        de: "24 Stunden (%{example})"
+      hours_12:
+        en: "12-hour (%{example})"
+        de: "12 Stunden (%{example})"
+    first_day:
+      title:
+        en: First day of week
+        de: Erster Wochentag
+      detail:
+        en: Calendar weeks, months and date pickers start on this day
+        de: Wochen, Monate und Datumsauswahl im Kalender beginnen an diesem Tag
+      auto:
+        en: "Automatic (%{day})"
+        de: "Automatisch (%{day})"
   chats:
     density:
       en: Message density
@@ -1898,3 +1928,92 @@ shortcuts:
     calls:
       en: Calls
       de: Anrufe
+regional:
+  today:
+    en: Today
+    de: Heute
+  yesterday:
+    en: Yesterday
+    de: Gestern
+  tomorrow:
+    en: Tomorrow
+    de: Morgen
+  today_clock:
+    en: "today %{clock}"
+    de: "heute %{clock}"
+  today_at:
+    en: "today at %{clock}"
+    de: "heute um %{clock}"
+  yesterday_at:
+    en: "yesterday at %{clock}"
+    de: "gestern um %{clock}"
+  date_at:
+    en: "%{date} at %{clock}"
+    de: "%{date} um %{clock}"
+  until:
+    en: "until %{time}"
+    de: "bis %{time}"
+  region:
+    at:
+      en: Austria
+      de: Österreich
+    au:
+      en: Australia
+      de: Australien
+    br:
+      en: Brazil
+      de: Brasilien
+    ca:
+      en: Canada
+      de: Kanada
+    ch:
+      en: Switzerland
+      de: Schweiz
+    cz:
+      en: Czechia
+      de: Tschechien
+    de:
+      en: Germany
+      de: Deutschland
+    dk:
+      en: Denmark
+      de: Dänemark
+    es:
+      en: Spain
+      de: Spanien
+    fi:
+      en: Finland
+      de: Finnland
+    fr:
+      en: France
+      de: Frankreich
+    gb:
+      en: United Kingdom
+      de: Vereinigtes Königreich
+    ie:
+      en: Ireland
+      de: Irland
+    in:
+      en: India
+      de: Indien
+    it:
+      en: Italy
+      de: Italien
+    jp:
+      en: Japan
+      de: Japan
+    nl:
+      en: Netherlands
+      de: Niederlande
+    no:
+      en: Norway
+      de: Norwegen
+    pl:
+      en: Poland
+      de: Polen
+    se:
+      en: Sweden
+      de: Schweden
+    us:
+      en: United States
+      de: Vereinigte Staaten

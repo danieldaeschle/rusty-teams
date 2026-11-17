@@ -59,11 +59,11 @@ pub fn response_label(response: ResponseType) -> &'static str {
 
 pub fn day_heading(day: NaiveDate, today: NaiveDate) -> String {
     if day == today {
-        "Today".to_owned()
+        app_base::ui_locale::tr("regional.today")
     } else if today.succ_opt() == Some(day) {
-        "Tomorrow".to_owned()
+        app_base::ui_locale::tr("regional.tomorrow")
     } else {
-        day.format("%a, %b %-d").to_string()
+        app_base::format::weekday_date_label(day)
     }
 }
 

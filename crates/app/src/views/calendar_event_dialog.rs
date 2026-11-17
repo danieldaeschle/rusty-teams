@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
-use app_base::format::Zone;
+use app_base::format::{WeekdayWidth, Zone, weekday_name};
 use app_ui_kit::layout::{COMFY_RUNWAY_WIDTH, SIDEBAR_WIDTH};
 use app_ui_kit::render::hooks::open_link;
 use app_ui_kit::render::{Block, layout_blocks, render_blocks, strip_image_placeholders};
 use chatsvc::{
     CalendarEvent, CalendarSource, DialIn, EventAttendee, Reply, ResponseType, join_info_text,
 };
-use chrono::{Datelike, Weekday};
+use chrono::Datelike;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -1026,8 +1026,8 @@ fn peek_when_label(event: &CalendarEvent) -> String {
         let day_label = |date: chrono::NaiveDate| {
             format!(
                 "{} {}",
-                localized_weekday(date.weekday()),
-                format_peek_date(date)
+                weekday_name(date.weekday(), WeekdayWidth::Short),
+                app_base::format::date_label(date)
             )
         };
         let (start, end) = (start.date_naive(), end.date_naive());
@@ -1041,8 +1041,8 @@ fn peek_when_label(event: &CalendarEvent) -> String {
         }
         return format!("{} · {}", tr("calendar.peek.all_day"), day_label(start));
     }
-    let weekday = localized_weekday(start.weekday());
-    let date = format_peek_date(start.date_naive());
+    let weekday = weekday_name(start.weekday(), WeekdayWidth::Short);
+    let date = app_base::format::date_label(start.date_naive());
     let clock = app_base::format::clock_format();
     if start.date_naive() == end.date_naive() {
         format!(
@@ -1055,7 +1055,7 @@ fn peek_when_label(event: &CalendarEvent) -> String {
         format!(
             "{weekday} {date}, {} – {}, {}",
             start.format(clock),
-            format_peek_date(end.date_naive()),
+            app_base::format::date_label(end.date_naive()),
             end.format(clock)
         )
     }
@@ -1099,38 +1099,6 @@ fn reminder_label(minutes: u32) -> String {
         },
         &args,
     )
-}
-
-fn ui_is_german() -> bool {
-    gpui_kit::component::locale().starts_with("de")
-}
-
-fn format_peek_date(date: chrono::NaiveDate) -> String {
-    if ui_is_german() {
-        date.format("%d.%m.%Y").to_string()
-    } else {
-        date.format("%-m/%-d/%Y").to_string()
-    }
-}
-
-fn localized_weekday(weekday: Weekday) -> &'static str {
-    let de = ui_is_german();
-    match (de, weekday) {
-        (true, Weekday::Mon) => "Mo",
-        (true, Weekday::Tue) => "Di",
-        (true, Weekday::Wed) => "Mi",
-        (true, Weekday::Thu) => "Do",
-        (true, Weekday::Fri) => "Fr",
-        (true, Weekday::Sat) => "Sa",
-        (true, Weekday::Sun) => "So",
-        (false, Weekday::Mon) => "Mon",
-        (false, Weekday::Tue) => "Tue",
-        (false, Weekday::Wed) => "Wed",
-        (false, Weekday::Thu) => "Thu",
-        (false, Weekday::Fri) => "Fri",
-        (false, Weekday::Sat) => "Sat",
-        (false, Weekday::Sun) => "Sun",
-    }
 }
 
 fn location_label(event: &CalendarEvent) -> String {

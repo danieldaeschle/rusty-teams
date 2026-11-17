@@ -131,7 +131,7 @@ pub fn day_choices(today: NaiveDate) -> Vec<DayChoice> {
             let date = today + Duration::days(offset);
             DayChoice {
                 date,
-                label: date.format("%a %-d %b").to_string(),
+                label: crate::format::weekday_date_label(date),
             }
         })
         .collect()
@@ -174,13 +174,13 @@ pub fn format_time(time: NaiveTime) -> String {
 
 pub fn describe(at: DateTime<Local>, now: DateTime<Local>) -> String {
     let days_ahead = (at.date_naive() - now.date_naive()).num_days();
+    let clock = at.format(crate::format::clock_format()).to_string();
     match days_ahead {
-        0 => format!("today {}", at.format(crate::format::clock_format())),
+        0 => crate::ui_locale::tr_with("regional.today_clock", &[("clock", &clock)]),
         1..=6 => weekday_clock(at),
         _ => format!(
-            "{} {}",
-            at.format("%a %-d %b"),
-            at.format(crate::format::clock_format())
+            "{} {clock}",
+            crate::format::weekday_date_label(at.date_naive())
         ),
     }
 }
@@ -188,7 +188,7 @@ pub fn describe(at: DateTime<Local>, now: DateTime<Local>) -> String {
 fn weekday_clock(at: DateTime<Local>) -> String {
     format!(
         "{} {}",
-        at.format("%a"),
+        crate::format::weekday_name(at.weekday(), crate::format::WeekdayWidth::Short),
         at.format(crate::format::clock_format())
     )
 }
@@ -226,6 +226,7 @@ mod tests {
 
     #[test]
     fn midweek_offers_tomorrow_and_next_monday() {
+        let _guard = crate::ui_locale::locale_test_lock();
         let found = presets(at(8, 9, 0));
         let labels: Vec<_> = found.iter().map(|preset| preset.label).collect();
         assert_eq!(
@@ -250,6 +251,7 @@ mod tests {
 
     #[test]
     fn sunday_shows_tomorrow_only_because_monday_would_duplicate_it() {
+        let _guard = crate::ui_locale::locale_test_lock();
         let found = presets(at(11, 21, 0));
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].kind, PresetKind::TomorrowMorning);
@@ -285,10 +287,11 @@ mod tests {
 
     #[test]
     fn day_choices_run_from_today_for_seven_days() {
+        let _guard = crate::ui_locale::locale_test_lock();
         let choices = day_choices(at(9, 12, 0).date_naive());
         assert_eq!(choices.len(), 7);
-        assert_eq!(choices[0].label, "Fri 9 Oct");
-        assert_eq!(choices[6].label, "Thu 15 Oct");
+        assert_eq!(choices[0].label, "Fri, Oct 9");
+        assert_eq!(choices[6].label, "Thu, Oct 15");
     }
 
     #[test]
@@ -318,9 +321,10 @@ mod tests {
 
     #[test]
     fn describing_a_time_names_today_or_the_weekday() {
+        let _guard = crate::ui_locale::locale_test_lock();
         let now = at(9, 10, 0);
         assert_eq!(describe(at(9, 15, 30), now), "today 15:30");
         assert_eq!(describe(at(12, 8, 15), now), "Mon 08:15");
-        assert_eq!(describe(at(16, 8, 15), now), "Fri 16 Oct 08:15");
+        assert_eq!(describe(at(16, 8, 15), now), "Fri, Oct 16 08:15");
     }
 }

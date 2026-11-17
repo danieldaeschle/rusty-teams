@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use agents::{DesktopSession, Environment, RunningSession};
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Datelike, Local, Utc};
 use mcp::install::{Homes, Location};
 
 use super::message_context;
@@ -34,9 +34,10 @@ pub fn relative_age(now: DateTime<Utc>, then: DateTime<Utc>) -> String {
     } else if age.num_days() < 1 {
         format!("{}h", age.num_hours())
     } else if age.num_days() < WEEK_DAYS {
-        then.with_timezone(&Local).format("%a").to_string()
+        let weekday = then.with_timezone(&Local).weekday();
+        crate::format::weekday_name(weekday, crate::format::WeekdayWidth::Short)
     } else {
-        then.with_timezone(&Local).format("%b %-d").to_string()
+        crate::format::day_month_label(then.with_timezone(&Local).date_naive())
     }
 }
 

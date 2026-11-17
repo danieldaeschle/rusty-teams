@@ -105,6 +105,8 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
                 language_choices,
             ),
         ))
+        .child(caption(tr("settings.caption.regional_format")))
+        .children(super::regional::rows(app, cx))
         .child(caption(tr("settings.caption.theme")))
         .child(control_row(
             tr("settings.appearance.theme"),

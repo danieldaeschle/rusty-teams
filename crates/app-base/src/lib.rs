@@ -32,6 +32,7 @@ pub mod orgs;
 pub mod presence_link;
 pub mod read_state;
 pub mod recap;
+pub mod regional;
 pub mod release_feed;
 pub mod remote_image;
 pub mod runtime;
