@@ -2,6 +2,7 @@ pub mod activity_feed;
 pub mod activity_mentions;
 pub mod ams;
 pub mod bot_profiles;
+pub mod caldav;
 pub mod calendar;
 pub mod calllog;
 pub mod cards;
@@ -20,6 +21,7 @@ pub mod forward;
 pub mod gifs;
 pub mod google_calendar;
 pub mod graph_events;
+pub mod ical;
 mod json_id;
 pub use json_id::id_text;
 pub mod language_settings;
@@ -56,12 +58,16 @@ pub use activity_feed::{
 };
 pub use activity_mentions::{MentionActivity, MentionKind, mentions_of};
 pub use bot_profiles::{BotProfile, BotProfiles, parse_bot_profiles};
+pub use caldav::{
+    CalDavClient, CalDavEvent, ListedCalendar, discover as discover_caldav, href_from_object_id,
+    new_event_uid, object_id_for, partstat_for_reply,
+};
 pub use calendar::{
     Attendee, AttendeeResponseCounts, BusyTime, Calendar, CalendarEvent, CalendarSource,
-    CreatedEvent, DialIn, EventAttendee, NewEvent, PersonSchedule, Reminder, Repeat, Reply,
-    ResponseType, ShowAs, apply_event_details, join_info_text, meet_now_join_url, new_event_body,
-    new_event_body_with_join, parse_calendar_events, parse_created_event, strip_html,
-    truncate_preview,
+    CreatedEvent, DialIn, EventAttendee, HomeCalendar, NewEvent, PersonSchedule, Reminder, Repeat,
+    Reply, ResponseType, ShowAs, apply_event_details, join_info_text, meet_now_join_url,
+    merge_calendar_events, new_event_body, new_event_body_with_join, normalize_join_url,
+    parse_calendar_events, parse_created_event, strip_html, truncate_preview,
 };
 pub use calllog::{CallDirection, CallLogEntry, CallOutcome};
 pub use cards::{
@@ -85,8 +91,12 @@ pub use gifs::{Gif, Gifs};
 pub use google_calendar::{
     AuthPending, GoogleCalendar, GoogleEventDraft, GoogleOAuth, TokenBundle, allocate_redirect_uri,
     client_id_from_env, exchange_code, google_event_body, google_rsvp_query, google_rsvp_status,
-    merge_calendar_events, normalize_join_url, parse_calendar_list, parse_google_events,
-    refresh_access_token, rrule_for_repeat, wait_for_code,
+    parse_calendar_list, parse_google_events, refresh_access_token, rrule_for_repeat,
+    wait_for_code,
+};
+pub use ical::{
+    CalDavEventDraft, build_vevent, exclude_occurrence_from_ics, expand_events, parse_calendar,
+    teams_join_url,
 };
 pub use language_settings::{
     LanguageSettings, LanguageSettingsClient, TranslationBehavior, authoring_patch, behavior_patch,

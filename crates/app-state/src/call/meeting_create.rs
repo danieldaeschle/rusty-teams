@@ -8,11 +8,10 @@ use super::schedule::MeetingDraft;
 
 /// Whether create must mint a Teams join URL before per-target inserts.
 pub fn needs_join_first(accounts: &CalendarAccounts) -> bool {
-    let targets = accounts.resolved_write_targets();
-    targets.len() > 1
-        || targets
-            .iter()
-            .any(|target| target.provider == CalendarProvider::Google)
+    accounts
+        .resolved_write_targets()
+        .iter()
+        .any(|target| target.provider != CalendarProvider::Outlook)
 }
 
 /// Write targets used for New meeting (home + extras, de-duplicated).
@@ -40,10 +39,22 @@ pub async fn create_across_targets(
     let event = launcher.resolve_new_event(draft).await?;
     let join_url = launcher.create_meet_now(&event.subject).await?;
     let targets = create_targets(&accounts);
+    let outlook_invites = targets
+        .iter()
+        .any(|target| target.provider == CalendarProvider::Outlook);
     let mut failed = Vec::new();
     let mut first_id = String::new();
     for target in targets {
-        match write_target(launcher.as_ref(), &mut accounts, &target, &event, &join_url).await {
+        match write_target(
+            launcher.as_ref(),
+            &mut accounts,
+            &target,
+            &event,
+            &join_url,
+            outlook_invites,
+        )
+        .await
+        {
             Ok(id) => {
                 if first_id.is_empty() {
                     first_id = id;
@@ -75,6 +86,7 @@ async fn write_target(
     target: &CalendarRef,
     event: &NewEvent,
     join_url: &str,
+    outlook_invites: bool,
 ) -> Result<String, String> {
     match target.provider {
         CalendarProvider::Outlook => launcher
@@ -98,6 +110,33 @@ async fn write_target(
             .await?;
             Ok(format!("google:{}:{}", target.account_id, calendar_id))
         }
+        CalendarProvider::CalDav => {
+            let attendees: Vec<String> = event
+                .attendees
+                .iter()
+                .map(|attendee| attendee.address.clone())
+                .collect();
+            let draft = crate::caldav_sync::draft_from_meeting(
+                &event.subject,
+                event.start,
+                event.end,
+                Some(join_url),
+                &attendees,
+                !outlook_invites,
+                event.repeat,
+            );
+            crate::caldav_sync::insert_caldav_event(
+                accounts,
+                &target.account_id,
+                &target.calendar_id,
+                &draft,
+            )
+            .await?;
+            Ok(format!(
+                "caldav:{}:{}",
+                target.account_id, target.calendar_id
+            ))
+        }
     }
 }
 
@@ -108,22 +147,20 @@ mod tests {
     use super::*;
 
     fn google_home() -> CalendarAccounts {
-        CalendarAccounts {
-            home: CalendarRef::google("g1", "primary"),
-            write_targets: Vec::new(),
-            outlook_selected: true,
-            google_accounts: vec![GoogleAccount {
-                id: "g1".into(),
-                email: "joe@example.com".into(),
-                calendars: vec![GoogleCalendarInfo {
-                    id: "primary".into(),
-                    summary: "Joe".into(),
-                    selected: true,
-                    primary: true,
-                }],
-                tokens: GoogleTokenSet::default(),
+        let mut accounts = CalendarAccounts::default();
+        accounts.home = CalendarRef::google("g1", "primary");
+        accounts.google_accounts.push(GoogleAccount {
+            id: "g1".into(),
+            email: "joe@example.com".into(),
+            calendars: vec![GoogleCalendarInfo {
+                id: "primary".into(),
+                summary: "Joe".into(),
+                selected: true,
+                primary: true,
             }],
-        }
+            tokens: GoogleTokenSet::default(),
+        });
+        accounts
     }
 
     #[test]
@@ -140,6 +177,13 @@ mod tests {
     #[test]
     fn google_home_needs_join_first() {
         assert!(needs_join_first(&google_home()));
+    }
+
+    #[test]
+    fn caldav_only_home_needs_join_first() {
+        let mut accounts = CalendarAccounts::default();
+        accounts.home = CalendarRef::caldav("c1", "/cal/");
+        assert!(needs_join_first(&accounts));
     }
 
     #[test]

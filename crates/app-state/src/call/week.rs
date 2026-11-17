@@ -274,15 +274,55 @@ impl AppState {
                     }),
                 }
             }
+            let mut caldav_count = None;
+            if accounts.has_caldav() {
+                match crate::caldav_sync::fetch_caldav_events(&mut fetched_accounts, from, to).await
+                {
+                    Ok((events, partial)) => {
+                        let _ = store::merge_caldav_metadata(&store, &fetched_accounts);
+                        caldav_count = Some(events.len());
+                        combined.extend(events);
+                        for message in partial {
+                            failures.push(CalendarLoadFailure {
+                                source: CalendarSource::CalDav,
+                                message,
+                            });
+                        }
+                    }
+                    Err(error) => failures.push(CalendarLoadFailure {
+                        source: CalendarSource::CalDav,
+                        message: error,
+                    }),
+                }
+            }
+            if accounts.has_ics() {
+                match crate::ics_sync::fetch_ics_events(&accounts, from, to).await {
+                    Ok((events, partial)) => {
+                        combined.extend(events);
+                        for message in partial {
+                            failures.push(CalendarLoadFailure {
+                                source: CalendarSource::Ics,
+                                message,
+                            });
+                        }
+                    }
+                    Err(error) => failures.push(CalendarLoadFailure {
+                        source: CalendarSource::Ics,
+                        message: error,
+                    }),
+                }
+            }
             crate::diagnostics::record(load_summary(
                 from,
                 to,
                 outlook_count,
                 google_count,
+                caldav_count,
                 started.elapsed().as_millis(),
                 &failures,
             ));
-            (chatsvc::merge_calendar_events(combined), failures)
+            let home = home_calendar(&accounts);
+            (chatsvc::merge_calendar_events(combined, home), failures)
         });
         cx.spawn(async move |this, cx| {
             let loaded = receiver.await.unwrap_or_else(|_| {
@@ -314,12 +354,17 @@ impl AppState {
 }
 
 /// A source that failed keeps its previous events on screen instead of blanking the week.
+/// When the round already returned some events for that source (partial calendar failure),
+/// previous events are left out so successful calendars are not duplicated.
 pub(crate) fn keep_failed_sources(
     previous: &[CalendarEvent],
     mut events: Vec<CalendarEvent>,
     failures: &[CalendarLoadFailure],
 ) -> Vec<CalendarEvent> {
     for failure in failures {
+        if events.iter().any(|event| event.source == failure.source) {
+            continue;
+        }
         events.extend(
             previous
                 .iter()
@@ -337,16 +382,18 @@ pub(crate) fn load_summary(
     to: chrono::DateTime<chrono::Utc>,
     outlook: Option<usize>,
     google: Option<usize>,
+    caldav: Option<usize>,
     elapsed_ms: u128,
     failures: &[CalendarLoadFailure],
 ) -> String {
     let count = |value: Option<usize>| value.map_or_else(|| "-".to_owned(), |n| n.to_string());
     let mut line = format!(
-        "calendar grid: {}..{} outlook={} google={} in {elapsed_ms} ms",
+        "calendar grid: {}..{} outlook={} google={} caldav={} in {elapsed_ms} ms",
         from.format("%Y-%m-%dT%H:%MZ"),
         to.format("%Y-%m-%dT%H:%MZ"),
         count(outlook),
         count(google),
+        count(caldav),
     );
     for failure in failures {
         line.push_str(&format!(
@@ -356,6 +403,20 @@ pub(crate) fn load_summary(
         ));
     }
     line
+}
+
+fn home_calendar(accounts: &store::CalendarAccounts) -> Option<chatsvc::HomeCalendar<'_>> {
+    use store::CalendarProvider;
+    let source = match accounts.home.provider {
+        CalendarProvider::Outlook => CalendarSource::Outlook,
+        CalendarProvider::Google => CalendarSource::Google,
+        CalendarProvider::CalDav => CalendarSource::CalDav,
+    };
+    Some(chatsvc::HomeCalendar {
+        source,
+        account_id: accounts.home.account_id.as_str(),
+        calendar_id: accounts.home.calendar_id.as_str(),
+    })
 }
 
 fn retain_peek_details(previous: &[CalendarEvent], events: &mut [CalendarEvent]) {
@@ -634,6 +695,24 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_source_failure_does_not_duplicate_fresh_events() {
+        let previous = vec![
+            event("caldav-old-a", CalendarSource::CalDav, 9),
+            event("caldav-old-b", CalendarSource::CalDav, 10),
+        ];
+        let fresh = vec![event("caldav-new", CalendarSource::CalDav, 8)];
+        let failures = [CalendarLoadFailure {
+            source: CalendarSource::CalDav,
+            message: "CalDAV Work: timeout".into(),
+        }];
+        let ids: Vec<_> = keep_failed_sources(&previous, fresh, &failures)
+            .into_iter()
+            .map(|event| event.object_id)
+            .collect();
+        assert_eq!(ids, ["caldav-new"]);
+    }
+
+    #[test]
     fn the_load_summary_names_counts_and_failures() {
         let from = Utc.with_ymd_and_hms(2026, 11, 15, 23, 0, 0).unwrap();
         let to = Utc.with_ymd_and_hms(2026, 11, 20, 23, 0, 0).unwrap();
@@ -642,8 +721,8 @@ mod tests {
             message: "client_secret is missing".into(),
         }];
         assert_eq!(
-            load_summary(from, to, Some(3), None, 412, &failures),
-            "calendar grid: 2026-11-15T23:00Z..2026-11-20T23:00Z outlook=3 google=- in 412 ms; \
+            load_summary(from, to, Some(3), None, None, 412, &failures),
+            "calendar grid: 2026-11-15T23:00Z..2026-11-20T23:00Z outlook=3 google=- caldav=- in 412 ms; \
              Google failed: client_secret is missing"
         );
     }

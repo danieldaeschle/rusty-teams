@@ -33,6 +33,149 @@ impl AppState {
         cx.notify();
     }
 
+    pub fn connect_caldav_account(
+        &mut self,
+        url: String,
+        username: String,
+        password: String,
+        cx: &mut Context<Self>,
+    ) {
+        let store = self.store.clone();
+        let connecting = runtime::spawn(async move {
+            let mut accounts = load_calendar_accounts(&store);
+            let id = crate::caldav_sync::connect_caldav(&mut accounts, &url, &username, &password)
+                .await?;
+            save_calendar_accounts(&store, &accounts).map_err(|error| error.to_string())?;
+            Ok::<_, String>(id)
+        });
+        cx.spawn(async move |this, cx| match connecting.await {
+            Ok(Ok(_)) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(tr("settings.calendar.caldav_connected"), None, cx);
+                    state.refresh_calendar(cx);
+                    state.load_calendar_week(cx);
+                    cx.notify();
+                })
+                .ok();
+            }
+            Ok(Err(error)) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(
+                        crate::caldav_credentials::redact_secret_text(&error),
+                        None,
+                        cx,
+                    );
+                })
+                .ok();
+            }
+            Err(_) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(tr("settings.calendar.caldav_connect_failed"), None, cx);
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    pub fn disconnect_caldav_account(&mut self, account_id: &str, cx: &mut Context<Self>) {
+        let mut accounts = load_calendar_accounts(&self.store);
+        if let Err(error) = crate::caldav_sync::disconnect_caldav(&mut accounts, account_id) {
+            self.raise_notice(error, None, cx);
+            return;
+        }
+        let _ = save_calendar_accounts(&self.store, &accounts);
+        self.refresh_calendar(cx);
+        self.load_calendar_week(cx);
+        cx.notify();
+    }
+
+    pub fn toggle_caldav_calendar_selected(
+        &mut self,
+        account_id: &str,
+        calendar_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let mut accounts = load_calendar_accounts(&self.store);
+        if let Some(calendar) = accounts.caldav_account_mut(account_id).and_then(|account| {
+            account
+                .calendars
+                .iter_mut()
+                .find(|calendar| calendar.id == calendar_id)
+        }) {
+            calendar.selected = !calendar.selected;
+        }
+        let _ = save_calendar_accounts(&self.store, &accounts);
+        self.refresh_calendar(cx);
+        self.load_calendar_week(cx);
+        cx.notify();
+    }
+
+    pub fn connect_ics_subscription(
+        &mut self,
+        url: String,
+        summary: String,
+        cx: &mut Context<Self>,
+    ) {
+        let store = self.store.clone();
+        let connecting = runtime::spawn(async move {
+            let mut accounts = load_calendar_accounts(&store);
+            let id = crate::ics_sync::add_ics_subscription(&mut accounts, &url, &summary).await?;
+            save_calendar_accounts(&store, &accounts).map_err(|error| error.to_string())?;
+            Ok::<_, String>(id)
+        });
+        cx.spawn(async move |this, cx| match connecting.await {
+            Ok(Ok(_)) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(tr("settings.calendar.ics_connected"), None, cx);
+                    state.refresh_calendar(cx);
+                    state.load_calendar_week(cx);
+                    cx.notify();
+                })
+                .ok();
+            }
+            Ok(Err(error)) => {
+                this.update(cx, |state, cx| state.raise_notice(error, None, cx))
+                    .ok();
+            }
+            Err(_) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(tr("settings.calendar.ics_connect_failed"), None, cx);
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    pub fn disconnect_ics_subscription(&mut self, subscription_id: &str, cx: &mut Context<Self>) {
+        let mut accounts = load_calendar_accounts(&self.store);
+        accounts.disconnect_ics(subscription_id);
+        let _ = save_calendar_accounts(&self.store, &accounts);
+        self.refresh_calendar(cx);
+        self.load_calendar_week(cx);
+        cx.notify();
+    }
+
+    pub fn toggle_ics_subscription_selected(
+        &mut self,
+        subscription_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let mut accounts = load_calendar_accounts(&self.store);
+        if let Some(subscription) = accounts
+            .ics_subscriptions
+            .iter_mut()
+            .find(|subscription| subscription.id == subscription_id)
+        {
+            subscription.selected = !subscription.selected;
+        }
+        let _ = save_calendar_accounts(&self.store, &accounts);
+        self.refresh_calendar(cx);
+        self.load_calendar_week(cx);
+        cx.notify();
+    }
+
     pub fn set_home_calendar(&mut self, home: CalendarRef, cx: &mut Context<Self>) {
         let mut accounts = load_calendar_accounts(&self.store);
         accounts.home = home;

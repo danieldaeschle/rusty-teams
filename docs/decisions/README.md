@@ -34,5 +34,6 @@ Statuses: `proposed`, `accepted`, `superseded`.
 | [0016](0016-calendar-week-start-and-time-scale-stay-local.md) | Calendar work hours go to the mailbox, week start and time scale stay local |
 | [0017](0017-guest-orgs-switch-by-restart.md) | Guest orgs, one org per window, switch by restart |
 | [0018](0018-regional-format-is-separate-from-the-app-language.md) | Regional format is separate from the app language |
+| [0019](0019-caldav-app-password-and-keyring.md) | CalDAV with app password and OS keyring |
 
-Records `0001` to `0018` are the decisions already shipped. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.
+Records `0001` to `0019` are the decisions already shipped. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.

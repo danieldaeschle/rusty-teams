@@ -55,7 +55,7 @@ fn write_scrubbed_text(raw: &str, destination: &Path) -> io::Result<()> {
         return Ok(());
     }
     let mut scrubber = Scrubber::default();
-    let scrubbed = scrubber.scrub(raw);
+    let scrubbed = crate::caldav_credentials::redact_secret_text(&scrubber.scrub(raw));
     fs::write(destination, scrubbed)
 }
 

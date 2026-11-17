@@ -10,7 +10,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use store::{CalendarAccounts, GoogleAccount};
+use store::{CalDavAccount, CalendarAccounts, GoogleAccount, IcsSubscription};
 
 use super::calendar_mini_month::mini_month_grid;
 use crate::app_state::AppState;
@@ -67,6 +67,17 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             prefs.group_collapsed(&account.id),
             state.calendar_expanded_groups.contains(&account.id),
         ));
+    }
+    for account in &accounts.caldav_accounts {
+        column = column.child(caldav_group(
+            app,
+            &accounts,
+            account,
+            prefs.group_collapsed(&account.id),
+        ));
+    }
+    for subscription in &accounts.ics_subscriptions {
+        column = column.child(ics_row(app, subscription));
     }
     column
 }
@@ -151,7 +162,7 @@ fn add_calendar_row(app: &Entity<AppState>) -> Stateful<Div> {
         .child(tr("calendar.view.add_calendar"))
         .on_click(move |_, _, cx| {
             app.update(cx, |state, cx| {
-                state.open_settings(SettingsSection::Calendar, cx)
+                state.open_settings(SettingsSection::CalendarAccounts, cx)
             })
         })
 }
@@ -273,6 +284,80 @@ fn google_group(
         );
     }
     body
+}
+
+fn caldav_group(
+    app: &Entity<AppState>,
+    accounts: &CalendarAccounts,
+    account: &CalDavAccount,
+    collapsed: bool,
+) -> Div {
+    let selected: Vec<bool> = account
+        .calendars
+        .iter()
+        .map(|calendar| calendar.selected)
+        .collect();
+    let check = group_check(&selected);
+    let (collapse, group_id) = (app.clone(), account.id.clone());
+    let mut body = group(
+        format!("calendar-group-caldav-{}", account.id),
+        format!("CalDAV · {}", account.display_name),
+        check,
+        collapsed,
+        |_| {},
+        move |cx| {
+            collapse.update(cx, |state, cx| {
+                state.update_calendar_prefs(|prefs| prefs.toggle_group(&group_id), cx)
+            })
+        },
+    );
+    if collapsed {
+        return body;
+    }
+    for calendar in &account.calendars {
+        let toggle = app.clone();
+        let (account_id, calendar_id) = (account.id.clone(), calendar.id.clone());
+        let color_index = accounts
+            .google_accounts
+            .iter()
+            .map(|account| account.calendars.len())
+            .sum::<usize>()
+            + 1
+            + accounts
+                .caldav_accounts
+                .iter()
+                .flat_map(|account| account.calendars.iter().map(|c| c.id.as_str()))
+                .position(|id| id == calendar.id)
+                .unwrap_or(0);
+        body = body.child(calendar_row(
+            format!("calendar-picker-caldav-{}", calendar.id),
+            calendar.summary.clone(),
+            calendar.selected,
+            theme::calendar_color(color_index),
+            move |cx| {
+                toggle.update(cx, |state, cx| {
+                    state.toggle_caldav_calendar_selected(&account_id, &calendar_id, cx)
+                });
+            },
+        ));
+    }
+    body
+}
+
+fn ics_row(app: &Entity<AppState>, subscription: &IcsSubscription) -> Stateful<Div> {
+    let toggle = app.clone();
+    let id = subscription.id.clone();
+    calendar_row(
+        format!("calendar-picker-ics-{}", subscription.id),
+        subscription.summary.clone(),
+        subscription.selected,
+        theme::calendar_color(8),
+        move |cx| {
+            toggle.update(cx, |state, cx| {
+                state.toggle_ics_subscription_selected(&id, cx)
+            })
+        },
+    )
 }
 
 /// Group header: chevron to collapse, a check box for the whole group, the title.

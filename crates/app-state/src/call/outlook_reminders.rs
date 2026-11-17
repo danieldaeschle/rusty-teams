@@ -82,7 +82,7 @@ impl OutlookReminders {
     }
 
     pub fn allows(&self, event: &CalendarEvent, now: DateTime<Utc>) -> bool {
-        // Google (and later sources) use the local Soon/Started phase only —
+        // Non-Outlook sources use the local Soon/Started phase only —
         // Outlook ReminderView must not suppress them when the id is absent.
         if event.source != CalendarSource::Outlook {
             return true;

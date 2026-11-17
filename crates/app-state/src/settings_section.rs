@@ -10,6 +10,7 @@ pub enum SettingsSection {
     Chats,
     Calls,
     Calendar,
+    CalendarAccounts,
     Devices,
     Agents,
     Mcp,

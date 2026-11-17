@@ -8,11 +8,14 @@ publish.workspace = true
 [dependencies]
 base64.workspace = true
 chrono.workspace = true
+chrono-tz = "0.10"
 iana-time-zone = "0.1"
 futures-util.workspace = true
 percent-encoding.workspace = true
+quick-xml = "0.37"
 rand = "0.9"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query", "form"] }
+rrule = "0.14"
 serde.workspace = true
 serde_json.workspace = true
 session.workspace = true
