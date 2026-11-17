@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -61,7 +62,7 @@ pub enum Delivered {
 }
 
 pub async fn deliver(
-    engine: &Engine,
+    engine: &Arc<Engine>,
     conversation_id: &str,
     target: OutboxTarget,
     thread_root_id: Option<&str>,
@@ -121,10 +122,17 @@ pub async fn deliver(
                 .await
         }
     }?;
-    if let Some(preview) = &outgoing.link_preview {
-        let _ = engine
-            .attach_link_preview(conversation_id, &record.message_id, preview)
-            .await;
+    if let Some(preview) = outgoing.link_preview.clone() {
+        let (engine, conversation_id, message_id) = (
+            engine.clone(),
+            conversation_id.to_owned(),
+            record.message_id.clone(),
+        );
+        runtime::handle().spawn(async move {
+            let _ = engine
+                .attach_link_preview(&conversation_id, &message_id, &preview)
+                .await;
+        });
     }
     Ok(Delivered::Complete {
         message_id: Some(record.message_id),
@@ -194,7 +202,7 @@ async fn already_sent(
 }
 
 async fn attempt(
-    engine: &Engine,
+    engine: &Arc<Engine>,
     record: &OutboxRecord,
     outgoing: &Outgoing,
 ) -> teams_core::Result<Delivered> {
@@ -212,7 +220,11 @@ async fn attempt(
     .await
 }
 
-async fn resend(engine: &Engine, record: &OutboxRecord, outgoing: &Outgoing) -> Result<(), String> {
+async fn resend(
+    engine: &Arc<Engine>,
+    record: &OutboxRecord,
+    outgoing: &Outgoing,
+) -> Result<(), String> {
     let mut failure = String::new();
     for attempt_number in 0..=RETRY_BACKOFF.len() {
         if let Some(delay) = attempt_number
@@ -230,7 +242,7 @@ async fn resend(engine: &Engine, record: &OutboxRecord, outgoing: &Outgoing) -> 
     Err(failure)
 }
 
-async fn resend_record(engine: &Engine, record: OutboxRecord) {
+async fn resend_record(engine: &Arc<Engine>, record: OutboxRecord) {
     let store = engine.store();
     let outcome = match outgoing_of(&record) {
         Some(outgoing) => resend(engine, &record, &outgoing).await,

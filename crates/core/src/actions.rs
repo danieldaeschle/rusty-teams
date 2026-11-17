@@ -441,14 +441,13 @@ impl<R: Remote> SyncEngine<R> {
     ) -> Result<()> {
         let target = self.message_target(conversation_id, message_id)?;
         let links_json = preview.links_json();
-        self.remote.set_message_links(&target, &links_json).await?;
         if self
             .store
             .set_message_links(conversation_id, message_id, &links_json)?
         {
             self.announce(conversation_id, true);
         }
-        Ok(())
+        self.remote.set_message_links(&target, &links_json).await
     }
 
     pub async fn mark_read(&self, conversation_id: &str) -> Result<()> {
