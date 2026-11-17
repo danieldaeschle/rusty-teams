@@ -161,11 +161,11 @@ settings:
     signed_in:
       en: Signed in
       de: Angemeldet
-    yes:
-      en: Yes
+    "yes":
+      en: "Yes"
       de: Ja
-    no:
-      en: No
+    "no":
+      en: "No"
       de: Nein
     debug_logging:
       en: Debug logging
@@ -1843,7 +1843,7 @@ sidebar:
     en: Activity only
     de: Nur Aktivität
   notify_off:
-    en: Off
+    en: "Off"
     de: Aus
   include_thread_replies:
     en: Include thread replies

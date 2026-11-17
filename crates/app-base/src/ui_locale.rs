@@ -204,6 +204,22 @@ mod tests {
     }
 
     #[test]
+    fn every_key_resolves_in_english_and_german() {
+        let _guard = locale_test_lock();
+        let keys: Vec<String> = leaf_languages()
+            .into_iter()
+            .map(|(key, _)| key.replace('"', ""))
+            .collect();
+        assert!(keys.len() > 500, "only {} keys found", keys.len());
+        for locale in ["en", "de"] {
+            rust_i18n::set_locale(locale);
+            let raw: Vec<_> = keys.iter().filter(|key| tr(key) == **key).collect();
+            assert!(raw.is_empty(), "{locale} shows raw keys: {raw:?}");
+        }
+        rust_i18n::set_locale("en");
+    }
+
+    #[test]
     fn ui_locale_effective_prefers_explicit_english_and_german() {
         let _guard = locale_test_lock();
         assert_eq!(
