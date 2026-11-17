@@ -14,6 +14,3 @@ docs/design/islands/*
 !docs/research/
 docs/research/*
 !docs/research/internal-endpoints.md
-
-# graft's local graph cache — regenerable, not committed (run `graft build`).
-/graft/
