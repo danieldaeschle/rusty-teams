@@ -10,8 +10,9 @@
 [![GPUI](https://img.shields.io/badge/UI-GPUI-c4642d)](https://www.gpui.rs/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-3b3b3b)](#status)
 [![License: MIT](https://img.shields.io/badge/license-MIT-2ea043)](LICENSE)
+[![Discord](https://img.shields.io/badge/chat-Discord-5865f2?logo=discord&logoColor=white)](https://discord.gg/SPQQp3DCH)
 
-[Features](#features) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Roadmap](ROADMAP.md)
+[Features](#features) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Roadmap](ROADMAP.md) · [Discord](https://discord.gg/SPQQp3DCH)
 
 <img src=".github/app-demo.png" alt="Rusty Teams with demo data" width="900">
 
