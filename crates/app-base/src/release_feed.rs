@@ -1,4 +1,7 @@
-#![cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#![cfg_attr(
+    not(any(windows, target_os = "linux", target_os = "macos")),
+    allow(dead_code)
+)]
 
 use std::cmp::Ordering;
 use std::fs;
@@ -17,14 +20,20 @@ pub const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const RELEASES_URL: &str =
     "https://api.github.com/repos/danieldaeschle/rusty-teams/releases?per_page=10";
 /// The release asset this platform installs, and the magic bytes it must start with.
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
 const ASSET_SUFFIX: &str = "-windows-amd64.exe";
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
 const EXECUTABLE_MAGIC: &[u8] = b"MZ";
 #[cfg(target_os = "linux")]
 const ASSET_SUFFIX: &str = "-linux-amd64";
 #[cfg(target_os = "linux")]
 const EXECUTABLE_MAGIC: &[u8] = b"\x7fELF";
+/// macOS and any other target still compile. The suffix matches no release asset,
+/// so the feed stays idle. macOS updates by replacing the `.app`, not a Mach-O in place.
+#[cfg(not(any(windows, target_os = "linux")))]
+const ASSET_SUFFIX: &str = "-unsupported";
+#[cfg(not(any(windows, target_os = "linux")))]
+const EXECUTABLE_MAGIC: &[u8] = b"\0unsupported";
 const PARTIAL_SUFFIX: &str = ".partial";
 const DOWNLOAD_CHUNK: usize = 64 * 1024;
 const SHA256_PREFIX: &str = "sha256:";

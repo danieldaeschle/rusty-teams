@@ -359,7 +359,7 @@ impl NotificationCenter {
     pub fn start_in_background(&self, window: &mut Window, cx: &mut App) {
         match (&self.tray, self.main_native) {
             (Some(_), Some(native)) => platform::hide_window(native),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             (Some(_), None) => crate::main_window::hide(cx),
             _ => window.minimize_window(),
         }
@@ -374,7 +374,7 @@ impl NotificationCenter {
                 platform::hide_window(native);
                 true
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             (true, Some(_), None) => {
                 crate::main_window::mark_hiding(cx);
                 false
@@ -1552,7 +1552,7 @@ impl NotificationCenter {
             if let Some(native) = self.main_native {
                 platform::hide_window(native);
             } else {
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 crate::main_window::hide(cx);
             }
         } else {
@@ -1567,7 +1567,7 @@ impl NotificationCenter {
     }
 
     fn raise_main_window(&mut self, cx: &mut Context<Self>) {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         if crate::main_window::is_hidden(cx) {
             crate::main_window::show(cx);
             return;

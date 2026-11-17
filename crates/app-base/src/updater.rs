@@ -1,4 +1,7 @@
-#![cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
+#![cfg_attr(
+    not(any(windows, target_os = "linux", target_os = "macos")),
+    allow(dead_code)
+)]
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -263,15 +266,24 @@ mod platform {
 
 /// Whether this build may replace itself from GitHub releases. On Linux only the copy
 /// installed in `~/.local/share/rusty-teams` updates; a binary run from a
-/// build folder or a package location is left alone.
+/// build folder or a package location is left alone. macOS ships a `.app` and does not
+/// swap its Mach-O in place.
 pub fn self_update_allowed() -> bool {
     #[cfg(target_os = "linux")]
-    return std::env::current_exe().is_ok_and(|executable| {
-        crate::linux_desktop::Layout::current()
-            .is_some_and(|layout| crate::linux_desktop::is_installed(&executable, &layout))
-    });
-    #[cfg(not(target_os = "linux"))]
-    true
+    {
+        return std::env::current_exe().is_ok_and(|executable| {
+            crate::linux_desktop::Layout::current()
+                .is_some_and(|layout| crate::linux_desktop::is_installed(&executable, &layout))
+        });
+    }
+    #[cfg(windows)]
+    {
+        return true;
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        false
+    }
 }
 
 /// Reading the new exe once lets the virus scanner finish before the restart, which otherwise blocks process start for seconds.
