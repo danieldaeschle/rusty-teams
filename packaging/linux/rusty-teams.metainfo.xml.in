@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata (software centres). Template: package.sh substitutes @VERSION@ and
+     @DATE@ from Cargo.toml and the build date. -->
+<component type="desktop-application">
+  <id>io.github.danieldaeschle.RustyTeams</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Rusty Teams</name>
+  <summary>A fast, native Microsoft Teams chat client</summary>
+  <developer id="io.github.danieldaeschle">
+    <name>Daniel Däschle</name>
+  </developer>
+  <description>
+    <p>
+      Rusty Teams is a native Microsoft Teams client written in Rust. It signs in through
+      a Teams web page in your own browser, never sees your password and keeps a local
+      cache, so chats open instantly and stay readable offline.
+    </p>
+    <ul>
+      <li>Chats, channels, meetings and calls with video and screen sharing</li>
+      <li>Desktop notifications and a tray icon</li>
+      <li>Needs a Chromium- or Firefox-based browser for the Teams session</li>
+    </ul>
+  </description>
+  <!-- The desktop id is the window's app id (rusty-teams), so docks pair the window with it. -->
+  <launchable type="desktop-id">rusty-teams.desktop</launchable>
+  <icon type="stock">rusty-teams</icon>
+  <!-- Only url types known to appstream 0.15 (Ubuntu 22.04, where CI validates): no vcs-browser. -->
+  <url type="homepage">https://github.com/danieldaeschle/rusty-teams</url>
+  <url type="bugtracker">https://github.com/danieldaeschle/rusty-teams/issues</url>
+  <categories>
+    <category>Network</category>
+    <category>InstantMessaging</category>
+    <category>Chat</category>
+  </categories>
+  <keywords>
+    <keyword>Teams</keyword>
+    <keyword>Chat</keyword>
+    <keyword>Microsoft</keyword>
+  </keywords>
+  <screenshots>
+    <screenshot type="default">
+      <caption>The chat view with demo data</caption>
+      <image>https://raw.githubusercontent.com/danieldaeschle/rusty-teams/main/.github/app-demo.png</image>
+    </screenshot>
+  </screenshots>
+  <requires>
+    <display_length compare="ge">640</display_length>
+  </requires>
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+  <provides>
+    <binary>teams</binary>
+  </provides>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">intense</content_attribute>
+    <content_attribute id="social-audio">intense</content_attribute>
+  </content_rating>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

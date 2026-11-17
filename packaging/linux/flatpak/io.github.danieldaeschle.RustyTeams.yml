@@ -1,0 +1,60 @@
+# Flatpak manifest for Rusty Teams. BROKEN, see below: kept so the packaging matches the
+# other Craft apps and so the sandbox work has a starting point. Not attached to releases.
+#
+# It repackages the prebuilt binary from package.sh's tarball (packaging/linux/flatpak-bundle.sh):
+# libwebrtc is downloaded during the cargo build, which flatpak-builder's offline build does not
+# allow, so there is no build-from-source manifest.
+#
+# Why it is broken: the Teams session runs in the user's own Chromium- or Firefox-based browser,
+# which the app finds on the host and starts with a debug port (crates/browser, ADR 0003). Inside
+# the sandbox the host's browsers are not visible and cannot be started without
+# `flatpak-spawn --host` (needs --talk-name=org.freedesktop.Flatpak, granted below, and app code
+# that uses it). Until then the app starts but cannot sign in. `--endpoint` to a browser started
+# by hand on the host (`chromium --remote-debugging-port=9222`) works, since the network is shared.
+#
+# The app id must be reverse-DNS, so the desktop file and icon are renamed to it; the window's
+# Wayland app id stays rusty-teams (StartupWMClass in the desktop file pairs them on X11).
+id: io.github.danieldaeschle.RustyTeams
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: teams
+rename-desktop-file: rusty-teams.desktop
+rename-icon: rusty-teams
+finish-args:
+  # Display: Wayland first; X11 only when no Wayland compositor is running.
+  - --socket=wayland
+  - --socket=fallback-x11
+  # X11 shared memory (MIT-SHM).
+  - --share=ipc
+  # Graph, the Teams services and the browser's debug port on 127.0.0.1.
+  - --share=network
+  # GPU for wgpu (Vulkan, or GL as a fallback) and cameras for video calls.
+  - --device=all
+  # Microphone and speakers for calls.
+  - --socket=pulseaudio
+  # Desktop toasts (ADR 0015) and the StatusNotifierItem tray icon.
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+  # Starting the host's browser would go through flatpak-spawn --host (not implemented yet).
+  - --talk-name=org.freedesktop.Flatpak
+  # Downloaded files and attachments.
+  - --filesystem=xdg-download
+build-options:
+  no-debuginfo: true
+modules:
+  - name: rusty-teams
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 bin/teams /app/bin/teams
+      - install -Dm644 share/applications/rusty-teams.desktop /app/share/applications/rusty-teams.desktop
+      # rename-desktop-file and rename-icon do not touch the metainfo: point it at the new names.
+      - >-
+        sed -e 's|<launchable type="desktop-id">rusty-teams.desktop<|<launchable type="desktop-id">io.github.danieldaeschle.RustyTeams.desktop<|'
+        -e 's|<icon type="stock">rusty-teams<|<icon type="stock">io.github.danieldaeschle.RustyTeams<|'
+        share/metainfo/io.github.danieldaeschle.RustyTeams.metainfo.xml
+        | install -Dm644 /dev/stdin /app/share/metainfo/io.github.danieldaeschle.RustyTeams.metainfo.xml
+      - mkdir -p /app/share/icons /app/share/doc && cp -R share/icons/hicolor /app/share/icons/ && cp -R share/doc/rusty-teams /app/share/doc/
+    sources:
+      - type: dir
+        path: stage

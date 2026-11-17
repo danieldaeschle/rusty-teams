@@ -36,5 +36,6 @@ Statuses: `proposed`, `accepted`, `superseded`.
 | [0018](0018-regional-format-is-separate-from-the-app-language.md) | Regional format is separate from the app language |
 | [0019](0019-caldav-app-password-and-keyring.md) | CalDAV with app password and OS keyring |
 | [0020](0020-macos-tray-and-close-to-tray.md) | macOS tray and close-to-tray match Linux |
+| [0021](0021-linux-packages.md) | Linux releases also ship an AppImage, a deb and an rpm |
 
 Records `0001` to `0020` are the decisions already shipped. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.

@@ -20,6 +20,9 @@ pub fn start(cx: &mut App) {
     let (Ok(executable), Some(layout)) = (std::env::current_exe(), Layout::current()) else {
         return;
     };
+    if linux_desktop::is_packaged(&executable, std::env::var_os("APPIMAGE").as_deref()) {
+        return;
+    }
     if linux_desktop::is_installed(&executable, &layout) {
         // Keeps the menu entry pointing at this file, e.g. after it was deleted by hand.
         if !layout.desktop_file().is_file()

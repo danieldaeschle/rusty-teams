@@ -1,6 +1,7 @@
 # Builds per README "Quick start": `cargo build -p app`, plus the universal macOS
-# binary from scripts/build-macos.sh. Tests live in test.yml; this file only
-# packages the artifacts.
+# binary from scripts/build-macos.sh and the Linux packages from
+# packaging/linux/package.sh. Tests live in test.yml; this file only packages the
+# artifacts.
 name: Build
 
 # Builds run for tags (the release assets); pushes are tested in test.yml.
@@ -23,7 +24,10 @@ env:
 jobs:
   linux:
     name: Linux
-    runs-on: ubuntu-latest
+    # The oldest supported Ubuntu LTS: the binary needs the glibc it was built
+    # against, so building here lets it, the AppImage and the deb/rpm run on
+    # glibc 2.35 and newer.
+    runs-on: ubuntu-22.04
     timeout-minutes: 90
     # webrtc-sys compiles its C++ against the hermetic libc++ inside the libwebrtc
     # artifact, which needs a clang as new as that libc++ (clang 21 today, see
@@ -41,18 +45,44 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Its own key: build scripts cached on a newer Ubuntu would need a newer glibc.
       - uses: Swatinem/rust-cache@v2
         with:
-          key: build
+          key: build-ubuntu-22.04
 
       - name: Build
         run: cargo build -p app --release
+
+      # nfpm builds the deb and rpm, zsync the AppImage's .zsync; desktop-file-utils
+      # and appstream validate the metadata. AppImage tooling is downloaded by
+      # package.sh at pinned digests.
+      - name: Install packaging tools
+        env:
+          NFPM_VERSION: 2.48.0
+          NFPM_SHA256: 787af76e172dd5fc7cedf4d7c5a090a2f62be9001557a4db1103e270f90ddefd
+        run: |
+          sudo apt-get install --no-install-recommends -y zsync desktop-file-utils appstream
+          curl -fsSL -o "$RUNNER_TEMP/nfpm.deb" \
+            "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_amd64.deb"
+          echo "$NFPM_SHA256  $RUNNER_TEMP/nfpm.deb" | sha256sum -c -
+          sudo dpkg -i "$RUNNER_TEMP/nfpm.deb"
+
+      # A tag build carries the tag's version (v0.5.0-rc.1 -> 0.5.0~rc.1 in the deb).
+      - name: Package
+        env:
+          RUSTY_TEAMS_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: packaging/linux/package.sh --skip-build --formats "appimage deb rpm"
 
       # The runner is x86_64; the artifact name carries the architecture.
       - uses: actions/upload-artifact@v7
         with:
           name: teams-linux-amd64
           path: target/release/teams
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: teams-linux-packages
+          path: dist/release/*
 
   windows:
     name: Windows
@@ -131,6 +161,9 @@ jobs:
           cp dist/teams-linux-amd64/teams "release/rusty-teams-$TAG-linux-amd64"
           cp dist/teams-windows-amd64/teams.exe "release/rusty-teams-$TAG-windows-amd64.exe"
           cp dist/teams-macos/teams-macos.zip "release/rusty-teams-$TAG-macos-universal.zip"
+          # deb, rpm, AppImage and its .zsync, named rusty-teams-<version>-linux-x86_64.*;
+          # the AppImage's update information looks for that .zsync name.
+          cp dist/teams-linux-packages/* release/
 
       - uses: softprops/action-gh-release@v3
         with:
