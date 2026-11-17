@@ -124,6 +124,7 @@ Without these env vars the calendar stays Outlook-only.
 | Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
 | Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
 | macOS .app (universal arm64 + x86_64), Xcode CLT only | `scripts/build-macos.sh crates/app teams` |
+| Linux AppImage, deb, rpm and tar.gz in `dist/release` (needs [nfpm](https://nfpm.goreleaser.com) for deb/rpm) | `packaging/linux/package.sh` |
 | Tests | `cargo test` |
 | Headless screenshot (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
 | Layout sweep before every UI deploy: 8 screens at 640x480 and 1920x1080, PNGs in `target/layout-sweep` (look at each) | `cargo build -p app && scripts/layout-sweep.sh` |

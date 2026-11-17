@@ -1,0 +1,106 @@
+# .deb and .rpm packages (nfpm: https://nfpm.goreleaser.com). Run by package.sh, which stages
+# the file tree, substitutes its path for ${STAGE} and the binary's glibc floor for ${GLIBC_MIN}
+# (nfpm doesn't expand env vars in `src` or `depends`) and exports VERSION, NFPM_ARCH and
+# RUSTY_TEAMS_MAINTAINER.
+#
+#   packaging/linux/package.sh --formats "deb rpm"
+name: rusty-teams
+arch: ${NFPM_ARCH}
+platform: linux
+version: ${VERSION}
+# semver: 0.5.0-rc.1 becomes 0.5.0~rc.1 in deb/rpm, so pre-releases sort before the release.
+version_schema: semver
+release: 1
+section: net
+priority: optional
+maintainer: ${RUSTY_TEAMS_MAINTAINER}
+homepage: https://github.com/danieldaeschle/rusty-teams
+license: MIT
+description: |-
+  A fast, native Microsoft Teams chat client.
+  Chats, channels, meetings and calls with video and screen sharing, desktop
+  notifications and a tray icon. Signs in through a Teams web page in a
+  Chromium- or Firefox-based browser and never sees the password.
+
+# Microsoft's discontinued Linux client (package `teams`) also installed /usr/bin/teams.
+conflicts:
+  - teams
+
+# Linked directly (ELF NEEDED): glibc, libstdc++, libgcc_s, glib/gio/gobject, ALSA, fontconfig,
+# freetype, xcb, xkbcommon and xkbcommon-x11. Loaded at runtime with dlopen, so the package
+# tools can't see them: Wayland (libwayland-client) and X11 (libX11) for the window, Vulkan or
+# EGL for wgpu. libwebrtc dlopens the rest only for calls (PulseAudio, PipeWire for Wayland
+# screen sharing, VA-API/GBM/DRM for hardware video, the X11 extensions for X11 screen
+# capture), so those are recommended rather than required. The Teams session runs in the
+# user's own browser, suggested below.
+overrides:
+  deb:
+    depends:
+      - libc6 (>= ${GLIBC_MIN})
+      - libgcc-s1
+      - libstdc++6
+      - libglib2.0-0
+      - libasound2
+      - libfontconfig1
+      - libfreetype6
+      - libxcb1
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libwayland-client0
+      - libx11-6
+      - libvulkan1 | libegl1
+    recommends:
+      - mesa-vulkan-drivers
+      - libegl1
+      - libwayland-egl1
+      - libpulse0
+      - libpipewire-0.3-0
+      - libva2
+      - libva-drm2
+      - libdrm2
+      - libgbm1
+      - libxcomposite1
+      - libxdamage1
+      - libxext6
+      - libxfixes3
+      - libxrandr2
+      - xdg-desktop-portal
+    suggests:
+      - chromium | google-chrome-stable | firefox | firefox-esr
+  rpm:
+    # Soname provides rather than package names, so the same requirements resolve on Fedora/RHEL
+    # (libxkbcommon-x11, libX11, ...) and openSUSE (libxkbcommon-x11-0, libX11-6, ...).
+    depends:
+      - libc.so.6(GLIBC_${GLIBC_MIN})(64bit)
+      - libstdc++.so.6()(64bit)
+      - libglib-2.0.so.0()(64bit)
+      - libgio-2.0.so.0()(64bit)
+      - libgobject-2.0.so.0()(64bit)
+      - libasound.so.2()(64bit)
+      - libfontconfig.so.1()(64bit)
+      - libfreetype.so.6()(64bit)
+      - libxcb.so.1()(64bit)
+      - libxkbcommon.so.0()(64bit)
+      - libxkbcommon-x11.so.0()(64bit)
+      - libwayland-client.so.0()(64bit)
+      - libX11.so.6()(64bit)
+      - (libvulkan.so.1()(64bit) or libEGL.so.1()(64bit))
+    recommends:
+      - mesa-vulkan-drivers
+      - libpulse.so.0()(64bit)
+      - libpipewire-0.3.so.0()(64bit)
+      - libva.so.2()(64bit)
+      - libgbm.so.1()(64bit)
+      - xdg-desktop-portal
+
+contents:
+  - src: ${STAGE}/usr/bin/teams
+    dst: /usr/bin/teams
+    file_info: { mode: 0755 }
+  - src: ${STAGE}/usr/share/
+    dst: /usr/share/
+    type: tree
+
+scripts:
+  postinstall: packaging/linux/postinst.sh
+  postremove: packaging/linux/postinst.sh
