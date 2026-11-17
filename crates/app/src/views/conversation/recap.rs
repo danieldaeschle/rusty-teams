@@ -7,7 +7,7 @@ use chatsvc::{
     Attendance, Occurrence, Recap, RecordingDetails, TranscriptFormat, TranscriptTurn,
     days_until_expiry,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
@@ -31,6 +31,7 @@ use crate::views::shared_tab::{SharedCommand, SharedRun};
 const SEARCH_PLACEHOLDER: &str = "Search transcript";
 const RECORDING_EXTENSION: &str = "mp4";
 const EXPIRY_OCCURRENCES: usize = 3;
+const EXPIRY_CACHE_PREFIX: &str = "recording_expiry/";
 
 pub(super) fn search_input(
     window: &mut Window,
@@ -144,6 +145,7 @@ impl ConversationView {
         let Some(engine) = engine else {
             return;
         };
+        self.recap.expiry_days = expiry_days(&cached_expiry(state, &conversation_id), Utc::now());
         let generation = self.recap.generation;
         let receiver = runtime::spawn(async move {
             Recap::new(engine.remote().session())
@@ -211,14 +213,22 @@ impl ConversationView {
                 if this.conversation_id().as_deref() != Some(conversation_id.as_str()) {
                     return;
                 }
-                let now = Utc::now();
-                this.recap.expiry_days = found
-                    .into_iter()
-                    .filter_map(|(message_id, expires_at)| {
-                        Some((message_id, days_until_expiry(expires_at?, now)))
-                    })
-                    .collect();
-                this.rebuild(false, cx);
+                let state = this.app.read(cx);
+                let mut cached = cached_expiry(state, &conversation_id);
+                cached.extend(
+                    found
+                        .into_iter()
+                        .filter_map(|(message_id, expires_at)| Some((message_id, expires_at?))),
+                );
+                if let Ok(json) = serde_json::to_string(&cached) {
+                    let key = format!("{EXPIRY_CACHE_PREFIX}{conversation_id}");
+                    state.store.set_meta(&key, &json).ok();
+                }
+                let expiry = expiry_days(&cached, Utc::now());
+                if expiry != this.recap.expiry_days {
+                    this.recap.expiry_days = expiry;
+                    this.rebuild(false, cx);
+                }
             })
             .ok();
         })
@@ -691,4 +701,25 @@ async fn save_download(
         }
     }
     Ok(target)
+}
+
+/// Expiry from the last open, so the recording lines have their final text in the first frame.
+fn cached_expiry(state: &AppState, conversation_id: &str) -> HashMap<String, DateTime<Utc>> {
+    state
+        .store
+        .meta(&format!("{EXPIRY_CACHE_PREFIX}{conversation_id}"))
+        .ok()
+        .flatten()
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default()
+}
+
+fn expiry_days(
+    expiry: &HashMap<String, DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> HashMap<String, i64> {
+    expiry
+        .iter()
+        .map(|(message_id, expires_at)| (message_id.clone(), days_until_expiry(*expires_at, now)))
+        .collect()
 }
