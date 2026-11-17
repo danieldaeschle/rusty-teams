@@ -15,6 +15,16 @@ pub(crate) fn as_adaptive_card(root: &Value) -> Option<Value> {
     if object.contains_key("body") || text(root, "type") == Some("AdaptiveCard") {
         return None;
     }
+    let connector = text(root, "@type") == Some("MessageCard")
+        || ["sections", "potentialAction"]
+            .iter()
+            .any(|key| root.get(key).is_some_and(Value::is_array));
+    let hero = ["buttons", "images"]
+        .iter()
+        .any(|key| root.get(key).is_some_and(Value::is_array));
+    if !connector && !hero {
+        return None;
+    }
     let mut body = Vec::new();
     if let Some(title) = text(root, "title") {
         body.push(json!({"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": true}));
@@ -205,7 +215,8 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_object_stays_no_card() {
+    fn an_object_without_card_shape_stays_no_card() {
         assert!(AdaptiveCard::parse("{}").is_none());
+        assert!(AdaptiveCard::parse(r#"{"title": "t", "value": "v"}"#).is_none());
     }
 }
