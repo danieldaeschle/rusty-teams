@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use store::MessageRecord;
 
 use crate::adaptive_card::{AdaptiveCard, card_content_text};
+use crate::ams_video::{thumbnail_video_url, video_thumbnail_url};
 use crate::external_image::{external_image_url, is_giphy_url};
 use crate::forwarded::{
     ForwardHeader, ForwardInfo, forwarded_texts, inline_forwards, no_forward_header,
@@ -110,6 +111,11 @@ pub enum ImageKind {
 impl ImageRef {
     pub fn key(&self) -> &str {
         &self.url
+    }
+
+    /// The Teams video clip this image is the thumbnail of.
+    pub fn video_url(&self) -> Option<String> {
+        thumbnail_video_url(&self.url)
     }
 
     pub fn kind(&self) -> ImageKind {
@@ -319,10 +325,12 @@ pub fn images(record: &MessageRecord) -> Vec<ImageRef> {
         let is_emoji = value
             .attr("itemtype")
             .is_some_and(|itemtype| itemtype.contains(EMOJI_ITEMTYPE));
-        let Some(url) = value
-            .attr("src")
-            .filter(|url| value.name() == "img" && !is_emoji && !url.is_empty())
-        else {
+        let src = value.attr("src").filter(|src| !src.is_empty());
+        let Some(url) = (match value.name() {
+            "img" if !is_emoji => src.map(str::to_owned),
+            "video" => src.and_then(video_thumbnail_url),
+            _ => None,
+        }) else {
             continue;
         };
         if found.iter().any(|image| image.url == url) {
@@ -330,8 +338,8 @@ pub fn images(record: &MessageRecord) -> Vec<ImageRef> {
         }
         let style = value.attr("style").unwrap_or_default();
         found.push(ImageRef {
-            id: image_id(found.len(), url),
-            url: url.to_owned(),
+            id: image_id(found.len(), &url),
+            url,
             width: dimension(value.attr("width"), style, "width"),
             height: dimension(value.attr("height"), style, "height"),
             alt: value

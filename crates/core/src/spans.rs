@@ -1,5 +1,6 @@
 use scraper::{ElementRef, Html, Node};
 
+use crate::ams_video::video_thumbnail_url;
 use crate::jumbo::without_repeated_skin_tone;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +191,7 @@ fn convert_unindented(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         "emoji" => push_emoji(element, spans),
         "customemoji" => push_custom_emoji(element, spans),
         "img" => push_image(element, spans),
+        "video" => push_video(element, spans),
         _ => spans.extend(convert_children(element)),
     }
 }
@@ -455,6 +457,16 @@ fn push_image(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         spans.push(Span::Image {
             hosted_content_url: source.to_owned(),
         });
+    }
+}
+
+/// A Teams video clip draws as its thumbnail; other videos keep only their fallback content.
+fn push_video(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+    match element.value().attr("src").and_then(video_thumbnail_url) {
+        Some(thumbnail) => spans.push(Span::Image {
+            hosted_content_url: thumbnail,
+        }),
+        None => spans.extend(convert_children(element)),
     }
 }
 

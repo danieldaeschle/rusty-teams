@@ -56,7 +56,11 @@ pub fn collect_gallery(
         .flat_map(|message| {
             let caption = caption_of(message);
             let time = viewer_time_label(message, today, offset);
-            message.images.iter().map(move |image| GalleryItem {
+            let pictures = message
+                .images
+                .iter()
+                .filter(|image| image.video_url().is_none());
+            pictures.map(move |image| GalleryItem {
                 message_key: message.key.clone(),
                 image: image.clone(),
                 sender_id: message.sender_id.clone(),

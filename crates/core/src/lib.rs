@@ -1,6 +1,7 @@
 mod actions;
 mod activity_sync;
 mod adaptive_card;
+mod ams_video;
 mod announcement;
 mod announcement_post;
 mod avatars;
