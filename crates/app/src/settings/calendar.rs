@@ -317,9 +317,7 @@ fn ics_block(app: &Entity<AppState>, subscription: &store::IcsSubscription) -> D
                 tr("settings.calendar.disconnect"),
             )
             .on_click(move |_, _, cx| {
-                disconnect.update(cx, |state, cx| {
-                    state.disconnect_ics_subscription(&id, cx)
-                })
+                disconnect.update(cx, |state, cx| state.disconnect_ics_subscription(&id, cx))
             }),
         ))
         .child(

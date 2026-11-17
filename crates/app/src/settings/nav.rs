@@ -91,10 +91,9 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
         ],
         SettingsSection::Calls => vec![tr("settings.calls.ringtones")],
         SettingsSection::Calendar => CALENDAR_VIEW_TERMS.iter().map(|key| tr(key)).collect(),
-        SettingsSection::CalendarAccounts => CALENDAR_ACCOUNTS_TERMS
-            .iter()
-            .map(|key| tr(key))
-            .collect(),
+        SettingsSection::CalendarAccounts => {
+            CALENDAR_ACCOUNTS_TERMS.iter().map(|key| tr(key)).collect()
+        }
         SettingsSection::Devices => vec![
             "Speaker".to_owned(),
             "Microphone".to_owned(),

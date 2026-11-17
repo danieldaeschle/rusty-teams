@@ -71,11 +71,7 @@ impl Render for CalDavForm {
                             )
                             .on_click(move |_, window, cx| {
                                 set_fastmail.update(cx, |input, cx| {
-                                    input.set_value(
-                                        "https://caldav.fastmail.com/dav/",
-                                        window,
-                                        cx,
-                                    );
+                                    input.set_value("https://caldav.fastmail.com/dav/", window, cx);
                                 });
                             }),
                         )

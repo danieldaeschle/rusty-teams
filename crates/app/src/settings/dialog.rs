@@ -219,13 +219,10 @@ impl SettingsDialog {
             SettingsSection::Chats => chats::render(&self.app, cx).into_any_element(),
             SettingsSection::Calls => calls::render(&self.center, cx).into_any_element(),
             SettingsSection::Calendar => calendar::render_view(&self.app, cx).into_any_element(),
-            SettingsSection::CalendarAccounts => calendar::render_accounts(
-                &self.app,
-                self.caldav.as_ref(),
-                self.ics.as_ref(),
-                cx,
-            )
-            .into_any_element(),
+            SettingsSection::CalendarAccounts => {
+                calendar::render_accounts(&self.app, self.caldav.as_ref(), self.ics.as_ref(), cx)
+                    .into_any_element()
+            }
             SettingsSection::Devices => self
                 .devices
                 .clone()
