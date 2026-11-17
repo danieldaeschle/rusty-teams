@@ -64,6 +64,7 @@ const MAX_WIDTH_RATIO: f32 = 0.7;
 const NARROW_BUBBLE_WIDTH: f32 = 300.;
 const BUBBLE_PADDING_Y: f32 = 8.;
 const META_BOTTOM_INSET: f32 = 4.;
+const META_RIGHT_INSET: f32 = 8.;
 const META_SIZE: f32 = 11.;
 const META_CHECK_SIZE: f32 = 15.;
 const SAVED_MARK_SIZE: f32 = 12.;
@@ -374,18 +375,24 @@ fn bubble(
                     h_flex()
                         .flex_none()
                         .mb(px(META_BOTTOM_INSET - bubble_padding_y(extras.compact)))
+                        .mr(px(meta_right_shift(jumbo.is_some())))
                         .child(bubble_meta(row, own, saved)),
                 ),
         );
     } else if !meta_inline {
-        content = content.child(h_flex().justify_end().child(bubble_meta(row, own, saved)));
+        content = content.child(
+            h_flex()
+                .justify_end()
+                .mr(px(meta_right_shift(jumbo.is_some())))
+                .child(bubble_meta(row, own, saved)),
+        );
     }
     element = element.child(content);
     if meta_inline {
         element = element.child(
             div()
                 .absolute()
-                .right(px(8.))
+                .right(px(META_RIGHT_INSET))
                 .bottom(px(META_BOTTOM_INSET))
                 .child(bubble_meta(row, own, saved)),
         );
@@ -456,6 +463,15 @@ pub(super) fn forwarded_header() -> Div {
         .text_color(theme::text_muted())
         .child(icon(IconName::Forward, FORWARDED_SIZE, theme::text_muted()))
         .child("Forwarded")
+}
+
+/// Every time and tick ends `META_RIGHT_INSET` from the bubble edge, inside a padded bubble or under a big emoji.
+fn meta_right_shift(jumbo: bool) -> f32 {
+    if jumbo {
+        META_RIGHT_INSET
+    } else {
+        META_RIGHT_INSET - BUBBLE_PADDING_X
+    }
 }
 
 fn bubble_meta(row: &MessageRow, own: bool, saved: bool) -> Div {
