@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::time::Instant;
 
 use gpui_kit::component::h_flex;
@@ -12,17 +12,23 @@ use crate::theme;
 const EMOTICON_SIZE: f32 = 50.;
 const GLYPH_SIZE: f32 = 40.;
 const EMOTICON_GAP: f32 = 4.;
-struct Playback {
-    started: Option<Instant>,
-}
-
+/// When each big emoji started its one play. Kept for the app's lifetime, so rows that
+/// are laid out off screen or rebuilt keep their start and a reopened chat does not replay.
 #[derive(Default)]
-struct PlayedEmoticons(HashSet<ElementId>);
+struct PlayedEmoticons(HashMap<ElementId, Instant>);
 
 impl Global for PlayedEmoticons {}
 
-fn first_play(id: &ElementId, cx: &mut App) -> bool {
-    cx.default_global::<PlayedEmoticons>().0.insert(id.clone())
+fn play_start(id: &ElementId, active: bool, now: Instant, cx: &mut App) -> Option<Instant> {
+    let played = cx.default_global::<PlayedEmoticons>();
+    match played.0.get(id) {
+        Some(started) => Some(*started),
+        None if active => {
+            played.0.insert(id.clone(), now);
+            Some(now)
+        }
+        None => None,
+    }
 }
 
 #[derive(IntoElement)]
@@ -53,17 +59,8 @@ impl RenderOnce for JumboEmoticon {
             Some(Err(_)) => return glyph(&self.emoji),
             None => return div().size(px(EMOTICON_SIZE)).into_any_element(),
         };
-        let playback =
-            window.use_keyed_state(self.id.clone(), cx, |_, _| Playback { started: None });
         let now = Instant::now();
-        let active = window.is_window_active();
-        let unplayed = active && playback.read(cx).started.is_none() && first_play(&self.id, cx);
-        let started = playback.update(cx, |playback, _| {
-            if unplayed {
-                playback.started = Some(now);
-            }
-            playback.started
-        });
+        let started = play_start(&self.id, window.is_window_active(), now, cx);
         let playing =
             started.is_some_and(|started| now.duration_since(started) < resolved.loop_duration());
         let image = if playing {
@@ -73,15 +70,18 @@ impl RenderOnce for JumboEmoticon {
         };
         let image_id = ElementId::Name(format!("{}-image", self.id).into());
         div()
-            .id(self.id)
+            .id(self.id.clone())
             .size(px(EMOTICON_SIZE))
             .flex_none()
-            .on_hover(move |hovered, _, cx| {
-                if *hovered {
-                    playback.update(cx, |playback, cx| {
-                        playback.started = Some(Instant::now());
-                        cx.notify();
-                    });
+            .on_hover({
+                let id = self.id;
+                move |hovered, window, cx| {
+                    if *hovered {
+                        cx.default_global::<PlayedEmoticons>()
+                            .0
+                            .insert(id.clone(), Instant::now());
+                        window.refresh();
+                    }
                 }
             })
             .child(img(ImageSource::Render(image)).id(image_id).size_full())
