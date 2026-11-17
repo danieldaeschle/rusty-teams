@@ -175,20 +175,3 @@ async fn ensure_access_token(
 fn missing_client_id() -> String {
     app_base::ui_locale::tr("settings.calendar.not_in_build")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn refresh_failure_message_is_err_not_empty_ok() {
-        // Contract for week load: auth refresh problems must be Err so CalendarLoadFailure fires.
-        let err: Result<Vec<CalendarEvent>, String> =
-            Err("google token refresh failed: HTTP 400: client_secret is missing".into());
-        assert!(err.is_err());
-        assert!(err.unwrap_err().contains("token refresh failed"));
-        let empty_ok: Result<Vec<CalendarEvent>, String> = Ok(Vec::new());
-        assert!(empty_ok.is_ok());
-        assert!(empty_ok.unwrap().is_empty());
-    }
-}

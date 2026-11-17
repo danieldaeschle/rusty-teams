@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use reqwest::{Client, Method, StatusCode, header};
 use uuid::Uuid;
@@ -6,12 +9,12 @@ use crate::calendar::{
     AttendeeResponseCounts, CalendarEvent, CalendarSource, EventAttendee, ResponseType, ShowAs,
 };
 use crate::error::{Error, Result};
-use crate::ical::{CalDavEventDraft, expand_events, parse_calendar};
+use crate::ical::{CalDavEventDraft, exclude_occurrence_from_ics, expand_events, parse_calendar};
 
 use super::discovery::{DiscoverResult, discover, reject_https_downgrade, resolve_url};
-use super::xml::{
-    calendar_query_body, parse_calendar_query, parse_multistatus, propfind_body,
-};
+use super::xml::{calendar_query_body, parse_calendar_query, parse_multistatus, propfind_body};
+
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone)]
 pub struct ListedCalendar {
@@ -35,25 +38,27 @@ pub struct CalDavClient {
 }
 
 impl CalDavClient {
-    pub fn new(username: impl Into<String>, password: impl Into<String>) -> Self {
-        CalDavClient {
-            http: Client::builder()
-                .redirect(reqwest::redirect::Policy::custom(|attempt| {
-                    let previous = attempt.previous().last().map(|u| u.as_str()).unwrap_or("");
-                    let next = attempt.url().as_str();
-                    if previous.starts_with("https://") && next.starts_with("http://") {
-                        attempt.error(std::io::Error::other("https downgrade"))
-                    } else if attempt.previous().len() > 10 {
-                        attempt.stop()
-                    } else {
-                        attempt.follow()
-                    }
-                }))
-                .build()
-                .unwrap_or_else(|_| Client::new()),
+    pub fn new(username: impl Into<String>, password: impl Into<String>) -> Result<Self> {
+        let http = Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                let previous = attempt.previous().last().map(|u| u.as_str()).unwrap_or("");
+                let next = attempt.url().as_str();
+                if previous.starts_with("https://") && next.starts_with("http://") {
+                    attempt.error(std::io::Error::other("https downgrade"))
+                } else if attempt.previous().len() > 10 {
+                    attempt.stop()
+                } else {
+                    attempt.follow()
+                }
+            }))
+            .build()
+            .map_err(map_reqwest)?;
+        Ok(CalDavClient {
+            http,
             username: username.into(),
             password: password.into(),
-        }
+        })
     }
 
     pub async fn discover(&self, url: &str) -> Result<DiscoverResult> {
@@ -104,31 +109,35 @@ impl CalDavClient {
     ) -> Result<Vec<CalDavEvent>> {
         let start = from.format("%Y%m%dT%H%M%SZ").to_string();
         let end = to.format("%Y%m%dT%H%M%SZ").to_string();
-        let mut resources = self
-            .calendar_query(calendar_href, &start, &end, true)
-            .await;
+        let mut resources = self.calendar_query(calendar_href, &start, &end, true).await;
         if resources.is_err() {
-            resources = self.calendar_query(calendar_href, &start, &end, false).await;
+            resources = self
+                .calendar_query(calendar_href, &start, &end, false)
+                .await;
         }
         let resources = resources?;
         let mut out = Vec::new();
         for (href, etag, data) in resources {
             let absolute = resolve_url(calendar_href, &href).unwrap_or(href);
             let parsed = parse_calendar(&data);
+            let series_uids: HashSet<String> = parsed
+                .iter()
+                .filter(|event| {
+                    event.rrule.is_some()
+                        || !event.rdates.is_empty()
+                        || event.recurrence_id.is_some()
+                })
+                .map(|event| event.uid.clone())
+                .collect();
             let expanded = expand_events(parsed, from, to);
             for item in expanded {
-                let mut event = to_calendar_event(
-                    &item,
-                    account_id,
-                    &absolute,
-                    calendar_name,
-                );
+                let mut event = to_calendar_event(&item, account_id, &absolute, calendar_name);
+                let uid = event.ical_uid.clone().unwrap_or_default();
+                let series = series_uids.contains(&uid) || item.recurrence_id.is_some();
+                event.series = series;
+                event.object_id = object_id_for(&absolute, &uid, series, item.start);
                 out.push(CalDavEvent {
-                    event: {
-                        // Keep href in object_id for writes.
-                        event.object_id = format!("{absolute}#{}", event.ical_uid.clone().unwrap_or_default());
-                        event
-                    },
+                    event,
                     href: absolute.clone(),
                     etag: etag.clone(),
                 });
@@ -143,11 +152,7 @@ impl CalDavClient {
         draft: &CalDavEventDraft,
         stamp: DateTime<Utc>,
     ) -> Result<String> {
-        let href = format!(
-            "{}{}.ics",
-            ensure_trailing_slash(calendar_href),
-            draft.uid
-        );
+        let href = format!("{}{}.ics", ensure_trailing_slash(calendar_href), draft.uid);
         let body = crate::ical::build_vevent(draft, stamp);
         let response = self
             .http
@@ -186,6 +191,55 @@ impl CalDavClient {
             "CalDAV DELETE failed: {}",
             response.status()
         )))
+    }
+
+    /// Exclude one occurrence by EXDATE on the master; does not DELETE the series href.
+    pub async fn exclude_occurrence(
+        &self,
+        href: &str,
+        occurrence: DateTime<Utc>,
+        etag: Option<&str>,
+    ) -> Result<()> {
+        let response = self
+            .http
+            .get(href)
+            .basic_auth(&self.username, Some(&self.password))
+            .send()
+            .await
+            .map_err(map_reqwest)?;
+        ensure_auth(response.status())?;
+        let fresh_etag = response
+            .headers()
+            .get(header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.trim_matches('"').to_owned());
+        let body = response.text().await.map_err(map_reqwest)?;
+        let updated =
+            exclude_occurrence_from_ics(&body, occurrence).map_err(Error::UnexpectedAnswer)?;
+        let match_etag = etag.or(fresh_etag.as_deref());
+        let mut request = self
+            .http
+            .put(href)
+            .basic_auth(&self.username, Some(&self.password))
+            .header(header::CONTENT_TYPE, "text/calendar; charset=utf-8")
+            .body(updated);
+        if let Some(etag) = match_etag {
+            request = request.header(header::IF_MATCH, format!("\"{etag}\""));
+        }
+        let response = request.send().await.map_err(map_reqwest)?;
+        if response.status() == StatusCode::PRECONDITION_FAILED {
+            return Err(Error::UnexpectedAnswer(
+                "CalDAV event changed on the server; reload and try again".into(),
+            ));
+        }
+        ensure_auth(response.status())?;
+        if !response.status().is_success() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "CalDAV EXDATE failed: {}",
+                response.status()
+            )));
+        }
+        Ok(())
     }
 
     pub async fn update_partstat(
@@ -320,10 +374,7 @@ fn to_calendar_event(
         join_url: parsed.join_url.clone(),
         thread_id: None,
         organizer_name: parsed.organizer.as_ref().map(|(n, _)| n.clone()),
-        organizer_address: parsed
-            .organizer
-            .as_ref()
-            .and_then(|(_, a)| a.clone()),
+        organizer_address: parsed.organizer.as_ref().and_then(|(_, a)| a.clone()),
         ical_uid: Some(parsed.uid.clone()),
         response,
         show_as: if parsed.transparent {
@@ -345,7 +396,10 @@ fn to_calendar_event(
             }
         }),
         body_html: parsed.description.clone(),
-        series: parsed.rrule.is_some() || parsed.recurrence_id.is_some(),
+        // Overridden by fetch_events after expansion (RRULE is cleared on occurrences).
+        series: parsed.rrule.is_some()
+            || !parsed.rdates.is_empty()
+            || parsed.recurrence_id.is_some(),
         series_master_id: None,
         response_counts: None::<AttendeeResponseCounts>,
         attendees: parsed
@@ -441,4 +495,33 @@ fn map_reqwest(error: reqwest::Error) -> Error {
 
 pub fn new_event_uid() -> String {
     format!("{}@rusty-teams", Uuid::new_v4())
+}
+
+pub fn object_id_for(href: &str, uid: &str, series: bool, start: DateTime<Utc>) -> String {
+    if series {
+        format!("{href}#{uid}#{}", start.format("%Y%m%dT%H%M%SZ"))
+    } else {
+        format!("{href}#{uid}")
+    }
+}
+
+pub fn href_from_object_id(object_id: &str) -> &str {
+    object_id.split('#').next().unwrap_or(object_id)
+}
+
+#[cfg(test)]
+mod object_id_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn series_occurrences_get_distinct_ids() {
+        let start_a = Utc.with_ymd_and_hms(2026, 1, 5, 9, 0, 0).unwrap();
+        let start_b = Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap();
+        let a = object_id_for("https://dav.example/cal/evt.ics", "series", true, start_a);
+        let b = object_id_for("https://dav.example/cal/evt.ics", "series", true, start_b);
+        assert_ne!(a, b);
+        assert!(a.ends_with("#20260105T090000Z"));
+        assert_eq!(href_from_object_id(&a), "https://dav.example/cal/evt.ics");
+    }
 }

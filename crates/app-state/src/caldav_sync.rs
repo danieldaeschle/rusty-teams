@@ -3,11 +3,11 @@ use store::{CalDavAccount, CalDavCalendarInfo, CalendarAccounts};
 use uuid::Uuid;
 
 use chatsvc::{
-    CalDavClient, CalDavEventDraft, CalendarEvent, Reply, discover_caldav, new_event_uid,
-    partstat_for_reply,
+    CalDavClient, CalDavEventDraft, CalendarEvent, Reply, discover_caldav, href_from_object_id,
+    new_event_uid, partstat_for_reply,
 };
 
-use crate::caldav_credentials::{delete_password, load_password, store_password};
+use crate::caldav_credentials::{delete_password, load_password_async, store_password_async};
 
 pub async fn connect_caldav(
     accounts: &mut CalendarAccounts,
@@ -16,7 +16,7 @@ pub async fn connect_caldav(
     password: &str,
 ) -> Result<String, String> {
     let url = normalize_url(url)?;
-    let client = CalDavClient::new(username, password);
+    let client = CalDavClient::new(username, password).map_err(|e| e.to_string())?;
     let discovered = discover_caldav(&client, &url)
         .await
         .map_err(|e| e.to_string())?;
@@ -28,7 +28,7 @@ pub async fn connect_caldav(
         return Err("No event calendars found on this CalDAV account".into());
     }
     let id = Uuid::new_v4().to_string();
-    store_password(&id, password)?;
+    store_password_async(id.clone(), password.to_owned()).await?;
     accounts.caldav_accounts.push(CalDavAccount {
         id: id.clone(),
         url,
@@ -56,24 +56,33 @@ pub fn disconnect_caldav(accounts: &mut CalendarAccounts, account_id: &str) -> R
     Ok(())
 }
 
+/// Events plus per-calendar failure messages. One bad calendar does not drop the rest.
 pub async fn fetch_caldav_events(
     accounts: &mut CalendarAccounts,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
-) -> Result<Vec<CalendarEvent>, String> {
+) -> Result<(Vec<CalendarEvent>, Vec<String>), String> {
     let mut all = Vec::new();
+    let mut failures = Vec::new();
     for index in 0..accounts.caldav_accounts.len() {
         let account = &accounts.caldav_accounts[index];
-        let password = match load_password(&account.id) {
+        let password = match load_password_async(account.id.clone()).await {
             Ok(password) => password,
             Err(error) => {
-                return Err(format!(
+                failures.push(format!(
                     "CalDAV password missing for {}: {error}",
                     account.username
                 ));
+                continue;
             }
         };
-        let client = CalDavClient::new(&account.username, &password);
+        let client = match CalDavClient::new(&account.username, &password) {
+            Ok(client) => client,
+            Err(error) => {
+                failures.push(format!("CalDAV {}: {error}", account.username));
+                continue;
+            }
+        };
         let account_id = account.id.clone();
         let calendars: Vec<(String, String)> = account
             .calendars
@@ -87,13 +96,11 @@ pub async fn fetch_caldav_events(
                 .await
             {
                 Ok(events) => all.extend(events.into_iter().map(|item| item.event)),
-                Err(error) => {
-                    return Err(format!("CalDAV {calendar_name}: {error}"));
-                }
+                Err(error) => failures.push(format!("CalDAV {calendar_name}: {error}")),
             }
         }
     }
-    Ok(all)
+    Ok((all, failures))
 }
 
 pub async fn insert_caldav_event(
@@ -105,8 +112,8 @@ pub async fn insert_caldav_event(
     let account = accounts
         .caldav_account(account_id)
         .ok_or_else(|| format!("CalDAV account {account_id} missing"))?;
-    let password = load_password(account_id)?;
-    let client = CalDavClient::new(&account.username, password);
+    let password = load_password_async(account_id.to_owned()).await?;
+    let client = CalDavClient::new(&account.username, password).map_err(|e| e.to_string())?;
     client
         .put_event(calendar_id, draft, Utc::now())
         .await
@@ -123,7 +130,7 @@ pub async fn respond_caldav_event(
     let account = accounts
         .caldav_account(account_id)
         .ok_or_else(|| format!("CalDAV account {account_id} missing"))?;
-    let password = load_password(account_id)?;
+    let password = load_password_async(account_id.to_owned()).await?;
     let mailto = account
         .user_addresses
         .iter()
@@ -137,9 +144,10 @@ pub async fn respond_caldav_event(
         })
         .ok_or_else(|| "CalDAV calendar-user-address missing".to_owned())?;
     let notified = account.schedule_outbox.is_some();
-    let client = CalDavClient::new(&account.username, password);
+    let client = CalDavClient::new(&account.username, password).map_err(|e| e.to_string())?;
+    let href = href_from_object_id(href).to_owned();
     client
-        .update_partstat(href, None, &mailto, partstat_for_reply(reply))
+        .update_partstat(&href, None, &mailto, partstat_for_reply(reply))
         .await
         .map_err(|e| e.to_string())?;
     Ok(notified)
@@ -148,19 +156,24 @@ pub async fn respond_caldav_event(
 pub async fn delete_caldav_event(
     accounts: &mut CalendarAccounts,
     account_id: &str,
-    href: &str,
+    object_id: &str,
+    series: bool,
+    occurrence_start: DateTime<Utc>,
 ) -> Result<(), String> {
     let account = accounts
         .caldav_account(account_id)
         .ok_or_else(|| format!("CalDAV account {account_id} missing"))?;
-    let password = load_password(account_id)?;
-    let client = CalDavClient::new(&account.username, password);
-    // Series occurrence exclusion is handled by callers that rewrite EXDATE; single events DELETE.
-    let href = href.split('#').next().unwrap_or(href);
-    client
-        .delete(href, None)
-        .await
-        .map_err(|e| e.to_string())
+    let password = load_password_async(account_id.to_owned()).await?;
+    let client = CalDavClient::new(&account.username, password).map_err(|e| e.to_string())?;
+    let href = href_from_object_id(object_id);
+    if series {
+        client
+            .exclude_occurrence(href, occurrence_start, None)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        client.delete(href, None).await.map_err(|e| e.to_string())
+    }
 }
 
 pub fn draft_from_meeting(

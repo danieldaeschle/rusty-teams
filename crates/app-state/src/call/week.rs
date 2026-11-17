@@ -278,10 +278,16 @@ impl AppState {
             if accounts.has_caldav() {
                 match crate::caldav_sync::fetch_caldav_events(&mut fetched_accounts, from, to).await
                 {
-                    Ok(events) => {
+                    Ok((events, partial)) => {
                         let _ = store::merge_caldav_metadata(&store, &fetched_accounts);
                         caldav_count = Some(events.len());
                         combined.extend(events);
+                        for message in partial {
+                            failures.push(CalendarLoadFailure {
+                                source: CalendarSource::CalDav,
+                                message,
+                            });
+                        }
                     }
                     Err(error) => failures.push(CalendarLoadFailure {
                         source: CalendarSource::CalDav,
@@ -291,7 +297,15 @@ impl AppState {
             }
             if accounts.has_ics() {
                 match crate::ics_sync::fetch_ics_events(&accounts, from, to).await {
-                    Ok(events) => combined.extend(events),
+                    Ok((events, partial)) => {
+                        combined.extend(events);
+                        for message in partial {
+                            failures.push(CalendarLoadFailure {
+                                source: CalendarSource::Ics,
+                                message,
+                            });
+                        }
+                    }
                     Err(error) => failures.push(CalendarLoadFailure {
                         source: CalendarSource::Ics,
                         message: error,
@@ -308,10 +322,7 @@ impl AppState {
                 &failures,
             ));
             let home = home_calendar(&accounts);
-            (
-                chatsvc::merge_calendar_events(combined, home),
-                failures,
-            )
+            (chatsvc::merge_calendar_events(combined, home), failures)
         });
         cx.spawn(async move |this, cx| {
             let loaded = receiver.await.unwrap_or_else(|_| {
@@ -343,12 +354,17 @@ impl AppState {
 }
 
 /// A source that failed keeps its previous events on screen instead of blanking the week.
+/// When the round already returned some events for that source (partial calendar failure),
+/// previous events are left out so successful calendars are not duplicated.
 pub(crate) fn keep_failed_sources(
     previous: &[CalendarEvent],
     mut events: Vec<CalendarEvent>,
     failures: &[CalendarLoadFailure],
 ) -> Vec<CalendarEvent> {
     for failure in failures {
+        if events.iter().any(|event| event.source == failure.source) {
+            continue;
+        }
         events.extend(
             previous
                 .iter()
@@ -676,6 +692,24 @@ mod tests {
             .map(|event| event.object_id)
             .collect();
         assert_eq!(ids, ["google-new"]);
+    }
+
+    #[test]
+    fn a_partial_source_failure_does_not_duplicate_fresh_events() {
+        let previous = vec![
+            event("caldav-old-a", CalendarSource::CalDav, 9),
+            event("caldav-old-b", CalendarSource::CalDav, 10),
+        ];
+        let fresh = vec![event("caldav-new", CalendarSource::CalDav, 8)];
+        let failures = [CalendarLoadFailure {
+            source: CalendarSource::CalDav,
+            message: "CalDAV Work: timeout".into(),
+        }];
+        let ids: Vec<_> = keep_failed_sources(&previous, fresh, &failures)
+            .into_iter()
+            .map(|event| event.object_id)
+            .collect();
+        assert_eq!(ids, ["caldav-new"]);
     }
 
     #[test]

@@ -283,6 +283,8 @@ impl AppState {
         let source = event.source;
         let account_id = event.account_id.clone();
         let calendar_id = event.calendar_id.clone();
+        let series = event.series;
+        let occurrence_start = event.start;
         self.remove_calendar_event(&event_id);
         cx.notify();
         let launcher = self.call_launcher.clone().filter(|_| !self.mode.demo);
@@ -320,10 +322,14 @@ impl AppState {
                         let mut accounts = store::load_calendar_accounts(&store);
                         let account =
                             account_id.ok_or_else(|| "CalDAV account missing".to_owned())?;
-                        let href = event_id.split('#').next().unwrap_or(&event_id).to_owned();
-                        let result =
-                            crate::caldav_sync::delete_caldav_event(&mut accounts, &account, &href)
-                                .await;
+                        let result = crate::caldav_sync::delete_caldav_event(
+                            &mut accounts,
+                            &account,
+                            &event_id,
+                            series,
+                            occurrence_start,
+                        )
+                        .await;
                         let _ = store::save_calendar_accounts(&store, &accounts);
                         result
                     }
@@ -562,7 +568,7 @@ impl AppState {
                         let mut accounts = store::load_calendar_accounts(&store);
                         let account =
                             account_id.ok_or_else(|| "CalDAV account missing".to_owned())?;
-                        let href = event_id.split('#').next().unwrap_or(&event_id).to_owned();
+                        let href = chatsvc::href_from_object_id(&event_id).to_owned();
                         let result = crate::caldav_sync::respond_caldav_event(
                             &mut accounts,
                             &account,

@@ -62,10 +62,7 @@ async fn user_scheduling(
     client: &CalDavClient,
     principal: &str,
 ) -> Result<(Vec<String>, Option<String>)> {
-    let body = propfind_body(&[
-        "<c:calendar-user-address-set/>",
-        "<c:schedule-outbox-URL/>",
-    ]);
+    let body = propfind_body(&["<c:calendar-user-address-set/>", "<c:schedule-outbox-URL/>"]);
     let xml = client.propfind(principal, "0", &body).await?;
     let mut addresses = Vec::new();
     let mut outbox = None;

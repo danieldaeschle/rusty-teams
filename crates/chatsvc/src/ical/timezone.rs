@@ -46,6 +46,9 @@ mod tests {
 
     #[test]
     fn parses_iana() {
-        assert_eq!(resolve_tzid("Europe/Zurich"), Some(chrono_tz::Europe::Zurich));
+        assert_eq!(
+            resolve_tzid("Europe/Zurich"),
+            Some(chrono_tz::Europe::Zurich)
+        );
     }
 }

@@ -162,13 +162,15 @@ fn parse_vevent(lines: &[String]) -> Option<ParsedEvent> {
     }
 
     let start = start?;
-    let end = end.or_else(|| duration.map(|d| start + d)).unwrap_or_else(|| {
-        if all_day {
-            start + Duration::days(1)
-        } else {
-            start + Duration::hours(1)
-        }
-    });
+    let end = end
+        .or_else(|| duration.map(|d| start + d))
+        .unwrap_or_else(|| {
+            if all_day {
+                start + Duration::days(1)
+            } else {
+                start + Duration::hours(1)
+            }
+        });
     let join = teams_join_url(
         skype.as_deref(),
         url.as_deref(),

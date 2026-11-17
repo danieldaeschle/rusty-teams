@@ -8,7 +8,10 @@ pub fn teams_join_url(
     skype_url
         .filter(|value| looks_like_teams(value))
         .map(str::to_owned)
-        .or_else(|| url.filter(|value| looks_like_teams(value)).map(str::to_owned))
+        .or_else(|| {
+            url.filter(|value| looks_like_teams(value))
+                .map(str::to_owned)
+        })
         .or_else(|| {
             location
                 .filter(|value| looks_like_teams(value))

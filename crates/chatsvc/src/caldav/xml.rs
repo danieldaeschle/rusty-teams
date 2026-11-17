@@ -39,7 +39,10 @@ pub fn parse_multistatus(xml: &str) -> Vec<PropfindResponse> {
                 if local == "comp" {
                     for attr in e.attributes().flatten() {
                         if local_name(attr.key.as_ref()) == "name"
-                            && attr.unescape_value().map(|v| v.eq_ignore_ascii_case("VEVENT")).unwrap_or(false)
+                            && attr
+                                .unescape_value()
+                                .map(|v| v.eq_ignore_ascii_case("VEVENT"))
+                                .unwrap_or(false)
                         {
                             current.supports_vevent = true;
                         }
@@ -91,7 +94,9 @@ pub fn parse_multistatus(xml: &str) -> Vec<PropfindResponse> {
                     }
                     "displayname" => current.displayname = Some(text),
                     "calendar-color" | "color" => current.calendar_color = Some(text),
-                    "getctag" | "getetag" => current.getctag = Some(text.trim_matches('"').to_owned()),
+                    "getctag" | "getetag" => {
+                        current.getctag = Some(text.trim_matches('"').to_owned())
+                    }
                     _ => {}
                 }
             }

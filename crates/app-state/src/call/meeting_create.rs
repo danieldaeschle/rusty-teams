@@ -132,7 +132,10 @@ async fn write_target(
                 &draft,
             )
             .await?;
-            Ok(format!("caldav:{}:{}", target.account_id, target.calendar_id))
+            Ok(format!(
+                "caldav:{}:{}",
+                target.account_id, target.calendar_id
+            ))
         }
     }
 }

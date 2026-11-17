@@ -21,6 +21,24 @@ pub fn delete_password(account_id: &str) -> Result<(), String> {
     }
 }
 
+pub async fn store_password_async(account_id: String, password: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || store_password(&account_id, &password))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+pub async fn load_password_async(account_id: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || load_password(&account_id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+pub async fn delete_password_async(account_id: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || delete_password(&account_id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 /// Redact credentials that must never appear in diagnostics or support bundles.
 pub fn redact_secret_text(text: &str) -> String {
     let mut out = text.to_owned();

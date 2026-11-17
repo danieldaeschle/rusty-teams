@@ -43,38 +43,36 @@ impl AppState {
         let store = self.store.clone();
         let connecting = runtime::spawn(async move {
             let mut accounts = load_calendar_accounts(&store);
-            let id =
-                crate::caldav_sync::connect_caldav(&mut accounts, &url, &username, &password).await?;
+            let id = crate::caldav_sync::connect_caldav(&mut accounts, &url, &username, &password)
+                .await?;
             save_calendar_accounts(&store, &accounts).map_err(|error| error.to_string())?;
             Ok::<_, String>(id)
         });
-        cx.spawn(async move |this, cx| {
-            match connecting.await {
-                Ok(Ok(_)) => {
-                    this.update(cx, |state, cx| {
-                        state.raise_notice(tr("settings.calendar.caldav_connected"), None, cx);
-                        state.refresh_calendar(cx);
-                        state.load_calendar_week(cx);
-                        cx.notify();
-                    })
-                    .ok();
-                }
-                Ok(Err(error)) => {
-                    this.update(cx, |state, cx| {
-                        state.raise_notice(
-                            crate::caldav_credentials::redact_secret_text(&error),
-                            None,
-                            cx,
-                        );
-                    })
-                    .ok();
-                }
-                Err(_) => {
-                    this.update(cx, |state, cx| {
-                        state.raise_notice(tr("settings.calendar.caldav_connect_failed"), None, cx);
-                    })
-                    .ok();
-                }
+        cx.spawn(async move |this, cx| match connecting.await {
+            Ok(Ok(_)) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(tr("settings.calendar.caldav_connected"), None, cx);
+                    state.refresh_calendar(cx);
+                    state.load_calendar_week(cx);
+                    cx.notify();
+                })
+                .ok();
+            }
+            Ok(Err(error)) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(
+                        crate::caldav_credentials::redact_secret_text(&error),
+                        None,
+                        cx,
+                    );
+                })
+                .ok();
+            }
+            Err(_) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(tr("settings.calendar.caldav_connect_failed"), None, cx);
+                })
+                .ok();
             }
         })
         .detach();
@@ -113,7 +111,12 @@ impl AppState {
         cx.notify();
     }
 
-    pub fn connect_ics_subscription(&mut self, url: String, summary: String, cx: &mut Context<Self>) {
+    pub fn connect_ics_subscription(
+        &mut self,
+        url: String,
+        summary: String,
+        cx: &mut Context<Self>,
+    ) {
         let store = self.store.clone();
         let connecting = runtime::spawn(async move {
             let mut accounts = load_calendar_accounts(&store);
@@ -121,27 +124,25 @@ impl AppState {
             save_calendar_accounts(&store, &accounts).map_err(|error| error.to_string())?;
             Ok::<_, String>(id)
         });
-        cx.spawn(async move |this, cx| {
-            match connecting.await {
-                Ok(Ok(_)) => {
-                    this.update(cx, |state, cx| {
-                        state.raise_notice(tr("settings.calendar.ics_connected"), None, cx);
-                        state.refresh_calendar(cx);
-                        state.load_calendar_week(cx);
-                        cx.notify();
-                    })
+        cx.spawn(async move |this, cx| match connecting.await {
+            Ok(Ok(_)) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(tr("settings.calendar.ics_connected"), None, cx);
+                    state.refresh_calendar(cx);
+                    state.load_calendar_week(cx);
+                    cx.notify();
+                })
+                .ok();
+            }
+            Ok(Err(error)) => {
+                this.update(cx, |state, cx| state.raise_notice(error, None, cx))
                     .ok();
-                }
-                Ok(Err(error)) => {
-                    this.update(cx, |state, cx| state.raise_notice(error, None, cx))
-                        .ok();
-                }
-                Err(_) => {
-                    this.update(cx, |state, cx| {
-                        state.raise_notice(tr("settings.calendar.ics_connect_failed"), None, cx);
-                    })
-                    .ok();
-                }
+            }
+            Err(_) => {
+                this.update(cx, |state, cx| {
+                    state.raise_notice(tr("settings.calendar.ics_connect_failed"), None, cx);
+                })
+                .ok();
             }
         })
         .detach();

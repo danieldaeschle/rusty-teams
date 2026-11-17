@@ -226,7 +226,10 @@ mod tests {
         next_day.start += chrono::Duration::days(1);
         next_day.end += chrono::Duration::days(1);
         let merged = merge_calendar_events(
-            vec![event("o1", CalendarSource::Outlook, Some("uid"), join), next_day],
+            vec![
+                event("o1", CalendarSource::Outlook, Some("uid"), join),
+                next_day,
+            ],
             None,
         );
         assert_eq!(merged.len(), 2);
