@@ -70,7 +70,6 @@ pub fn build_vevent(draft: &CalDavEventDraft, stamp: DateTime<Utc>) -> String {
 /// Add EXDATE for one occurrence on the series master and bump SEQUENCE.
 /// Leaves overrides and other VEVENT blocks untouched.
 pub fn exclude_occurrence_from_ics(ics: &str, occurrence: DateTime<Utc>) -> Result<String, String> {
-    let stamp = format_utc(occurrence);
     let mut out = Vec::new();
     let mut in_event = false;
     let mut is_master = false;
@@ -93,7 +92,7 @@ pub fn exclude_occurrence_from_ics(ics: &str, occurrence: DateTime<Utc>) -> Resu
         if upper == "END:VEVENT" {
             event_lines.push(line);
             if is_master {
-                out.extend(patch_master_exdate(event_lines, &stamp)?);
+                out.extend(patch_master_exdate(event_lines, occurrence)?);
                 patched = true;
             } else {
                 out.extend(event_lines);
@@ -113,45 +112,54 @@ pub fn exclude_occurrence_from_ics(ics: &str, occurrence: DateTime<Utc>) -> Resu
     Ok(out.join("\r\n") + "\r\n")
 }
 
-fn patch_master_exdate(mut lines: Vec<String>, stamp: &str) -> Result<Vec<String>, String> {
+fn patch_master_exdate(
+    mut lines: Vec<String>,
+    occurrence: DateTime<Utc>,
+) -> Result<Vec<String>, String> {
+    let all_day = lines.iter().any(|line| {
+        let upper = line.to_ascii_uppercase();
+        upper.starts_with("DTSTART") && upper.contains("VALUE=DATE") && !upper.contains("DATE-TIME")
+    });
+    let (exdate, value) = if all_day {
+        let value = occurrence.format("%Y%m%d").to_string();
+        (format!("EXDATE;VALUE=DATE:{value}"), value)
+    } else {
+        let value = format_utc(occurrence);
+        (format!("EXDATE:{value}"), value)
+    };
     let mut sequence_bumped = false;
-    let mut exdate_added = false;
+    let mut excluded = false;
     for line in &mut lines {
         let upper = line.to_ascii_uppercase();
         if upper.starts_with("SEQUENCE:") {
-            let value = line.split_once(':').map(|(_, v)| v).unwrap_or("0");
-            let next = value.trim().parse::<u32>().unwrap_or(0).saturating_add(1);
+            let current = line.split_once(':').map(|(_, v)| v).unwrap_or("0");
+            let next = current.trim().parse::<u32>().unwrap_or(0).saturating_add(1);
             *line = format!("SEQUENCE:{next}");
             sequence_bumped = true;
         }
-        if upper.starts_with("EXDATE") {
-            if line.contains(stamp) {
-                exdate_added = true;
-            } else if let Some((name, value)) = line.split_once(':') {
-                *line = format!("{name}:{value},{stamp}");
-                exdate_added = true;
-            }
+        if upper.starts_with("EXDATE")
+            && line
+                .split_once(':')
+                .is_some_and(|(_, values)| values.split(',').any(|item| item == value))
+        {
+            excluded = true;
         }
     }
     if !sequence_bumped {
-        if let Some(idx) = lines
+        let at = lines
             .iter()
             .position(|l| l.to_ascii_uppercase().starts_with("UID:"))
-        {
-            lines.insert(idx + 1, "SEQUENCE:1".to_owned());
-        } else {
-            lines.insert(1, "SEQUENCE:1".to_owned());
-        }
+            .map_or(1, |idx| idx + 1);
+        lines.insert(at, "SEQUENCE:1".to_owned());
     }
-    if !exdate_added {
-        if let Some(idx) = lines.iter().position(|l| {
-            l.to_ascii_uppercase().starts_with("RRULE")
-                || l.to_ascii_uppercase().starts_with("RDATE")
-        }) {
-            lines.insert(idx + 1, format!("EXDATE:{stamp}"));
-        } else {
+    if !excluded {
+        let Some(idx) = lines.iter().position(|l| {
+            let upper = l.to_ascii_uppercase();
+            upper.starts_with("RRULE") || upper.starts_with("RDATE")
+        }) else {
             return Err("CalDAV series master missing RRULE/RDATE".into());
-        }
+        };
+        lines.insert(idx + 1, exdate);
     }
     Ok(lines)
 }
@@ -195,6 +203,25 @@ mod tests {
         assert!(!ics.contains("METHOD:"));
         assert!(ics.contains("URL:https://teams.microsoft.com/l/meetup-join/x"));
         assert!(ics.contains("ATTENDEE:mailto:a@b.c"));
+    }
+
+    #[test]
+    fn exclude_occurrence_keeps_a_zoned_exdate_and_adds_its_own_line() {
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:series\r\nDTSTART;TZID=Europe/Berlin:20260105T100000\r\nRRULE:FREQ=WEEKLY\r\nEXDATE;TZID=Europe/Berlin:20260105T100000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let patched =
+            exclude_occurrence_from_ics(ics, Utc.with_ymd_and_hms(2026, 1, 12, 9, 0, 0).unwrap())
+                .unwrap();
+        assert!(patched.contains("EXDATE;TZID=Europe/Berlin:20260105T100000\r\n"));
+        assert!(patched.contains("EXDATE:20260112T090000Z\r\n"));
+    }
+
+    #[test]
+    fn exclude_occurrence_of_an_all_day_series_uses_a_date() {
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:series\r\nDTSTART;VALUE=DATE:20260105\r\nRRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let patched =
+            exclude_occurrence_from_ics(ics, Utc.with_ymd_and_hms(2026, 1, 12, 0, 0, 0).unwrap())
+                .unwrap();
+        assert!(patched.contains("EXDATE;VALUE=DATE:20260112\r\n"));
     }
 
     #[test]
