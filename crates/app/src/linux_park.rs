@@ -47,7 +47,7 @@ impl ParkClock {
         } else {
             let _ = self
                 .holds
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |holds| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |holds| {
                     Some(holds.saturating_sub(1))
                 });
         }
@@ -71,7 +71,7 @@ pub fn spawn(clock: Arc<ParkClock>, browser: browser::Browser, endpoint: &str) {
                 continue;
             }
             // False for a parked tab, a login page and a Teams that has not signed in yet.
-            if !browser.teams_has_msal_cache().await {
+            if !browser.teams_has_msal_cache().await || !clock.due(Instant::now()) {
                 continue;
             }
             match park(&transport).await {
