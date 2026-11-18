@@ -258,7 +258,7 @@ impl SettingsDialog {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(20.))
+                    .text_size(theme::text_title())
                     .line_height(px(28.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())

@@ -395,7 +395,7 @@ impl FunPicker {
             .flex()
             .items_center()
             .cursor_pointer()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .font_weight(FontWeight::SEMIBOLD)
             .border_b_2()
             .border_color(if selected {
@@ -433,7 +433,7 @@ impl FunPicker {
             .gap(px(8.))
             .items_center()
             .justify_center()
-            .text_size(px(12.5))
+            .text_size(theme::text_small())
             .text_color(theme::text_muted())
             .child(text)
     }
@@ -446,7 +446,7 @@ impl FunPicker {
                     .flex()
                     .items_end()
                     .pb(px(4.))
-                    .text_size(px(11.))
+                    .text_size(theme::text_caption())
                     .text_color(theme::text_muted())
                     .child(*title)
                     .into_any_element();
@@ -467,7 +467,7 @@ impl FunPicker {
                 .items_center()
                 .justify_center()
                 .rounded(px(6.))
-                .text_size(px(20.))
+                .text_size(theme::text_title())
                 .font_family(theme::EMOJI_FONT_FAMILY)
                 .cursor_pointer()
                 .hover(|cell| cell.bg(theme::popup_hover()))
@@ -673,7 +673,7 @@ impl FunPicker {
             .items_center()
             .rounded_full()
             .cursor_pointer()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .when(selected, |button| {
                 button
                     .bg(theme::accent_soft())
@@ -754,7 +754,7 @@ impl Render for FunPicker {
                         .flex_none()
                         .flex()
                         .justify_end()
-                        .text_size(px(10.5))
+                        .text_size(theme::text_caption())
                         .text_color(theme::text_faint())
                         .child("Powered by GIPHY"),
                 )

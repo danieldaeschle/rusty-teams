@@ -79,7 +79,7 @@ pub fn titled(
         .gap(px(2.))
         .child(
             div()
-                .text_size(px(14.))
+                .text_size(theme::text_body())
                 .line_height(px(20.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text())
@@ -88,7 +88,7 @@ pub fn titled(
         .when(!detail.is_empty(), |column| {
             column.child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .line_height(px(16.))
                     .text_color(detail_color)
                     .child(detail),
@@ -132,7 +132,7 @@ pub fn stacked_field(
         .rounded(px(ROW_RADIUS))
         .child(
             div()
-                .text_size(px(14.))
+                .text_size(theme::text_body())
                 .line_height(px(20.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text())
@@ -141,7 +141,7 @@ pub fn stacked_field(
         .when(!detail.is_empty(), |column| {
             column.child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .line_height(px(16.))
                     .text_color(theme::text_muted())
                     .child(detail),
@@ -171,7 +171,7 @@ pub fn caption(label: impl Into<SharedString>) -> Div {
         .px(px(ROW_INSET))
         .pt(px(18.))
         .pb(px(6.))
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_muted())
         .child(label.into())
@@ -189,7 +189,7 @@ pub fn text_button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> 
         .border_1()
         .border_color(theme::border_strong())
         .cursor_pointer()
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text())
         .hover(|button| button.bg(theme::popup_hover()))

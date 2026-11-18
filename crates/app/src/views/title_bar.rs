@@ -59,7 +59,7 @@ fn mode_pill(label: &'static str) -> Div {
         .items_center()
         .rounded_full()
         .bg(theme::amber().opacity(0.14))
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::amber())
         .child(label)
@@ -96,7 +96,7 @@ pub fn update_button(
             .rounded(px(6.))
             .bg(theme::accent())
             .text_color(theme::on_accent())
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .font_weight(FontWeight::SEMIBOLD)
             .when(!installing, |button| {
                 button
@@ -187,7 +187,7 @@ fn search_box(
         .rounded(px(6.))
         .bg(theme::surface())
         .cursor_pointer()
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .text_color(theme::text_muted())
         .child(
             div()
@@ -203,7 +203,7 @@ fn search_box(
                     .py(px(1.))
                     .rounded(px(4.))
                     .bg(theme::surface_raised())
-                    .text_size(px(11.))
+                    .text_size(theme::text_caption())
                     .child(SHORTCUT_HINT),
             )
         })
@@ -234,7 +234,7 @@ impl RenderOnce for TitleBarRow {
             )
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
                     .child(app_base::APP_NAME),

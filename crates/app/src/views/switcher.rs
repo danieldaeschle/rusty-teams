@@ -471,7 +471,7 @@ fn group_header(label: &'static str) -> AnyElement {
         .px(px(12.))
         .pt(px(8.))
         .pb(px(4.))
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_muted())
         .child(label)
@@ -515,14 +515,14 @@ impl Render for Switcher {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .text_color(theme::text())
                                     .child(candidate.title.clone()),
                             )
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_muted())
                                     .child(candidate.subtitle.clone()),
                             ),
@@ -565,7 +565,7 @@ impl Render for Switcher {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .text_color(theme::text())
                                     .child(person.name.clone()),
                             )
@@ -573,7 +573,7 @@ impl Render for Switcher {
                                 column.child(
                                     div()
                                         .truncate()
-                                        .text_size(px(12.))
+                                        .text_size(theme::text_small())
                                         .text_color(theme::text_muted())
                                         .child(person.subtitle.clone()),
                                 )
@@ -633,7 +633,7 @@ impl Render for Switcher {
                                     .child(
                                         div()
                                             .flex_none()
-                                            .text_size(px(13.))
+                                            .text_size(theme::text_label())
                                             .font_weight(FontWeight::SEMIBOLD)
                                             .text_color(theme::text())
                                             .child(message.author.clone()),
@@ -642,7 +642,7 @@ impl Render for Switcher {
                                         div()
                                             .min_w_0()
                                             .truncate()
-                                            .text_size(px(12.))
+                                            .text_size(theme::text_small())
                                             .text_color(theme::text_muted())
                                             .child(format!("in {}", message.conversation)),
                                     )
@@ -650,7 +650,7 @@ impl Render for Switcher {
                                     .child(
                                         div()
                                             .flex_none()
-                                            .text_size(px(11.))
+                                            .text_size(theme::text_caption())
                                             .text_color(theme::text_muted())
                                             .child(message.date.clone()),
                                     ),
@@ -658,7 +658,7 @@ impl Render for Switcher {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(12.5))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_soft())
                                     .child(
                                         StyledText::new(message.snippet.clone())
@@ -680,7 +680,7 @@ impl Render for Switcher {
             .px(px(12.))
             .gap(px(16.))
             .items_center()
-            .text_size(px(11.))
+            .text_size(theme::text_caption())
             .text_color(theme::text_muted())
             .child("Enter to open")
             .child("Arrows to select")

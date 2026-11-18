@@ -669,7 +669,7 @@ impl ImageViewer {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(white())
                                     .child(author),
@@ -677,7 +677,7 @@ impl ImageViewer {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(white().opacity(0.6))
                                     .child(subtitle),
                             ),
@@ -700,7 +700,7 @@ impl ImageViewer {
                             .w(px(ZOOM_LABEL_WIDTH))
                             .flex_none()
                             .text_center()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(white().opacity(0.8))
                             .child(zoom_label),
                     )
@@ -919,7 +919,7 @@ impl ImageViewer {
                     .flex_none()
                     .truncate()
                     .text_center()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(white().opacity(0.9))
                     .child(caption),
             )
@@ -927,7 +927,7 @@ impl ImageViewer {
                 div()
                     .h(px(STATUS_HEIGHT))
                     .flex_none()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(white().opacity(0.6))
                     .child(status),
             )
@@ -952,7 +952,7 @@ fn status_placeholder(text: &'static str) -> AnyElement {
         .child(symbol("image", 28., white().opacity(0.5)))
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(white().opacity(0.6))
                 .child(text),
         )

@@ -57,7 +57,7 @@ pub fn header_call_controls(
                 .rounded_full()
                 .bg(background)
                 .text_color(foreground)
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .hover(|button| button.opacity(0.85))
@@ -125,7 +125,7 @@ fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> 
                         .when(labelled, |row| {
                             row.child(
                                 div()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
                                     .child(tr("calls.chrome.meet_now")),

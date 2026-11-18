@@ -114,7 +114,7 @@ fn row(index: usize, found: &Match, selected: bool, skin_tone: u8) -> Stateful<D
                 .w(px(28.))
                 .flex_none()
                 .text_center()
-                .text_size(px(20.))
+                .text_size(theme::text_title())
                 .line_height(px(ROW_HEIGHT))
                 .font_family(theme::EMOJI_FONT_FAMILY)
                 .child(emoticons::with_tone(found.glyph, skin_tone)),
@@ -156,7 +156,7 @@ fn hint() -> Div {
         .px(px(8.))
         .gap(px(6.))
         .items_center()
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .text_color(theme::text_muted())
         .child(key("↑↓"))
         .child("select")

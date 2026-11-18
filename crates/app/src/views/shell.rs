@@ -1328,7 +1328,7 @@ impl Render for AppShell {
             .size_full()
             .bg(theme::background())
             .text_color(theme::text())
-            .text_size(px(14.))
+            .text_size(theme::text_body())
             .child(crate::frame_log::probe("first"))
             .child(user_activity::input_probe(self.user_input.clone()))
             .child(app_ui_kit::long_press::long_press_right_click())

@@ -146,7 +146,7 @@ fn flat_button(
         .items_center()
         .rounded(px(6.))
         .cursor_pointer()
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(color)
         .hover(move |button| button.bg(hover_fill))
@@ -199,7 +199,7 @@ fn side_chip(label: String, mention: bool) -> Div {
         } else {
             theme::text()
         })
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .line_height(px(20.))
         .font_weight(FontWeight::SEMIBOLD)
         .child(label)
@@ -269,7 +269,7 @@ impl ToastView {
             return side_chip(format!("{} new", model.count), false).into_any_element();
         }
         div()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::text_muted())
             .child(model.time.clone())
             .into_any_element()
@@ -288,7 +288,7 @@ impl ToastView {
                 .child(symbol("image", 16., theme::text_muted()))
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text())
                         .child(text.preview.clone()),
                 )
@@ -312,7 +312,7 @@ impl ToastView {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .line_height(px(20.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
@@ -325,7 +325,7 @@ impl ToastView {
                     .gap(px(4.))
                     .items_center()
                     .h(px(16.))
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::text_muted())
                     .children(subtitle_icon.map(|name| symbol(name, 14., theme::text_muted())))
                     .child(div().truncate().child(text.subtitle.clone())),
@@ -418,7 +418,7 @@ impl ToastView {
                     .h(px(16.))
                     .gap(px(12.))
                     .justify_end()
-                    .text_size(px(11.))
+                    .text_size(theme::text_caption())
                     .text_color(theme::text_muted())
                     .child(hint("Enter", "send"))
                     .child(hint("Shift+Enter", "new line"))
@@ -448,7 +448,7 @@ impl ToastView {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(14.))
+                    .text_size(theme::text_body())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
                     .child(label),
@@ -456,7 +456,7 @@ impl ToastView {
             .when(sent, |row| {
                 row.child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(model.time.clone()),
                 )
@@ -609,7 +609,7 @@ impl Render for PillView {
             .bg(theme::popup())
             .cursor_pointer()
             .hover(|bar| bar.bg(theme::popup_hover()))
-            .text_size(px(12.5))
+            .text_size(theme::text_small())
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text_soft())
             .child("Hide all")

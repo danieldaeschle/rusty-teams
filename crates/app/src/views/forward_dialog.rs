@@ -244,7 +244,7 @@ impl ForwardDialog {
                     )
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(DIALOG_SUBTITLE),
                     ),
@@ -281,7 +281,7 @@ impl ForwardDialog {
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .child(format!("To: {}", target.title)),
                 )
                 .child(
@@ -347,14 +347,14 @@ impl ForwardDialog {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .text_color(theme::text())
                                     .child(candidate.title.clone()),
                             )
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_muted())
                                     .child(candidate.subtitle.clone()),
                             ),
@@ -386,7 +386,7 @@ impl ForwardDialog {
             .rounded(px(6.))
             .bg(theme::accent())
             .text_color(theme::on_accent())
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .font_weight(FontWeight::SEMIBOLD)
             .when(self.sending, |button| {
                 button.child(icon(IconName::Loader, 14., theme::on_accent()))
@@ -449,14 +449,14 @@ fn preview_quote(item: &ForwardItem, lines: usize) -> Div {
                 .items_baseline()
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text_soft())
                         .child(item.author.clone()),
                 )
                 .child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .text_color(theme::text_muted())
                         .child(item.time.clone()),
                 ),
@@ -465,7 +465,7 @@ fn preview_quote(item: &ForwardItem, lines: usize) -> Div {
             div()
                 .line_clamp(lines)
                 .text_ellipsis()
-                .text_size(px(12.5))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .child(text),
         )
@@ -516,7 +516,7 @@ impl Render for ForwardDialog {
                     .child(Input::new(&self.comment))
                     .children(self.error.clone().map(|error| {
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::red_tint())
                             .child(error)
                     }))

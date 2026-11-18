@@ -747,21 +747,21 @@ fn list_row(
                 .gap(px(2.))
                 .child(
                     div()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(title),
                 )
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(detail),
                 )
                 .children(mono.map(|command| {
                     div()
                         .truncate()
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .text_color(theme::text_faint())
                         .child(command)
                 })),
@@ -939,7 +939,7 @@ impl AgentsSettings {
                         div()
                             .px(px(12.))
                             .py(px(8.))
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(tr("agents.settings.no_cli_found")),
                     )
@@ -963,13 +963,13 @@ impl AgentsSettings {
                     .gap(px(6.))
                     .child(
                         div()
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(tr("agents.settings.write_with")),
                     )
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(tr("agents.settings.rewrite_hint")),
                     )
@@ -982,7 +982,7 @@ impl AgentsSettings {
                     .px(px(PAGE_PADDING))
                     .pt(px(16.))
                     .pb(px(16.))
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .line_height(relative(1.5))
                     .text_color(theme::text_faint())
                     .child(tr("agents.settings.note")),

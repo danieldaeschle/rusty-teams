@@ -333,7 +333,7 @@ impl CloudPicker {
             .items_center()
             .rounded(px(6.))
             .cursor_pointer()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(if active {
                 theme::text_strong()
             } else {
@@ -362,7 +362,7 @@ impl CloudPicker {
                 .pt(px(20.))
                 .pb(px(6.))
                 .px(px(10.))
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text())
                 .child(label)
@@ -387,7 +387,7 @@ impl CloudPicker {
                 div()
                     .px(px(10.))
                     .pb(px(16.))
-                    .text_size(px(20.))
+                    .text_size(theme::text_title())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_strong())
                     .child("OneDrive"),
@@ -464,7 +464,7 @@ impl CloudPicker {
         } else {
             h_flex().child(
                 div()
-                    .text_size(px(20.))
+                    .text_size(theme::text_title())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_strong())
                     .child(self.title()),
@@ -474,7 +474,7 @@ impl CloudPicker {
             .gap(px(2.))
             .children(site.map(|name| {
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_soft())
                     .child(name)
             }))
@@ -491,7 +491,7 @@ impl CloudPicker {
             .items_center()
             .border_b_1()
             .border_color(theme::border())
-            .text_size(px(12.5))
+            .text_size(theme::text_small())
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text_soft())
             .child(div().w(px(CHECK_WIDTH)).flex_none())
@@ -529,7 +529,7 @@ impl CloudPicker {
             .border_b_1()
             .border_color(theme::border())
             .cursor_pointer()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::text_soft())
             .when(picked, |row| row.bg(theme::selection()))
             .hover(|row| row.bg(theme::row_hover()))
@@ -571,7 +571,7 @@ impl CloudPicker {
         let note = |text: &'static str| {
             div()
                 .p(px(16.))
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text_soft())
                 .child(text)
                 .into_any_element()

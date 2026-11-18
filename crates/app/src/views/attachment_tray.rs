@@ -871,14 +871,14 @@ fn chip<T: 'static>(
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(12.5))
+                        .text_size(theme::text_small())
                         .text_color(theme::text())
                         .child(item.name.clone()),
                 )
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .text_color(subtitle_color)
                         .child(state.subtitle),
                 ),
@@ -888,7 +888,7 @@ fn chip<T: 'static>(
                 div()
                     .id(ElementId::Name(format!("attachment-retry-{id}").into()))
                     .flex_none()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::accent_text())
                     .cursor_pointer()

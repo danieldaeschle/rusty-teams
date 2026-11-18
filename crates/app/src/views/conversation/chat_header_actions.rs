@@ -192,7 +192,7 @@ pub fn member_count(count: usize) -> Div {
     h_flex()
         .gap(px(4.))
         .items_center()
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .text_color(theme::text_soft())
         .child(icon(IconName::Users, COUNT_GLYPH, theme::text_soft()))
         .child(count.to_string())

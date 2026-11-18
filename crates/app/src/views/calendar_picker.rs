@@ -46,7 +46,7 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
         .gap(px(4.))
         .child(
             div()
-                .text_size(px(16.))
+                .text_size(theme::text_heading())
                 .font_weight(FontWeight::BOLD)
                 .text_color(theme::text())
                 .pb(px(8.))
@@ -97,7 +97,7 @@ fn mini_month(app: &Entity<AppState>, state: &AppState) -> Div {
                 .child(
                     div()
                         .pl(px(4.))
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text())
                         .child(app_base::format::month_year_label(month)),
@@ -156,7 +156,7 @@ fn add_calendar_row(app: &Entity<AppState>) -> Stateful<Div> {
         .rounded(px(6.))
         .cursor_pointer()
         .hover(|row| row.bg(theme::popup_hover()))
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .text_color(theme::accent_text())
         .child(icon(IconName::Plus, 14., theme::accent_text()))
         .child(tr("calendar.view.add_calendar"))
@@ -269,7 +269,7 @@ fn google_group(
                 .flex()
                 .items_center()
                 .cursor_pointer()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::accent_text())
                 .child(if expanded {
                     tr("calendar.view.show_fewer")
@@ -405,7 +405,7 @@ fn group(
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
                     .child(title),
@@ -446,7 +446,7 @@ fn calendar_row(
                 .flex_1()
                 .min_w_0()
                 .truncate()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text())
                 .child(label),
         )

@@ -164,7 +164,7 @@ fn separator_pill(label: &str, fill: Hsla, text_color: Hsla) -> Div {
                 .items_center()
                 .rounded(px(12.))
                 .bg(fill)
-                .text_size(px(11.))
+                .text_size(theme::text_caption())
                 .text_color(text_color)
                 .child(label.to_owned()),
         )
@@ -187,7 +187,7 @@ pub(super) fn deleted_tombstone(index: usize, undo_delete: SharedRowAction) -> D
         h_flex()
             .gap(px(8.))
             .items_baseline()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .child(div().italic().text_color(theme::text_muted()).child(
                 if undo_delete.is_some() {
                     DELETED_TOMBSTONE
@@ -663,7 +663,7 @@ pub(super) fn delivery_note(
     let note = |text: &'static str| {
         h_flex()
             .gap(px(4.))
-            .text_size(px(11.))
+            .text_size(theme::text_caption())
             .text_color(theme::red_soft())
             .child(text)
     };
@@ -723,7 +723,7 @@ fn others_row(
                     div().id(ElementId::Name(format!("author-{index}").into())),
                     profile_user,
                 )
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text_soft())
                 .child(author.clone()),

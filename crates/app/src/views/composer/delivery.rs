@@ -136,14 +136,14 @@ impl Composer {
                     .min_w_0()
                     .child(
                         div()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .child(option.header),
                     )
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(option.content),
                     ),
@@ -210,7 +210,7 @@ impl Composer {
                 .items_center()
                 .rounded(px(10.))
                 .bg(theme::red().opacity(BANNER_TINT))
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::red_tint())
                 .child(symbol(
                     "notification_important",

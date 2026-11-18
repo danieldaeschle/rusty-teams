@@ -97,7 +97,7 @@ fn chip_row(run: &AgentRun, fill: Hsla) -> Stateful<Div> {
         .rounded(px(8.))
         .bg(fill)
         .cursor_pointer()
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .text_color(theme::text_soft())
         .tooltip(move |window, cx| Tooltip::new(step.clone()).build(window, cx))
         .on_click(move |_, _, cx| with_runs(cx, |runs, cx| runs.toggle_expanded(run_id, cx)));
@@ -232,7 +232,7 @@ fn detail_panel(run: &AgentRun, fill: Hsla) -> Div {
         .gap(px(6.))
         .rounded(px(8.))
         .bg(fill)
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .text_color(theme::text_muted());
     if matches!(run.state, RunState::Failed { .. }) {
         let lines = run.log_lines();

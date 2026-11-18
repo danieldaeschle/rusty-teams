@@ -3933,7 +3933,7 @@ impl ConversationView {
                             )
                             .child(
                                 div()
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_muted())
                                     .child(detail),
                             ),
@@ -3956,7 +3956,7 @@ impl ConversationView {
                 .py(px(4.))
                 .gap(px(8.))
                 .items_center()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::red_soft())
                 .child(message)
                 .child(
@@ -4156,7 +4156,7 @@ impl ConversationView {
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::accent_text())
                     .hover(|button| button.bg(theme::row_hover()))
@@ -4235,7 +4235,7 @@ impl ConversationView {
                     .when(!subline.is_empty(), |column| {
                         column.child(
                             div()
-                                .text_size(px(12.))
+                                .text_size(theme::text_small())
                                 .text_color(theme::text_muted())
                                 .child(subline),
                         )
@@ -4385,7 +4385,7 @@ impl Render for ConversationView {
                             .py_2()
                             .gap(px(6.))
                             .justify_center()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(icon(IconName::Loader, 12., theme::text_muted()))
                             .child("Loading older messages")
@@ -4404,7 +4404,7 @@ impl Render for ConversationView {
                             .py_2()
                             .gap(px(6.))
                             .justify_center()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(icon(IconName::Loader, 12., theme::text_muted()))
                             .child("Loading newer messages")
@@ -4436,14 +4436,14 @@ impl Render for ConversationView {
                             })
                             .child(
                                 div()
-                                    .text_size(px(16.))
+                                    .text_size(theme::text_heading())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
                                     .child(start.title.clone()),
                             )
                             .child(
                                 div()
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_muted())
                                     .child("This is the beginning of the conversation"),
                             )
@@ -4551,7 +4551,7 @@ impl Render for ConversationView {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text_muted())
                 .child("No posts in this channel yet")
                 .into_any_element()

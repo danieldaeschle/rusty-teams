@@ -324,7 +324,7 @@ impl PrejoinView {
                 ))
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text_muted())
                         .child(tr("calls.prejoin.camera_off")),
                 )
@@ -438,7 +438,7 @@ impl PrejoinView {
             .gap(px(4.))
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::text_muted())
                     .child(label),
             )
@@ -465,7 +465,7 @@ impl PrejoinView {
             })
             .when(selected, |option| option.bg(theme::surface_raised()))
             .cursor_pointer()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::text())
             .child(choice.label())
             .on_click(move |_, _, cx| view.update(cx, |view, cx| view.set_audio(choice, cx)))
@@ -474,7 +474,7 @@ impl PrejoinView {
 
 fn centered_note(text: &str) -> AnyElement {
     div()
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .text_color(theme::text_muted())
         .child(text.to_owned())
         .into_any_element()
@@ -581,7 +581,7 @@ impl Render for PrejoinView {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(20.))
+                                    .text_size(theme::text_title())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text_strong())
                                     .child(title),
@@ -589,7 +589,7 @@ impl Render for PrejoinView {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(13.))
+                                    .text_size(theme::text_label())
                                     .text_color(theme::text_muted())
                                     .child(tr("calls.prejoin.choose_av")),
                             ),

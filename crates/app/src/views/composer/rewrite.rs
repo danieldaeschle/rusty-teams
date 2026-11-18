@@ -382,7 +382,7 @@ impl Composer {
             .items_center()
             .rounded(px(6.))
             .bg(theme::surface_raised())
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text())
             .child(symbol(icon, CHIP_ICON, theme::text_soft()))
@@ -444,7 +444,7 @@ impl Composer {
                 .rounded(px(6.))
                 .cursor_pointer()
                 .hover(|row| row.bg(theme::popup_hover()))
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text())
                 .child(label)
         };
@@ -488,7 +488,7 @@ impl Composer {
             .bg(theme::surface_raised())
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::text_soft())
                     .child(result.action.label().to_owned()),
             );
@@ -500,21 +500,21 @@ impl Composer {
                     .child(spinner(16.))
                     .child(
                         div()
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .text_color(theme::text_soft())
                             .child(working_message(&writer_display_name(cx))),
                     ),
             ),
             RewriteAnswer::Failed(reason) => card.child(
                 div()
-                    .text_size(px(14.))
+                    .text_size(theme::text_body())
                     .text_color(theme::text_soft())
                     .child(reason.clone()),
             ),
             RewriteAnswer::Ready(draft) => card
                 .child(
                     div()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .text_color(theme::text())
                         .child(draft.plain_text()),
                 )
@@ -533,7 +533,7 @@ impl Composer {
                                 .rounded(px(6.))
                                 .bg(theme::accent())
                                 .text_color(theme::on_accent())
-                                .text_size(px(14.))
+                                .text_size(theme::text_body())
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .cursor_pointer()
                                 .hover(|button| button.opacity(0.85))
@@ -544,7 +544,7 @@ impl Composer {
                         )
                         .child(
                             div()
-                                .text_size(px(11.))
+                                .text_size(theme::text_caption())
                                 .text_color(theme::text_muted())
                                 .child(DISCLAIMER),
                         ),

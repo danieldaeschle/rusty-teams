@@ -173,7 +173,7 @@ fn tile(id: SharedString, label: &'static str, selected: bool, preview: Div) -> 
                 .justify_between()
                 .child(
                     div()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .line_height(px(20.))
                         .text_color(theme::text())
                         .child(label),

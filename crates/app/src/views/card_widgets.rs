@@ -201,7 +201,7 @@ pub(super) fn progress_ring_view(ring: &CardProgressRing, id: &str) -> AnyElemen
     );
     let label = ring.label.clone().map(|label| {
         div()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::text_soft())
             .child(label)
     });
@@ -260,14 +260,14 @@ pub(super) fn compound_button_view(
                 .min_w(px(0.))
                 .child(
                     div()
-                        .text_size(px(13.5))
+                        .text_size(theme::text_label())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text_strong())
                         .child(button.title.clone()),
                 )
                 .children(button.description.clone().map(|description| {
                     div()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(description)
                 })),
@@ -281,7 +281,7 @@ pub(super) fn compound_button_view(
                 .items_center()
                 .rounded_full()
                 .bg(theme::badge_muted())
-                .text_size(px(11.))
+                .text_size(theme::text_caption())
                 .font_weight(FontWeight::BOLD)
                 .text_color(theme::text_strong())
                 .child(badge)

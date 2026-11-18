@@ -133,7 +133,7 @@ fn divider(overflow: usize) -> Div {
                     .px(px(8.))
                     .rounded_full()
                     .bg(theme::surface_raised())
-                    .text_size(px(11.))
+                    .text_size(theme::text_caption())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_muted())
                     .child(format!("+{overflow}")),

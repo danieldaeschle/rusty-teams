@@ -242,7 +242,7 @@ impl ProfileCard {
             .rounded(px(6.))
             .bg(background)
             .text_color(foreground)
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .line_height(relative(1.4))
             .child(
                 div()
@@ -387,7 +387,7 @@ impl ProfileCard {
             .gap(px(4.))
             .items_center()
             .cursor_pointer()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text_muted())
             .child(icon(
@@ -451,7 +451,7 @@ impl ProfileCard {
             .child(
                 div()
                     .truncate()
-                    .text_size(px(12.5))
+                    .text_size(theme::text_small())
                     .text_color(theme::text())
                     .child(name),
             )
@@ -495,7 +495,7 @@ impl ProfileCard {
                     .py(px(3.))
                     .items_center()
                     .cursor_pointer()
-                    .text_size(px(12.5))
+                    .text_size(theme::text_small())
                     .text_color(theme::text_soft())
                     .child(label)
                     .child(icon(
@@ -544,7 +544,7 @@ impl ProfileCard {
     fn failure(&self, cx: &mut Context<Self>) -> Div {
         h_flex()
             .gap(px(6.))
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::red_soft())
             .child("Profile details could not be loaded.")
             .child(
@@ -599,7 +599,7 @@ struct EntryState {
 
 fn muted_text(text: String) -> Div {
     div()
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .text_color(theme::text_muted())
         .child(text)
 }
@@ -633,7 +633,7 @@ fn contact_row(row: ContactRow) -> Div {
                 .flex_1()
                 .min_w_0()
                 .truncate()
-                .text_size(px(12.5))
+                .text_size(theme::text_small())
                 .text_color(theme::text())
                 .child(row.value),
         )
@@ -685,7 +685,7 @@ fn action_button(
         .cursor_pointer()
         .bg(background)
         .text_color(foreground)
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .hover(|button| button.opacity(0.9))
         .child(icon(glyph, 14., foreground))
@@ -716,7 +716,7 @@ impl Render for ProfileCard {
                 .gap(px(4.))
                 .items_center()
                 .cursor_pointer()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .hover(|button| button.text_color(theme::text()))
                 .child(icon(IconName::ArrowLeft, 14., theme::text_muted()))

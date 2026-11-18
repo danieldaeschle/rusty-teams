@@ -81,7 +81,7 @@ fn free_writing_row(entry: &ProposalEntry, allow: AllowAction) -> Option<Div> {
                 .items_center()
                 .rounded(px(BUTTON_RADIUS))
                 .cursor_pointer()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .bg(theme::surface_raised())
                 .text_color(theme::text())
                 .hover(|chip| chip.opacity(0.85))
@@ -97,7 +97,7 @@ fn free_writing_row(entry: &ProposalEntry, allow: AllowAction) -> Option<Div> {
             .gap(px(6.))
             .child(
                 div()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::text_muted())
                     .child(format!(
                         "{agent} asks to keep writing here without review for {}{reason}",
@@ -111,7 +111,7 @@ fn free_writing_row(entry: &ProposalEntry, allow: AllowAction) -> Option<Div> {
                     .gap(px(6.))
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_soft())
                             .child("Send and allow for"),
                     )
@@ -140,7 +140,7 @@ pub fn free_writing_bar(agent: &str, until: DateTime<Utc>, stop: CardAction) -> 
                 .flex_1()
                 .min_w_0()
                 .truncate()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .child(format!("{agent} writes here without review until {until}")),
         )
@@ -288,7 +288,7 @@ pub(super) fn card_button(
         .items_center()
         .rounded(px(BUTTON_RADIUS))
         .cursor_pointer()
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .bg(background)
         .text_color(color)
@@ -342,7 +342,7 @@ pub fn render(
                 .min_w_0()
                 .items_baseline()
                 .overflow_hidden()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .child(
                     div()
                         .truncate()
@@ -375,7 +375,7 @@ pub fn render(
             .pl(px(8.))
             .border_l(px(QUOTE_BAR_WIDTH))
             .border_color(theme::border_strong())
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::text_muted())
             .child(quote)
     });
@@ -385,7 +385,7 @@ pub fn render(
         .w_full()
         .max_h(px(BODY_LINE_HEIGHT * BODY_MAX_LINES))
         .overflow_y_scroll()
-        .text_size(px(14.))
+        .text_size(theme::text_body())
         .line_height(px(BODY_LINE_HEIGHT))
         .when(stale, |body| body.opacity(0.6))
         .child(render_blocks(&entry.body, "proposal-body", false, cx))
@@ -436,7 +436,7 @@ pub fn render(
                 .id("proposal-open-session")
                 .ml_auto()
                 .cursor_pointer()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::accent_text())
                 .child("Open session")
                 .on_click(move |_, window, cx| open_session(&session_id, window, cx))

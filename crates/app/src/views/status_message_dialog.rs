@@ -172,7 +172,7 @@ impl StatusMessageDialog {
                     .w_full()
                     .flex()
                     .justify_end()
-                    .text_size(px(11.))
+                    .text_size(theme::text_caption())
                     .text_color(theme::text_muted())
                     .child(format!("{}/{NOTE_LIMIT}", self.length)),
             )
@@ -186,7 +186,11 @@ impl StatusMessageDialog {
             .items_center()
             .justify_between()
             .gap(px(SECTION_GAP))
-            .child(div().text_size(px(13.)).child("Clear status message after"))
+            .child(
+                div()
+                    .text_size(theme::text_label())
+                    .child("Clear status message after"),
+            )
             .child(
                 Button::new("status-message-expiry")
                     .outline()
@@ -221,7 +225,7 @@ impl StatusMessageDialog {
             .rounded(px(6.))
             .bg(theme::accent())
             .text_color(theme::on_accent())
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .font_weight(FontWeight::SEMIBOLD)
             .child("Done");
         if enabled {

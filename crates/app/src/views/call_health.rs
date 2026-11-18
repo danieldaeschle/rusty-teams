@@ -63,7 +63,7 @@ fn signal_bars(level: NetworkLevel) -> Div {
 
 fn section_title(title: &'static str) -> Div {
     div()
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_muted())
         .child(title)
@@ -73,7 +73,7 @@ fn row(label: &'static str, value: String) -> Div {
     h_flex()
         .w_full()
         .justify_between()
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .child(div().text_color(theme::text_muted()).child(label))
         .child(value)
 }
@@ -123,13 +123,13 @@ fn health_popover(model: &CallModel) -> Div {
                 .child(section_title("Encryption"))
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .font_weight(FontWeight::SEMIBOLD)
                         .child("Secured by Teams encryption"),
                 )
                 .children(transport.map(|line| {
                     div()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text_muted())
                         .child(line)
                 })),

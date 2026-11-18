@@ -70,12 +70,12 @@ impl AgentsPanel {
         };
         let trailing = if run.is_running() {
             div()
-                .text_size(px(11.))
+                .text_size(theme::text_caption())
                 .text_color(theme::text_faint())
                 .child(run.elapsed_text())
         } else {
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::accent_text())
                 .child("Show")
@@ -99,14 +99,14 @@ impl AgentsPanel {
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text())
                             .child(format!("{} - {}", run.action_label, run.chat_title)),
                     )
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(run.current_step.clone()),
                     ),
@@ -121,7 +121,7 @@ fn section_header(title: &'static str) -> Div {
         .px(px(16.))
         .pt(px(8.))
         .pb(px(4.))
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_faint())
         .child(title)
@@ -166,7 +166,7 @@ impl Render for AgentsPanel {
                         .flex()
                         .justify_center()
                         .text_center()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text_muted())
                         .child(EMPTY_TEXT),
                 )

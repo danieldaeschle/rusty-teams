@@ -48,7 +48,7 @@ pub fn recording_chip(model: &CallModel) -> Option<AnyElement> {
             .flex_none()
             .gap(px(6.))
             .items_center()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(color)
             .child(div().size(px(9.)).rounded_full().bg(color))
@@ -73,7 +73,7 @@ pub fn room_chip(model: &CallModel) -> Option<AnyElement> {
     Some(
         div()
             .flex_none()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::text_muted())
             .child(tr("calls.chrome.breakout_room"))
             .into_any_element(),
@@ -127,7 +127,7 @@ pub fn hold_panel(app: &Entity<AppState>, model: &CallModel) -> Option<AnyElemen
             )
             .child(
                 div()
-                    .text_size(px(14.))
+                    .text_size(theme::text_body())
                     .text_color(theme::text_muted())
                     .child(detail),
             )
@@ -214,7 +214,7 @@ pub fn consult_banner(app: &Entity<AppState>, state: &AppState) -> Option<AnyEle
             .justify_center()
             .bg(theme::amber())
             .text_color(dark_text())
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .font_weight(FontWeight::SEMIBOLD)
             .child(div().min_w_0().truncate().child(consult.banner_text()))
             .child(transfer)
@@ -266,14 +266,14 @@ pub fn consent_overlay(app: &Entity<AppState>, model: &CallModel) -> Option<AnyE
                             .child(div().size(px(10.)).rounded_full().bg(theme::red()))
                             .child(
                                 div()
-                                    .text_size(px(16.))
+                                    .text_size(theme::text_heading())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child(tr("calls.chrome.recording_notice")),
                             ),
                     )
                     .child(
                         div()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text_muted())
                             .child(tr("calls.chrome.recording_accept_hint")),
                     )

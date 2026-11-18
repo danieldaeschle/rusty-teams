@@ -213,7 +213,7 @@ fn tab_button(
         .items_center()
         .rounded(px(7.))
         .cursor_pointer()
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .text_color(if active {
             theme::text()
         } else {
@@ -251,7 +251,7 @@ fn entry_row(entry: &ReactionEntry, directory: &Directory) -> Div {
                 .min_w_0()
                 .child(
                     div()
-                        .text_size(px(13.5))
+                        .text_size(theme::text_label())
                         .text_color(theme::text())
                         .truncate()
                         .child(entry.reactor.name.clone()),
@@ -263,7 +263,7 @@ fn entry_row(entry: &ReactionEntry, directory: &Directory) -> Div {
                         .map(|time| reaction_time_label(time, &Local::now()))
                         .map(|time| {
                             div()
-                                .text_size(px(11.5))
+                                .text_size(theme::text_caption())
                                 .text_color(theme::text_muted())
                                 .child(time)
                         }),

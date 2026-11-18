@@ -478,7 +478,7 @@ impl NewChatDraft {
                 div()
                     .max_w(px(CHIP_NAME_MAX_WIDTH))
                     .truncate()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text())
                     .child(chip.name.clone()),
             )
@@ -540,7 +540,7 @@ impl NewChatDraft {
                         .child(
                             div()
                                 .truncate()
-                                .text_size(px(13.))
+                                .text_size(theme::text_label())
                                 .text_color(theme::text())
                                 .child(pick.name.clone()),
                         )
@@ -548,7 +548,7 @@ impl NewChatDraft {
                             column.child(
                                 div()
                                     .truncate()
-                                    .text_size(px(11.5))
+                                    .text_size(theme::text_caption())
                                     .text_color(theme::text_muted())
                                     .child(detail),
                             )
@@ -562,7 +562,7 @@ impl NewChatDraft {
             div()
                 .px(px(6.))
                 .py(px(8.))
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(color)
                 .child(text)
         };
@@ -579,7 +579,7 @@ impl NewChatDraft {
                     div()
                         .px(px(6.))
                         .pb(px(4.))
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text_muted())
                         .child(label),
@@ -640,7 +640,7 @@ impl NewChatDraft {
             .items_center()
             .child(
                 div()
-                    .text_size(px(14.))
+                    .text_size(theme::text_body())
                     .text_color(theme::text_muted())
                     .child("To:"),
             )
@@ -673,7 +673,7 @@ impl NewChatDraft {
                 .items_center()
                 .child(
                     div()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .text_color(theme::text_muted())
                         .child("Name"),
                 )
@@ -729,7 +729,7 @@ impl NewChatDraft {
                 )
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text_muted())
                         .child(NEW_CONVERSATION_HINT),
                 )
@@ -743,14 +743,14 @@ impl NewChatDraft {
                 ))
                 .child(
                     div()
-                        .text_size(px(16.))
+                        .text_size(theme::text_heading())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text())
                         .child(chip.name.clone()),
                 )
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child("No messages yet. Say hi."),
                 )
@@ -761,7 +761,7 @@ impl NewChatDraft {
                     .when(!title.is_empty(), |column| {
                         column.child(
                             div()
-                                .text_size(px(16.))
+                                .text_size(theme::text_heading())
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(theme::text())
                                 .child(title.to_owned()),
@@ -769,7 +769,7 @@ impl NewChatDraft {
                     })
                     .child(
                         div()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text_muted())
                             .child(format!(
                                 "New group chat with you and {} people",

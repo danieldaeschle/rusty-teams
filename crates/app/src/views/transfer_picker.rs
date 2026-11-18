@@ -164,7 +164,7 @@ impl TransferPicker {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .child(candidate.name.clone()),
                     )
                     .when(chosen, |row| {

@@ -76,7 +76,7 @@ fn message_index(post_index: usize, slot: usize) -> usize {
 
 fn edited_marker() -> Div {
     div()
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .italic()
         .text_color(theme::text_muted())
         .child("Edited")
@@ -86,7 +86,7 @@ fn pinned_marker() -> Div {
     h_flex()
         .gap(px(3.))
         .items_center()
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .text_color(theme::text_muted())
         .child(icon(IconName::Pin, 11., theme::text_muted()))
         .child(PINNED_LABEL)
@@ -196,7 +196,7 @@ fn message_header(
         .child(author_name(index, author, profile_user))
         .child(
             div()
-                .text_size(px(11.))
+                .text_size(theme::text_caption())
                 .text_color(theme::text_muted())
                 .child(row.time.clone()),
         )
@@ -215,7 +215,7 @@ fn author_name(index: usize, author: String, profile_user: Option<&str>) -> Stat
         div().id(ElementId::Name(format!("post-author-{index}").into())),
         profile_user,
     )
-    .text_size(px(13.))
+    .text_size(theme::text_label())
     .font_weight(FontWeight::SEMIBOLD)
     .text_color(theme::text())
     .child(author)
@@ -409,7 +409,7 @@ fn replies_link(label: String, post_index: usize, open: Option<PostAction>) -> S
         .pl(px(CARD_PADDING + REPLY_AVATAR + REPLY_AVATAR_GAP))
         .pr(px(CARD_PADDING))
         .pb(px(8.))
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::accent_text())
         .when_some(open, |link, open| {
@@ -466,7 +466,7 @@ fn reply_footer(
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_soft())
                     .hover(|button| {
@@ -495,7 +495,7 @@ fn card_action(label: &'static str, glyph: IconName, primary: bool) -> Div {
         .items_center()
         .rounded(px(6.))
         .when(primary, |action| action.bg(theme::reply_surface()))
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(color)
         .child(icon(glyph, 14., color))
@@ -532,7 +532,7 @@ pub fn post_in_channel_card(
                 .children(own_avatar)
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text_strong())
                         .child(POST_IN_CHANNEL),
@@ -567,7 +567,7 @@ fn new_post_badge() -> Div {
         .items_center()
         .rounded_full()
         .bg(theme::mention_background(false))
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::accent_text())
         .child(NEW_LABEL)

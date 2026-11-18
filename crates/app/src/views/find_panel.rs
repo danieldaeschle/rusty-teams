@@ -398,7 +398,7 @@ impl FindPanel {
             .items_center()
             .rounded_full()
             .cursor_pointer()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .when(selected, |chip| {
                 chip.bg(theme::accent()).text_color(theme::on_accent())
             })
@@ -439,7 +439,7 @@ impl FindPanel {
                 div()
                     .px(px(SIDE_INSET))
                     .py(px(8.))
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_muted())
                     .child(message),
             );
@@ -451,7 +451,7 @@ impl FindPanel {
                     .px(px(SIDE_INSET))
                     .pt(px(12.))
                     .pb(px(4.))
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_muted())
                     .child(group.label),
@@ -509,7 +509,7 @@ impl FindPanel {
             .child(
                 h_flex()
                     .gap(px(8.))
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .child(
                         div()
                             .flex_1()
@@ -528,7 +528,7 @@ impl FindPanel {
             )
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_soft())
                     .line_clamp(2)
                     .text_ellipsis()
@@ -578,7 +578,7 @@ fn chip_button(id: &'static str, label: String, selected: bool) -> Button {
         .dropdown_caret(true)
         .rounded(px(CHIP_HEIGHT / 2.))
         .h(px(CHIP_HEIGHT))
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .when(selected, |chip| {
             chip.bg(theme::accent()).text_color(theme::on_accent())
         })

@@ -43,7 +43,7 @@ pub fn picker_row(label: String, control: impl IntoElement) -> Div {
             div()
                 .w(px(LABEL_WIDTH))
                 .flex_none()
-                .text_size(px(11.))
+                .text_size(theme::text_caption())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text_faint())
                 .child(label),
@@ -56,7 +56,7 @@ fn meta_text(meta: String, running: bool) -> Div {
         .flex_none()
         .items_center()
         .gap(px(4.))
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .text_color(theme::text_faint())
         .when(running, |meta_row| {
             meta_row.child(
@@ -79,7 +79,7 @@ fn select_body(value: String, meta: Option<String>, running: bool, chevron: bool
                 .flex_1()
                 .min_w(px(0.))
                 .truncate()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .child(value),
         )
         .children(meta.map(|meta| meta_text(meta, running)))

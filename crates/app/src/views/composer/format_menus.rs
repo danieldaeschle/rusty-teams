@@ -397,7 +397,7 @@ impl Composer {
                 .rounded(px(6.))
                 .flex()
                 .justify_center()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text())
                 .cursor_pointer()
                 .hover(|row| row.bg(theme::popup_hover())),
@@ -423,7 +423,7 @@ impl Composer {
                     .px(px(MENU_ROW_PADDING_X))
                     .py(px(MENU_ROW_PADDING_Y))
                     .rounded(px(6.))
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text())
                     .when(current, |row| row.font_weight(FontWeight::BOLD))
                     .cursor_pointer()

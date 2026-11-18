@@ -136,7 +136,7 @@ fn header(context: &MenuContext, cx: &App) -> Div {
         div()
             .w_full()
             .truncate()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(color)
             .child(text)
     };
@@ -155,7 +155,7 @@ fn header(context: &MenuContext, cx: &App) -> Div {
                     div()
                         .w_full()
                         .truncate()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text())
                         .child(context.person.display_name.clone()),
@@ -167,7 +167,7 @@ fn header(context: &MenuContext, cx: &App) -> Div {
                         .gap(px(4.))
                         .items_center()
                         .cursor_pointer()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_soft())
                         .hover(|link| link.text_color(theme::accent_text()))
                         .child(tr("status_menu.view_account"))

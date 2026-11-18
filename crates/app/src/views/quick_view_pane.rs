@@ -191,7 +191,7 @@ impl QuickViewPane {
             .items_center()
             .child(
                 div()
-                    .text_size(px(16.))
+                    .text_size(theme::text_heading())
                     .font_weight(FontWeight::BOLD)
                     .text_color(theme::text())
                     .child(view.title()),
@@ -199,7 +199,7 @@ impl QuickViewPane {
             .when(count > 0, |header| {
                 header.child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(count.to_string()),
                 )
@@ -263,7 +263,7 @@ impl QuickViewPane {
                             .child(
                                 div()
                                     .flex_none()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
                                     .child(row.author.clone()),
@@ -273,7 +273,7 @@ impl QuickViewPane {
                                     .flex_1()
                                     .min_w_0()
                                     .truncate()
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_muted())
                                     .child(row.place.clone()),
                             )
@@ -281,7 +281,7 @@ impl QuickViewPane {
                                 div()
                                     .flex_none()
                                     .pr(px(BUTTON_SIZE + 8.))
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_muted())
                                     .child(row.time.clone()),
                             ),
@@ -290,7 +290,7 @@ impl QuickViewPane {
                         div()
                             .line_clamp(PREVIEW_LINES)
                             .text_ellipsis()
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .line_height(relative(1.4))
                             .text_color(theme::text_soft())
                             .child(row.preview.clone()),
@@ -324,7 +324,7 @@ impl Render for QuickViewPane {
                     .flex()
                     .justify_center()
                     .text_center()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_muted())
                     .child(view.empty_text())
                     .into_any_element(),
