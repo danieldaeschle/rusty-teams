@@ -595,6 +595,37 @@ settings:
     color_scheme_detail:
       en: The colors to use for Rusty Teams
       de: Die Farben für Rusty Teams
+    accent:
+      en: Accent color
+      de: Akzentfarbe
+    accent_detail:
+      en: Used by the Rusty Teams color scheme
+      de: Gilt für das Farbschema Rusty Teams
+    accent_preset:
+      rust:
+        en: Rust
+        de: Rost
+      amber:
+        en: Amber
+        de: Bernstein
+      emerald:
+        en: Emerald
+        de: Smaragd
+      cyan:
+        en: Cyan
+        de: Cyan
+      blue:
+        en: Blue
+        de: Blau
+      violet:
+        en: Violet
+        de: Violett
+      pink:
+        en: Pink
+        de: Pink
+      red:
+        en: Red
+        de: Rot
     search:
       en: Search
       de: Suchen

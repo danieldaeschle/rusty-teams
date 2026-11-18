@@ -2,7 +2,7 @@ use gpui_kit::*;
 use store::Store;
 
 use crate::appearance::{self, AppIcon, AppearanceSettings, SystemTheme, ThemeChoice};
-use crate::theme::{self, ColorScheme};
+use crate::theme::{self, AccentPreset, ColorScheme};
 use crate::zoom;
 
 #[derive(Default)]
@@ -33,6 +33,7 @@ pub fn install(store: &Store, cx: &mut App) {
     let settings = appearance::load(store);
     let system = system_theme(cx.window_appearance());
     theme::set_active_scheme(settings.color_scheme.id);
+    theme::set_active_accent(settings.accent);
     theme::set_active_shade(settings.theme.shade(system));
     theme::set_chosen_fonts(settings.ui_font.clone(), settings.code_font.clone());
     zoom::set_factor(settings.zoom);
@@ -61,8 +62,10 @@ fn restyle(cx: &mut App) {
     let active = cx.global::<ActiveAppearance>();
     let shade = active.settings.theme.shade(active.system);
     let scheme = active.settings.color_scheme.id;
-    if theme::scheme().id != scheme || theme::shade() != shade {
+    let accent = active.settings.accent;
+    if theme::scheme().id != scheme || theme::shade() != shade || theme::active_accent() != accent {
         theme::set_active_scheme(scheme);
+        theme::set_active_accent(accent);
         theme::set_active_shade(shade);
         theme::apply(cx);
     }
@@ -105,6 +108,15 @@ pub fn set_code_font(font: Option<SharedString>, store: &Store, cx: &mut App) {
         ..current(cx)
     };
     apply_fonts(settings, store, cx);
+}
+
+pub fn set_accent(accent: AccentPreset, store: &Store, cx: &mut App) {
+    let settings = AppearanceSettings {
+        accent,
+        ..current(cx)
+    };
+    store_settings(settings, store, cx);
+    restyle(cx);
 }
 
 pub fn set_theme(choice: ThemeChoice, store: &Store, cx: &mut App) {

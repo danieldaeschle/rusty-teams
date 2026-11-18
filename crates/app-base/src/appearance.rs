@@ -1,10 +1,11 @@
 use gpui_kit::SharedString;
 use store::Store;
 
-use crate::theme::{self, ColorScheme, Shade};
+use crate::theme::{self, AccentPreset, ColorScheme, Shade};
 
 const META_KEY: &str = "appearance.settings";
 const COLOR_SCHEME_KEY: &str = "color_scheme";
+const ACCENT_KEY: &str = "accent";
 const UI_FONT_KEY: &str = "ui_font";
 const CODE_FONT_KEY: &str = "code_font";
 const APP_ICON_KEY: &str = "app_icon";
@@ -116,6 +117,7 @@ pub struct SystemTheme {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppearanceSettings {
     pub color_scheme: &'static ColorScheme,
+    pub accent: AccentPreset,
     pub ui_font: Option<SharedString>,
     pub code_font: Option<SharedString>,
     pub app_icon: AppIcon,
@@ -127,6 +129,7 @@ impl Default for AppearanceSettings {
     fn default() -> Self {
         AppearanceSettings {
             color_scheme: theme::default_scheme(),
+            accent: AccentPreset::default(),
             ui_font: None,
             code_font: None,
             app_icon: AppIcon::default(),
@@ -203,8 +206,9 @@ pub fn save(store: &Store, settings: &AppearanceSettings) {
 
 fn serialize(settings: &AppearanceSettings) -> String {
     format!(
-        "{COLOR_SCHEME_KEY}={}\n{UI_FONT_KEY}={}\n{CODE_FONT_KEY}={}\n{APP_ICON_KEY}={}\n{THEME_KEY}={}\n{ZOOM_KEY}={}",
+        "{COLOR_SCHEME_KEY}={}\n{ACCENT_KEY}={}\n{UI_FONT_KEY}={}\n{CODE_FONT_KEY}={}\n{APP_ICON_KEY}={}\n{THEME_KEY}={}\n{ZOOM_KEY}={}",
         settings.color_scheme.id,
+        settings.accent.key(),
         settings.ui_font.as_deref().unwrap_or_default(),
         settings.code_font.as_deref().unwrap_or_default(),
         settings.app_icon.key(),
@@ -224,6 +228,11 @@ fn parse(text: &str) -> AppearanceSettings {
             Some((COLOR_SCHEME_KEY, value)) => {
                 if let Some(scheme) = theme::scheme_by_id(value) {
                     settings.color_scheme = scheme;
+                }
+            }
+            Some((ACCENT_KEY, value)) => {
+                if let Some(accent) = AccentPreset::from_key(value) {
+                    settings.accent = accent;
                 }
             }
             Some((UI_FONT_KEY, value)) => settings.ui_font = font_name(value),
@@ -266,6 +275,7 @@ mod tests {
     fn round_trips_every_field() {
         let settings = AppearanceSettings {
             color_scheme: theme::SCHEMES[1],
+            accent: AccentPreset::Emerald,
             ui_font: Some("Inter".into()),
             code_font: Some("JetBrains Mono".into()),
             app_icon: AppIcon::MicrosoftTeams,

@@ -80,6 +80,7 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.appearance.first_day.title"),
             tr("settings.appearance.theme"),
             tr("settings.appearance.color_scheme"),
+            tr("settings.appearance.accent"),
             tr("settings.appearance.ui_font"),
             tr("settings.appearance.code_font"),
             tr("settings.appearance.app_icon"),
@@ -432,6 +433,7 @@ mod tests {
             SettingsSection::Appearance => &[
                 "settings.appearance.theme",
                 "settings.appearance.color_scheme",
+                "settings.appearance.accent",
                 "settings.appearance.ui_font",
                 "settings.appearance.code_font",
                 "settings.appearance.app_icon",

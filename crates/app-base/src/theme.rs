@@ -5,13 +5,16 @@ use gpui_kit::component::elevation::{self, Elevation, ElevationTokens};
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 
+mod accent;
+mod color_math;
 mod schemes;
 mod type_scale;
 
+pub use accent::AccentPreset;
 pub use schemes::{
-    ColorScheme, HIGH_CONTRAST, Palette, SCHEMES, Shade, active_palette as palette,
+    ColorScheme, HIGH_CONTRAST, Palette, SCHEMES, Shade, active_accent, active_palette as palette,
     active_scheme as scheme, active_shade as shade, default_scheme, palettes, scheme_by_id,
-    set_active_scheme, set_active_shade, set_thread_scheme, set_thread_shade,
+    set_active_accent, set_active_scheme, set_active_shade, set_thread_scheme, set_thread_shade,
 };
 
 pub use type_scale::{text_body, text_caption, text_heading, text_label, text_small, text_title};

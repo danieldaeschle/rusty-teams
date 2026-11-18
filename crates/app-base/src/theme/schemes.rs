@@ -1,6 +1,8 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
+use super::accent::AccentPreset;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Shade {
     #[default]
@@ -418,6 +420,7 @@ pub const SCHEMES: [&ColorScheme; 2] = [&RUSTY_TEAMS, &TEAMS];
 
 static ACTIVE_SCHEME: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_SHADE: AtomicU8 = AtomicU8::new(0);
+static ACTIVE_ACCENT: AtomicU8 = AtomicU8::new(0);
 
 thread_local! {
     static THREAD_SCHEME: Cell<Option<usize>> = const { Cell::new(None) };
@@ -452,8 +455,22 @@ pub fn active_shade() -> Shade {
         .unwrap_or_else(|| Shade::from_index(ACTIVE_SHADE.load(Ordering::Relaxed)))
 }
 
+pub fn active_accent() -> AccentPreset {
+    AccentPreset::from_index(ACTIVE_ACCENT.load(Ordering::Relaxed))
+}
+
+pub fn set_active_accent(accent: AccentPreset) {
+    ACTIVE_ACCENT.store(accent.index() as u8, Ordering::Relaxed);
+}
+
+/// The palette in use. Accent presets only apply to the default scheme.
 pub fn active_palette() -> &'static Palette {
-    active_scheme().palette(active_shade())
+    let scheme = active_scheme();
+    if scheme.id == default_scheme().id {
+        active_accent().palette(active_shade())
+    } else {
+        scheme.palette(active_shade())
+    }
 }
 
 pub fn set_active_scheme(id: &str) {
