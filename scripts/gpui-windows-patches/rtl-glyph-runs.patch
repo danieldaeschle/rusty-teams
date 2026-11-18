@@ -1,0 +1,49 @@
+diff -ruN a/src/direct_write.rs b/src/direct_write.rs
+--- a/src/direct_write.rs
++++ b/src/direct_write.rs
+@@ -1505,7 +1505,7 @@
+     fn DrawGlyphRun(
+         &self,
+         clientdrawingcontext: *const ::core::ffi::c_void,
+-        _baselineoriginx: f32,
++        baselineoriginx: f32,
+         _baselineoriginy: f32,
+         _measuringmode: DWRITE_MEASURING_MODE,
+         glyphrun: *const DWRITE_GLYPH_RUN,
+@@ -1590,6 +1590,8 @@
+             )?
+         };
+ 
++        let right_to_left = glyphrun.bidiLevel % 2 == 1;
++        let mut pen_x = baselineoriginx;
+         let cluster_analyzer = ClusterAnalyzer::new(cluster_map, glyph_count);
+         let mut utf16_idx = desc.textPosition as usize;
+         let mut glyph_idx = 0;
+@@ -1606,16 +1608,25 @@
+                 let is_emoji =
+                     color_font && is_color_glyph(font_face, id, &context.components.factory);
+                 let this_glyph_idx = glyph_idx + cluster_glyph_idx;
++                let advance = glyph_advances[this_glyph_idx];
++                let advance_offset = glyph_offsets[this_glyph_idx].advanceOffset;
++                // DirectWrite hands right-to-left runs over in logical order, drawn leftwards from the run's visual origin.
++                let glyph_x = if right_to_left {
++                    pen_x - advance - advance_offset
++                } else {
++                    pen_x + advance_offset
++                };
++                pen_x += if right_to_left { -advance } else { advance };
+                 glyphs.push(ShapedGlyph {
+                     id,
+                     position: point(
+-                        px(context.width + glyph_offsets[this_glyph_idx].advanceOffset),
++                        px(glyph_x),
+                         px(-glyph_offsets[this_glyph_idx].ascenderOffset),
+                     ),
+                     index: context.index_converter.utf8_ix,
+                     is_emoji,
+                 });
+-                context.width += glyph_advances[this_glyph_idx];
++                context.width += advance;
+             }
+             glyph_idx += cluster_glyph_count;
+         }
