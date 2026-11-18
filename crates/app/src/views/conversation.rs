@@ -75,6 +75,7 @@ use super::reaction_pills::{ReactionControls, ReactionPopover};
 use super::scroll_edge::edge_divider;
 use super::toolbar_placement::{TimelineBounds, record_bounds};
 use super::widgets::{icon, symbol};
+use crate::active_appearance::TextMetricsRevision;
 use crate::agents::{AgentRun, StartRequest};
 use crate::app_state::{AppEvent, AppState, Selection, selection_title};
 use crate::backend::Engine;
@@ -721,6 +722,15 @@ impl ConversationView {
                 }
             }),
         ];
+        subscriptions.push(cx.observe_global::<TextMetricsRevision>(|this, cx| {
+            this.scroller
+                .update(cx, |scroller, cx| scroller.remeasure(cx));
+            if let Some(stash) = &this.feed_stash {
+                stash
+                    .scroller
+                    .update(cx, |scroller, cx| scroller.remeasure(cx));
+            }
+        }));
         if let Some(runs) = crate::agents::runs_handle(cx) {
             subscriptions.push(cx.observe(&runs, |this, _, cx| this.sync_agent_chips(cx)));
         }

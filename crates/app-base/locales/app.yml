@@ -231,6 +231,9 @@ settings:
       en: diagnostics.log and call dumps
       de: diagnostics.log und Anruf-Dumps
   caption:
+    text:
+      en: TEXT
+      de: TEXT
     system:
       en: SYSTEM
       de: SYSTEM
@@ -592,6 +595,27 @@ settings:
     color_scheme_detail:
       en: The colors to use for Rusty Teams
       de: Die Farben für Rusty Teams
+    search:
+      en: Search
+      de: Suchen
+    ui_font:
+      en: Interface font
+      de: Schrift der Oberfläche
+    ui_font_detail:
+      en: Any font installed on this device
+      de: Jede auf diesem Gerät installierte Schrift
+    code_font:
+      en: Code font
+      de: Schrift für Code
+    code_font_detail:
+      en: Used for code blocks and inline code
+      de: Für Codeblöcke und Inline-Code
+    default_font:
+      en: Default
+      de: Standard
+    no_matching_fonts:
+      en: No matching fonts
+      de: Keine passenden Schriften
     theme:
       en: Theme
       de: Design

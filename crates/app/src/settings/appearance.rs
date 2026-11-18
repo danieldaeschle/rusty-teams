@@ -2,7 +2,10 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::rows::{Choice, ROW_INSET, caption, control_row, select_with_width, titled};
+use super::font_picker::{FontPicker, FontTarget};
+use super::rows::{
+    Choice, ROW_INSET, caption, control_row, select_with_width, text_button, titled,
+};
 use crate::active_appearance;
 use crate::active_locale;
 use crate::app_state::AppState;
@@ -42,7 +45,7 @@ fn app_icon_detail() -> String {
     }
 }
 
-pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
+pub fn render(app: &Entity<AppState>, picker: &Entity<FontPicker>, cx: &App) -> Div {
     let current = active_appearance::current(cx);
     let locale_pref = active_locale::current_preference(cx);
     let language_choices = LocalePreference::ALL
@@ -124,12 +127,61 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             tr("settings.appearance.color_scheme_detail"),
             scheme_tiles,
         ))
+        .child(caption(tr("settings.caption.text")))
+        .child(font_row(
+            FontTarget::Interface,
+            tr("settings.appearance.ui_font"),
+            tr("settings.appearance.ui_font_detail"),
+            current.ui_font.clone(),
+            picker,
+            cx,
+        ))
+        .child(font_row(
+            FontTarget::Code,
+            tr("settings.appearance.code_font"),
+            tr("settings.appearance.code_font_detail"),
+            current.code_font.clone(),
+            picker,
+            cx,
+        ))
         .child(caption(tr("settings.caption.app_icon")))
         .child(choice_group(
             tr("settings.appearance.app_icon"),
             app_icon_detail(),
             icon_tiles,
         ))
+}
+
+fn font_row(
+    target: FontTarget,
+    title: String,
+    detail: String,
+    font: Option<SharedString>,
+    picker: &Entity<FontPicker>,
+    cx: &App,
+) -> Div {
+    let id = match target {
+        FontTarget::Interface => "settings-ui-font",
+        FontTarget::Code => "settings-code-font",
+    };
+    let label = font.unwrap_or_else(|| tr("settings.appearance.default_font").into());
+    let open_list = {
+        let picker = picker.clone();
+        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+            picker.update(cx, |picker, cx| picker.toggle(target, window, cx));
+        }
+    };
+    control_row(
+        title,
+        detail,
+        v_flex()
+            .flex_none()
+            .items_end()
+            .child(text_button(id, label).on_click(open_list))
+            .when(picker.read(cx).target() == Some(target), |column| {
+                column.child(picker.clone())
+            }),
+    )
 }
 
 fn choice_group(

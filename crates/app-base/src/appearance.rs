@@ -1,9 +1,12 @@
+use gpui_kit::SharedString;
 use store::Store;
 
 use crate::theme::{self, ColorScheme, Shade};
 
 const META_KEY: &str = "appearance.settings";
 const COLOR_SCHEME_KEY: &str = "color_scheme";
+const UI_FONT_KEY: &str = "ui_font";
+const CODE_FONT_KEY: &str = "code_font";
 const APP_ICON_KEY: &str = "app_icon";
 const THEME_KEY: &str = "theme";
 const ZOOM_KEY: &str = "zoom";
@@ -110,9 +113,11 @@ pub struct SystemTheme {
     pub high_contrast: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AppearanceSettings {
     pub color_scheme: &'static ColorScheme,
+    pub ui_font: Option<SharedString>,
+    pub code_font: Option<SharedString>,
     pub app_icon: AppIcon,
     pub theme: ThemeChoice,
     pub zoom: f32,
@@ -122,6 +127,8 @@ impl Default for AppearanceSettings {
     fn default() -> Self {
         AppearanceSettings {
             color_scheme: theme::default_scheme(),
+            ui_font: None,
+            code_font: None,
             app_icon: AppIcon::default(),
             theme: ThemeChoice::default(),
             zoom: DEFAULT_ZOOM,
@@ -196,12 +203,18 @@ pub fn save(store: &Store, settings: &AppearanceSettings) {
 
 fn serialize(settings: &AppearanceSettings) -> String {
     format!(
-        "{COLOR_SCHEME_KEY}={}\n{APP_ICON_KEY}={}\n{THEME_KEY}={}\n{ZOOM_KEY}={}",
+        "{COLOR_SCHEME_KEY}={}\n{UI_FONT_KEY}={}\n{CODE_FONT_KEY}={}\n{APP_ICON_KEY}={}\n{THEME_KEY}={}\n{ZOOM_KEY}={}",
         settings.color_scheme.id,
+        settings.ui_font.as_deref().unwrap_or_default(),
+        settings.code_font.as_deref().unwrap_or_default(),
         settings.app_icon.key(),
         settings.theme.key(),
         settings.zoom
     )
+}
+
+fn font_name(value: &str) -> Option<SharedString> {
+    (!value.is_empty()).then(|| value.to_owned().into())
 }
 
 fn parse(text: &str) -> AppearanceSettings {
@@ -213,6 +226,8 @@ fn parse(text: &str) -> AppearanceSettings {
                     settings.color_scheme = scheme;
                 }
             }
+            Some((UI_FONT_KEY, value)) => settings.ui_font = font_name(value),
+            Some((CODE_FONT_KEY, value)) => settings.code_font = font_name(value),
             Some((APP_ICON_KEY, value)) => {
                 if let Some(icon) = AppIcon::from_key(value) {
                     settings.app_icon = icon;
@@ -251,6 +266,8 @@ mod tests {
     fn round_trips_every_field() {
         let settings = AppearanceSettings {
             color_scheme: theme::SCHEMES[1],
+            ui_font: Some("Inter".into()),
+            code_font: Some("JetBrains Mono".into()),
             app_icon: AppIcon::MicrosoftTeams,
             theme: ThemeChoice::FollowOperatingSystem,
             zoom: 1.25,
@@ -276,6 +293,7 @@ mod tests {
             app_icon: AppIcon::MicrosoftTeams,
             theme: ThemeChoice::Light,
             zoom: 0.9,
+            ..AppearanceSettings::default()
         };
         save(&store, &changed);
         assert_eq!(load(&store), changed);
