@@ -6,7 +6,7 @@ use super::rows::{Choice, ROW_INSET, caption, control_row, select_with_width, ti
 use crate::active_appearance;
 use crate::active_locale;
 use crate::app_state::AppState;
-use crate::appearance::{AppIcon, ThemeChoice};
+use crate::appearance::{AppIcon, ThemeChoice, TrayIconChoice};
 use crate::i18n::tr;
 use crate::theme::{self, Palette};
 use crate::views::title_bar::app_icon_image;
@@ -81,6 +81,30 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             active_appearance::set_app_icon(icon, &store, cx);
         })
     });
+    let tray_tiles = TrayIconChoice::ALL.into_iter().map(|choice| {
+        let app = app.clone();
+        let (label, preview) = match choice {
+            TrayIconChoice::SameAsApp => (
+                SharedString::from(tr("settings.appearance.tray_icon_same")),
+                icon_preview(current.app_icon),
+            ),
+            TrayIconChoice::Icon(icon) => (SharedString::from(icon.label()), icon_preview(icon)),
+            TrayIconChoice::Hidden => (
+                SharedString::from(tr("settings.appearance.tray_icon_none")),
+                preview_frame(theme::background()),
+            ),
+        };
+        tile(
+            SharedString::from(format!("settings-tray-icon-{}", choice.key())),
+            label,
+            choice == current.tray_icon,
+            preview,
+        )
+        .on_click(move |_, _, cx| {
+            let store = app.read(cx).store.clone();
+            active_appearance::set_tray_icon(choice, &store, cx);
+        })
+    });
     let theme_choices = ThemeChoice::ALL
         .into_iter()
         .map(|choice| {
@@ -130,6 +154,11 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             app_icon_detail(),
             icon_tiles,
         ))
+        .child(choice_group(
+            tr("settings.appearance.tray_icon"),
+            tr("settings.appearance.tray_icon_detail"),
+            tray_tiles,
+        ))
 }
 
 fn choice_group(
@@ -152,7 +181,13 @@ fn choice_group(
         )
 }
 
-fn tile(id: SharedString, label: &'static str, selected: bool, preview: Div) -> Stateful<Div> {
+fn tile(
+    id: SharedString,
+    label: impl Into<SharedString>,
+    selected: bool,
+    preview: Div,
+) -> Stateful<Div> {
+    let label = label.into();
     v_flex()
         .id(id)
         .w(px(TILE_WIDTH))
