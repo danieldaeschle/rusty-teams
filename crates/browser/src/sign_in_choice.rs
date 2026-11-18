@@ -66,12 +66,11 @@ impl SignInBrowser {
 /// Chromium and Firefox browsers on this machine, Chromium first.
 pub fn installed_browsers() -> Vec<InstalledBrowser> {
     let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
-    let path_variable = std::env::var_os("PATH").unwrap_or_default();
     installed_in(
         Platform::detect(),
         home.as_deref(),
-        &path_variable,
-        &|path| path.is_file(),
+        &crate::host::path_variable(),
+        &crate::host::is_file,
     )
 }
 
@@ -90,12 +89,16 @@ pub(crate) fn chosen_executable(platform: Platform, home: Option<&Path>) -> Opti
         return None;
     }
     if let SignInBrowser::Program(path) = SignInBrowser::load()
-        && path.is_file()
+        && crate::host::is_file(&path)
     {
         return Some(path);
     }
-    let path_variable = std::env::var_os("PATH").unwrap_or_default();
-    let installed = installed_in(platform, home, &path_variable, &|path| path.is_file());
+    let installed = installed_in(
+        platform,
+        home,
+        &crate::host::path_variable(),
+        &crate::host::is_file,
+    );
     automatic_in(platform, &installed).map(|browser| browser.path.clone())
 }
 
@@ -148,7 +151,7 @@ fn system_default(platform: Platform, installed: &[InstalledBrowser]) -> Option<
             })
         }
         Platform::Linux => {
-            let output = Command::new("xdg-settings")
+            let output = crate::host::command("xdg-settings")
                 .args(["get", "default-web-browser"])
                 .output()
                 .ok()?;

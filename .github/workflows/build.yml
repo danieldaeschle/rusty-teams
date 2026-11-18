@@ -73,6 +73,16 @@ jobs:
           RUSTY_TEAMS_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: packaging/linux/package.sh --skip-build --formats "appimage deb rpm"
 
+      # The Flatpak repackages a tarball built only for it; the release keeps its own tarball.
+      - name: Flatpak
+        continue-on-error: true
+        env:
+          RUSTY_TEAMS_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          sudo apt-get install --no-install-recommends -y flatpak flatpak-builder
+          DIST="$RUNNER_TEMP/flatpak" packaging/linux/package.sh --skip-build --formats tar
+          packaging/linux/flatpak-bundle.sh --no-test "$RUNNER_TEMP"/flatpak/rusty-teams-*-linux-x86_64.tar.gz
+
       # The runner is x86_64; the artifact name carries the architecture.
       - uses: actions/upload-artifact@v7
         with:
@@ -161,7 +171,7 @@ jobs:
           cp dist/teams-linux-amd64/teams "release/rusty-teams-$TAG-linux-amd64"
           cp dist/teams-windows-amd64/teams.exe "release/rusty-teams-$TAG-windows-amd64.exe"
           cp dist/teams-macos/teams-macos.zip "release/rusty-teams-$TAG-macos-universal.zip"
-          # deb, rpm, AppImage and its .zsync, named rusty-teams-<version>-linux-x86_64.*;
+          # deb, rpm, Flatpak, AppImage and its .zsync, named rusty-teams-<version>-linux-x86_64.*;
           # the AppImage's update information looks for that .zsync name.
           cp dist/teams-linux-packages/* release/
 

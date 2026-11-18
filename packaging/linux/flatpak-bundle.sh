@@ -3,9 +3,8 @@
 #
 #   $DIST/rusty-teams-<version>-linux-<arch>.flatpak
 #
-# BROKEN: the app cannot start the host's browser from inside the sandbox, so it cannot sign
-# in (details in packaging/linux/flatpak/io.github.danieldaeschle.RustyTeams.yml). Not part of
-# the release; kept to work on the sandbox support.
+# The app finds, starts and stops the host's browser through `flatpak-spawn --host`
+# (crates/browser/src/host.rs). The release attaches the bundle next to the other packages.
 #
 # Usage: packaging/linux/flatpak-bundle.sh [--no-test] [TARBALL]
 #
@@ -46,7 +45,6 @@ for tool in flatpak flatpak-builder; do
   command -v "$tool" >/dev/null || { echo "error: $tool not found (apt install flatpak flatpak-builder)" >&2; exit 1; }
 done
 
-warn "the Flatpak is known broken: the app cannot start the host's browser from the sandbox"
 echo "==> Rusty Teams $VERSION Flatpak bundle for $ARCH from $(basename "$TARBALL")"
 
 WORK="$CARGO_TARGET_DIR/flatpak-bundle"

@@ -156,7 +156,7 @@ fn app_fontconfig_keys(lookup: impl Fn(&str) -> Option<std::ffi::OsString>) -> V
 fn chrome_major(platform: Platform, executable: &Path) -> u32 {
     let detected = match platform {
         Platform::Linux | Platform::Macos => {
-            let mut command = Command::new(executable);
+            let mut command = crate::host::command(executable);
             strip_app_fontconfig(&mut command);
             command.arg("--version").output().ok().and_then(|output| {
                 major_from_version_output(&String::from_utf8_lossy(&output.stdout))
@@ -214,7 +214,7 @@ impl Launcher for SystemLauncher {
                 })
             }
         };
-        let mut command = Command::new(&executable);
+        let mut command = crate::host::command(&executable);
         strip_app_fontconfig(&mut command);
         command
             .args(arguments)

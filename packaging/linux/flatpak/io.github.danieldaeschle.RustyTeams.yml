@@ -1,16 +1,14 @@
-# Flatpak manifest for Rusty Teams. BROKEN, see below: kept so the packaging matches the
-# other Craft apps and so the sandbox work has a starting point. Not attached to releases.
+# Flatpak manifest for Rusty Teams, attached to releases (packaging/linux/flatpak-bundle.sh).
 #
 # It repackages the prebuilt binary from package.sh's tarball (packaging/linux/flatpak-bundle.sh):
 # libwebrtc is downloaded during the cargo build, which flatpak-builder's offline build does not
 # allow, so there is no build-from-source manifest.
 #
-# Why it is broken: the Teams session runs in the user's own Chromium- or Firefox-based browser,
-# which the app finds on the host and starts with a debug port (crates/browser, ADR 0003). Inside
-# the sandbox the host's browsers are not visible and cannot be started without
-# `flatpak-spawn --host` (needs --talk-name=org.freedesktop.Flatpak, granted below, and app code
-# that uses it). Until then the app starts but cannot sign in. `--endpoint` to a browser started
-# by hand on the host (`chromium --remote-debugging-port=9222`) works, since the network is shared.
+# The Teams session runs in the user's own Chromium- or Firefox-based browser on the host
+# (crates/browser, ADR 0003). The app finds, starts and stops it through `flatpak-spawn --host`
+# (crates/browser/src/host.rs, needs --talk-name=org.freedesktop.Flatpak below); the debug port
+# is reachable since the network is shared, and the profile under ~/.var/app is the same path
+# on the host.
 #
 # The app id must be reverse-DNS, so the desktop file and icon are renamed to it; the window's
 # Wayland app id stays rusty-teams (StartupWMClass in the desktop file pairs them on X11).
@@ -36,8 +34,10 @@ finish-args:
   # Desktop toasts (ADR 0015) and the StatusNotifierItem tray icon.
   - --talk-name=org.freedesktop.Notifications
   - --talk-name=org.kde.StatusNotifierWatcher
-  # Starting the host's browser would go through flatpak-spawn --host (not implemented yet).
+  # Finding, starting and stopping the host's browser through flatpak-spawn --host.
   - --talk-name=org.freedesktop.Flatpak
+  # CalDAV app passwords in the desktop keyring (ADR 0019).
+  - --talk-name=org.freedesktop.secrets
   # Downloaded files and attachments.
   - --filesystem=xdg-download
 build-options:

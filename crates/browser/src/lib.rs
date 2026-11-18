@@ -3,6 +3,7 @@ mod bidi_transport;
 mod browser;
 mod config;
 mod error;
+mod host;
 mod http;
 mod launch;
 mod process;

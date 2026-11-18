@@ -150,13 +150,14 @@ impl Config {
                 to_local: &to_local,
             },
         )?;
-        let path_variable = std::env::var_os("PATH").unwrap_or_default();
+        let path_variable = crate::host::path_variable();
         let chosen = crate::sign_in_choice::chosen_executable(platform, home_dir.as_deref());
-        Ok(
-            config.select_browser(chosen, home_dir.as_deref(), &path_variable, &|path| {
-                path.is_file()
-            }),
-        )
+        Ok(config.select_browser(
+            chosen,
+            home_dir.as_deref(),
+            &path_variable,
+            &crate::host::is_file,
+        ))
     }
 
     /// Uses `chosen` as the sign-in browser, else the first Chromium browser, else the first
@@ -281,8 +282,11 @@ impl Config {
     }
 
     pub fn executable(&self) -> Result<PathBuf, BrowserError> {
-        let path_variable = std::env::var_os("PATH").unwrap_or_default();
-        find_browser(&self.search, &path_variable, &|path| path.is_file())
+        find_browser(
+            &self.search,
+            &crate::host::path_variable(),
+            &crate::host::is_file,
+        )
     }
 }
 
