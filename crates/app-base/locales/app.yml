@@ -613,6 +613,15 @@ settings:
     app_icon_detail:
       en: Shown in the title bar, taskbar and tray
       de: In Titelleiste, Taskleiste und Infobereich
+    tray_icon:
+      en: Menu bar and tray icon
+      de: Symbol in Menüleiste und Infobereich
+    tray_icon_detail:
+      en: Shown in the macOS menu bar or the system tray
+      de: In der macOS-Menüleiste oder im Infobereich der Taskleiste
+    tray_icon_same:
+      en: Same as app icon
+      de: Wie App-Symbol
     language:
       title:
         en: Language

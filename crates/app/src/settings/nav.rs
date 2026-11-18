@@ -80,6 +80,7 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.appearance.theme"),
             tr("settings.appearance.color_scheme"),
             tr("settings.appearance.app_icon"),
+            tr("settings.appearance.tray_icon"),
         ],
         SettingsSection::Chats => vec![
             tr("settings.chats.density"),
@@ -429,6 +430,7 @@ mod tests {
                 "settings.appearance.theme",
                 "settings.appearance.color_scheme",
                 "settings.appearance.app_icon",
+                "settings.appearance.tray_icon",
             ],
             SettingsSection::Chats => &[
                 "settings.chats.density",

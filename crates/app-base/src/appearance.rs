@@ -5,6 +5,8 @@ use crate::theme::{self, ColorScheme, Shade};
 const META_KEY: &str = "appearance.settings";
 const COLOR_SCHEME_KEY: &str = "color_scheme";
 const APP_ICON_KEY: &str = "app_icon";
+const TRAY_ICON_KEY: &str = "tray_icon";
+const TRAY_ICON_SAME_AS_APP: &str = "same-as-app";
 const THEME_KEY: &str = "theme";
 const ZOOM_KEY: &str = "zoom";
 pub const ZOOM_STEPS: [f32; 14] = [
@@ -114,8 +116,16 @@ pub struct SystemTheme {
 pub struct AppearanceSettings {
     pub color_scheme: &'static ColorScheme,
     pub app_icon: AppIcon,
+    /// Menu bar or system tray icon. `None` follows `app_icon`.
+    pub tray_icon: Option<AppIcon>,
     pub theme: ThemeChoice,
     pub zoom: f32,
+}
+
+impl AppearanceSettings {
+    pub fn shown_tray_icon(&self) -> AppIcon {
+        self.tray_icon.unwrap_or(self.app_icon)
+    }
 }
 
 impl Default for AppearanceSettings {
@@ -123,6 +133,7 @@ impl Default for AppearanceSettings {
         AppearanceSettings {
             color_scheme: theme::default_scheme(),
             app_icon: AppIcon::default(),
+            tray_icon: None,
             theme: ThemeChoice::default(),
             zoom: DEFAULT_ZOOM,
         }
@@ -196,9 +207,12 @@ pub fn save(store: &Store, settings: &AppearanceSettings) {
 
 fn serialize(settings: &AppearanceSettings) -> String {
     format!(
-        "{COLOR_SCHEME_KEY}={}\n{APP_ICON_KEY}={}\n{THEME_KEY}={}\n{ZOOM_KEY}={}",
+        "{COLOR_SCHEME_KEY}={}\n{APP_ICON_KEY}={}\n{TRAY_ICON_KEY}={}\n{THEME_KEY}={}\n{ZOOM_KEY}={}",
         settings.color_scheme.id,
         settings.app_icon.key(),
+        settings
+            .tray_icon
+            .map_or(TRAY_ICON_SAME_AS_APP, AppIcon::key),
         settings.theme.key(),
         settings.zoom
     )
@@ -218,6 +232,7 @@ fn parse(text: &str) -> AppearanceSettings {
                     settings.app_icon = icon;
                 }
             }
+            Some((TRAY_ICON_KEY, value)) => settings.tray_icon = AppIcon::from_key(value),
             Some((THEME_KEY, value)) => {
                 if let Some(choice) = ThemeChoice::from_key(value) {
                     settings.theme = choice;
@@ -252,6 +267,7 @@ mod tests {
         let settings = AppearanceSettings {
             color_scheme: theme::SCHEMES[1],
             app_icon: AppIcon::MicrosoftTeams,
+            tray_icon: Some(AppIcon::RustyTeams),
             theme: ThemeChoice::FollowOperatingSystem,
             zoom: 1.25,
         };
@@ -274,6 +290,7 @@ mod tests {
         let changed = AppearanceSettings {
             color_scheme: theme::scheme_by_id("teams").unwrap(),
             app_icon: AppIcon::MicrosoftTeams,
+            tray_icon: None,
             theme: ThemeChoice::Light,
             zoom: 0.9,
         };
@@ -287,6 +304,16 @@ mod tests {
         assert_eq!(settings.theme, ThemeChoice::Dark);
         assert_eq!(settings.zoom, DEFAULT_ZOOM);
         assert_eq!(parse("zoom=1.3").zoom, 1.25);
+    }
+
+    #[test]
+    fn the_tray_icon_follows_the_app_icon_until_one_is_chosen() {
+        let following = parse("app_icon=microsoft-teams");
+        assert_eq!(following.tray_icon, None);
+        assert_eq!(following.shown_tray_icon(), AppIcon::MicrosoftTeams);
+        let chosen = parse("app_icon=microsoft-teams\ntray_icon=rusty-teams");
+        assert_eq!(chosen.shown_tray_icon(), AppIcon::RustyTeams);
+        assert_eq!(parse(&serialize(&following)), following);
     }
 
     #[test]

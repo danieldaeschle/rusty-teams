@@ -81,6 +81,29 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             active_appearance::set_app_icon(icon, &store, cx);
         })
     });
+    let tray_tiles = std::iter::once(None)
+        .chain(AppIcon::ALL.map(Some))
+        .map(|choice| {
+            let app = app.clone();
+            let (key, label, shown) = match choice {
+                Some(icon) => (icon.key(), SharedString::from(icon.label()), icon),
+                None => (
+                    "same-as-app",
+                    SharedString::from(tr("settings.appearance.tray_icon_same")),
+                    current.app_icon,
+                ),
+            };
+            tile(
+                SharedString::from(format!("settings-tray-icon-{key}")),
+                label,
+                choice == current.tray_icon,
+                icon_preview(shown),
+            )
+            .on_click(move |_, _, cx| {
+                let store = app.read(cx).store.clone();
+                active_appearance::set_tray_icon(choice, &store, cx);
+            })
+        });
     let theme_choices = ThemeChoice::ALL
         .into_iter()
         .map(|choice| {
@@ -130,6 +153,11 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             app_icon_detail(),
             icon_tiles,
         ))
+        .child(choice_group(
+            tr("settings.appearance.tray_icon"),
+            tr("settings.appearance.tray_icon_detail"),
+            tray_tiles,
+        ))
 }
 
 fn choice_group(
@@ -152,7 +180,13 @@ fn choice_group(
         )
 }
 
-fn tile(id: SharedString, label: &'static str, selected: bool, preview: Div) -> Stateful<Div> {
+fn tile(
+    id: SharedString,
+    label: impl Into<SharedString>,
+    selected: bool,
+    preview: Div,
+) -> Stateful<Div> {
+    let label = label.into();
     v_flex()
         .id(id)
         .w(px(TILE_WIDTH))
