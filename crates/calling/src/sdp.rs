@@ -805,6 +805,47 @@ fn with_opus_send_quality(fmtp: &str) -> String {
     with_fmtp_parameters(fmtp, &OPUS_SEND_QUALITY)
 }
 
+/// libwebrtc starts its bandwidth estimate at 300 kbit/s, which opens a 720p camera at 320x180.
+const H264_SEND_START: [(&str, &str); 1] = [("x-google-start-bitrate", "1500")];
+const H264_PROFILE_LEVEL_ID: &str = "profile-level-id=";
+const H264_LEVEL_4_0: u8 = 0x28;
+const FULL_HD_MAX_FS: u32 = 8160;
+const FULL_HD_MAX_MBPS: u32 = 244_800;
+
+/// Only touches H264 lines, the sole codec here that carries a `profile-level-id`.
+fn with_h264_send_quality(fmtp: &str) -> String {
+    if !fmtp.contains(H264_PROFILE_LEVEL_ID) {
+        return fmtp.to_owned();
+    }
+    with_fmtp_parameters(&with_full_hd_level(fmtp), &H264_SEND_START)
+}
+
+/// Teams answers level 3.1 even when its `max-fs` and `max-mbps` allow 1080p, and the encoder
+/// stalls at 1080p on that level. The explicit limits are what the peer can really receive.
+fn with_full_hd_level(fmtp: &str) -> String {
+    let limit = |name: &str| {
+        fmtp.split([' ', ';'])
+            .find_map(|parameter| parameter.strip_prefix(name)?.strip_prefix('='))
+            .and_then(|value| value.parse::<u32>().ok())
+    };
+    let allows_full_hd = limit("max-fs").is_some_and(|max_fs| max_fs >= FULL_HD_MAX_FS)
+        && limit("max-mbps").is_some_and(|max_mbps| max_mbps >= FULL_HD_MAX_MBPS);
+    let level = fmtp
+        .find(H264_PROFILE_LEVEL_ID)
+        .map(|start| start + H264_PROFILE_LEVEL_ID.len() + 4)
+        .map(|start| start..start + 2)
+        .filter(|range| {
+            fmtp.get(range.clone())
+                .and_then(|level| u8::from_str_radix(level, 16).ok())
+                .is_some_and(|level| level < H264_LEVEL_4_0)
+        });
+    let mut raised = fmtp.to_owned();
+    if let Some(range) = level.filter(|_| allows_full_hd) {
+        raised.replace_range(range, &format!("{H264_LEVEL_4_0:02x}"));
+    }
+    raised
+}
+
 fn with_fmtp_parameters(fmtp: &str, parameters: &[(&str, &str)]) -> String {
     let mut value = fmtp.to_owned();
     for &(name, setting) in parameters {
@@ -900,7 +941,7 @@ fn browser_rtp_line(
             if is_opus {
                 with_opus_send_quality(&cleaned)
             } else {
-                cleaned
+                with_h264_send_quality(&cleaned)
             },
         ));
     }
@@ -1348,6 +1389,7 @@ fn browser_rtp_from_teams(
             "rtcp" => attributes.push(Attribute::new("rtcp", BROWSER_RTCP)),
             "rtpmap" => attributes.push(Attribute::new("rtpmap", browser_rtpmap(value))),
             "extmap" => attributes.push(Attribute::new("extmap", browser_extmap(value))),
+            "fmtp" => attributes.push(Attribute::new("fmtp", with_h264_send_quality(value))),
             "rtcp-fb" => match value.strip_prefix("* ") {
                 Some(kind) => expanded_feedback.extend(
                     source
@@ -1413,6 +1455,21 @@ mod tests {
             next += 1;
             next
         }
+    }
+
+    #[test]
+    fn h264_sends_start_high_and_use_the_level_the_peer_limits_allow() {
+        let full_hd = "98 packetization-mode=1;profile-level-id=42e01f;max-fs=8160;max-mbps=244800";
+        assert_eq!(
+            with_h264_send_quality(full_hd),
+            "98 packetization-mode=1;profile-level-id=42e028;max-fs=8160;max-mbps=244800;x-google-start-bitrate=1500"
+        );
+        let hd = "98 profile-level-id=42e01f;max-fs=3600;max-mbps=108000";
+        assert_eq!(
+            with_h264_send_quality(hd),
+            "98 profile-level-id=42e01f;max-fs=3600;max-mbps=108000;x-google-start-bitrate=1500"
+        );
+        assert_eq!(with_h264_send_quality("99 apt=98"), "99 apt=98");
     }
 
     #[test]
