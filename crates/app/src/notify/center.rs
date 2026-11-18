@@ -126,7 +126,7 @@ pub struct NotificationCenter {
     desktop_avatar_cache: HashMap<String, (u64, NotificationImage)>,
     last_tray_presence: Option<TrayPresence>,
     app_icon: AppIcon,
-    tray_icon: AppIcon,
+    tray_icon: Option<AppIcon>,
     shown_badge: Option<Badge>,
     shown_mention_dot: bool,
     animations: bool,
@@ -156,7 +156,7 @@ impl NotificationCenter {
         let tray = if app.read(cx).mode.demo {
             None
         } else {
-            Tray::new(initial_presence.clone(), tray_icon.png())
+            tray_icon.and_then(|icon| Tray::new(initial_presence.clone(), icon.png()))
         };
         let last_tray_presence = tray.as_ref().map(|_| initial_presence);
         platform::set_window_icon(window, app_icon.png());
@@ -1588,10 +1588,7 @@ impl NotificationCenter {
         let tray_icon = appearance.shown_tray_icon();
         if tray_icon != self.tray_icon {
             self.tray_icon = tray_icon;
-            let mention = !self.unread_mentions.is_empty();
-            if let Some(tray) = &mut self.tray {
-                tray.set_app_icon(tray_icon.png(), mention);
-            }
+            self.show_tray_icon(tray_icon, cx);
         }
         let app_icon = appearance.app_icon;
         if app_icon != self.app_icon {
@@ -1599,6 +1596,24 @@ impl NotificationCenter {
             let _ = self.main_window.update(cx, |_, window, _| {
                 platform::set_window_icon(window, app_icon.png())
             });
+        }
+    }
+
+    /// Removes the tray for `None` and creates it again when an icon comes back.
+    fn show_tray_icon(&mut self, icon: Option<AppIcon>, cx: &mut Context<Self>) {
+        let Some(icon) = icon else {
+            self.tray = None;
+            self.last_tray_presence = None;
+            return;
+        };
+        let mention = !self.unread_mentions.is_empty();
+        if let Some(tray) = &mut self.tray {
+            tray.set_app_icon(icon.png(), mention);
+        } else if !self.demo_mode {
+            let presence = tray_presence_from(self.app.read(cx), mention);
+            self.tray = Tray::new(presence, icon.png());
+            self.last_tray_presence = None;
+            self.sync_tray(cx);
         }
     }
 

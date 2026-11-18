@@ -6,7 +6,7 @@ use super::rows::{Choice, ROW_INSET, caption, control_row, select_with_width, ti
 use crate::active_appearance;
 use crate::active_locale;
 use crate::app_state::AppState;
-use crate::appearance::{AppIcon, ThemeChoice};
+use crate::appearance::{AppIcon, ThemeChoice, TrayIconChoice};
 use crate::i18n::tr;
 use crate::theme::{self, Palette};
 use crate::views::title_bar::app_icon_image;
@@ -81,29 +81,30 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             active_appearance::set_app_icon(icon, &store, cx);
         })
     });
-    let tray_tiles = std::iter::once(None)
-        .chain(AppIcon::ALL.map(Some))
-        .map(|choice| {
-            let app = app.clone();
-            let (key, label, shown) = match choice {
-                Some(icon) => (icon.key(), SharedString::from(icon.label()), icon),
-                None => (
-                    "same-as-app",
-                    SharedString::from(tr("settings.appearance.tray_icon_same")),
-                    current.app_icon,
-                ),
-            };
-            tile(
-                SharedString::from(format!("settings-tray-icon-{key}")),
-                label,
-                choice == current.tray_icon,
-                icon_preview(shown),
-            )
-            .on_click(move |_, _, cx| {
-                let store = app.read(cx).store.clone();
-                active_appearance::set_tray_icon(choice, &store, cx);
-            })
-        });
+    let tray_tiles = TrayIconChoice::ALL.into_iter().map(|choice| {
+        let app = app.clone();
+        let (label, preview) = match choice {
+            TrayIconChoice::SameAsApp => (
+                SharedString::from(tr("settings.appearance.tray_icon_same")),
+                icon_preview(current.app_icon),
+            ),
+            TrayIconChoice::Icon(icon) => (SharedString::from(icon.label()), icon_preview(icon)),
+            TrayIconChoice::Hidden => (
+                SharedString::from(tr("settings.appearance.tray_icon_none")),
+                preview_frame(theme::background()),
+            ),
+        };
+        tile(
+            SharedString::from(format!("settings-tray-icon-{}", choice.key())),
+            label,
+            choice == current.tray_icon,
+            preview,
+        )
+        .on_click(move |_, _, cx| {
+            let store = app.read(cx).store.clone();
+            active_appearance::set_tray_icon(choice, &store, cx);
+        })
+    });
     let theme_choices = ThemeChoice::ALL
         .into_iter()
         .map(|choice| {

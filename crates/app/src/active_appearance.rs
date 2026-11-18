@@ -1,7 +1,9 @@
 use gpui_kit::*;
 use store::Store;
 
-use crate::appearance::{self, AppIcon, AppearanceSettings, SystemTheme, ThemeChoice};
+use crate::appearance::{
+    self, AppIcon, AppearanceSettings, SystemTheme, ThemeChoice, TrayIconChoice,
+};
 use crate::theme::{self, ColorScheme};
 use crate::zoom;
 
@@ -99,10 +101,9 @@ pub fn set_app_icon(icon: AppIcon, store: &Store, cx: &mut App) {
     cx.refresh_windows();
 }
 
-/// `None` makes the tray follow the app icon.
-pub fn set_tray_icon(icon: Option<AppIcon>, store: &Store, cx: &mut App) {
+pub fn set_tray_icon(choice: TrayIconChoice, store: &Store, cx: &mut App) {
     let settings = AppearanceSettings {
-        tray_icon: icon,
+        tray_icon: choice,
         ..current(cx)
     };
     store_settings(settings, store, cx);
