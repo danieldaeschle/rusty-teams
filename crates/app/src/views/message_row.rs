@@ -322,7 +322,7 @@ fn bubble(
     };
     let meta_inline = has_text(row) && padded_blocks.is_some();
     if let Some(jumbo) = jumbo {
-        content = content.child(jumbo_row(&row.key, jumbo, own));
+        content = content.child(jumbo_row(&row.key, jumbo, own, cx));
     } else if has_text(row) {
         content = content.children(message_body(
             padded_blocks.as_deref().unwrap_or(&row.blocks),

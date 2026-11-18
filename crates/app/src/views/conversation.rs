@@ -3815,6 +3815,7 @@ impl ConversationView {
         })) = &result
         {
             self.keep_sent_previews(key, message_id);
+            crate::views::jumbo_emoji::hand_over_sent(key, message_id, cx);
         }
         let failure = match result {
             Ok(Ok(_)) => None,
