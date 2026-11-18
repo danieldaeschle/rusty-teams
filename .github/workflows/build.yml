@@ -79,6 +79,8 @@ jobs:
         env:
           RUSTY_TEAMS_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
+          # 22.04's flatpak-builder 1.2 still calls appstream-compose, which the 26.08 SDK dropped.
+          sudo add-apt-repository -y ppa:flatpak/stable
           sudo apt-get install --no-install-recommends -y flatpak flatpak-builder
           DIST="$RUNNER_TEMP/flatpak" packaging/linux/package.sh --skip-build --formats tar
           packaging/linux/flatpak-bundle.sh --no-test "$RUNNER_TEMP"/flatpak/rusty-teams-*-linux-x86_64.tar.gz
