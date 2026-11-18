@@ -816,7 +816,7 @@ fn parse_text_block(value: &Value) -> Option<CardElement> {
         string_field(value, "style").is_some_and(|style| style.eq_ignore_ascii_case("heading"));
     let size = parse_text_size(string_field(value, "size"));
     Some(CardElement::Text(CardText {
-        spans: html_to_spans(&card_markdown_to_html(&text)),
+        spans: card_text_spans(value, &text),
         size: match size {
             TextSize::Default if heading => TextSize::Large,
             other => other,
@@ -1001,6 +1001,18 @@ fn parse_container(value: &Value) -> Option<CardElement> {
     })
 }
 
+fn card_text_spans(value: &Value, text: &str) -> Vec<Span> {
+    if value
+        .get(crate::legacy_card::HTML_TEXT)
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        html_to_spans(text)
+    } else {
+        html_to_spans(&card_markdown_to_html(text))
+    }
+}
+
 fn parse_fact_set(value: &Value) -> Option<CardElement> {
     let facts: Vec<CardFact> = value
         .get("facts")?
@@ -1011,7 +1023,7 @@ fn parse_fact_set(value: &Value) -> Option<CardElement> {
             let text = string_field(fact, "value").unwrap_or_default();
             Some(CardFact {
                 title: format_card_dates(title),
-                value: html_to_spans(&card_markdown_to_html(&format_card_dates(text))),
+                value: card_text_spans(fact, &format_card_dates(text)),
             })
         })
         .collect();

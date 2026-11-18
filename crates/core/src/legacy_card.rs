@@ -2,7 +2,17 @@
 //! webhooks, legacy workflows) and hero or thumbnail cards. Teams draws them with title,
 //! sections, facts and buttons; they are rewritten into an Adaptive Card here.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
 use serde_json::{Value, json};
+
+/// Set on a converted `TextBlock` or fact whose text is HTML, which connector cards allow
+/// besides markdown. The card parser then reads it as HTML instead of escaping the tags.
+pub(crate) const HTML_TEXT: &str = "x-legacyHtml";
+
+static HTML_TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"</?[a-zA-Z][a-zA-Z0-9]*(\s[^<>]*)?/?>").unwrap());
 
 const OPEN_URI: &str = "OpenUri";
 const VIEW_ACTION: &str = "ViewAction";
@@ -69,7 +79,29 @@ pub(crate) fn as_adaptive_card(root: &Value) -> Option<Value> {
     if body.is_empty() && actions.is_empty() {
         return None;
     }
-    Some(json!({"type": "AdaptiveCard", "version": "1.4", "body": body, "actions": actions}))
+    let mut card =
+        json!({"type": "AdaptiveCard", "version": "1.4", "body": body, "actions": actions});
+    mark_html_text(&mut card);
+    Some(card)
+}
+
+fn mark_html_text(value: &mut Value) {
+    match value {
+        Value::Array(items) => items.iter_mut().for_each(mark_html_text),
+        Value::Object(object) => {
+            let html_in = |key: &str| {
+                object
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| HTML_TAG.is_match(text))
+            };
+            if html_in("text") || html_in("value") {
+                object.insert(HTML_TEXT.to_owned(), Value::Bool(true));
+            }
+            object.values_mut().for_each(mark_html_text);
+        }
+        _ => {}
+    }
 }
 
 fn section_items(section: &Value) -> Vec<Value> {
@@ -212,6 +244,17 @@ mod tests {
                 .contains("Release 1.2")
         );
         assert_eq!(card.actions.len(), 1);
+    }
+
+    #[test]
+    fn html_in_connector_text_and_facts_is_read_as_html() {
+        let html_card = r#"{"@type": "MessageCard", "text": "Deploy <b>done</b><br>see <a href=\"https://example.com/run\">run</a>", "sections": [{"facts": [{"name": "Status", "value": "<i>green</i>"}]}]}"#;
+        let text = AdaptiveCard::parse(html_card)
+            .expect("connector card is shown")
+            .plain_text()
+            .unwrap_or_default();
+        assert!(text.contains("done") && text.contains("green"));
+        assert!(!text.contains('<'), "tags leaked: {text}");
     }
 
     #[test]
