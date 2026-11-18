@@ -15,7 +15,10 @@ const EMOTICON_GAP: f32 = 4.;
 /// When each big emoji started its one play. Kept for the app's lifetime, so rows that
 /// are laid out off screen or rebuilt keep their start and a reopened chat does not replay.
 #[derive(Default)]
-struct PlayedEmoticons(HashMap<ElementId, Instant>);
+struct PlayedEmoticons(
+    HashMap<ElementId, Instant>,
+    std::collections::HashSet<ElementId>,
+);
 
 impl Global for PlayedEmoticons {}
 
@@ -60,9 +63,22 @@ impl RenderOnce for JumboEmoticon {
             None => return div().size(px(EMOTICON_SIZE)).into_any_element(),
         };
         let now = Instant::now();
-        let started = play_start(&self.id, window.is_window_active(), now, cx);
+        let active = window.is_window_active();
+        let started = play_start(&self.id, active, now, cx);
         let playing =
             started.is_some_and(|started| now.duration_since(started) < resolved.loop_duration());
+        if cx
+            .default_global::<PlayedEmoticons>()
+            .1
+            .insert(self.id.clone())
+        {
+            log::info!(
+                "jumbo diag: first render {} active={active} age_ms={:?} loop_ms={} playing={playing}",
+                self.id,
+                started.map(|started| now.duration_since(started).as_millis()),
+                resolved.loop_duration().as_millis()
+            );
+        }
         let image = if playing {
             images.animated.clone()
         } else {
