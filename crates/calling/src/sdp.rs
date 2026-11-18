@@ -530,7 +530,10 @@ fn signal_rtp_line(
                     .get(payload)
                     .is_some_and(|encoding| encoding.to_ascii_lowercase().starts_with("opus/"));
                 let cleaned = if video {
-                    value.replace(";sps-pps-idr-in-keyframe=1", "")
+                    without_fmtp_parameter(
+                        &value.replace(";sps-pps-idr-in-keyframe=1", ""),
+                        H264_SEND_START[0].0,
+                    )
                 } else if is_opus {
                     with_fmtp_parameters(value, &OPUS_RECEIVE_FULLBAND)
                 } else {
@@ -844,6 +847,17 @@ fn with_full_hd_level(fmtp: &str) -> String {
         raised.replace_range(range, &format!("{H264_LEVEL_4_0:02x}"));
     }
     raised
+}
+
+fn without_fmtp_parameter(fmtp: &str, name: &str) -> String {
+    let Some((payload, parameters)) = fmtp.split_once(' ') else {
+        return fmtp.to_owned();
+    };
+    let kept: Vec<&str> = parameters
+        .split(';')
+        .filter(|parameter| parameter.split('=').next() != Some(name))
+        .collect();
+    format!("{payload} {}", kept.join(";"))
 }
 
 fn with_fmtp_parameters(fmtp: &str, parameters: &[(&str, &str)]) -> String {
@@ -1470,6 +1484,13 @@ mod tests {
             "98 profile-level-id=42e01f;max-fs=3600;max-mbps=108000;x-google-start-bitrate=1500"
         );
         assert_eq!(with_h264_send_quality("99 apt=98"), "99 apt=98");
+        assert_eq!(
+            without_fmtp_parameter(
+                "98 profile-level-id=42e01f;x-google-start-bitrate=1500",
+                "x-google-start-bitrate"
+            ),
+            "98 profile-level-id=42e01f"
+        );
     }
 
     #[test]
