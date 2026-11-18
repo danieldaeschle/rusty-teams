@@ -464,6 +464,12 @@ settings:
     open_in_background:
       en: Open application in background
       de: Anwendung im Hintergrund starten
+    show_in_tray:
+      en: Show icon in the tray
+      de: Symbol im Infobereich anzeigen
+    show_in_tray_detail:
+      en: In the macOS menu bar or the system tray. Without it, closing the window quits the app
+      de: In der macOS-Menüleiste oder im Infobereich der Taskleiste. Ohne Symbol beendet das Schliessen des Fensters die App
     close_to_tray:
       en: On close, keep the application running
       de: Beim Schliessen Anwendung weiterlaufen lassen
@@ -613,18 +619,6 @@ settings:
     app_icon_detail:
       en: Shown in the title bar, taskbar and tray
       de: In Titelleiste, Taskleiste und Infobereich
-    tray_icon:
-      en: Menu bar and tray icon
-      de: Symbol in Menüleiste und Infobereich
-    tray_icon_detail:
-      en: Shown in the macOS menu bar or the system tray. With None, closing the window quits the app
-      de: In der macOS-Menüleiste oder im Infobereich der Taskleiste. Mit Keines beendet das Schliessen des Fensters die App
-    tray_icon_same:
-      en: Same as app icon
-      de: Wie App-Symbol
-    tray_icon_none:
-      en: None
-      de: Keines
     language:
       title:
         en: Language

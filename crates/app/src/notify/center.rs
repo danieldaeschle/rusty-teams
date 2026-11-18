@@ -43,7 +43,7 @@ use crate::activity::ActivityCenter;
 use crate::agent_api::{self, pending::PendingProposal};
 use crate::agents::{AgentRun, AgentRunsEvent, RunState};
 use crate::app_state::{AppEvent, AppState, selection_for};
-use crate::appearance::{AppIcon, AppearanceSettings};
+use crate::appearance::AppIcon;
 use crate::autostart::{self, StartupSettings};
 use crate::call::DemoScene;
 use crate::data::{self, Directory, PresenceKind};
@@ -126,7 +126,6 @@ pub struct NotificationCenter {
     desktop_avatar_cache: HashMap<String, (u64, NotificationImage)>,
     last_tray_presence: Option<TrayPresence>,
     app_icon: AppIcon,
-    tray_icon: Option<AppIcon>,
     shown_badge: Option<Badge>,
     shown_mention_dot: bool,
     animations: bool,
@@ -149,19 +148,17 @@ impl NotificationCenter {
     ) -> Self {
         let mut settings = settings::load(&app.read(cx).store);
         settings.account = app.read(cx).account_chat_settings().notifications;
-        let appearance = active_appearance::current(cx);
-        let app_icon = appearance.app_icon;
-        let tray_icon = appearance.shown_tray_icon();
+        let app_icon = active_appearance::current(cx).app_icon;
         let initial_presence = tray_presence_from(&app.read(cx), false);
-        let tray = if app.read(cx).mode.demo {
+        let tray = if app.read(cx).mode.demo || !settings.show_in_tray {
             None
         } else {
-            tray_icon.and_then(|icon| Tray::new(initial_presence.clone(), icon.png()))
+            Tray::new(initial_presence.clone(), app_icon.png())
         };
         let last_tray_presence = tray.as_ref().map(|_| initial_presence);
         platform::set_window_icon(window, app_icon.png());
         let appearance_observation = cx.observe_global::<ActiveAppearance>(|this, cx| {
-            this.apply_icons(active_appearance::current(cx), cx)
+            this.apply_app_icon(active_appearance::current(cx).app_icon, cx)
         });
         let locale_observation = cx.observe_global::<ActiveLocale>(|this, cx| {
             // Locale changes the presence title; force a tray sync.
@@ -224,7 +221,6 @@ impl NotificationCenter {
             desktop_avatar_cache: HashMap::new(),
             last_tray_presence,
             app_icon,
-            tray_icon,
             shown_badge: None,
             shown_mention_dot: false,
             animations: platform::animations_enabled(),
@@ -394,6 +390,7 @@ impl NotificationCenter {
         let previous = self.settings.sounds.clone();
         change(&mut self.settings);
         settings::save(&self.app.read(cx).store, &self.settings);
+        self.show_in_tray(self.settings.show_in_tray, cx);
         self.sync_tray(cx);
         if self.settings.sounds != previous {
             let updated = self.settings.sounds.clone();
@@ -1584,36 +1581,28 @@ impl NotificationCenter {
             .ok();
     }
 
-    fn apply_icons(&mut self, appearance: AppearanceSettings, cx: &mut Context<Self>) {
-        let tray_icon = appearance.shown_tray_icon();
-        if tray_icon != self.tray_icon {
-            self.tray_icon = tray_icon;
-            self.show_tray_icon(tray_icon, cx);
-        }
-        let app_icon = appearance.app_icon;
-        if app_icon != self.app_icon {
-            self.app_icon = app_icon;
-            let _ = self.main_window.update(cx, |_, window, _| {
-                platform::set_window_icon(window, app_icon.png())
-            });
-        }
-    }
-
-    /// Removes the tray for `None` and creates it again when an icon comes back.
-    fn show_tray_icon(&mut self, icon: Option<AppIcon>, cx: &mut Context<Self>) {
-        let Some(icon) = icon else {
-            self.tray = None;
-            self.last_tray_presence = None;
+    fn apply_app_icon(&mut self, icon: AppIcon, cx: &mut Context<Self>) {
+        if icon == self.app_icon {
             return;
-        };
+        }
+        self.app_icon = icon;
         let mention = !self.unread_mentions.is_empty();
         if let Some(tray) = &mut self.tray {
             tray.set_app_icon(icon.png(), mention);
-        } else if !self.demo_mode {
-            let presence = tray_presence_from(self.app.read(cx), mention);
-            self.tray = Tray::new(presence, icon.png());
+        }
+        let _ = self.main_window.update(cx, |_, window, _| {
+            platform::set_window_icon(window, icon.png())
+        });
+    }
+
+    fn show_in_tray(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if !shown {
+            self.tray = None;
             self.last_tray_presence = None;
-            self.sync_tray(cx);
+        } else if self.tray.is_none() && !self.demo_mode {
+            let presence = tray_presence_from(self.app.read(cx), !self.unread_mentions.is_empty());
+            self.tray = Tray::new(presence, self.app_icon.png());
+            self.last_tray_presence = None;
         }
     }
 

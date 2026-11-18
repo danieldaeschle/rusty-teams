@@ -48,6 +48,7 @@ fn serialize(settings: &Settings) -> String {
         ),
         ("corner".to_owned(), settings.corner.key().to_owned()),
         ("taskbar_flash".to_owned(), settings.flash.to_string()),
+        ("show_in_tray".to_owned(), settings.show_in_tray.to_string()),
         (
             "close_to_tray".to_owned(),
             settings.close_to_tray.to_string(),
@@ -81,6 +82,7 @@ fn parse(text: &str) -> Settings {
             "sound_when_busy" => sounds.sound_when_busy = flag,
             "corner" => settings.corner = Corner::from_key(value).unwrap_or_default(),
             "taskbar_flash" => settings.flash = flag,
+            "show_in_tray" => settings.show_in_tray = flag,
             "close_to_tray" => settings.close_to_tray = flag,
             "mute_in_calls" => settings.mute_in_calls = flag,
             _ => set_ringtone(&mut sounds.ringtones, key, value),
@@ -115,6 +117,7 @@ mod tests {
             account: Default::default(),
             corner: Corner::TopLeft,
             flash: false,
+            show_in_tray: false,
             close_to_tray: false,
             mute_in_calls: true,
             sounds: SoundSettings {

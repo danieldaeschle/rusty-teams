@@ -5,7 +5,6 @@ use crate::theme::{self, ColorScheme, Shade};
 const META_KEY: &str = "appearance.settings";
 const COLOR_SCHEME_KEY: &str = "color_scheme";
 const APP_ICON_KEY: &str = "app_icon";
-const TRAY_ICON_KEY: &str = "tray_icon";
 const THEME_KEY: &str = "theme";
 const ZOOM_KEY: &str = "zoom";
 pub const ZOOM_STEPS: [f32; 14] = [
@@ -49,39 +48,6 @@ impl AppIcon {
             AppIcon::RustyTeams => RUSTY_TEAMS_ICON_PNG,
             AppIcon::MicrosoftTeams => MICROSOFT_TEAMS_ICON_PNG,
         }
-    }
-}
-
-/// What the menu bar or system tray shows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TrayIconChoice {
-    #[default]
-    SameAsApp,
-    Icon(AppIcon),
-    /// No tray entry at all, so closing the main window quits the app.
-    Hidden,
-}
-
-impl TrayIconChoice {
-    pub const ALL: [TrayIconChoice; 4] = [
-        TrayIconChoice::SameAsApp,
-        TrayIconChoice::Icon(AppIcon::RustyTeams),
-        TrayIconChoice::Icon(AppIcon::MicrosoftTeams),
-        TrayIconChoice::Hidden,
-    ];
-
-    pub fn key(self) -> &'static str {
-        match self {
-            TrayIconChoice::SameAsApp => "same-as-app",
-            TrayIconChoice::Icon(icon) => icon.key(),
-            TrayIconChoice::Hidden => "none",
-        }
-    }
-
-    pub fn from_key(key: &str) -> Option<TrayIconChoice> {
-        TrayIconChoice::ALL
-            .into_iter()
-            .find(|choice| choice.key() == key)
     }
 }
 
@@ -148,20 +114,8 @@ pub struct SystemTheme {
 pub struct AppearanceSettings {
     pub color_scheme: &'static ColorScheme,
     pub app_icon: AppIcon,
-    pub tray_icon: TrayIconChoice,
     pub theme: ThemeChoice,
     pub zoom: f32,
-}
-
-impl AppearanceSettings {
-    /// The icon the tray shows, `None` when the tray is switched off.
-    pub fn shown_tray_icon(&self) -> Option<AppIcon> {
-        match self.tray_icon {
-            TrayIconChoice::SameAsApp => Some(self.app_icon),
-            TrayIconChoice::Icon(icon) => Some(icon),
-            TrayIconChoice::Hidden => None,
-        }
-    }
 }
 
 impl Default for AppearanceSettings {
@@ -169,7 +123,6 @@ impl Default for AppearanceSettings {
         AppearanceSettings {
             color_scheme: theme::default_scheme(),
             app_icon: AppIcon::default(),
-            tray_icon: TrayIconChoice::default(),
             theme: ThemeChoice::default(),
             zoom: DEFAULT_ZOOM,
         }
@@ -243,10 +196,9 @@ pub fn save(store: &Store, settings: &AppearanceSettings) {
 
 fn serialize(settings: &AppearanceSettings) -> String {
     format!(
-        "{COLOR_SCHEME_KEY}={}\n{APP_ICON_KEY}={}\n{TRAY_ICON_KEY}={}\n{THEME_KEY}={}\n{ZOOM_KEY}={}",
+        "{COLOR_SCHEME_KEY}={}\n{APP_ICON_KEY}={}\n{THEME_KEY}={}\n{ZOOM_KEY}={}",
         settings.color_scheme.id,
         settings.app_icon.key(),
-        settings.tray_icon.key(),
         settings.theme.key(),
         settings.zoom
     )
@@ -264,11 +216,6 @@ fn parse(text: &str) -> AppearanceSettings {
             Some((APP_ICON_KEY, value)) => {
                 if let Some(icon) = AppIcon::from_key(value) {
                     settings.app_icon = icon;
-                }
-            }
-            Some((TRAY_ICON_KEY, value)) => {
-                if let Some(choice) = TrayIconChoice::from_key(value) {
-                    settings.tray_icon = choice;
                 }
             }
             Some((THEME_KEY, value)) => {
@@ -305,7 +252,6 @@ mod tests {
         let settings = AppearanceSettings {
             color_scheme: theme::SCHEMES[1],
             app_icon: AppIcon::MicrosoftTeams,
-            tray_icon: TrayIconChoice::Icon(AppIcon::RustyTeams),
             theme: ThemeChoice::FollowOperatingSystem,
             zoom: 1.25,
         };
@@ -328,7 +274,6 @@ mod tests {
         let changed = AppearanceSettings {
             color_scheme: theme::scheme_by_id("teams").unwrap(),
             app_icon: AppIcon::MicrosoftTeams,
-            tray_icon: TrayIconChoice::Hidden,
             theme: ThemeChoice::Light,
             zoom: 0.9,
         };
@@ -342,18 +287,6 @@ mod tests {
         assert_eq!(settings.theme, ThemeChoice::Dark);
         assert_eq!(settings.zoom, DEFAULT_ZOOM);
         assert_eq!(parse("zoom=1.3").zoom, 1.25);
-    }
-
-    #[test]
-    fn the_tray_icon_follows_the_app_icon_until_one_is_chosen() {
-        let following = parse("app_icon=microsoft-teams");
-        assert_eq!(following.tray_icon, TrayIconChoice::SameAsApp);
-        assert_eq!(following.shown_tray_icon(), Some(AppIcon::MicrosoftTeams));
-        let chosen = parse("app_icon=microsoft-teams\ntray_icon=rusty-teams");
-        assert_eq!(chosen.shown_tray_icon(), Some(AppIcon::RustyTeams));
-        let hidden = parse("app_icon=microsoft-teams\ntray_icon=none");
-        assert_eq!(hidden.shown_tray_icon(), None);
-        assert_eq!(parse(&serialize(&hidden)), hidden);
     }
 
     #[test]

@@ -53,6 +53,7 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
         SettingsSection::General => vec![
             tr("settings.general.auto_start"),
             tr("settings.general.open_in_background"),
+            tr("settings.general.show_in_tray"),
             tr("settings.general.close_to_tray"),
             tr("settings.general.external_browser"),
             tr("settings.general.up_arrow"),
@@ -80,7 +81,6 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.appearance.theme"),
             tr("settings.appearance.color_scheme"),
             tr("settings.appearance.app_icon"),
-            tr("settings.appearance.tray_icon"),
         ],
         SettingsSection::Chats => vec![
             tr("settings.chats.density"),
@@ -407,6 +407,7 @@ mod tests {
             SettingsSection::General => &[
                 "settings.general.auto_start",
                 "settings.general.open_in_background",
+                "settings.general.show_in_tray",
                 "settings.general.close_to_tray",
                 "settings.general.up_arrow",
                 "settings.general.translate_into",
@@ -430,7 +431,6 @@ mod tests {
                 "settings.appearance.theme",
                 "settings.appearance.color_scheme",
                 "settings.appearance.app_icon",
-                "settings.appearance.tray_icon",
             ],
             SettingsSection::Chats => &[
                 "settings.chats.density",

@@ -14,6 +14,7 @@ use super::rows::{Choice, caption, control_row, select, toggle_row};
 use crate::app_state::AppState;
 use crate::i18n::tr;
 use crate::notify::NotificationCenter;
+use crate::notify::rules::Settings;
 use crate::theme;
 use crate::views::widgets::icon;
 
@@ -56,28 +57,33 @@ fn startup_rows(center: &Entity<NotificationCenter>, cx: &App) -> [Stateful<Div>
 }
 
 pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &App) -> Div {
-    let close_to_tray = center.read(cx).settings().close_to_tray;
-    let toggle_center = center.clone();
+    let settings = center.read(cx).settings();
     v_flex()
         .w_full()
         .child(caption(tr("settings.caption.system")))
         .children(startup_rows(center, cx))
-        .child(
-            toggle_row(
-                "settings-close-to-tray",
-                tr("settings.general.close_to_tray"),
-                tr("settings.general.close_to_tray_detail"),
-                theme::text_muted(),
-                close_to_tray,
-            )
-            .on_click(move |_, _, cx| {
-                toggle_center.update(cx, |center, cx| {
-                    center.update_settings(cx, |settings| {
-                        settings.close_to_tray = !settings.close_to_tray
-                    })
-                })
-            }),
-        )
+        .child(settings_toggle(
+            center,
+            (
+                "settings-show-in-tray",
+                tr("settings.general.show_in_tray"),
+                tr("settings.general.show_in_tray_detail"),
+            ),
+            settings.show_in_tray,
+            |settings| settings.show_in_tray = !settings.show_in_tray,
+        ))
+        .when(settings.show_in_tray, |rows| {
+            rows.child(settings_toggle(
+                center,
+                (
+                    "settings-close-to-tray",
+                    tr("settings.general.close_to_tray"),
+                    tr("settings.general.close_to_tray_detail"),
+                ),
+                settings.close_to_tray,
+                |settings| settings.close_to_tray = !settings.close_to_tray,
+            ))
+        })
         .children(external_browser_rows(app, cx))
         .children(install_rows(cx))
         .child(caption(tr("settings.caption.compose_box")))
@@ -94,6 +100,18 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
         ))
         .child(caption(tr("settings.caption.translation")))
         .children(translation_rows(app, cx))
+}
+
+fn settings_toggle(
+    center: &Entity<NotificationCenter>,
+    (id, title, detail): (&'static str, String, String),
+    enabled: bool,
+    change: fn(&mut Settings),
+) -> Stateful<Div> {
+    let center = center.clone();
+    toggle_row(id, title, detail, theme::text_muted(), enabled).on_click(move |_, _, cx| {
+        center.update(cx, |center, cx| center.update_settings(cx, change))
+    })
 }
 
 /// Linux only: the application menu install, the install question and updates.
