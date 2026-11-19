@@ -71,15 +71,12 @@
     if(i%4===0){var t=d.createElement("i");t.textContent=i*2.5;m.appendChild(t)}
     ruler.insertBefore(m,band);
   }
-  var secs=$$("section[data-name]"),cur=$("#crumb-cur"),prev=$("#crumb-prev");
   function update(){
     var H=root.scrollHeight,vh=innerHeight,max=Math.max(1,H-vh),p=Math.min(1,Math.max(0,scrollY/max));
     needle.style.top=(p*100)+"%";
     band.style.top=(scrollY/H*100)+"%";band.style.height=(vh/H*100)+"%";
     var v=Math.round(p*100);pct.textContent=("00"+v).slice(-3)+" %";
     ruler.setAttribute("aria-valuenow",v);
-    var idx=0;secs.forEach(function(s,k){if(s.getBoundingClientRect().top<vh*0.4)idx=k});
-    if(cur.textContent!==secs[idx].dataset.name){cur.textContent=secs[idx].dataset.name;prev.textContent=idx?secs[idx-1].dataset.name:""}
   }
   addEventListener("scroll",update,{passive:true});addEventListener("resize",update);update();
   ruler.addEventListener("click",function(e){
