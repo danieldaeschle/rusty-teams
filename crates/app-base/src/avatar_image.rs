@@ -97,11 +97,20 @@ pub fn with_edge_margin(texture: &RgbaImage, margin: u32) -> RgbaImage {
     })
 }
 
+/// Microsoft's small profile photos often carry a light outer row or column; the disc touches it at the edge midpoints.
+const EDGE_TRIM_PER: u32 = 48;
+
 pub fn square_texture(bytes: &[u8], side: u32) -> Option<RgbaImage> {
     let decoded = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let crop = decoded.width().min(decoded.height());
-    let left = (decoded.width() - crop) / 2;
-    let top = (decoded.height() - crop) / 2;
+    let full = decoded.width().min(decoded.height());
+    let trim = if full > 2 {
+        (full / EDGE_TRIM_PER).max(1)
+    } else {
+        0
+    };
+    let crop = full - 2 * trim;
+    let left = (decoded.width() - full) / 2 + trim;
+    let top = (decoded.height() - full) / 2 + trim;
     let square = image::imageops::crop_imm(&decoded, left, top, crop, crop).to_image();
     let mut texture = if crop == side {
         square
@@ -151,6 +160,23 @@ mod tests {
         assert_eq!(*padded.get_pixel(0, 0), Rgba([9, 9, 9, 255]));
         assert_eq!(*padded.get_pixel(1, 2), Rgba([9, 9, 9, 255]));
         assert_eq!(*padded.get_pixel(6, 6), Rgba([1, 2, 3, 255]));
+    }
+
+    #[test]
+    fn a_light_outer_edge_of_the_photo_is_trimmed() {
+        let mut source = RgbaImage::from_pixel(48, 48, Rgba([40, 40, 40, 255]));
+        for index in 0..48 {
+            source.put_pixel(index, 0, Rgba([255, 255, 255, 255]));
+            source.put_pixel(47, index, Rgba([255, 255, 255, 255]));
+        }
+        let mut encoded = Vec::new();
+        image::DynamicImage::ImageRgba8(source)
+            .write_to(&mut Cursor::new(&mut encoded), ImageFormat::Png)
+            .unwrap();
+        let texture = square_texture(&encoded, 32).unwrap();
+        let Rgba([top, ..]) = *texture.get_pixel(16, 0);
+        let Rgba([right, ..]) = *texture.get_pixel(31, 16);
+        assert!(top < 80 && right < 80, "top {top}, right {right}");
     }
 
     #[test]
