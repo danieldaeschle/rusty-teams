@@ -1,7 +1,6 @@
 use std::time::Instant;
 
 use gpui_kit::assets::IconName;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -293,7 +292,7 @@ fn overflow_tile(
             let list = v_flex()
                 .id("call-hidden-list")
                 .max_h(px(HIDDEN_LIST_HEIGHT))
-                .overflow_y_scrollbar()
+                .overflow_y_scroll()
                 .gap(px(2.))
                 .children(people.iter().map(|(mri, name, user_id)| {
                     let app_for_click = app.clone();

@@ -1843,6 +1843,56 @@ mod frames {
     }
 
     #[gpui_kit::test]
+    fn a_long_members_list_scrolls_to_its_last_person(cx: &mut TestAppContext) {
+        const PEOPLE: usize = 12;
+        let (handle, state) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            state.update(cx, |state, cx| {
+                if let Some(chat) = state
+                    .sidebar
+                    .chats
+                    .iter_mut()
+                    .find(|chat| chat.id == MEMBERS_CHAT)
+                {
+                    chat.members = (0..PEOPLE)
+                        .map(|index| store::MemberRecord {
+                            user_id: Some(format!("guard-person-{index}")),
+                            display_name: format!("Person {index}"),
+                        })
+                        .collect();
+                }
+                state.select(Selection::Chat(MEMBERS_CHAT.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(MEMBERS_BUTTON));
+        let button = visual
+            .debug_bounds(MEMBERS_BUTTON)
+            .expect("members button rendered");
+        visual.simulate_click(button.center(), Default::default());
+        collect(&mut visual, Some("chat-members-popup/list"));
+        let list = visual
+            .debug_bounds("chat-members-popup/list")
+            .expect("list");
+        let last_row = "chat-members-popup/row-11";
+        visual.simulate_event(ScrollWheelEvent {
+            position: list.center(),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-2_000.))),
+            ..Default::default()
+        });
+        collect(&mut visual, None);
+        let list = visual
+            .debug_bounds("chat-members-popup/list")
+            .expect("list");
+        let last = visual.debug_bounds(last_row).expect("last person rendered");
+        assert!(
+            last.bottom() <= list.bottom() + px(0.5),
+            "last person {last:?} below the list {list:?}"
+        );
+    }
+
+    #[gpui_kit::test]
     fn the_group_name_field_keeps_typed_text_across_frames(cx: &mut TestAppContext) {
         let (handle, state) = mount(cx);
         let mut visual = VisualTestContext::from_window(handle, cx);

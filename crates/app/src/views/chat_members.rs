@@ -6,7 +6,6 @@ use gpui_kit::component::fluent::{
     MENU_ITEM_PADDING_X, MENU_LIST_PADDING,
 };
 use gpui_kit::component::popover::{Popover, PopoverState};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{Sizable as _, WindowExt as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -77,7 +76,7 @@ fn members_panel(
         v_flex()
             .id("chat-members-list")
             .max_h(px(LIST_MAX_HEIGHT))
-            .overflow_y_scrollbar()
+            .overflow_y_scroll()
             .py(px(4.))
             .child(
                 div()
@@ -93,7 +92,8 @@ fn members_panel(
             )
             .children(rows.iter().enumerate().map(|(index, row)| {
                 member_row(app, &popover, &state.directory, chat_id, index, row)
-            }));
+            }))
+            .debug_selector(|| "chat-members-popup/list".into());
     v_flex()
         .debug_selector(|| "chat-members-popup".into())
         .w(px(POPUP_WIDTH))
@@ -176,6 +176,7 @@ fn member_row(
     };
     h_flex()
         .id(("chat-member", index))
+        .debug_selector(move || format!("chat-members-popup/row-{index}"))
         .group(group.clone())
         .h(px(row_height))
         .flex_none()
