@@ -280,6 +280,7 @@ pub struct ConversationView {
     context_menu: Option<OpenContextMenu>,
     context_serial: u64,
     timeline_bounds: TimelineBounds,
+    typing_offset: Cell<f32>,
     header_width: Rc<Cell<f32>>,
     toolbar_pinned: Option<String>,
     toolbar_suppressed: Option<String>,
@@ -762,6 +763,7 @@ impl ConversationView {
             context_menu: None,
             context_serial: 0,
             timeline_bounds: TimelineBounds::default(),
+            typing_offset: Cell::new(TYPING_BOTTOM_GAP),
             header_width: Rc::default(),
             toolbar_pinned: None,
             toolbar_suppressed: None,
@@ -4347,10 +4349,13 @@ impl Render for ConversationView {
         let typing_offset = {
             let scroller = self.scroller.read(cx);
             let last_row = scroller.item_count().checked_sub(1);
-            typing_bottom_offset(
+            let offset = typing_bottom_offset(
                 self.timeline_bounds.get(),
                 last_row.and_then(|index| scroller.item_bounds(index)),
-            )
+                self.typing_offset.get(),
+            );
+            self.typing_offset.set(offset);
+            offset
         };
         let scroller = MessageScroller::new(
             "messages",
@@ -4669,9 +4674,14 @@ impl Render for ConversationView {
 }
 
 /// Right under the last row like one more message; once that row scrolls below the view it sticks above the composer.
-fn typing_bottom_offset(timeline: Option<Bounds<Pixels>>, last_row: Option<Bounds<Pixels>>) -> f32 {
+/// A row added or replaced since the last frame has no bounds yet, so the bubble keeps its previous place.
+fn typing_bottom_offset(
+    timeline: Option<Bounds<Pixels>>,
+    last_row: Option<Bounds<Pixels>>,
+    previous: f32,
+) -> f32 {
     let (Some(timeline), Some(last_row)) = (timeline, last_row) else {
-        return TYPING_BOTTOM_GAP;
+        return previous;
     };
     let under_last_row =
         f32::from(timeline.bottom() - last_row.bottom()) - TYPING_TOP_GAP - TYPING_BUBBLE_HEIGHT;
@@ -4965,14 +4975,14 @@ mod tests {
             ))
         };
         assert_eq!(
-            typing_bottom_offset(Some(timeline), row_ending_at(400.)),
+            typing_bottom_offset(Some(timeline), row_ending_at(400.), 8.),
             256.
         );
         assert_eq!(
-            typing_bottom_offset(Some(timeline), row_ending_at(900.)),
+            typing_bottom_offset(Some(timeline), row_ending_at(900.), 8.),
             8.
         );
-        assert_eq!(typing_bottom_offset(Some(timeline), None), 8.);
+        assert_eq!(typing_bottom_offset(Some(timeline), None, 13.), 13.);
     }
 
     #[test]

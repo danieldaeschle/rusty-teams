@@ -198,7 +198,7 @@ mod frames {
     };
     use crate::views::conversation::{
         FEED_EDGE_TAG, FORWARD_FOOTER_BAR_TAG, FORWARD_FOOTER_COUNT_TAG, FORWARD_FOOTER_NEXT_TAG,
-        FORWARD_FOOTER_TAG, HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG,
+        FORWARD_FOOTER_TAG, HEADER_DIVIDER, MEMBERS_BUTTON, TIMELINE_TAG, TYPING_TAG,
     };
     use crate::views::find_panel::{
         FIND_DIVIDER_TAG, FIND_INPUT_TAG, FIND_PANEL_TAG, FIND_RESULTS_TAG,
@@ -1362,6 +1362,83 @@ mod frames {
             });
             assert!(found.is_empty(), "{}", found.join("\n"));
         }
+    }
+
+    #[gpui_kit::test]
+    fn the_typing_bubble_stays_put_when_an_own_message_arrives(cx: &mut TestAppContext) {
+        let (handle, app) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(520.)));
+        visual.update(|_, cx| {
+            app.update(cx, |state, cx| {
+                state.select(Selection::Chat(REACTION_CHAT.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(TYPING_TAG));
+        collect(&mut visual, None);
+        let resting = visual
+            .debug_bounds(TYPING_TAG)
+            .expect("typing bubble")
+            .bottom();
+        visual.update(|_, cx| {
+            app.update(cx, |state, cx| {
+                let record = store::MessageRecord {
+                    conversation_id: REACTION_CHAT.to_owned(),
+                    message_id: "guard-own".to_owned(),
+                    sender_id: Some(demo::DEMO_USER_ID.to_owned()),
+                    sender_name: Some("Me".to_owned()),
+                    created_at: chrono::Utc::now().max(demo::at(0, 10, 48)),
+                    body_html: "<p>Sent while Mara types</p>".to_owned(),
+                    links_json: "[]".to_owned(),
+                    attachments_json: "[]".to_owned(),
+                    reactions_json: "[]".to_owned(),
+                    mentions_json: "[]".to_owned(),
+                    ..Default::default()
+                };
+                state
+                    .store
+                    .upsert_messages(&[record])
+                    .expect("store message");
+                state.typing.start(
+                    REACTION_CHAT,
+                    demo::MARA_ID,
+                    "Mara Lindqvist",
+                    std::time::Instant::now(),
+                    chrono::Utc::now() + chrono::Duration::days(1),
+                );
+                state.apply(
+                    crate::backend::BackendEvent::Core(teams_core::CoreEvent::MessagesChanged {
+                        conversation_id: REACTION_CHAT.to_owned(),
+                    }),
+                    cx,
+                );
+            })
+        });
+        let mut bottoms = Vec::new();
+        for _ in 0..12 {
+            visual.executor().advance_clock(Duration::from_millis(16));
+            visual.run_until_parked();
+            visual.update(|window, cx| window.render_frame(cx));
+            bottoms.push(
+                visual
+                    .debug_bounds(TYPING_TAG)
+                    .map(|bounds| f32::from(bounds.bottom())),
+            );
+        }
+        let positions: Vec<f32> = bottoms
+            .iter()
+            .map(|bottom| bottom.expect("typing bubble"))
+            .collect();
+        let steps: Vec<f32> = positions
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .filter(|step| step.abs() > 0.5)
+            .collect();
+        let reversals = steps
+            .windows(2)
+            .filter(|pair| pair[0].signum() != pair[1].signum())
+            .count();
+        assert_eq!(reversals, 0, "resting {resting:?}, frames {positions:?}");
     }
 
     #[gpui_kit::test]
