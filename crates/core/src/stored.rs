@@ -789,7 +789,7 @@ pub fn quote_html(quote: &QuoteInfo) -> String {
     )
 }
 
-fn quote_time(message_id: &str) -> Option<String> {
+pub(crate) fn quote_time(message_id: &str) -> Option<String> {
     let millis = message_id.parse::<i64>().ok()?;
     let time = chrono::DateTime::from_timestamp_millis(millis)?;
     Some(

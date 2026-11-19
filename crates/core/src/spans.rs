@@ -2,6 +2,7 @@ use scraper::{ElementRef, Html, Node};
 
 use crate::ams_video::video_thumbnail_url;
 use crate::jumbo::without_repeated_skin_tone;
+use crate::stored::quote_time;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontSize {
@@ -166,6 +167,9 @@ fn convert_unindented(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         "sup" => spans.push(Span::Superscript(convert_children(element))),
         "sub" => spans.push(Span::Subscript(convert_children(element))),
         "u" | "ins" => spans.push(Span::Underline(convert_children(element))),
+        "span" if element.value().attr("itemprop") == Some("time") => {
+            push_quote_time(element, spans)
+        }
         "span" | "font" | "mark" => push_colored(element, spans),
         "ul" | "ol" => spans.push(list(element)),
         "table" => spans.push(table(element)),
@@ -474,6 +478,17 @@ fn raw_text(element: ElementRef<'_>) -> String {
     element.text().collect()
 }
 
+/// The service sends the reply time as an empty span that only carries the quoted message id.
+fn push_quote_time(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+    if !raw_text(element).trim().is_empty() {
+        push_colored(element, spans);
+        return;
+    }
+    if let Some(time) = element.value().attr("itemid").and_then(quote_time) {
+        push_text(spans, &format!(" {time}"));
+    }
+}
+
 fn push_text(spans: &mut Vec<Span>, text: &str) {
     if text.is_empty() {
         return;
@@ -650,6 +665,20 @@ fn trim_breaks(spans: &mut Vec<Span>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_reply_time_shows_the_time_of_the_quoted_message() {
+        let quoted = r#"<blockquote itemscope="" itemtype="http://schema.skype.com/Reply" itemid="1751975663649"><strong itemprop="mri">Ann</strong><span itemprop="time" itemid="1751975663649"></span><p itemprop="preview">old</p></blockquote>"#;
+        let expected = quote_time("1751975663649").unwrap();
+        let spans = html_to_spans(quoted);
+        let [Span::Quote { children, .. }] = spans.as_slice() else {
+            panic!("expected a quote");
+        };
+        assert!(
+            children.contains(&Span::Text(format!(" {expected}"))),
+            "{children:?}"
+        );
+    }
 
     #[test]
     fn spaces_at_the_edge_of_inline_formatting_survive() {
