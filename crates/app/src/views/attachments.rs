@@ -164,17 +164,20 @@ fn image_view(
     let (image, open_image) = (image.clone(), open_image.cloned());
     let frame = frame
         .cursor_pointer()
+        .when_some(sent_preview, |frame, sent| {
+            frame.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .child(local_image(sent, format!("{image_id}-sent").into())),
+            )
+        })
         .child(
             img(preview(entry.path.clone()))
-                .id(image_id.clone())
+                .id(image_id)
                 .size_full()
                 .rounded(px(IMAGE_RADIUS))
-                .object_fit(ObjectFit::Cover)
-                .when_some(sent_preview.cloned(), |remote, sent| {
-                    remote.with_loading(move || {
-                        local_image(&sent, image_id.clone()).into_any_element()
-                    })
-                }),
+                .object_fit(ObjectFit::Cover),
         )
         .when(clip, |frame| frame.child(play_badge()))
         .on_click({
