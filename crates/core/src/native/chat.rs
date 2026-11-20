@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use super::message::graph_message_json;
 
-const ORGID_PREFIX: &str = "8:orgid:";
+pub(super) const ORGID_PREFIX: &str = "8:orgid:";
 const ONE_ON_ONE_SUFFIX: &str = "@unq.gbl.spaces";
 const OWNER_ROLE: &str = "admin";
 
