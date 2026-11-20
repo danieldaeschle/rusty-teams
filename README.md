@@ -88,11 +88,44 @@
 
 ## Status
 
-| Platform | State |
-|---|---|
-| 🪟 Windows | Main target. Login through an embedded WebView2 |
-| 🐧 Linux | Starts your default browser on its own when it is Chromium- or Firefox-based (Chrome, Chromium, Firefox, Zen, LibreWolf, Floorp), else the first one installed; Settings > General > Teams session browser picks another (debug port 9222, own profile in the XDG data folder) and keeps it headless in the background. When Teams asks for a login, the Chrome window shows itself and goes back to the background once you are signed in. `--endpoint` connects to a Chrome you started yourself instead. Color emoji use a bundled bitmap Noto Color Emoji font; a system COLRv1 face of the same name is left out of the font list. The window id is `rusty-teams`. On start the app offers to install itself to `~/.local/share/rusty-teams/teams` (moved, or copied when started from a cargo `target` folder) and writes `~/.local/share/applications/rusty-teams.desktop`; starting a newer build offers to replace the installed one, and Settings > General can install, replace, remove or bring the question back. The installed copy of a release build looks for new GitHub releases (Settings > General > Automatic updates) and asks before it downloads and restarts. Tray icon through StatusNotifierItem (KDE Plasma natively, GNOME with the AppIndicator extension); with "Close to tray" the window closes and the app keeps running in the tray, which opens a new window. Built-in login without Chrome is planned |
-| 🍎 macOS | Starts your default browser on its own when it is Chromium- or Firefox-based (Google Chrome, Chromium, Microsoft Edge, Brave, Helium, Vivaldi, Firefox, Zen, LibreWolf, Floorp), else the first one installed; Settings > General > Teams session browser picks another (debug port 9222, own profile under Application Support) and keeps it headless in the background. When Teams asks for a login, the Chrome window shows itself and goes back to the background once you are signed in. `--endpoint` connects to a Chrome you started yourself instead. Universal arm64 + x86_64 `.app` bundle. Screen share uses the ScreenCaptureKit system dialog |
+| | Windows | Linux | macOS |
+|---|---|---|---|
+| Support | Main target | Supported | Supported |
+| Sign-in | Embedded WebView2 | Your browser, headless | Your browser, headless |
+| Download | `.exe` | `.tar.gz`, self-installs to the app menu | Universal `.app` (arm64 + x86_64) |
+| Tray icon | Yes | StatusNotifierItem | Menu bar |
+| Auto-update | - | Yes | - |
+
+<details>
+<summary><b>Sign-in on Linux and macOS</b></summary>
+
+- Uses your default browser when it is Chromium- or Firefox-based, else the first one installed.
+  - Linux: Chrome, Chromium, Firefox, Zen, LibreWolf, Floorp
+  - macOS: also Edge, Brave, Helium, Vivaldi
+- Settings > General > Teams session browser picks another one.
+- The browser runs headless with its own profile. It only shows a window when Teams asks you to sign in.
+- `--endpoint` connects to a Chrome you started yourself.
+- A built-in login without a browser is planned.
+
+</details>
+
+<details>
+<summary><b>Linux details</b></summary>
+
+- **Install:** on first start the app offers to install itself to `~/.local/share/rusty-teams/teams` and adds it to the application menu. Settings > General can install, replace or remove it.
+- **Updates:** the installed release build checks GitHub releases and asks before it downloads and restarts.
+- **Tray:** KDE Plasma natively, GNOME with the AppIndicator extension. "Show icon in the tray" plus "On close, keep the application running" keeps the app in the tray.
+- **Window id:** `rusty-teams`, for window manager rules.
+- **Emoji:** a bundled Noto Color Emoji font, so they look the same on every distro.
+
+</details>
+
+<details>
+<summary><b>macOS details</b></summary>
+
+- Screen share uses the ScreenCaptureKit system dialog.
+
+</details>
 
 The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
 
