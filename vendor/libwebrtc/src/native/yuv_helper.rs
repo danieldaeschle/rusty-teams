@@ -212,6 +212,36 @@ macro_rules! rgba_to_i420 {
     };
 }
 
+/// Scales a 32-bit RGB image. An exact halving averages 2x2 blocks, other sizes
+/// are bilinear. The channel order is kept.
+pub fn argb_scale(
+    src_argb: &[u8],
+    src_stride_argb: u32,
+    src_width: i32,
+    src_height: i32,
+    dst_argb: &mut [u8],
+    dst_stride_argb: u32,
+    dst_width: i32,
+    dst_height: i32,
+) {
+    argb_assert_safety(src_argb, src_stride_argb, src_width, src_height);
+    argb_assert_safety(dst_argb, dst_stride_argb, dst_width, dst_height);
+
+    unsafe {
+        yuv_sys::ffi::argb_scale(
+            src_argb.as_ptr(),
+            src_stride_argb as i32,
+            src_width,
+            src_height,
+            dst_argb.as_mut_ptr(),
+            dst_stride_argb as i32,
+            dst_width,
+            dst_height,
+        )
+        .unwrap();
+    }
+}
+
 pub fn argb_to_rgb24(
     src_argb: &[u8],
     src_stride_argb: u32,
