@@ -227,11 +227,14 @@ async fn supervise(
         link,
         live_retry,
     ));
-    tokio::spawn(calendar_loop(
-        session.clone(),
-        store.clone(),
-        events.clone(),
-    ));
+    // A guest has no mailbox in the org it visits, so Outlook answers every poll with 403.
+    if guest_tenant.is_none() {
+        tokio::spawn(calendar_loop(
+            session.clone(),
+            store.clone(),
+            events.clone(),
+        ));
+    }
     tokio::spawn(pins_loop(session, events.clone()));
     tokio::spawn(presence_resubscribe_loop(engine.clone()));
     refresh_loop(engine, events, nudges).await;

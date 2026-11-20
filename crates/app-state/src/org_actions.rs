@@ -12,6 +12,11 @@ impl AppState {
         self.save_orgs(&self.orgs);
     }
 
+    /// A guest org has no calendar for the account, like in Teams.
+    pub fn calendar_available(&self) -> bool {
+        self.orgs.active_guest().is_none()
+    }
+
     /// Orgs to offer in the account menu; a single org needs no switcher, like Teams.
     pub fn switchable_orgs(&self) -> &[Org] {
         if self.orgs.list.len() > 1 {
