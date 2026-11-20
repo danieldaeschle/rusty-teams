@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use libwebrtc::media_stream_track::MediaStreamTrack;
@@ -24,7 +24,7 @@ use crate::effects::CameraEffects;
 use crate::error::{Error, Result};
 use crate::notices::{CAMERA_STOPPED_NOTICE, SCREEN_SHARE_STOPPED_NOTICE, notice_with_detail};
 use crate::screen::{
-    PortalFollowUp, ShareKind, ShareSource, start_portal_capture, start_screen_capture,
+    PortalFollowUp, ShareKind, ShareRate, ShareSource, start_portal_capture, start_screen_capture,
 };
 use crate::send_control::{
     EncoderLimits, KEYFRAME_NUDGE, LayerPlan, SendLimit, encoder_limits, plan_layers,
@@ -204,7 +204,7 @@ pub struct LocalVideo {
     lines: Option<VideoLines>,
     blur: Arc<BlurSettings>,
     motion: bool,
-    share_fps: Arc<AtomicU32>,
+    share_rate: Arc<ShareRate>,
     camera_preview: bool,
     quality: VideoQuality,
     camera_stats: Arc<CameraCaptureStats>,
@@ -237,7 +237,7 @@ impl LocalVideo {
             lines: None,
             blur: Arc::new(BlurSettings::default()),
             motion: false,
-            share_fps: Arc::new(AtomicU32::new(SCREEN_SHARE_FPS)),
+            share_rate: ShareRate::new(SCREEN_SHARE_FPS),
             camera_preview: false,
             quality: VideoQuality::default(),
             camera_stats: CameraCaptureStats::new(),
@@ -268,7 +268,7 @@ impl LocalVideo {
 
     pub fn set_motion(&mut self, motion: bool) {
         self.motion = motion;
-        self.share_fps.store(
+        self.share_rate.fps.store(
             if motion {
                 MOTION_SHARE_FPS
             } else {
@@ -297,7 +297,7 @@ impl LocalVideo {
         } else {
             DegradationPreference::MaintainResolution
         });
-        let fps = f64::from(self.share_fps.load(Ordering::Relaxed));
+        let fps = f64::from(self.share_rate.fps.load(Ordering::Relaxed));
         for encoding in &mut parameters.encodings {
             encoding.max_framerate = Some(fps);
         }
@@ -330,6 +330,12 @@ impl LocalVideo {
             SendSource::Camera => &mut self.camera,
             SendSource::Screen => &mut self.screen,
         };
+        if source == SendSource::Screen {
+            let max_fs = limits.iter().filter_map(|limit| limit.max_fs).max();
+            self.share_rate
+                .max_fs
+                .store(max_fs.unwrap_or(0), Ordering::Relaxed);
+        }
         let frame = unpack_size(outgoing.frame_size.load(Ordering::Relaxed));
         outgoing.requested = Some(RequestedLimits {
             limits: limits.to_vec(),
@@ -821,7 +827,7 @@ impl LocalVideo {
         let updates = self.updates.clone();
         let capture = start_portal_capture(
             kind,
-            self.share_fps.clone(),
+            self.share_rate.clone(),
             move |buffer| sink.push(buffer),
             move |follow| match follow {
                 PortalFollowUp::Share(source) => {
@@ -863,7 +869,7 @@ impl LocalVideo {
                 VideoMode::Pattern => Capture::Task(spawn_pattern(sink, PatternKind::Screen, None)),
                 _ => start_screen_capture(
                     source.clone(),
-                    self.share_fps.clone(),
+                    self.share_rate.clone(),
                     move |buffer| sink.push(buffer),
                     self.report_failure(
                         SCREEN_SHARE_STOPPED_NOTICE,
