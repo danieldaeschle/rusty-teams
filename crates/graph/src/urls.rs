@@ -230,6 +230,14 @@ pub fn drive_item_invite(drive_id: &str, item_id: &str) -> String {
     )
 }
 
+pub fn drive_item_create_link(drive_id: &str, item_id: &str) -> String {
+    format!(
+        "{GRAPH}/v1.0/drives/{}/items/{}/createLink",
+        segment(drive_id),
+        segment(item_id)
+    )
+}
+
 pub fn joined_teams() -> String {
     format!("{GRAPH}/v1.0/me/joinedTeams?$select=id,displayName")
 }

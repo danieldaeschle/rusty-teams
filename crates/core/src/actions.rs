@@ -1,8 +1,8 @@
 use chatsvc::{ConversationRef, read_horizon};
 use chrono::{DateTime, Duration, Utc};
 use graph::{
-    FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
-    hosted_image_order,
+    FileReference, MessageExtras, MessageTarget, OutgoingMention, Recipient, UploadDestination,
+    UploadedFile, hosted_image_order,
 };
 use store::MessageRecord;
 
@@ -303,7 +303,28 @@ impl<R: Remote> SyncEngine<R> {
             return Ok(());
         }
         let other_members = self.other_member_ids(conversation_id).await?;
-        self.remote.share_file(uploaded, &other_members).await
+        let recipients = if uploaded.home_drive {
+            self.member_emails(conversation_id, &other_members).await?
+        } else {
+            other_members.into_iter().map(Recipient::ObjectId).collect()
+        };
+        self.remote.share_file(uploaded, &recipients).await
+    }
+
+    /// The home tenant does not know the guest org's user ids, so a file there is shared by email.
+    /// Members without an email, such as bots, cannot be invited and are left out.
+    async fn member_emails(&self, chat_id: &str, user_ids: &[String]) -> Result<Vec<Recipient>> {
+        let members = self.remote.chat_members(chat_id).await?;
+        Ok(members
+            .into_iter()
+            .filter(|member| {
+                member
+                    .user_id
+                    .as_ref()
+                    .is_some_and(|user_id| user_ids.contains(user_id))
+            })
+            .filter_map(|member| member.email.map(Recipient::Email))
+            .collect())
     }
 
     pub async fn discard_attachment(&self, uploaded: &UploadedFile) -> Result<()> {

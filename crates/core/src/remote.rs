@@ -24,7 +24,7 @@ use chatsvc::{
 use chrono::{DateTime, Utc};
 use graph::{
     Channel, Chat, CloudFile, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras,
-    MessageTarget, OutgoingMention, Photo, Presence, QuickSite, SharedFile, Tag, Team,
+    MessageTarget, OutgoingMention, Photo, Presence, QuickSite, Recipient, SharedFile, Tag, Team,
     UploadDestination, UploadedFile, User,
 };
 
@@ -245,7 +245,7 @@ pub trait Remote {
         Err(Error::Unsupported("a file upload"))
     }
 
-    async fn share_file(&self, _file: &UploadedFile, _user_ids: &[String]) -> Result<()> {
+    async fn share_file(&self, _file: &UploadedFile, _recipients: &[Recipient]) -> Result<()> {
         Err(Error::Unsupported("sharing a file"))
     }
 
@@ -1121,8 +1121,8 @@ impl Remote for Graph {
         Ok(Graph::upload_file(self, destination, file_name, bytes, progress).await?)
     }
 
-    async fn share_file(&self, file: &UploadedFile, user_ids: &[String]) -> Result<()> {
-        Ok(Graph::share_item(self, file, user_ids).await?)
+    async fn share_file(&self, file: &UploadedFile, recipients: &[Recipient]) -> Result<()> {
+        Ok(Graph::share_item(self, file, recipients).await?)
     }
 
     async fn recent_files(&self, top: usize) -> Result<Vec<CloudFile>> {
@@ -1153,7 +1153,7 @@ impl Remote for Graph {
     }
 
     async fn delete_file(&self, file: &UploadedFile) -> Result<()> {
-        Ok(Graph::delete_drive_item(self, &file.drive_id, &file.item_id).await?)
+        Ok(Graph::delete_uploaded(self, file).await?)
     }
 
     async fn resolve_share(&self, open_url: &str) -> Result<SharedFile> {

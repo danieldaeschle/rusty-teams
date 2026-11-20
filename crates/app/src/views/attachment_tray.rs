@@ -22,6 +22,8 @@ pub const INLINE_IMAGE_MAX_BYTES: u64 = 1024 * 1024;
 pub const INLINE_TOTAL_MAX_BYTES: u64 = 5 * 512 * 1024;
 pub const MAX_FILE_BYTES: u64 = 250 * 1024 * 1024;
 pub const FILES_LATER_NOTICE: &str = "Files can be added once the chat exists.";
+pub const NOT_SHARED_NOTICE: &str =
+    "Your organization does not allow sharing with this chat. People may need to request access.";
 const PASTED_IMAGE_STEM: &str = "pasted-image";
 const PREVIEW_HEIGHT: f32 = 120.;
 const PREVIEW_GAP: f32 = 4.;
@@ -94,6 +96,9 @@ pub struct DoneFile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UploadResult {
     Done(DoneFile),
+    /// Sent without access for the chat members, like Teams does for a guest's file that the
+    /// home tenant may not share outside.
+    NotShared(DoneFile),
     ShareFailed(UploadedFile),
     Failed,
 }
@@ -389,19 +394,23 @@ impl AttachmentTray {
     pub fn finish_upload(&mut self, id: u64, result: UploadResult) -> Option<UploadedFile> {
         if !self.items.iter().any(|item| item.id == id) {
             return match result {
-                UploadResult::Done(done) => done.uploaded,
+                UploadResult::Done(done) | UploadResult::NotShared(done) => done.uploaded,
                 UploadResult::ShareFailed(uploaded) => Some(uploaded),
                 UploadResult::Failed => None,
             };
         }
+        let not_shared = matches!(result, UploadResult::NotShared(_));
         if let Some(ItemKind::File { upload, .. }) = self.kind_of_mut(id)
             && matches!(upload, UploadState::Uploading(_) | UploadState::Sharing(_))
         {
             *upload = match result {
-                UploadResult::Done(done) => UploadState::Done(done),
+                UploadResult::Done(done) | UploadResult::NotShared(done) => UploadState::Done(done),
                 UploadResult::ShareFailed(uploaded) => UploadState::ShareFailed(uploaded),
                 UploadResult::Failed => UploadState::Failed,
             };
+            if not_shared {
+                self.notice = Some(NOT_SHARED_NOTICE.to_owned());
+            }
         }
         None
     }
@@ -950,10 +959,10 @@ mod tests {
 
     use super::{
         AttachmentTray, Classification, DoneFile, FILES_LATER_NOTICE, INLINE_IMAGE_MAX_BYTES,
-        INLINE_TOTAL_MAX_BYTES, InlineFormat, ItemKind, LoadedFile, MAX_ATTACHMENTS, OutgoingImage,
-        PasteAction, PreviewImage, RemoteImage, Tone, UploadResult, chip_state, classify,
-        limit_notice, paste_action, pasted_image_name, prepare_pasted_image, preview_size,
-        read_attachment, sniff_inline_format,
+        INLINE_TOTAL_MAX_BYTES, InlineFormat, ItemKind, LoadedFile, MAX_ATTACHMENTS,
+        NOT_SHARED_NOTICE, OutgoingImage, PasteAction, PreviewImage, RemoteImage, Tone,
+        UploadResult, chip_state, classify, limit_notice, paste_action, pasted_image_name,
+        prepare_pasted_image, preview_size, read_attachment, sniff_inline_format,
     };
     use crate::remote_image::RemoteKind;
 
@@ -995,6 +1004,7 @@ mod tests {
             web_url: "https://x".into(),
             web_dav_url: None,
             etag: "\"{G},1\"".into(),
+            home_drive: false,
         }
     }
 
@@ -1310,6 +1320,18 @@ mod tests {
         tray.set_progress(id, 10);
         tray.finish_upload(id, UploadResult::Failed);
         assert!(!tray.blocks_send());
+    }
+
+    #[test]
+    fn a_file_that_could_not_be_shared_still_goes_out_with_a_notice() {
+        let (mut tray, id) = tray_with_file();
+        let UploadResult::Done(done) = done("plan.pdf") else {
+            unreachable!()
+        };
+        tray.finish_upload(id, UploadResult::NotShared(done));
+        assert!(!tray.blocks_send());
+        assert_eq!(tray.outgoing_files().len(), 1);
+        assert_eq!(tray.notice(), Some(NOT_SHARED_NOTICE));
     }
 
     #[test]
