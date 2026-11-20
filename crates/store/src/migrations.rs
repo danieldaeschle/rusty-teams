@@ -137,6 +137,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0032_external_people.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0033_full_chat_refresh_for_external_people.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {
