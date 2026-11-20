@@ -206,7 +206,7 @@ mod frames {
     use crate::views::forward_dialog::{FORWARD_CARD_TAG, FORWARD_PREVIEW_TAG};
     use crate::views::group_name::{GROUP_NAME_BUTTON, GROUP_NAME_FORM};
     use crate::views::message_row::{
-        BUBBLE_TAGS, IMPORTANCE_LABEL_TAG, bubble_padding_y, select_box_selector,
+        BUBBLE_META_TAGS, BUBBLE_TAGS, IMPORTANCE_LABEL_TAG, bubble_padding_y, select_box_selector,
     };
     use crate::views::pin_banner::{BANNER_INSET, PIN_BANNER_TAG};
     use crate::views::post_card::{
@@ -1439,6 +1439,62 @@ mod frames {
             .filter(|pair| pair[0].signum() != pair[1].signum())
             .count();
         assert_eq!(reversals, 0, "resting {resting:?}, frames {positions:?}");
+    }
+
+    #[gpui_kit::test]
+    fn the_time_of_a_short_own_message_with_a_reaction_stays_in_its_bubble(
+        cx: &mut TestAppContext,
+    ) {
+        const SHORT_CHAT: &str = "demo-chat-priya";
+        let (handle, app) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            app.update(cx, |state, cx| {
+                let reactions = vec![teams_core::ReactionInfo {
+                    reaction_type: "like".to_owned(),
+                    user_id: Some(demo::MARA_ID.to_owned()),
+                    user_name: Some("Mara Lindqvist".to_owned()),
+                    created_at: Some(chrono::Utc::now()),
+                }];
+                let record = store::MessageRecord {
+                    conversation_id: SHORT_CHAT.to_owned(),
+                    message_id: "guard-short".to_owned(),
+                    sender_id: Some(demo::DEMO_USER_ID.to_owned()),
+                    sender_name: Some("Me".to_owned()),
+                    created_at: chrono::Utc::now().max(demo::at(0, 10, 48)),
+                    body_html: "<p>danke</p>".to_owned(),
+                    links_json: "[]".to_owned(),
+                    attachments_json: "[]".to_owned(),
+                    reactions_json: serde_json::to_string(&reactions).expect("reactions"),
+                    mentions_json: "[]".to_owned(),
+                    ..Default::default()
+                };
+                state
+                    .store
+                    .upsert_messages(&[record])
+                    .expect("store message");
+                state.select(Selection::Chat(SHORT_CHAT.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(TIMELINE_TAG));
+        collect(&mut visual, None);
+        let pairs: Vec<(Bounds<Pixels>, Bounds<Pixels>)> = BUBBLE_TAGS
+            .iter()
+            .zip(BUBBLE_META_TAGS)
+            .filter_map(|(bubble, meta)| {
+                Some((visual.debug_bounds(bubble)?, visual.debug_bounds(meta)?))
+            })
+            .collect();
+        let (bubble, meta) = pairs
+            .iter()
+            .max_by(|left, right| f32::from(left.0.top()).total_cmp(&f32::from(right.0.top())))
+            .expect("the newest bubble and its time");
+        assert_eq!(
+            f32::from(bubble.right() - meta.right()),
+            8.,
+            "time {meta:?} is not 8 px inside its bubble {bubble:?}"
+        );
     }
 
     #[gpui_kit::test]
