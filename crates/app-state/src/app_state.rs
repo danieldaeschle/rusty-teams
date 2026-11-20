@@ -644,6 +644,12 @@ impl AppState {
             .flatten()
             .unwrap_or_default();
         self.directory.folders = data::folders(&self.store, &self.favorite_ids);
+        self.directory.external = self
+            .store
+            .external_people()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         self.reapply_section_changes();
         self.directory.section_settings = teams_core::stored_section_settings(&self.store);
         self.adopt_folder_expanded();

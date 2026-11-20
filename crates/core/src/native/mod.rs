@@ -5,7 +5,9 @@ mod source;
 
 pub use chat::{NativeMember, chat_type, graph_chat, graph_chat_from_aggregator};
 pub use message::graph_message;
-pub use source::{NativeChats, known_profile};
+pub use source::{
+    NativeChats, external_people, is_email_address, known_profile, remember_external,
+};
 
 #[cfg(test)]
 mod event_tests {

@@ -85,6 +85,8 @@ impl<R: Remote> SyncEngine<R> {
             let (records, hidden) = self.split_page(&page, &my_user_id)?;
             let any_changed = self.any_chat_changed(&records)?;
             self.store.upsert_chats(&records)?;
+            self.store
+                .upsert_external_people(&crate::native::external_people())?;
             self.fill_kept_previews(&records)?;
             kept_ids.extend(records.iter().map(|record| record.id.clone()));
             hidden_ids.extend(hidden);

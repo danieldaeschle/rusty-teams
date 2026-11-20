@@ -5,6 +5,7 @@ mod calendar_accounts;
 mod chats;
 mod drafts;
 mod error;
+mod external_people;
 mod folders;
 mod image_files;
 mod images;

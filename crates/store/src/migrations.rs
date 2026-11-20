@@ -133,6 +133,10 @@ const MIGRATIONS: &[Migration] = &[
         script: include_str!("migrations/0031_agent_meeting_proposals.sql"),
         after: None,
     },
+    Migration {
+        script: include_str!("migrations/0032_external_people.sql"),
+        after: None,
+    },
 ];
 
 pub fn latest_version() -> i64 {

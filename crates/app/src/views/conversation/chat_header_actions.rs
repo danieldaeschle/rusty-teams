@@ -198,6 +198,22 @@ pub fn member_count(count: usize) -> Div {
         .child(count.to_string())
 }
 
+pub fn external_badge() -> Div {
+    div()
+        .debug_selector(|| EXTERNAL_BADGE.into())
+        .flex_none()
+        .ml(px(6.))
+        .px(px(6.))
+        .rounded(px(4.))
+        .bg(theme::row_hover())
+        .text_size(px(11.))
+        .line_height(px(18.))
+        .text_color(theme::text_soft())
+        .child("External")
+}
+
+pub const EXTERNAL_BADGE: &str = "chat-header/external";
+
 const TITLE_NAMES: usize = 3;
 const NAME_DOT: f32 = 10.;
 

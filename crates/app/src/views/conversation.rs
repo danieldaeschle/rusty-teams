@@ -23,7 +23,7 @@ use teams_core::{
 };
 
 mod channel_details;
-mod chat_header_actions;
+pub(crate) mod chat_header_actions;
 mod copilot;
 pub use channel_details::{
     CHANNEL_DETAILS_BUTTON, CHANNEL_DETAILS_PINNED_TAG, CHANNEL_DETAILS_SHARED_TAG,
@@ -4047,6 +4047,7 @@ impl ConversationView {
         let mut stack: Option<AnyElement> = None;
         let mut rename: Option<AnyElement> = None;
         let mut names_title: Option<Div> = None;
+        let mut external: Option<Div> = None;
         let mut header_title = current.title.clone();
         match &current.selection {
             Selection::Chat(chat_id) => {
@@ -4081,6 +4082,9 @@ impl ConversationView {
                         };
                         if is_one_on_one(chat) && !is_notes_chat(chat_id) {
                             stack = Some(add_people_button(&self.app, chat_id));
+                        }
+                        if user_id.is_some_and(|id| directory.is_external(id)) {
+                            external = Some(chat_header_actions::external_badge());
                         }
                     } else {
                         if chat.kind == GROUP_KIND
@@ -4230,6 +4234,7 @@ impl ConversationView {
                                         None => title.child(header_title),
                                     }),
                             )
+                            .children(external)
                             .children(rename),
                     )
                     .when(!subline.is_empty(), |column| {

@@ -3,7 +3,7 @@ use session::{Method, Request, SPACES, Scope, Session};
 
 use crate::error::Result;
 use crate::language_settings::with_headers;
-use crate::messages::ensure_success;
+use crate::messages::{encode, ensure_success};
 use crate::pins::{CsaTransport, DEFAULT_REGION, SessionTransport};
 
 const SKYPE_SCOPE: &str = "user_impersonation";
@@ -20,11 +20,12 @@ pub struct UserProfile {
     pub user_principal_name: Option<String>,
     pub job_title: Option<String>,
     pub department: Option<String>,
+    pub tenant_name: Option<String>,
 }
 
 pub struct UserProfiles<T: CsaTransport = SessionTransport> {
     transport: T,
-    url: String,
+    users_url: String,
 }
 
 impl UserProfiles<SessionTransport> {
@@ -38,13 +39,39 @@ impl<T: CsaTransport> UserProfiles<T> {
     pub fn with_transport(transport: T, region: &str) -> Self {
         UserProfiles {
             transport,
-            url: format!(
-                "https://teams.cloud.microsoft/api/mt/{region}/beta/users/fetchShortProfile?{PROFILE_QUERY}"
-            ),
+            users_url: format!("https://teams.cloud.microsoft/api/mt/{region}/beta/users"),
         }
     }
 
     pub async fn fetch(&self, user_ids: &[String]) -> Result<Vec<UserProfile>> {
+        self.post_mris(
+            &format!("{}/fetchShortProfile?{PROFILE_QUERY}", self.users_url),
+            user_ids,
+        )
+        .await
+    }
+
+    /// People of other organizations; the short profile lookup answers nothing for them.
+    pub async fn fetch_federated(&self, user_ids: &[String]) -> Result<Vec<UserProfile>> {
+        self.post_mris(&format!("{}/fetchFederated", self.users_url), user_ids)
+            .await
+    }
+
+    /// Teams finds a person of another organization only by the full email address.
+    pub async fn search_external(&self, email: &str) -> Result<Vec<UserProfile>> {
+        let answer = self
+            .transport
+            .send(with_headers(Request::get(format!(
+                "{}/{}/externalsearchv3?includeTFLUsers=true",
+                self.users_url,
+                encode(email.trim())
+            ))))
+            .await?;
+        ensure_success(&answer)?;
+        Ok(parse_user_profiles(&json!({"value": answer.body})))
+    }
+
+    async fn post_mris(&self, url: &str, user_ids: &[String]) -> Result<Vec<UserProfile>> {
         let mut profiles = Vec::new();
         for chunk in user_ids.chunks(PROFILES_PER_REQUEST) {
             let mris: Vec<Value> = chunk
@@ -55,7 +82,7 @@ impl<T: CsaTransport> UserProfiles<T> {
                 .transport
                 .send(with_headers(Request::with_body(
                     Method::Post,
-                    self.url.clone(),
+                    url.to_owned(),
                     Value::Array(mris),
                 )))
                 .await?;
@@ -91,6 +118,7 @@ pub fn parse_user_profiles(body: &Value) -> Vec<UserProfile> {
                 user_principal_name: text(profile, "userPrincipalName"),
                 job_title: text(profile, "jobTitle"),
                 department: text(profile, "department"),
+                tenant_name: text(profile, "tenantName"),
             })
         })
         .collect()
@@ -149,5 +177,28 @@ mod tests {
             requests[0].body,
             Some(json!(["8:orgid:ann", "8:orgid:bob"]))
         );
+        assert!(requests[0].url.contains("/users/fetchShortProfile?"));
+    }
+
+    #[tokio::test]
+    async fn people_of_other_organizations_come_from_the_federated_lookup() {
+        let canned = Canned {
+            requests: Mutex::new(Vec::new()),
+        };
+        UserProfiles::with_transport(&canned, "emea")
+            .fetch_federated(&["ann".into()])
+            .await
+            .unwrap();
+        let requests = canned.requests.lock().unwrap();
+        assert!(requests[0].url.ends_with("/emea/beta/users/fetchFederated"));
+        assert_eq!(requests[0].body, Some(json!(["8:orgid:ann"])));
+    }
+
+    #[test]
+    fn a_federated_profile_carries_its_organization() {
+        let profiles = parse_user_profiles(&json!({"value": [
+            {"mri": "8:orgid:ann", "objectId": "ann", "displayName": "Ann", "tenantName": "Example Corp"},
+        ]}));
+        assert_eq!(profiles[0].tenant_name.as_deref(), Some("Example Corp"));
     }
 }

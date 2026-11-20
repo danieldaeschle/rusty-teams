@@ -1442,6 +1442,29 @@ mod frames {
     }
 
     #[gpui_kit::test]
+    fn a_chat_with_someone_of_another_organization_says_external(cx: &mut TestAppContext) {
+        let (handle, app) = mount(cx);
+        let mut visual = VisualTestContext::from_window(handle, cx);
+        visual.simulate_resize(size(px(1280.), px(800.)));
+        visual.update(|_, cx| {
+            app.update(cx, |state, cx| {
+                state
+                    .directory
+                    .external
+                    .insert(demo::MARA_ID.to_owned(), Some("Example Corp".to_owned()));
+                state.select(Selection::Chat(REACTION_CHAT.to_owned()), cx)
+            })
+        });
+        collect(&mut visual, Some(TIMELINE_TAG));
+        collect(&mut visual, None);
+        assert!(
+            visual
+                .debug_bounds(crate::views::conversation::chat_header_actions::EXTERNAL_BADGE)
+                .is_some()
+        );
+    }
+
+    #[gpui_kit::test]
     fn the_time_of_a_short_own_message_with_a_reaction_stays_in_its_bubble(
         cx: &mut TestAppContext,
     ) {

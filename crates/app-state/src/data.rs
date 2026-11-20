@@ -142,11 +142,17 @@ pub struct Directory {
     pub images_requested: HashSet<String>,
     pub images_failed: HashMap<String, Instant>,
     pub avatars_failed: HashMap<String, Instant>,
+    /// People of other organizations, with their organization's name when known.
+    pub external: HashMap<String, Option<String>>,
 }
 
 const IMAGE_RETRY_AFTER: Duration = Duration::from_secs(60);
 
 impl Directory {
+    pub fn is_external(&self, user_id: &str) -> bool {
+        self.external.contains_key(user_id)
+    }
+
     pub fn avatar(&self, user_id: &str) -> Option<&AvatarState> {
         self.avatars.get(user_id)
     }

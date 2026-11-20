@@ -22,6 +22,8 @@ const OLDER_PAGE_MARKER: &str = "chatsvc:older";
 /// Profiles looked up so far; `None` when the directory does not know the id, such as a bot.
 static PROFILES: LazyLock<Mutex<HashMap<String, Option<UserProfile>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static EXTERNAL: LazyLock<Mutex<HashMap<String, Option<String>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 /// Thread members by chat, kept while the thread's roster version stays the same.
 static ROSTERS: LazyLock<Mutex<HashMap<String, (String, Vec<NativeMember>)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
@@ -237,9 +239,24 @@ impl<'a> NativeChats<'a> {
         if unknown.is_empty() {
             return;
         }
-        let Ok(profiles) = UserProfiles::new(self.session).fetch(&unknown).await else {
+        let lookup = UserProfiles::new(self.session);
+        let Ok(mut profiles) = lookup.fetch(&unknown).await else {
             return;
         };
+        let missing: Vec<String> = unknown
+            .iter()
+            .filter(|user_id| !profiles.iter().any(|profile| &profile.user_id == *user_id))
+            .cloned()
+            .collect();
+        if !missing.is_empty()
+            && let Ok(federated) = lookup.fetch_federated(&missing).await
+        {
+            let mut external = EXTERNAL.lock().unwrap();
+            for profile in &federated {
+                external.insert(profile.user_id.clone(), profile.tenant_name.clone());
+            }
+            profiles.extend(federated);
+        }
         let mut known = PROFILES.lock().unwrap();
         for user_id in unknown {
             known.insert(user_id, None);
@@ -273,6 +290,45 @@ impl<'a> NativeChats<'a> {
     }
 }
 
+/// Directory people for profiles found outside the own organization, remembered as external.
+pub fn remember_external(profiles: Vec<UserProfile>) -> Vec<graph::User> {
+    let mut external = EXTERNAL.lock().unwrap();
+    let mut known = PROFILES.lock().unwrap();
+    profiles
+        .into_iter()
+        .map(|profile| {
+            external.insert(profile.user_id.clone(), profile.tenant_name.clone());
+            let user = graph::User {
+                id: profile.user_id.clone(),
+                display_name: profile.display_name.clone(),
+                mail: profile.email.clone(),
+                user_principal_name: profile.user_principal_name.clone(),
+                job_title: profile.job_title.clone(),
+                department: profile.department.clone(),
+            };
+            known.insert(profile.user_id.clone(), Some(profile));
+            user
+        })
+        .collect()
+}
+
+pub fn is_email_address(query: &str) -> bool {
+    let query = query.trim();
+    query.split_once('@').is_some_and(|(local, domain)| {
+        !local.is_empty() && domain.contains('.') && !query.contains(char::is_whitespace)
+    })
+}
+
+/// People of other organizations the lookups met, with their organization's name.
+pub fn external_people() -> Vec<(String, Option<String>)> {
+    EXTERNAL
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(user_id, tenant)| (user_id.clone(), tenant.clone()))
+        .collect()
+}
+
 /// What the directory lookups learned about a user, for callers outside the chat path.
 pub fn known_profile(user_id: &str) -> Option<UserProfile> {
     PROFILES.lock().unwrap().get(user_id).cloned().flatten()
@@ -284,4 +340,15 @@ fn profile_name(user_id: &str) -> Option<String> {
 
 fn profile_email(user_id: &str) -> Option<String> {
     known_profile(user_id).and_then(|profile| profile.email)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_a_full_email_address_asks_for_people_of_other_organizations() {
+        assert!(super::is_email_address(" ann@example.com "));
+        assert!(!super::is_email_address("ann@example"));
+        assert!(!super::is_email_address("ann example@x.com"));
+        assert!(!super::is_email_address("@example.com"));
+    }
 }
