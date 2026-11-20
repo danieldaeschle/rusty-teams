@@ -584,7 +584,7 @@ impl Composer {
                 .px(px(MENU_ROW_PADDING_X))
                 .py(px(MENU_ROW_PADDING_Y))
                 .rounded(px(6.))
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text())
                 .cursor_pointer()
                 .when(index == menu.highlighted, |row| {
@@ -670,7 +670,7 @@ impl Composer {
                 }))
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(format!("Insert {}x{} table", picker.columns, picker.rows)),
                 )

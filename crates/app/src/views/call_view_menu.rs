@@ -27,7 +27,7 @@ fn hint_row(label: &'static str, hint: String, dimmed: bool) -> Div {
         .child(label)
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .child(hint),
         )

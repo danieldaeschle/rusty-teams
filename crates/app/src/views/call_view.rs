@@ -121,7 +121,7 @@ fn hand_badge(position: usize, own: bool) -> Div {
         .rounded_full()
         .bg(theme::amber())
         .text_color(hsla(0., 0., 0.08, 1.))
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .child(if own {
             "Hand raised".to_owned()
@@ -360,7 +360,7 @@ fn tile(
                     div()
                         .max_w_full()
                         .truncate()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(name.to_owned()),
                 )
@@ -578,7 +578,7 @@ fn standout_switch_item(app: &Entity<AppState>, standout: bool, camera_on: bool)
             .when(!camera_on, |row| {
                 row.child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .text_color(theme::text_muted())
                         .child(SHARE_STANDOUT_NEEDS_CAMERA),
                 )
@@ -631,7 +631,7 @@ fn push_to_talk_chip(call: &ActiveCall) -> Option<AnyElement> {
                     .rounded_full()
                     .bg(hsla(0., 0., 0., NAME_PLATE_BACKGROUND))
                     .text_color(theme::white())
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .child(PUSH_TO_TALK_HINT),
             )
             .into_any_element()
@@ -822,7 +822,7 @@ fn sharing_banner(app: &Entity<AppState>, model: &CallModel, sound: bool) -> Opt
             .justify_center()
             .bg(theme::accent())
             .text_color(theme::on_accent())
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .font_weight(FontWeight::SEMIBOLD)
             .child(icon(IconName::ScreenShare, 16., theme::on_accent()))
             .child(format!("You are sharing: {label}"))
@@ -953,7 +953,7 @@ fn reactions_button(app: &Entity<AppState>, model: &CallModel) -> AnyElement {
                             theme::text()
                         },
                     ))
-                    .child(div().text_size(px(13.)).child(if raised {
+                    .child(div().text_size(theme::text_label()).child(if raised {
                         "Lower hand"
                     } else {
                         "Raise hand"
@@ -1218,7 +1218,7 @@ fn person_tile_body(
     );
     let caption = model.tile_caption(remote).map(|text| {
         let label = div()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::text_muted())
             .child(text);
         if waiting {
@@ -1376,14 +1376,14 @@ pub fn render_call_view(
             div()
                 .min_w_0()
                 .truncate()
-                .text_size(px(16.))
+                .text_size(theme::text_heading())
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(model.title.clone()),
         )
         .child(
             div()
                 .flex_none()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(status_color)
                 .child(status),
         )

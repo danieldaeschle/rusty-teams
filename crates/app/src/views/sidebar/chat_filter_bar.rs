@@ -231,7 +231,7 @@ impl SidebarView {
             .flex_none()
             .items_center()
             .rounded_full()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .when(selected, |chip| {
                 chip.bg(theme::accent()).text_color(theme::on_accent())
             })
@@ -261,7 +261,7 @@ impl SidebarView {
             .items_center()
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_muted())
                     .child(filter_no_matches()),
             )
@@ -274,7 +274,7 @@ impl SidebarView {
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::accent_text())
                     .hover(|button| button.bg(theme::surface_raised()))
                     .child(filter_clear_all())

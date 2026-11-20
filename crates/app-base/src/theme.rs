@@ -1,16 +1,23 @@
 use std::borrow::Cow;
+use std::sync::RwLock;
 
 use gpui_kit::component::elevation::{self, Elevation, ElevationTokens};
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 
+mod accent;
+mod color_math;
 mod schemes;
+mod type_scale;
 
+pub use accent::AccentPreset;
 pub use schemes::{
-    ColorScheme, HIGH_CONTRAST, Palette, SCHEMES, Shade, active_palette as palette,
+    ColorScheme, HIGH_CONTRAST, Palette, SCHEMES, Shade, active_accent, active_palette as palette,
     active_scheme as scheme, active_shade as shade, default_scheme, palettes, scheme_by_id,
-    set_active_scheme, set_active_shade, set_thread_scheme, set_thread_shade,
+    set_active_accent, set_active_scheme, set_active_shade, set_thread_scheme, set_thread_shade,
 };
+
+pub use type_scale::{text_body, text_caption, text_heading, text_label, text_small, text_title};
 
 const FONT_FAMILY: &str = "Google Sans Flex";
 const MONO_FAMILIES: [&str; 2] = ["Cascadia Code", "Consolas"];
@@ -49,6 +56,27 @@ fn color_with_alpha(hex: u32) -> Hsla {
     rgba(hex).into()
 }
 
+/// The fonts picked in Settings, and the interface font in use after checking it is installed.
+static CHOSEN_FONTS: RwLock<(Option<SharedString>, Option<SharedString>)> =
+    RwLock::new((None, None));
+static UI_FONT: RwLock<Option<SharedString>> = RwLock::new(None);
+
+/// Sets the installed fonts to use for the interface and for code. `None` keeps the default.
+pub fn set_chosen_fonts(ui: Option<SharedString>, code: Option<SharedString>) {
+    *CHOSEN_FONTS
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = (ui, code);
+}
+
+/// The installed font families people can choose from.
+pub fn installed_fonts(cx: &App) -> Vec<SharedString> {
+    let mut names = cx.text_system().all_font_names();
+    names.retain(|name| !name.starts_with('.'));
+    names.sort_by_key(|name| name.to_lowercase());
+    names.dedup();
+    names.into_iter().map(SharedString::from).collect()
+}
+
 pub fn load_fonts(cx: &mut App) {
     let fonts = FONT_FILES
         .iter()
@@ -60,10 +88,23 @@ pub fn load_fonts(cx: &mut App) {
 
 pub fn apply(cx: &mut App) {
     let installed = cx.text_system().all_font_names();
-    let mono = MONO_FAMILIES
-        .iter()
-        .find(|family| installed.iter().any(|name| name == *family))
-        .map(|family| SharedString::from(*family));
+    let is_installed = |family: &SharedString| installed.iter().any(|name| name == family.as_ref());
+    let (chosen_ui, chosen_code) = CHOSEN_FONTS
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    let ui_font = chosen_ui
+        .filter(is_installed)
+        .unwrap_or_else(|| FONT_FAMILY.into());
+    *UI_FONT
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ui_font.clone());
+    let mono = chosen_code.filter(is_installed).or_else(|| {
+        MONO_FAMILIES
+            .iter()
+            .find(|family| installed.iter().any(|name| name == *family))
+            .map(|family| SharedString::from(*family))
+    });
     let mode = if palette().shade.is_dark() {
         ThemeMode::Dark
     } else {
@@ -71,7 +112,7 @@ pub fn apply(cx: &mut App) {
     };
     Theme::change(mode, None, cx);
     Theme::update(cx, |theme| {
-        theme.font_family = FONT_FAMILY.into();
+        theme.font_family = ui_font;
         theme.font_size = px(BASE_FONT_SIZE);
         if let Some(mono) = mono {
             theme.mono_font_family = mono;
@@ -189,7 +230,11 @@ pub trait ElevatedSurface: Styled + Sized {
 impl<T: Styled + Sized> ElevatedSurface for T {}
 
 pub fn font_family() -> SharedString {
-    FONT_FAMILY.into()
+    UI_FONT
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+        .unwrap_or_else(|| FONT_FAMILY.into())
 }
 
 pub fn background() -> Hsla {

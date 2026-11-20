@@ -91,7 +91,7 @@ impl Render for DatePicker {
                     .child(
                         div()
                             .pl(px(6.))
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .child(app_base::format::month_year_label(self.month)),

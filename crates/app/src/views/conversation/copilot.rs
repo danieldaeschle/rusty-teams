@@ -271,7 +271,7 @@ impl ConversationView {
                             .py(px(10.))
                             .rounded(px(CHIP_RADIUS))
                             .bg(theme::surface_raised())
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .cursor_pointer()
@@ -425,7 +425,7 @@ fn prompt_bubble(prompt: &str) -> Div {
             .py(px(6.))
             .rounded(px(BUBBLE_RADIUS))
             .bg(theme::row_hover())
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::text())
             .child(prompt.to_owned()),
     )
@@ -434,12 +434,12 @@ fn prompt_bubble(prompt: &str) -> Div {
 fn answer_view(index: usize, answer: &CopilotAnswer, working: &str, cx: &App) -> AnyElement {
     match answer {
         CopilotAnswer::Waiting => div()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::text_muted())
             .child(working.to_owned())
             .into_any_element(),
         CopilotAnswer::Failed(error) => div()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::red())
             .child(error.clone())
             .into_any_element(),
@@ -447,7 +447,7 @@ fn answer_view(index: usize, answer: &CopilotAnswer, working: &str, cx: &App) ->
             let spans = teams_core::html_to_spans(&teams_core::markdown_to_html(text));
             div()
                 .w_full()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .child(render_blocks(
                     &layout_card_blocks(&spans),
                     &format!("copilot-answer-{index}"),

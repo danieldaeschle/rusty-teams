@@ -294,7 +294,7 @@ impl ReactionPicker {
             .items_center()
             .justify_center()
             .rounded(px(6.))
-            .text_size(px(20.))
+            .text_size(theme::text_title())
             .font_family(theme::EMOJI_FONT_FAMILY)
             .cursor_pointer()
             .when(selected, |cell| cell.bg(theme::reaction_on_own()))
@@ -367,7 +367,7 @@ impl Render for ReactionPicker {
             )
             .child(
                 div()
-                    .text_size(px(11.))
+                    .text_size(theme::text_caption())
                     .text_color(theme::text_muted())
                     .child(label),
             )

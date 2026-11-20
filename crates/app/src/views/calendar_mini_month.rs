@@ -59,7 +59,7 @@ pub fn mini_month_grid(
                             .justify_center()
                             .rounded_full()
                             .cursor_pointer()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(if cell.in_month {
                                 theme::text()
                             } else {
@@ -87,7 +87,7 @@ pub fn mini_month_grid(
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(11.))
+                .text_size(theme::text_caption())
                 .text_color(theme::text_muted())
                 .child(letter)
         })))

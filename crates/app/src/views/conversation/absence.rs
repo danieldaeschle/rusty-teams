@@ -41,7 +41,7 @@ impl ConversationView {
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text())
                         .child(notice.text()),
                 )

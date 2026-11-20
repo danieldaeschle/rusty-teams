@@ -135,7 +135,7 @@ impl ActivityPanel {
             .items_center()
             .rounded_full()
             .cursor_pointer()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .when(selected, |pill| {
                 pill.bg(theme::accent()).text_color(theme::on_accent())
             })
@@ -210,7 +210,7 @@ impl ActivityPanel {
                     .child(
                         div()
                             .flex_1()
-                            .text_size(px(16.))
+                            .text_size(theme::text_heading())
                             .font_weight(FontWeight::BOLD)
                             .text_color(theme::text())
                             .child("Activity"),
@@ -224,7 +224,7 @@ impl ActivityPanel {
                             .items_center()
                             .rounded(px(8.))
                             .cursor_pointer()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::accent_text())
                             .hover(|button| button.bg(theme::surface_raised()))
                             .child("Mark all as read")
@@ -408,7 +408,7 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
                             headline.line_clamp(2).text_ellipsis()
                         })
                         .when(!headline_wraps, |headline| headline.truncate())
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .line_height(px(HEADLINE_LINE_HEIGHT))
                         .font_weight(if unread {
                             FontWeight::SEMIBOLD
@@ -425,7 +425,7 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(if unread {
                             theme::text_soft()
                         } else {
@@ -436,7 +436,7 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
                 .children(lines.into_iter().map(|line| {
                     div()
                         .truncate()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(line)
                 })),
@@ -447,7 +447,7 @@ fn row_frame(parts: RowParts) -> Stateful<Div> {
                 .items_end()
                 .child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .text_color(theme::text_muted())
                         .child(time),
                 )
@@ -690,7 +690,7 @@ fn group_header(label: &'static str) -> Div {
         .flex()
         .flex_none()
         .items_center()
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_muted())
         .child(label)
@@ -917,7 +917,7 @@ impl Render for ActivityPanel {
                     .flex_none()
                     .items_center()
                     .justify_center()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_muted())
                     .child(self.filter.empty_label())
                     .into_any_element(),

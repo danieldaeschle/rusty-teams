@@ -20,7 +20,7 @@ fn button(id: &'static str, label: &'static str, primary: bool) -> Stateful<Div>
         .items_center()
         .rounded(px(6.))
         .cursor_pointer()
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .when(primary, |button| {
             button
@@ -74,7 +74,7 @@ pub(super) fn agent_toast_content(
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(agent.header.clone()),
                 )
@@ -104,7 +104,7 @@ pub(super) fn agent_toast_content(
                 .w_full()
                 .h(px(20.))
                 .truncate()
-                .text_size(px(14.))
+                .text_size(theme::text_body())
                 .line_height(px(20.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text())

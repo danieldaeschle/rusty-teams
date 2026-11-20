@@ -57,12 +57,14 @@ Canonical values live in `crates/app-ui-kit/src/layout.rs` and theme apply. Do n
 | Island / card radius | 10 | Primary panels and cards (`theme.radius_lg`) |
 | Control radius | 6 | Buttons, nav items, compact chips |
 | Body text | 14 px | Default UI text size |
-| Font family | Google Sans Flex | Product UI; mono Cascadia Code / Consolas when installed |
+| Font family | Google Sans Flex | Default product UI font; people can pick any installed font. Mono defaults to Cascadia Code / Consolas when installed |
 | `SIDEBAR_WIDTH` | 300 | Sidebar island width |
 | `RAIL_ITEM_WIDTH` | 48 | Rail item hit target |
 | `RAIL_WIDTH` | 60 | `RAIL_ITEM_WIDTH + 2 * ISLAND_GAP` |
 | `ROW_PADDING` | 20 | Horizontal padding for conversation / list rows |
 | `COMFY_RUNWAY_WIDTH` | 1060 | Comfortable message runway width |
+
+Text sizes come from the tokens in `crates/app-base/src/theme/type_scale.rs`: `text_caption` 11, `text_small` 12, `text_label` 13, `text_body` 14, `text_heading` 16, `text_title` 20.
 
 Gaps between islands use `ISLAND_GAP` only. New screens reuse these constants; they do not invent parallel numbers.
 
@@ -88,6 +90,8 @@ Core roles (non-exhaustive; prefer an existing role over inventing a hex):
 | `accent`, then `avatar_palette` | Calendar colours: Outlook takes `accent`, every further calendar in the calendar list the next palette colour (`theme::calendar_color`) |
 
 Shades: Dark (default), Light, High contrast. Schemes: Rusty Teams and Teams (`SCHEMES` in `schemes.rs`). Changing a hex belongs in the palette / scheme tables, not in a view.
+
+Rusty Teams takes an accent preset (`theme/accent.rs`), which changes the accent, own bubble, mention and selection roles and leaves surfaces alone. Built-in palettes and accent presets meet WCAG AA for text.
 
 ## Content vs look
 

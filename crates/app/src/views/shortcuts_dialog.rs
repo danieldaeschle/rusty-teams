@@ -77,7 +77,7 @@ fn key_chip(keys: String) -> Div {
         .py(px(2.))
         .rounded(px(6.))
         .bg(theme::popup_hover())
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .text_color(theme::text_muted())
         .child(keys)
 }
@@ -89,7 +89,7 @@ fn group_block(group: Group) -> Div {
             .items_center()
             .justify_between()
             .gap(px(SECTION_GAP))
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .child(div().flex_1().min_w_0().child(shortcut.label))
             .child(key_chip(shortcut.display_keys()))
     });
@@ -98,7 +98,7 @@ fn group_block(group: Group) -> Div {
         .gap(px(ROW_GAP))
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text_muted())
                 .child(group.title()),

@@ -280,7 +280,7 @@ impl Composer {
                 .items_center()
                 .rounded(px(10.))
                 .bg(theme::surface_raised())
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .child(audience_hint(*count))
         })
@@ -443,7 +443,7 @@ impl Composer {
                 ))
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text_strong())
                         .child(me.display_name.clone()),
@@ -531,7 +531,7 @@ impl Composer {
                     .items_center()
                     .rounded(px(6.))
                     .bg(theme::accent())
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::on_accent())
                     .child(POST_LABEL)

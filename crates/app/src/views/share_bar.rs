@@ -44,7 +44,7 @@ fn stop_button(app: &Entity<AppState>) -> Stateful<Div> {
         .rounded_full()
         .bg(theme::red())
         .text_color(theme::white())
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .cursor_pointer()
         .hover(|button| button.opacity(0.85))
@@ -124,7 +124,7 @@ impl Render for ShareBarView {
             .border_1()
             .border_color(theme::red())
             .text_color(theme::text())
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .font_weight(FontWeight::SEMIBOLD)
             .on_mouse_move(wake_on_move)
             .child(

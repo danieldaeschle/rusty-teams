@@ -199,7 +199,7 @@ impl HelpView {
                         div()
                             .flex_1()
                             .min_w(px(0.))
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .line_height(px(20.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
@@ -217,7 +217,7 @@ impl HelpView {
                     .w_full()
                     .min_w(px(0.))
                     .font_family(cx.theme().mono_font_family.clone())
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .line_height(px(18.))
                     .text_color(theme::text_muted())
                     .whitespace_normal()
@@ -260,7 +260,7 @@ impl HelpView {
                                 div()
                                     .flex_1()
                                     .min_w(px(0.))
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
                                     .child(entry.name.clone()),
@@ -304,7 +304,7 @@ impl HelpView {
                     }))
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(label),
                     )
@@ -320,7 +320,7 @@ impl HelpView {
                     div()
                         .px(px(ROW_INSET))
                         .py(px(8.))
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text_muted())
                         .child(tr("settings.help.packages_empty")),
                 )
@@ -343,7 +343,7 @@ impl HelpView {
                 div()
                     .w_full()
                     .min_w(px(0.))
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text())
                     .whitespace_normal()
                     .child(render_blocks(&blocks, "settings-help-preview", false, cx))
@@ -353,7 +353,7 @@ impl HelpView {
                 .w_full()
                 .min_w(px(0.))
                 .font_family(cx.theme().mono_font_family.clone())
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .line_height(px(18.))
                 .text_color(theme::text_muted())
                 .whitespace_normal()
@@ -385,7 +385,7 @@ impl HelpView {
                         div()
                             .flex_1()
                             .min_w(px(0.))
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .child(preview.name.clone()),
@@ -395,7 +395,7 @@ impl HelpView {
                 column.child(
                     div()
                         .flex_none()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(tr("settings.help.preview_truncated")),
                 )
@@ -505,7 +505,7 @@ impl HelpView {
             .child(caption(tr("settings.help.caption_actions")))
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_muted())
                     .pb(px(8.))
                     .px(px(ROW_INSET))

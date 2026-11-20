@@ -96,14 +96,14 @@ fn call_row(
                                 .flex_1()
                                 .min_w_0()
                                 .truncate()
-                                .text_size(px(14.))
+                                .text_size(theme::text_body())
                                 .text_color(title_color)
                                 .child(row.title.clone()),
                         )
                         .child(
                             div()
                                 .flex_none()
-                                .text_size(px(11.))
+                                .text_size(theme::text_caption())
                                 .text_color(theme::text_muted())
                                 .child(row.time_label.clone()),
                         ),
@@ -111,7 +111,7 @@ fn call_row(
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(12.5))
+                        .text_size(theme::text_small())
                         .text_color(if row.missed {
                             theme::red_soft()
                         } else {
@@ -187,7 +187,7 @@ fn history_filters(state: &Entity<AppState>, current: HistoryFilter) -> AnyEleme
             .items_center()
             .rounded_full()
             .cursor_pointer()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .when(selected, |pill| {
                 pill.bg(theme::accent()).text_color(theme::on_accent())
             })
@@ -214,7 +214,7 @@ fn empty_row(text: &'static str) -> AnyElement {
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .text_color(theme::text_muted())
         .child(text)
         .into_any_element()
@@ -250,7 +250,7 @@ fn speed_dial_row(
                 .flex_1()
                 .min_w_0()
                 .truncate()
-                .text_size(px(14.))
+                .text_size(theme::text_body())
                 .text_color(theme::text())
                 .child(entry.name.clone()),
         )
@@ -401,7 +401,7 @@ impl CallsPage {
             .gap(px(12.))
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_muted())
                     .child(tr("calls.page.speed_dial_empty")),
             )
@@ -454,7 +454,7 @@ impl CallsPage {
                     .justify_between()
                     .child(
                         div()
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .child(tr("calls.page.speed_dial")),
@@ -568,7 +568,7 @@ impl CallsPage {
                     .items_center()
                     .child(
                         div()
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .child(tr("calls.page.history")),
@@ -610,7 +610,7 @@ impl Render for CallsPage {
                     .items_center()
                     .child(
                         div()
-                            .text_size(px(16.))
+                            .text_size(theme::text_heading())
                             .font_weight(FontWeight::BOLD)
                             .text_color(theme::text())
                             .child(tr("calls.page.title")),

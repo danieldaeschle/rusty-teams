@@ -382,7 +382,7 @@ impl ConversationView {
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text())
                             .child(item.title.clone()),
                     )
@@ -390,7 +390,7 @@ impl ConversationView {
                         column.child(
                             div()
                                 .truncate()
-                                .text_size(px(12.))
+                                .text_size(theme::text_small())
                                 .text_color(theme::text_muted())
                                 .child(item.byline.clone()),
                         )
@@ -432,7 +432,7 @@ impl ConversationView {
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text())
                             .child(row.name.clone()),
                     )
@@ -440,7 +440,7 @@ impl ConversationView {
                         column.child(
                             div()
                                 .truncate()
-                                .text_size(px(12.))
+                                .text_size(theme::text_small())
                                 .text_color(theme::text_muted())
                                 .child(row.byline.clone()),
                         )
@@ -456,7 +456,7 @@ impl ConversationView {
 fn section_title(text: &'static str) -> Div {
     div()
         .py(px(8.))
-        .text_size(px(14.))
+        .text_size(theme::text_body())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text())
         .child(text)

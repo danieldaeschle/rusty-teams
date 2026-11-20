@@ -326,7 +326,7 @@ impl StartDialog {
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(self.subtitle.clone()),
                     ),
@@ -361,7 +361,7 @@ impl StartDialog {
             .py(px(8.))
             .rounded(px(8.))
             .bg(theme::reply_surface())
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .line_height(relative(1.4))
             .text_color(theme::text_soft())
             .line_clamp(QUOTE_LINES)
@@ -505,7 +505,7 @@ impl StartDialog {
             .gap(px(6.))
             .child(
                 div()
-                    .text_size(px(11.))
+                    .text_size(theme::text_caption())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_faint())
                     .child(if self.selected_session.is_some() {
@@ -537,7 +537,7 @@ impl StartDialog {
             .gap(px(4.))
             .items_center()
             .cursor_pointer()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::text_muted())
             .hover(|toggle| toggle.text_color(theme::text_soft()))
             .child(icon(
@@ -611,7 +611,7 @@ impl StartDialog {
                     .cursor_pointer()
                     .bg(theme::surface_raised())
                     .hover(|button| button.bg(theme::popup_hover()))
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .child(tr("common.cancel"))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(StartDialogEvent::Close))),
             )
@@ -624,7 +624,7 @@ impl StartDialog {
                     .rounded(px(8.))
                     .bg(theme::accent())
                     .text_color(theme::on_accent())
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(start_label)
                     .when(blocked, |button| button.opacity(DISABLED_OPACITY))
@@ -679,7 +679,7 @@ impl Render for StartDialog {
                     .when(self.needs_allow, |card| {
                         card.child(
                             div()
-                                .text_size(px(12.))
+                                .text_size(theme::text_small())
                                 .text_color(theme::text_soft())
                                 .child(tr("agents.start.chat_invisible")),
                         )

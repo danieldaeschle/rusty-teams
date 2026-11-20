@@ -80,7 +80,7 @@ pub(super) fn tinted_chip(text: String, background: Hsla) -> Div {
         .py(px(3.))
         .rounded(px(6.))
         .bg(background)
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::white())
         .child(text)
@@ -125,7 +125,7 @@ pub(super) fn speaker_layer(state: &AppState, model: &CallModel, now: Instant) -
                 div()
                     .max_w_full()
                     .truncate()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .child(model.title.clone()),
             )
             .into_any_element();
@@ -147,7 +147,7 @@ pub(super) fn speaker_layer(state: &AppState, model: &CallModel, now: Instant) -
                 div()
                     .max_w_full()
                     .truncate()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(tile.name.clone()),
             )

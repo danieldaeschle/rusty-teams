@@ -75,7 +75,7 @@ fn render_block(block: &Block, id: String, own: bool, depth: usize, cx: &App) ->
             .border_color(theme::accent())
             .rounded_r(px(4.))
             .bg(theme::quote_fill())
-            .text_size(px(12.5))
+            .text_size(theme::text_small())
             .text_color(theme::text_muted())
             .child(render_block_list(children, &id, own, depth, cx))
             .into_any_element(),
@@ -146,7 +146,7 @@ fn render_code(language: Option<&str>, code: &str, id: String, own: bool, cx: &A
         .bg(theme::code_surface())
         .text_color(theme::text_strong())
         .font_family(code_font(cx))
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .line_height(relative(1.5))
         .when(show_header, |container| {
             container.child(code_header(
@@ -174,7 +174,7 @@ fn render_code_line(code: &str, id: String, own: bool, cx: &App) -> AnyElement {
                 .border_1()
                 .border_color(theme::code_frame())
                 .font_family(code_font(cx))
-                .text_size(px(12.5))
+                .text_size(theme::text_small())
                 .line_height(relative(1.5))
                 .text_color(code_text(own))
                 .child(SelectableRichText::new(
@@ -209,7 +209,7 @@ fn code_header(language: &str, code: &str, id: &str, own: bool) -> Div {
         .justify_between()
         .items_center()
         .font_family(theme::font_family())
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .text_color(muted)
         .child(language.to_owned())
         .child(
@@ -327,7 +327,7 @@ pub fn render_table(
         .border_t_1()
         .border_l_1()
         .border_color(theme::border_strong())
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .children(rows.iter().enumerate().map(|(row_index, row)| {
             let is_header = header && row_index == 0;
             h_flex()

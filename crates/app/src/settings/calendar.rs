@@ -537,7 +537,7 @@ fn work_day_chips(app: &Entity<AppState>, prefs: &CalendarPrefs, first_day: Week
                 .items_center()
                 .justify_center()
                 .rounded(px(6.))
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .font_weight(FontWeight::SEMIBOLD)
                 .map(|chip| {
                     if on {

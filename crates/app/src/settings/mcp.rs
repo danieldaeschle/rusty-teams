@@ -147,7 +147,7 @@ fn locations_label(locations: &[Location]) -> &'static str {
 fn install_detail(target: Target, state: Option<&InstallState>) -> AnyElement {
     let muted = |text: &'static str| {
         div()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::text_muted())
             .child(text)
             .into_any_element()
@@ -157,7 +157,7 @@ fn install_detail(target: Target, state: Option<&InstallState>) -> AnyElement {
     };
     if state.stale {
         return div()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::amber())
             .child("Out of date - Update")
             .into_any_element();
@@ -166,7 +166,7 @@ fn install_detail(target: Target, state: Option<&InstallState>) -> AnyElement {
         return h_flex()
             .gap(px(6.))
             .items_center()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::green())
             .child(div().size(px(6.)).rounded_full().bg(theme::green()))
             .child(locations_label(&state.installed_at))
@@ -398,7 +398,7 @@ fn inert_button(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Sta
         .items_center()
         .rounded(px(7.))
         .bg(theme::surface_raised())
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_faint())
         .child(label.into())
@@ -414,7 +414,7 @@ fn note_box(content: impl IntoElement, margin_top: f32) -> Div {
         .gap(px(8.))
         .rounded(px(8.))
         .bg(theme::surface_raised())
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .text_color(theme::text_muted())
         .child(content)
 }
@@ -477,7 +477,7 @@ impl McpView {
                 div()
                     .w(px(FIELD_LABEL_WIDTH))
                     .flex_none()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::text_faint())
                     .child(label),
             )
@@ -492,7 +492,7 @@ impl McpView {
                     .rounded(px(7.))
                     .bg(theme::surface_raised())
                     .font_family(cx.theme().mono_font_family.clone())
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::text_soft())
                     .child(div().truncate().child(value)),
             )
@@ -592,7 +592,7 @@ impl McpView {
                     div()
                         .px(px(ROW_INSET))
                         .pb(px(4.))
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::red_soft())
                         .child("Enter a port from 1 to 65535. Nothing was saved."),
                 )
@@ -639,7 +639,7 @@ impl McpView {
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(if active {
                         theme::text()
@@ -701,7 +701,7 @@ impl McpView {
                 .items_center()
                 .rounded(px(6.))
                 .bg(theme::surface_raised())
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_strong())
                 .child(div().max_w(px(CHIP_MAX_WIDTH)).truncate().child(title))
                 .child(
@@ -734,7 +734,7 @@ impl McpView {
             .border_1()
             .border_color(theme::border_strong())
             .cursor_pointer()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::accent_text())
             .child(scope.add_label())
             .on_click(cx.listener(move |this, _, window, cx| this.open_picker(scope, window, cx)));
@@ -803,14 +803,14 @@ impl McpView {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text())
                             .child(candidate.title.clone()),
                     )
                     .child(
                         div()
                             .flex_none()
-                            .text_size(px(11.))
+                            .text_size(theme::text_caption())
                             .text_color(if added {
                                 theme::accent_text()
                             } else {
@@ -987,7 +987,7 @@ impl McpView {
                             .justify_center()
                             .rounded(px(7.))
                             .bg(theme::surface_raised())
-                            .text_size(px(11.))
+                            .text_size(theme::text_caption())
                             .font_weight(FontWeight::BOLD)
                             .text_color(theme::text_soft())
                             .child(target_logo(target)),
@@ -997,7 +997,7 @@ impl McpView {
                             .flex_1()
                             .child(
                                 div()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text())
                                     .child(target.label()),
@@ -1011,7 +1011,7 @@ impl McpView {
                     .px(px(ROW_INSET))
                     .pb(px(4.))
                     .pl(px(60.))
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::red_soft())
                     .child(message.clone())
             }))

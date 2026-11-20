@@ -62,7 +62,7 @@ fn menu_row(id: ElementId, highlighted: bool) -> Stateful<Div> {
         .gap(px(10.))
         .items_center()
         .rounded(px(6.))
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .text_color(theme::text())
         .cursor_pointer()
         .when(highlighted, |row| row.bg(theme::popup_hover()))
@@ -361,7 +361,7 @@ impl Composer {
                 .child(div().flex_1().child(preset.label))
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_faint())
                         .child(preset.time_label.clone()),
                 )
@@ -405,7 +405,7 @@ impl Composer {
                 .flex()
                 .items_center()
                 .rounded(px(6.))
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .cursor_pointer()
                 .when(selected, |chip| {
                     chip.bg(theme::accent()).text_color(theme::on_accent())
@@ -461,7 +461,7 @@ impl Composer {
                             .rounded(px(6.))
                             .bg(theme::accent())
                             .text_color(theme::on_accent())
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .font_weight(FontWeight::SEMIBOLD)
                             .child("Schedule")
                             .when(!valid, |button| button.opacity(DISABLED_OPACITY))
@@ -474,7 +474,7 @@ impl Composer {
             )
             .children(choice.err().map(|message| {
                 div()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::red_soft())
                     .child(message)
             }))

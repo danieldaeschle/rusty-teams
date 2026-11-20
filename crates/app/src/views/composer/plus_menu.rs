@@ -157,7 +157,7 @@ impl Composer {
             )
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text())
                     .child(action.label()),
             )

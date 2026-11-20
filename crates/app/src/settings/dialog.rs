@@ -8,6 +8,7 @@ use gpui_kit::*;
 
 use super::caldav_form::{CalDavForm, IcsForm};
 use super::devices::DevicesView;
+use super::font_picker::FontPicker;
 use super::help::HelpView;
 use super::mcp::McpView;
 use super::nav::{NavLayout, NavSearch, first_match, label, matches, render_nav};
@@ -71,6 +72,7 @@ pub struct SettingsDialog {
     agents: Option<Entity<AgentsSettings>>,
     caldav: Option<Entity<CalDavForm>>,
     ics: Option<Entity<IcsForm>>,
+    font_picker: Option<Entity<FontPicker>>,
     body_scroll: ScrollHandle,
     focus_handle: FocusHandle,
     search: Entity<InputState>,
@@ -113,6 +115,7 @@ impl SettingsDialog {
             agents: None,
             caldav: None,
             ics: None,
+            font_picker: None,
             body_scroll: ScrollHandle::new(),
             focus_handle,
             search,
@@ -128,6 +131,14 @@ impl SettingsDialog {
             self.body_scroll = ScrollHandle::new();
         }
         self.section = section;
+        if section == SettingsSection::Appearance {
+            if self.font_picker.is_none() {
+                let app = self.app.clone();
+                self.font_picker = Some(cx.new(|cx| FontPicker::new(app, window, cx)));
+            }
+        } else {
+            self.font_picker = None;
+        }
         if section == SettingsSection::Devices {
             if self.devices.is_none() {
                 let app = self.app.clone();
@@ -215,7 +226,10 @@ impl SettingsDialog {
             SettingsSection::Notifications => {
                 notifications::render(&self.center, &self.app, cx).into_any_element()
             }
-            SettingsSection::Appearance => appearance::render(&self.app, cx).into_any_element(),
+            SettingsSection::Appearance => self.font_picker.as_ref().map_or_else(
+                || div().into_any_element(),
+                |picker| appearance::render(&self.app, picker, cx).into_any_element(),
+            ),
             SettingsSection::Chats => chats::render(&self.app, cx).into_any_element(),
             SettingsSection::Calls => calls::render(&self.center, cx).into_any_element(),
             SettingsSection::Calendar => calendar::render_view(&self.app, cx).into_any_element(),
@@ -258,7 +272,7 @@ impl SettingsDialog {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(20.))
+                    .text_size(theme::text_title())
                     .line_height(px(28.))
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())

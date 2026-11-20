@@ -76,7 +76,7 @@ pub fn lock_chip(model: &CallModel) -> Option<AnyElement> {
             .rounded_full()
             .bg(theme::amber())
             .text_color(dark_text())
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .font_weight(FontWeight::SEMIBOLD)
             .child(icon(IconName::Lock, 13., dark_text()))
             .child("Locked")
@@ -101,7 +101,7 @@ pub fn lock_banner(app: &Entity<AppState>, model: &CallModel) -> Option<AnyEleme
             .justify_center()
             .bg(theme::surface_raised())
             .text_color(theme::text())
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .font_weight(FontWeight::SEMIBOLD)
             .child("The meeting is locked. Nobody new can join.")
             .child(
@@ -263,7 +263,7 @@ fn section_header(title: String, action: Option<AnyElement>) -> Div {
         .px(px(20.))
         .items_center()
         .justify_between()
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_muted())
         .child(title)
@@ -280,7 +280,7 @@ fn hand_badge(position: usize) -> Div {
         .rounded_full()
         .bg(theme::amber())
         .text_color(dark_text())
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::SEMIBOLD)
         .child(icon(IconName::Hand, 11., dark_text()))
         .child(position.to_string())
@@ -356,14 +356,14 @@ fn person_row(
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(truncated(&row.name, NAME_LIMIT)),
                 )
                 .children(subtitle.map(|text| {
                     div()
                         .truncate()
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .text_color(theme::text_muted())
                         .child(text)
                 })),
@@ -456,7 +456,7 @@ fn lobby_section(
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(truncated(&guest.name, NAME_LIMIT)),
                     )
@@ -636,7 +636,13 @@ fn option_row(label: &'static str, control: AnyElement) -> Div {
         .gap(px(12.))
         .items_center()
         .justify_between()
-        .child(div().flex_1().min_w_0().text_size(px(14.)).child(label))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_size(theme::text_body())
+                .child(label),
+        )
         .child(control)
 }
 
@@ -716,7 +722,7 @@ fn dialog_body(app: &Entity<AppState>, dialog: &OptionsDialog) -> Div {
         Some(draft) => body.child(options_fields(app, draft)),
         None if dialog.is_loading() => body.child(
             div()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text_muted())
                 .child("Loading the meeting options..."),
         ),
@@ -726,7 +732,7 @@ fn dialog_body(app: &Entity<AppState>, dialog: &OptionsDialog) -> Div {
         div()
             .id("options-error")
             .w_full()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::red())
             .child(error.clone())
     }))

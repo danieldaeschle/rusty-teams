@@ -48,7 +48,7 @@ fn label_chip(text: String) -> Div {
         .rounded_full()
         .bg(hsla(0., 0., 0., LABEL_BACKGROUND))
         .text_color(theme::white())
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .font_weight(FontWeight::SEMIBOLD)
         .child(icon(IconName::ScreenShare, 15., theme::white()))
         .child(text)
@@ -61,7 +61,7 @@ fn picture(image: Option<Arc<RenderImage>>, stage: &ShareStage) -> AnyElement {
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(14.))
+            .text_size(theme::text_body())
             .text_color(theme::text_muted())
             .child(WAITING_TEXT)
             .into_any_element();
@@ -125,7 +125,7 @@ fn zoom_chip(app: &Entity<AppState>, stage: &ShareStage) -> Option<AnyElement> {
                     .rounded_full()
                     .bg(hsla(0., 0., 0., LABEL_BACKGROUND))
                     .text_color(theme::white())
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .cursor_pointer()
                     .hover(|chip| chip.opacity(0.85))
@@ -153,7 +153,7 @@ pub fn popped_placeholder(app: &Entity<AppState>) -> AnyElement {
         .gap(px(12.))
         .rounded(px(STAGE_RADIUS))
         .bg(stage_black())
-        .text_size(px(14.))
+        .text_size(theme::text_body())
         .text_color(theme::text_muted())
         .child(POPPED_TEXT)
         .child(
@@ -269,7 +269,7 @@ pub fn render_stage(
                                 .py(px(6.))
                                 .rounded_full()
                                 .bg(hsla(0., 0., 0., LABEL_BACKGROUND))
-                                .text_size(px(12.))
+                                .text_size(theme::text_small())
                                 .text_color(theme::white())
                                 .child(FULL_WINDOW_HINT),
                         ),

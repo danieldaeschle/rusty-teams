@@ -315,7 +315,7 @@ impl FormatButton {
                 .gap(px(4.))
                 .items_center()
                 .justify_between()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(color)
                 .child(label.unwrap_or_default())
                 .child(icon(IconName::ChevronDown, 12., color))
@@ -613,7 +613,7 @@ fn menu_row(
         .child(
             div()
                 .flex_1()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text())
                 .child(format.menu_label()),
         )
@@ -660,7 +660,7 @@ fn link_editor(field: &Entity<InputState>, refused: bool, on_apply: ApplyHandler
                 .rounded(px(6.))
                 .bg(theme::accent())
                 .text_color(theme::on_accent())
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
                 .hover(|button| button.opacity(0.9))
@@ -676,7 +676,7 @@ fn link_editor(field: &Entity<InputState>, refused: bool, on_apply: ApplyHandler
             div()
                 .pt(px(4.))
                 .px(px(2.))
-                .text_size(px(11.5))
+                .text_size(theme::text_caption())
                 .text_color(theme::red_soft())
                 .child("Only http, https and mailto links"),
         )

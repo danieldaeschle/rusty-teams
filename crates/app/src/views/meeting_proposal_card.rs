@@ -61,7 +61,7 @@ fn card(proposal: &MeetingProposal, now: DateTime<Utc>) -> Div {
         .debug_selector(|| MEETING_PROPOSAL_CARD.into())
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::accent_text())
                 .child(format!(
                     "{agent} proposes a meeting - {}",
@@ -70,24 +70,24 @@ fn card(proposal: &MeetingProposal, now: DateTime<Utc>) -> Div {
         )
         .child(
             div()
-                .text_size(px(14.))
+                .text_size(theme::text_body())
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(draft.subject.clone()),
         )
         .child(
             div()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .child(when_label(draft.start, draft.end)),
         )
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .child(format!("Invites {}", draft.attendees.join(", "))),
         )
         .children(description_excerpt(&draft.description).map(|excerpt| {
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .whitespace_normal()
                 .child(excerpt)

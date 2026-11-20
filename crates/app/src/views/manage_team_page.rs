@@ -98,7 +98,7 @@ impl ManageTeamPage {
                 div()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(16.))
+                    .text_size(theme::text_heading())
                     .font_weight(FontWeight::BOLD)
                     .text_color(theme::text())
                     .child(team_name.to_owned()),
@@ -111,7 +111,7 @@ impl ManageTeamPage {
                     .items_center()
                     .border_b_2()
                     .border_color(theme::accent())
-                    .text_size(px(14.))
+                    .text_size(theme::text_body())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
                     .child("Members"),
@@ -126,7 +126,7 @@ impl ManageTeamPage {
                     .items_center()
                     .rounded(px(6.))
                     .cursor_pointer()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_soft())
                     .hover(|button| button.bg(theme::row_hover()))
                     .child(icon(IconName::ExternalLink, 14., theme::text_muted()))
@@ -178,7 +178,7 @@ impl ManageTeamPage {
             .gap(px(6.))
             .items_center()
             .cursor_pointer()
-            .text_size(px(14.))
+            .text_size(theme::text_body())
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text())
             .child(icon(
@@ -233,14 +233,14 @@ fn member_row(member: &TeamMember, directory: &Directory) -> Div {
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .text_color(theme::text())
                         .child(member.name.clone()),
                 )
                 .children(member.email.clone().map(|email| {
                     div()
                         .truncate()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(email)
                 })),
@@ -249,7 +249,7 @@ fn member_row(member: &TeamMember, directory: &Directory) -> Div {
             div()
                 .flex_none()
                 .w(px(ROLE_WIDTH))
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text_soft())
                 .child(if member.owner { "Owner" } else { "Member" }),
         )
@@ -260,7 +260,7 @@ fn notice(text: String) -> Div {
         .py(px(32.))
         .flex()
         .justify_center()
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .text_color(theme::text_muted())
         .child(text)
 }

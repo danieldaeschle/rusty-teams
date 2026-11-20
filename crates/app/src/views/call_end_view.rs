@@ -72,7 +72,7 @@ pub fn render_call_end(app: &Entity<AppState>, state: &AppState) -> Option<AnyEl
                             .gap(px(TEXT_GAP))
                             .child(
                                 div()
-                                    .text_size(px(20.))
+                                    .text_size(theme::text_title())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme::text_strong())
                                     .text_center()
@@ -81,7 +81,7 @@ pub fn render_call_end(app: &Entity<AppState>, state: &AppState) -> Option<AnyEl
                             .child(
                                 div()
                                     .w_full()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .text_color(theme::text_muted())
                                     .text_center()
                                     .child(screen.description()),

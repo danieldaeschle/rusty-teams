@@ -163,7 +163,7 @@ impl EventPeek {
                 div()
                     .w_full()
                     .min_w(px(0.))
-                    .text_size(px(14.))
+                    .text_size(theme::text_body())
                     .text_color(theme::text())
                     .child(render_blocks(blocks, "calendar-peek-agenda", false, cx))
                     .into_any_element(),
@@ -179,7 +179,7 @@ impl EventPeek {
                 .w_full()
                 .min_w(px(0.))
                 .whitespace_normal()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text_soft())
                 .child(preview)
                 .into_any_element(),
@@ -303,7 +303,7 @@ impl EventPeek {
                     .items_center()
                     .child(
                         div()
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .text_color(theme::text())
                             .child(peek_when_label(&self.event)),
                     )
@@ -315,7 +315,7 @@ impl EventPeek {
                                 .child(icon(IconName::Repeat, theme::text_muted()))
                                 .child(
                                     div()
-                                        .text_size(px(13.))
+                                        .text_size(theme::text_label())
                                         .text_color(theme::text_soft())
                                         .child(tr("calendar.peek.series")),
                                 ),
@@ -333,7 +333,7 @@ impl EventPeek {
                 .child(icon(IconName::MapPin, theme::text_muted()))
                 .child(
                     div()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .text_color(theme::text())
                         .child(location),
                 )
@@ -357,7 +357,7 @@ impl EventPeek {
                 .child(icon(IconName::Calendar, theme::text_muted()))
                 .child(
                     div()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .text_color(theme::text())
                         .child(name),
                 ),
@@ -378,7 +378,7 @@ impl EventPeek {
                         .gap(px(2.))
                         .children(self.event.reminders.iter().map(|minutes| {
                             div()
-                                .text_size(px(14.))
+                                .text_size(theme::text_body())
                                 .text_color(theme::text())
                                 .child(reminder_label(*minutes))
                         })),
@@ -400,7 +400,7 @@ impl EventPeek {
                         .min_w(px(0.))
                         .child(
                             div()
-                                .text_size(px(14.))
+                                .text_size(theme::text_body())
                                 .text_color(theme::text())
                                 .whitespace_normal()
                                 .child(title),
@@ -408,7 +408,7 @@ impl EventPeek {
                         .child(
                             div()
                                 .id("calendar-peek-view-source")
-                                .text_size(px(12.))
+                                .text_size(theme::text_small())
                                 .text_color(theme::accent_text())
                                 .cursor_pointer()
                                 .child(tr("calendar.peek.view_source"))
@@ -491,13 +491,13 @@ impl EventPeek {
                             .gap(px(2.))
                             .child(
                                 div()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .text_color(theme::text())
                                     .child(invite_line),
                             )
                             .children(summary.map(|text| {
                                 div()
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_muted())
                                     .child(text)
                             })),
@@ -664,7 +664,7 @@ impl EventPeek {
             .pr(px(CARD_PADDING))
             .child(
                 div()
-                    .text_size(px(20.))
+                    .text_size(theme::text_title())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
                     .child(self.subject_label()),
@@ -679,7 +679,7 @@ impl EventPeek {
                             .flex_1()
                             .min_w(px(0.))
                             .whitespace_normal()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text_soft())
                             .child(names),
                     )
@@ -741,7 +741,7 @@ impl EventPeek {
             .border_color(theme::border())
             .child(
                 div()
-                    .text_size(px(16.))
+                    .text_size(theme::text_heading())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
                     .child(tr("calendar.peek.tracking")),
@@ -762,7 +762,7 @@ impl EventPeek {
             return panel
                 .child(
                     div()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text_muted())
                         .child(note),
                 )
@@ -795,7 +795,7 @@ impl EventPeek {
                     ))
                     .child(
                         div()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .child(format!("{} {}", group_label(group), members.len())),
@@ -929,7 +929,7 @@ fn avatar(initials: String) -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::accent_text())
         .child(initials)
@@ -946,14 +946,14 @@ fn person_row(name: &str, role: String) -> Div {
                 .min_w(px(0.))
                 .child(
                     div()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .text_color(theme::text())
                         .truncate()
                         .child(name.to_owned()),
                 )
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(role),
                 ),

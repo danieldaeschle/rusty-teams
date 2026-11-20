@@ -169,7 +169,7 @@ impl SidebarView {
                         .flex_none()
                         .items_center()
                         .rounded_full()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .cursor_pointer()
                         .when(selected, |chip| {
                             chip.bg(theme::accent()).text_color(theme::on_accent())

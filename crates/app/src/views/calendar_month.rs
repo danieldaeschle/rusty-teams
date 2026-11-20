@@ -54,7 +54,7 @@ fn event_chip(event: &CalendarEvent, color: Hsla, offset: FixedOffset) -> Div {
         .items_center()
         .rounded(px(6.))
         .bg(color.opacity(if all_day { 0.28 } else { 0.14 }))
-        .text_size(px(11.5))
+        .text_size(theme::text_caption())
         .text_color(theme::text())
         .children(time.map(|time| div().flex_none().text_color(theme::text_soft()).child(time)))
         .child(div().flex_1().min_w_0().truncate().child({
@@ -125,7 +125,7 @@ fn day_cell(
                     .items_center()
                     .justify_center()
                     .rounded_full()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .when(is_today, |number| {
                         number
                             .bg(theme::accent())
@@ -153,7 +153,7 @@ fn day_cell(
             cell.child(
                 div()
                     .px(px(6.))
-                    .text_size(px(11.5))
+                    .text_size(theme::text_caption())
                     .text_color(theme::text_muted())
                     .child(more_label(hidden)),
             )
@@ -216,7 +216,7 @@ pub fn month_grid(
                     div()
                         .flex_1()
                         .px(px(10.))
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(weekday_name(*day, WeekdayWidth::Short))
                 })),

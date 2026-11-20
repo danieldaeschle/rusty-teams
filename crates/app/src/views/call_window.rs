@@ -160,7 +160,7 @@ impl CallWindowView {
                         div()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text())
                             .child(title),
@@ -243,7 +243,7 @@ impl Render for CallWindowView {
             .size_full()
             .bg(theme::background())
             .text_color(theme::text())
-            .text_size(px(14.))
+            .text_size(theme::text_body())
             .on_action(call_action::<ToggleCallMute>(
                 &self.app,
                 AppState::toggle_call_mute,

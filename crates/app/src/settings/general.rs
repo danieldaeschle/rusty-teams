@@ -441,7 +441,7 @@ fn never_chips(app: &Entity<AppState>, target: &str, cx: &App) -> Div {
             .items_center()
             .rounded(px(6.))
             .bg(theme::surface_raised())
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::text_strong())
             .child(translation.language_name(code))
             .child(
@@ -487,7 +487,7 @@ fn add_language_button(choices: Vec<Choice>) -> impl IntoElement {
         .h(px(CHIP_HEIGHT))
         .px(px(8.))
         .rounded(px(6.))
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .text_color(theme::accent_text())
         .label(format!("+ {}", tr("common.add")))
         .dropdown_menu(move |menu, _, _| {
