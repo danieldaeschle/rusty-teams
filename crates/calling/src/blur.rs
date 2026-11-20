@@ -736,20 +736,23 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mut source = MaskSource::with_inference(SlowSegmenter {
             delay: Duration::from_millis(60),
-            seen,
+            seen: seen.clone(),
         });
         assert!(!source.refresh(|| marked_frame(5)));
         let deadline = Instant::now() + Duration::from_secs(10);
+        while seen.lock().unwrap().is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let mut shown = 1;
         while !source.refresh(|| marked_frame(6)) && Instant::now() < deadline {
             shown += 1;
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(shown >= 3, "the mask came back before the model was done");
-        assert_eq!(source.age(), shown - 1);
+        assert_eq!(source.age(), shown);
         assert_eq!(source.reference().values.len(), 4);
         assert!(!source.refresh(|| marked_frame(7)));
-        assert_eq!(source.age(), shown);
+        assert_eq!(source.age(), shown + 1);
     }
 
     #[test]
