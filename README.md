@@ -14,7 +14,7 @@
 
 [Features](#features) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Roadmap](ROADMAP.md) · [Discord](https://discord.gg/SPQQp3DCH)
 
-<img src=".github/app-demo.png" alt="Rusty Teams with demo data" width="900">
+<img src=".github/app-demo.png" alt="Rusty Teams" width="900">
 
 </div>
 
@@ -131,10 +131,10 @@ The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
 
 ## Quick start
 
-Try it with demo data, no account needed:
+Download the build for your platform from [Releases](https://github.com/danieldaeschle/rusty-teams/releases) and sign in with your work account. Or build it yourself:
 
 ```bash
-cargo run -p app -- --demo
+cargo run --release -p app
 ```
 
 ### Google Calendar (optional)
