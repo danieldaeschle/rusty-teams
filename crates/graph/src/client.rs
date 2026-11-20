@@ -15,15 +15,38 @@ const PEOPLE_PAGE_SIZE: usize = 10;
 
 pub struct Graph {
     session: Session,
+    home_drive: Option<Session>,
 }
 
 impl Graph {
     pub fn new(session: Session) -> Self {
-        Graph { session }
+        Graph {
+            session,
+            home_drive: None,
+        }
+    }
+
+    /// Chat files go to the OneDrive of `home`, the account's home tenant.
+    /// For a guest org, where the account has no OneDrive.
+    pub fn with_home_drive(mut self, home: Session) -> Self {
+        self.home_drive = Some(home);
+        self
     }
 
     pub fn session(&self) -> &Session {
         &self.session
+    }
+
+    /// The session for a file in the home drive when `home` is set and a home drive exists.
+    pub(crate) fn drive_session(&self, home: bool) -> &Session {
+        match &self.home_drive {
+            Some(drive) if home => drive,
+            _ => &self.session,
+        }
+    }
+
+    pub(crate) fn has_home_drive(&self) -> bool {
+        self.home_drive.is_some()
     }
 
     pub async fn me(&self) -> Result<User> {

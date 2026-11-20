@@ -5,7 +5,8 @@ use chatsvc::ConversationRef;
 use chrono::{DateTime, Duration, TimeZone, Utc};
 use graph::{
     Channel, Chat, DriveFolder, HostedImage, Member, Message, MessageExtras, MessageTarget,
-    OutgoingMention, Photo, Presence, SharedFile, Team, UploadDestination, UploadedFile, User,
+    OutgoingMention, Photo, Presence, Recipient, SharedFile, Team, UploadDestination, UploadedFile,
+    User,
 };
 use serde_json::json;
 use store::{
@@ -272,6 +273,11 @@ impl Remote for Handle {
             serde_json::from_value(
                 json!({"userId": ME, "tenantId": "tenant-1", "displayName": "Me Myself"}),
             )
+            .unwrap(),
+            serde_json::from_value(json!({
+                "userId": "user-ada", "tenantId": "tenant-1", "displayName": "Ada Example",
+                "email": "ada@example.com"
+            }))
             .unwrap(),
         ])
     }
@@ -768,6 +774,7 @@ impl Remote for Handle {
             web_url: "https://files.example/web".into(),
             web_dav_url: Some("https://files.example/dav".into()),
             etag: "\"{GUID-1},2\"".into(),
+            home_drive: false,
         })
     }
 
@@ -813,8 +820,14 @@ impl Remote for Handle {
         Ok(vec![7; length as usize])
     }
 
-    async fn share_file(&self, file: &UploadedFile, user_ids: &[String]) -> Result<()> {
-        self.record(format!("share {} {}", file.item_id, user_ids.join(",")));
+    async fn share_file(&self, file: &UploadedFile, recipients: &[Recipient]) -> Result<()> {
+        let recipients: Vec<&str> = recipients
+            .iter()
+            .map(|recipient| match recipient {
+                Recipient::ObjectId(id) | Recipient::Email(id) => id.as_str(),
+            })
+            .collect();
+        self.record(format!("share {} {}", file.item_id, recipients.join(",")));
         Ok(())
     }
 
@@ -2265,7 +2278,23 @@ fn uploaded() -> UploadedFile {
         web_url: "https://files.example/web".into(),
         web_dav_url: None,
         etag: "\"{GUID-1},2\"".into(),
+        home_drive: false,
     }
+}
+
+#[tokio::test]
+async fn a_file_in_the_home_drive_is_shared_by_email() {
+    let fake = Arc::new(Fake::default());
+    let engine = chat_engine(&fake, small_pages()).await;
+    let file = UploadedFile {
+        home_drive: true,
+        ..uploaded()
+    };
+    engine.share_attachment(CHAT, &file).await.unwrap();
+    assert!(
+        fake.calls()
+            .contains(&"share item-1 ada@example.com".to_owned())
+    );
 }
 
 #[tokio::test]

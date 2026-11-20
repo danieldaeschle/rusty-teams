@@ -2296,7 +2296,12 @@ impl Composer {
                                 let _ = event_sender.send(UploadEvent::Uploaded(uploaded.clone()));
                                 uploaded
                             }
-                            Err(_) => return UploadResult::Failed,
+                            Err(error) => {
+                                app_base::diagnostics::record(format!(
+                                    "attachments: upload failed: {error}"
+                                ));
+                                return UploadResult::Failed;
+                            }
                         }
                     }
                     JobKind::Share(uploaded) => uploaded,
@@ -2309,7 +2314,19 @@ impl Composer {
                         reference,
                         uploaded: Some(uploaded),
                     }),
-                    Err(_) => UploadResult::ShareFailed(uploaded),
+                    Err(error) => {
+                        app_base::diagnostics::record(format!(
+                            "attachments: share failed: {error}"
+                        ));
+                        if uploaded.home_drive {
+                            UploadResult::NotShared(DoneFile {
+                                reference,
+                                uploaded: Some(uploaded),
+                            })
+                        } else {
+                            UploadResult::ShareFailed(uploaded)
+                        }
+                    }
                 }
             }
             .await;
