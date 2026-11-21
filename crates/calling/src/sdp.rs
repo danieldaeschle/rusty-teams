@@ -811,40 +811,75 @@ fn with_opus_send_quality(fmtp: &str) -> String {
 /// libwebrtc starts its bandwidth estimate at 300 kbit/s, which opens a 720p camera at 320x180.
 const H264_SEND_START: [(&str, &str); 1] = [("x-google-start-bitrate", "1500")];
 const H264_PROFILE_LEVEL_ID: &str = "profile-level-id=";
-const H264_LEVEL_4_0: u8 = 0x28;
-const FULL_HD_MAX_FS: u32 = 8160;
-const FULL_HD_MAX_MBPS: u32 = 244_800;
+/// `level_idc` with its MaxFS (macroblocks) and MaxMBPS, from H.264 Table A-1, from level 3.0 up.
+const H264_LEVELS: [(u8, u32, u32); 9] = [
+    (0x1e, 1_620, 40_500),
+    (0x1f, 3_600, 108_000),
+    (0x20, 5_120, 216_000),
+    (0x28, 8_192, 245_760),
+    (0x29, 8_192, 245_760),
+    (0x2a, 8_704, 522_240),
+    (0x32, 22_080, 589_824),
+    (0x33, 36_864, 983_040),
+    (0x34, 36_864, 2_073_600),
+];
 
 /// Only touches H264 lines, the sole codec here that carries a `profile-level-id`.
 fn with_h264_send_quality(fmtp: &str) -> String {
     if !fmtp.contains(H264_PROFILE_LEVEL_ID) {
         return fmtp.to_owned();
     }
-    with_fmtp_parameters(&with_full_hd_level(fmtp), &H264_SEND_START)
+    with_fmtp_parameters(&with_peer_level(fmtp), &H264_SEND_START)
 }
 
-/// Teams answers level 3.1 even when its `max-fs` and `max-mbps` allow 1080p, and the encoder
-/// stalls at 1080p on that level. The explicit limits are what the peer can really receive.
-fn with_full_hd_level(fmtp: &str) -> String {
+/// Teams answers a level below its own `max-fs` and `max-mbps`, e.g. 3.0 with limits for 720p.
+/// The encoder stalls every layer whose frame is larger than the level allows, so a 720p camera
+/// stops at 640x360. The explicit limits are what the peer can really receive, so the level is
+/// raised to the lowest one that covers them. It is never lowered.
+fn with_peer_level(fmtp: &str) -> String {
     let limit = |name: &str| {
         fmtp.split([' ', ';'])
             .find_map(|parameter| parameter.strip_prefix(name)?.strip_prefix('='))
             .and_then(|value| value.parse::<u32>().ok())
     };
-    let allows_full_hd = limit("max-fs").is_some_and(|max_fs| max_fs >= FULL_HD_MAX_FS)
-        && limit("max-mbps").is_some_and(|max_mbps| max_mbps >= FULL_HD_MAX_MBPS);
-    let level = fmtp
+    if limit("max-fs").is_none() && limit("max-mbps").is_none() {
+        return fmtp.to_owned();
+    }
+    let Some(profile) = fmtp
         .find(H264_PROFILE_LEVEL_ID)
-        .map(|start| start + H264_PROFILE_LEVEL_ID.len() + 4)
-        .map(|start| start..start + 2)
-        .filter(|range| {
-            fmtp.get(range.clone())
-                .and_then(|level| u8::from_str_radix(level, 16).ok())
-                .is_some_and(|level| level < H264_LEVEL_4_0)
-        });
+        .map(|start| start + H264_PROFILE_LEVEL_ID.len())
+        .map(|start| start..start + 6)
+    else {
+        return fmtp.to_owned();
+    };
+    let range = profile.end - 2..profile.end;
+    let Some(level) = fmtp
+        .get(range.clone())
+        .and_then(|level| u8::from_str_radix(level, 16).ok())
+    else {
+        return fmtp.to_owned();
+    };
+    let (level_fs, level_mbps) = H264_LEVELS
+        .iter()
+        .find(|(idc, ..)| *idc == level)
+        .map_or((0, 0), |&(_, max_fs, max_mbps)| (max_fs, max_mbps));
+    let max_fs = limit("max-fs").unwrap_or(0).max(level_fs);
+    let max_mbps = limit("max-mbps").unwrap_or(0).max(level_mbps);
+    let covering = H264_LEVELS
+        .iter()
+        .find(|&&(_, fs, mbps)| fs >= max_fs && mbps >= max_mbps)
+        .map(|&(idc, ..)| idc);
     let mut raised = fmtp.to_owned();
-    if let Some(range) = level.filter(|_| allows_full_hd) {
-        raised.replace_range(range, &format!("{H264_LEVEL_4_0:02x}"));
+    if let Some(idc) = covering.filter(|idc| *idc > level) {
+        let upper = fmtp[profile]
+            .chars()
+            .any(|digit| digit.is_ascii_uppercase());
+        let digits = if upper {
+            format!("{idc:02X}")
+        } else {
+            format!("{idc:02x}")
+        };
+        raised.replace_range(range, &digits);
     }
     raised
 }
@@ -1485,11 +1520,33 @@ mod tests {
         );
         assert_eq!(with_h264_send_quality("99 apt=98"), "99 apt=98");
         assert_eq!(
+            with_peer_level("98 profile-level-id=42e01f"),
+            "98 profile-level-id=42e01f"
+        );
+        assert_eq!(
             without_fmtp_parameter(
                 "98 profile-level-id=42e01f;x-google-start-bitrate=1500",
                 "x-google-start-bitrate"
             ),
             "98 profile-level-id=42e01f"
+        );
+    }
+
+    #[test]
+    fn the_level_rises_to_the_lowest_one_covering_the_peer_limits() {
+        assert_eq!(
+            with_peer_level(
+                "107 profile-level-id=42C01E;packetization-mode=1;max-mbps=108000;max-fs=3600"
+            ),
+            "107 profile-level-id=42C01F;packetization-mode=1;max-mbps=108000;max-fs=3600"
+        );
+        assert_eq!(
+            with_peer_level("98 profile-level-id=42e01f;max-fs=8160;max-mbps=489600"),
+            "98 profile-level-id=42e02a;max-fs=8160;max-mbps=489600"
+        );
+        assert_eq!(
+            with_peer_level("98 profile-level-id=42e028;max-fs=3600;max-mbps=108000"),
+            "98 profile-level-id=42e028;max-fs=3600;max-mbps=108000"
         );
     }
 
