@@ -675,7 +675,7 @@ mod portal_smoke {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
-    use super::{PortalFollowUp, ShareKind, start_portal_capture};
+    use super::{PortalFollowUp, ShareKind, ShareRate, start_portal_capture};
 
     #[test]
     fn portal_smoke_captures_after_the_dialog() {
@@ -687,7 +687,7 @@ mod portal_smoke {
         let (sender, receiver) = std::sync::mpsc::channel();
         let capture = start_portal_capture(
             ShareKind::Screen,
-            Arc::new(AtomicU32::new(5)),
+            ShareRate::new(5),
             move |_| {
                 counter.fetch_add(1, Ordering::Relaxed);
             },
