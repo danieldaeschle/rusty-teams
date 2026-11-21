@@ -46,6 +46,7 @@ fn rail_items(
     activity_unread: usize,
     unread_chats: usize,
     channel_dot: bool,
+    calendar: bool,
     agents_running: Option<usize>,
 ) -> Vec<RailItem> {
     let mut items = vec![
@@ -89,6 +90,9 @@ fn rail_items(
             badge: RailBadge::None,
         },
     ];
+    if !calendar {
+        items.retain(|item| item.tab != SidebarTab::Calendar);
+    }
     if let Some(running) = agents_running {
         items.push(RailItem {
             tab: SidebarTab::Agents,
@@ -226,17 +230,19 @@ impl Render for RailView {
         let active = self.sidebar.read(cx).tab();
         let activity_unread = self.activity.read(cx).feed().bell_count()
             + crate::agent_api::unseen_proposal_count(cx);
-        let (unread_chats, channel_dot) = {
+        let (unread_chats, channel_dot, calendar) = {
             let state = self.state.read(cx);
             (
                 unread_chat_count(&state.sidebar.chats),
                 any_unread_channel(&state.sidebar),
+                state.calendar_available(),
             )
         };
         let items = rail_items(
             activity_unread,
             unread_chats as usize,
             channel_dot,
+            calendar,
             self.agents_running(cx),
         );
         v_flex()
@@ -262,7 +268,7 @@ mod tests {
     #[test]
     fn items_follow_the_spec_order() {
         apply_locale("en");
-        let tabs: Vec<SidebarTab> = rail_items(0, 0, false, None)
+        let tabs: Vec<SidebarTab> = rail_items(0, 0, false, true, None)
             .iter()
             .map(|item| item.tab)
             .collect();
@@ -279,27 +285,41 @@ mod tests {
     }
 
     #[test]
+    fn calendar_is_left_out_when_unavailable() {
+        apply_locale("en");
+        let tabs: Vec<SidebarTab> = rail_items(0, 0, false, false, None)
+            .iter()
+            .map(|item| item.tab)
+            .collect();
+        assert!(!tabs.contains(&SidebarTab::Calendar));
+        assert_eq!(tabs.len(), 4);
+    }
+
+    #[test]
     fn agents_comes_last_and_only_when_actions_exist() {
         apply_locale("en");
-        assert_eq!(rail_items(0, 0, false, None).len(), 5);
-        let with_agents = rail_items(0, 0, false, Some(2));
+        assert_eq!(rail_items(0, 0, false, true, None).len(), 5);
+        let with_agents = rail_items(0, 0, false, true, Some(2));
         assert_eq!(with_agents.len(), 6);
         assert_eq!(with_agents[5].tab, SidebarTab::Agents);
         assert_eq!(with_agents[5].label, tr("rail.agents"));
         assert_eq!(with_agents[5].badge, RailBadge::Count(2));
-        assert_eq!(rail_items(0, 0, false, Some(0))[5].badge, RailBadge::None);
+        assert_eq!(
+            rail_items(0, 0, false, true, Some(0))[5].badge,
+            RailBadge::None
+        );
     }
 
     #[test]
     fn badges_follow_the_unread_inputs() {
         apply_locale("en");
-        let items = rail_items(3, 5, true, None);
+        let items = rail_items(3, 5, true, true, None);
         assert_eq!(items[0].badge, RailBadge::Count(3));
         assert_eq!(items[1].badge, RailBadge::Count(5));
         assert_eq!(items[2].badge, RailBadge::Dot);
         assert_eq!(items[3].badge, RailBadge::None);
         assert_eq!(items[4].badge, RailBadge::None);
-        let quiet = rail_items(0, 0, false, None);
+        let quiet = rail_items(0, 0, false, true, None);
         assert!(quiet.iter().all(|item| item.badge == RailBadge::None));
         assert_eq!(count_badge_for(usize::MAX), RailBadge::Count(u32::MAX));
     }
@@ -308,7 +328,7 @@ mod tests {
     #[test]
     fn every_item_shows_its_shortcut_in_the_tooltip() {
         apply_locale("en");
-        let items = rail_items(0, 0, false, None);
+        let items = rail_items(0, 0, false, true, None);
         assert_eq!(tooltip_text(&items[0]), "Activity (Ctrl+1)");
         assert!(items.iter().all(|item| tooltip_text(item).ends_with(')')));
     }
