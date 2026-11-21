@@ -84,6 +84,9 @@ impl AppState {
     }
 
     pub fn open_calendar(&mut self, cx: &mut Context<Self>) {
+        if !self.calendar_available() {
+            return;
+        }
         self.calendar_week.visible = true;
         self.calendar_week.start = Some(self.calendar_start());
         self.request_calendar_scroll_to_now(cx);
@@ -204,6 +207,9 @@ impl AppState {
     }
 
     pub(crate) fn load_calendar_week(&mut self, cx: &mut Context<Self>) {
+        if !self.calendar_available() {
+            return;
+        }
         let start = self.calendar_start();
         let offset = Local::now().offset().fix();
         let (from, to) = dates_range(&self.calendar_dates(), offset);
@@ -602,6 +608,28 @@ mod tests {
                 state.open_calendar(cx);
                 assert!(state.calendar_week.visible);
                 assert!(state.calendar_week.take_pending());
+                assert!(!state.calendar_week.take_pending());
+            })
+        });
+    }
+
+    #[gpui_kit::test]
+    fn a_guest_org_neither_opens_nor_loads_the_calendar(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store, Mode::default())));
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                let guest = "11111111-2222-3333-4444-555555555555";
+                state.orgs.active = Some(guest.into());
+                state.orgs.list.push(app_base::orgs::Org {
+                    id: guest.into(),
+                    name: "Contoso".into(),
+                    guest: true,
+                });
+                state.open_calendar(cx);
+                state.retry_calendar_week(cx);
+                assert!(!state.calendar_week.visible);
                 assert!(!state.calendar_week.take_pending());
             })
         });
