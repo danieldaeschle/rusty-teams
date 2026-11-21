@@ -97,6 +97,17 @@ pub mod ffi {
             height: i32,
         ) -> Result<()>;
 
+        unsafe fn argb_scale(
+            src_argb: *const u8,
+            src_stride_argb: i32,
+            src_width: i32,
+            src_height: i32,
+            dst_argb: *mut u8,
+            dst_stride_argb: i32,
+            dst_width: i32,
+            dst_height: i32,
+        ) -> Result<()>;
+
         unsafe fn argb_to_rgb24(
             src_argb: *const u8,
             src_stride_argb: i32,

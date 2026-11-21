@@ -6,11 +6,12 @@ use libwebrtc::desktop_capturer::{
     CaptureError, CaptureSource, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
     PortalPickerEvent,
 };
-use libwebrtc::native::yuv_helper::argb_to_i420;
+use libwebrtc::native::yuv_helper::{argb_scale, argb_to_i420};
 use libwebrtc::video_frame::I420Buffer;
 
 use crate::capture::Capture;
 use crate::error::{Error, Result};
+use crate::send_control::scale_for;
 use crate::video_frame::VideoPicture;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +26,27 @@ impl ShareKind {
             ShareKind::Screen => DesktopCaptureSourceType::Screen,
             ShareKind::Window => DesktopCaptureSourceType::Window,
         }
+    }
+}
+
+/// How often and how large the capture threads deliver share frames. Both change while sharing.
+#[derive(Debug)]
+pub struct ShareRate {
+    pub fps: AtomicU32,
+    /// The mixer's frame budget in macroblocks. 0 keeps the captured size.
+    pub max_fs: AtomicU32,
+}
+
+impl ShareRate {
+    pub fn new(fps: u32) -> Arc<Self> {
+        Arc::new(ShareRate {
+            fps: AtomicU32::new(fps),
+            max_fs: AtomicU32::new(0),
+        })
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(1) / self.fps.load(Ordering::Relaxed).max(1)
     }
 }
 
@@ -195,14 +217,64 @@ fn i420_from_bgra(bytes: &[u8], width: u32, height: u32, stride: u32) -> I420Buf
     buffer
 }
 
+/// The even size within `max_fs` macroblocks that keeps the aspect ratio.
+fn share_size(width: u32, height: u32, max_fs: u32) -> (u32, u32) {
+    let scale = scale_for(width, height, max_fs);
+    if scale <= 1.0 {
+        return (width, height);
+    }
+    let fit = |side: u32| ((f64::from(side) / scale) as u32 & !1).max(2);
+    (fit(width), fit(height))
+}
+
+fn scale_bgra(bytes: &[u8], stride: u32, from: (u32, u32), to: (u32, u32)) -> Vec<u8> {
+    let mut scaled = vec![0u8; to.0 as usize * to.1 as usize * 4];
+    argb_scale(
+        bytes,
+        stride,
+        from.0 as i32,
+        from.1 as i32,
+        &mut scaled,
+        to.0 * 4,
+        to.0 as i32,
+        to.1 as i32,
+    );
+    scaled
+}
+
+/// Converts a captured frame to I420 within the mixer's frame budget. Scaling
+/// here keeps WebRTC from converting and scaling the full-size frame on the CPU
+/// with its slow path for uneven factors. Exact halvings average 2x2 blocks, so
+/// text stays readable, and a bilinear step covers the rest.
+fn share_frame(bytes: &[u8], width: u32, height: u32, stride: u32, max_fs: u32) -> I420Buffer {
+    let target = share_size(width, height, max_fs);
+    let (mut size, mut stride) = ((width, height), stride);
+    let mut scaled: Option<Vec<u8>> = None;
+    while size != target {
+        let next = if size.0 >= target.0 * 2 && size.1 >= target.1 * 2 {
+            (size.0 / 2, size.1 / 2)
+        } else {
+            target
+        };
+        scaled = Some(scale_bgra(
+            scaled.as_deref().unwrap_or(bytes),
+            stride,
+            size,
+            next,
+        ));
+        (size, stride) = (next, next.0 * 4);
+    }
+    i420_from_bgra(scaled.as_deref().unwrap_or(bytes), size.0, size.1, stride)
+}
+
 pub fn start_screen_capture(
     wanted: ShareSource,
-    fps: Arc<AtomicU32>,
+    rate: Arc<ShareRate>,
     mut deliver: impl FnMut(I420Buffer) + Send + 'static,
     failed: impl FnOnce(String) + Send + 'static,
 ) -> Result<Capture> {
     if current_share_picker() == SharePicker::Portal {
-        return start_portal_capture(wanted.kind, fps, deliver, move |follow| {
+        return start_portal_capture(wanted.kind, rate.clone(), deliver, move |follow| {
             if let PortalFollowUp::Notice(text) = follow {
                 failed(text.to_owned());
             }
@@ -221,6 +293,7 @@ pub fn start_screen_capture(
         };
         let gone_since: Arc<Mutex<Option<Instant>>> = Arc::default();
         let gone_mark = gone_since.clone();
+        let frame_rate = rate.clone();
         capturer.start_capture(Some(source), move |result| {
             let frame = match result {
                 Ok(frame) => frame,
@@ -238,7 +311,14 @@ pub fn start_screen_capture(
             }
             let (width, height) = (frame.width() as u32 & !1, frame.height() as u32 & !1);
             if width >= 2 && height >= 2 {
-                deliver(i420_from_bgra(frame.data(), width, height, frame.stride()));
+                let max_fs = frame_rate.max_fs.load(Ordering::Relaxed);
+                deliver(share_frame(
+                    frame.data(),
+                    width,
+                    height,
+                    frame.stride(),
+                    max_fs,
+                ));
             }
         });
         while !stop.load(Ordering::SeqCst) {
@@ -250,7 +330,7 @@ pub fn start_screen_capture(
             }
             pump_messages();
             capturer.capture_frame();
-            std::thread::sleep(Duration::from_secs(1) / fps.load(Ordering::Relaxed).max(1));
+            std::thread::sleep(rate.interval());
         }
     })
     .map_err(|error| Error::Webrtc(format!("screen thread: {error}")))
@@ -324,7 +404,7 @@ fn picker_event_from_frame<T>(
 
 pub(crate) fn start_portal_capture(
     kind: ShareKind,
-    fps: Arc<AtomicU32>,
+    rate: Arc<ShareRate>,
     mut deliver: impl FnMut(I420Buffer) + Send + 'static,
     outcome: impl FnOnce(PortalFollowUp) + Send + 'static,
 ) -> Result<Capture> {
@@ -346,6 +426,7 @@ pub(crate) fn start_portal_capture(
         let frame_events = (!delegated).then(|| sender.clone());
         let selected = Arc::new(AtomicBool::new(false));
         let gate = selected.clone();
+        let frame_rate = rate.clone();
         capturer.start_capture(None, move |result| {
             if !gate.load(Ordering::SeqCst) {
                 let Some(events) = &frame_events else { return };
@@ -361,7 +442,14 @@ pub(crate) fn start_portal_capture(
             let Ok(frame) = result else { return };
             let (width, height) = (frame.width() as u32 & !1, frame.height() as u32 & !1);
             if width >= 2 && height >= 2 {
-                deliver(i420_from_bgra(frame.data(), width, height, frame.stride()));
+                let max_fs = frame_rate.max_fs.load(Ordering::Relaxed);
+                deliver(share_frame(
+                    frame.data(),
+                    width,
+                    height,
+                    frame.stride(),
+                    max_fs,
+                ));
             }
         });
         if delegated {
@@ -411,7 +499,7 @@ pub(crate) fn start_portal_capture(
         outcome(follow);
         while !stop.load(Ordering::SeqCst) {
             capturer.capture_frame();
-            std::thread::sleep(Duration::from_secs(1) / fps.load(Ordering::Relaxed).max(1));
+            std::thread::sleep(rate.interval());
         }
     })
     .map_err(|error| Error::Webrtc(format!("portal thread: {error}")))
@@ -450,6 +538,36 @@ mod tests {
         assert_eq!(
             picker_event_from_frame::<()>(&Err(CaptureError::Temporary)),
             None
+        );
+    }
+}
+
+#[cfg(test)]
+mod share_frame_tests {
+    use libwebrtc::video_frame::VideoBuffer as _;
+
+    use super::{share_frame, share_size};
+    use crate::send_control::scale_for;
+
+    #[test]
+    fn a_share_frame_fits_the_mixer_budget_and_keeps_the_aspect() {
+        assert_eq!(share_size(5120, 2880, 0), (5120, 2880));
+        assert_eq!(share_size(1280, 720, 8160), (1280, 720));
+        let (width, height) = share_size(5120, 2880, 8160);
+        assert_eq!((width % 2, height % 2), (0, 0));
+        assert_eq!(scale_for(width, height, 8160), 1.0);
+        assert!((f64::from(width) / f64::from(height) - 16.0 / 9.0).abs() < 0.01);
+        assert!(width >= 1900);
+    }
+
+    #[test]
+    fn a_padded_frame_is_scaled_to_the_budget() {
+        let (width, height, stride) = (1600u32, 900u32, 1600 * 4 + 64);
+        let bytes = vec![128u8; (stride * height) as usize];
+        let frame = share_frame(&bytes, width, height, stride, 920);
+        assert_eq!(
+            (frame.width(), frame.height()),
+            share_size(width, height, 920)
         );
     }
 }
@@ -557,7 +675,7 @@ mod portal_smoke {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::Duration;
 
-    use super::{PortalFollowUp, ShareKind, start_portal_capture};
+    use super::{PortalFollowUp, ShareKind, ShareRate, start_portal_capture};
 
     #[test]
     fn portal_smoke_captures_after_the_dialog() {
@@ -569,7 +687,7 @@ mod portal_smoke {
         let (sender, receiver) = std::sync::mpsc::channel();
         let capture = start_portal_capture(
             ShareKind::Screen,
-            Arc::new(AtomicU32::new(5)),
+            ShareRate::new(5),
             move |_| {
                 counter.fetch_add(1, Ordering::Relaxed);
             },
