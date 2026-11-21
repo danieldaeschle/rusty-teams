@@ -20,6 +20,7 @@ use crate::mixer::mix_frames;
 use crate::pcm::SampleQueue;
 use crate::sound_capture::{LoopbackKind, start_loopback, start_microphone};
 use crate::wav_dump::StageDumps;
+use crate::win_timer::HighResSleep;
 
 /// Direct capture: 10 ms frames complete synchronously, so the feeder never parks on the Tokio runtime.
 const SOURCE_QUEUE_MS: u32 = 0;
@@ -65,12 +66,13 @@ struct Feeder {
 impl Feeder {
     fn run(mut self) {
         let mut chain = MicChain::new(self.processing, self.ml_noise, StageDumps::from_env());
+        let sleeper = HighResSleep::new();
         let mut due = Instant::now();
         while self.running.load(Ordering::SeqCst) {
             due += FRAME_PERIOD;
             let now = Instant::now();
             if due > now {
-                std::thread::sleep(due - now);
+                sleeper.sleep(due - now);
             } else if now - due > MAX_LAG {
                 due = now;
             }
@@ -78,7 +80,12 @@ impl Feeder {
                 chain.process_far_end(&mut far_end);
             }
             let muted = self.microphone_muted.load(Ordering::SeqCst);
-            let microphone = match self.microphone.next_frame() {
+            let captured = self.microphone.next_frame().or_else(|| {
+                // Small 2 ms cushion for WASAPI/CPAL callback cadence jitter before emitting silence.
+                sleeper.sleep(Duration::from_millis(2));
+                self.microphone.next_frame()
+            });
+            let microphone = match captured {
                 Some(mut frame) if !muted => {
                     chain.process(&mut frame);
                     frame
@@ -333,14 +340,15 @@ mod tests {
     }
 
     #[test]
-    fn default_settings_use_the_device_track_on_linux() {
+    fn default_settings_use_the_device_track_on_all_platforms() {
         let default = MicSettings::default();
-        assert!(SoftwareAudioPlan::wanted_on(true, default, false, true).is_some());
+        assert!(SoftwareAudioPlan::wanted_on(true, default, false, true).is_none());
         assert!(SoftwareAudioPlan::wanted_on(false, default, false, true).is_none());
         let low = MicSettings {
             noise_suppression: NoiseSuppression::Low,
             music_mode: false,
         };
+        assert!(SoftwareAudioPlan::wanted_on(true, low, false, true).is_none());
         assert!(SoftwareAudioPlan::wanted_on(false, low, false, true).is_none());
     }
 
@@ -364,14 +372,17 @@ mod tests {
     }
 
     #[test]
-    fn windows_runs_the_software_path_for_every_mic_setting() {
+    fn windows_uses_software_path_only_when_not_on_device_track() {
         for noise_suppression in NoiseSuppression::ALL {
             for music_mode in [false, true] {
                 let mic = MicSettings {
                     noise_suppression,
                     music_mode,
                 };
-                assert!(SoftwareAudioPlan::wanted_on(true, mic, false, true).is_some());
+                assert_eq!(
+                    SoftwareAudioPlan::wanted_on(true, mic, false, true).is_some(),
+                    !mic.uses_device_track_on(true)
+                );
                 assert!(SoftwareAudioPlan::wanted_on(true, mic, false, false).is_none());
                 assert_eq!(
                     SoftwareAudioPlan::wanted_on(false, mic, false, true).is_some(),
@@ -390,7 +401,7 @@ mod tests {
                     noise_suppression,
                     music_mode,
                 },
-                false,
+                true,
                 true,
             )
             .unwrap()

@@ -1,9 +1,10 @@
+#[cfg(target_os = "linux")]
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use libwebrtc::native::yuv_helper::{abgr_to_i420, nv12_to_i420};
+use libwebrtc::native::yuv_helper::{abgr_to_i420, nv12_to_i420, yuy2_to_i420};
 use libwebrtc::video_frame::{I420Buffer, VideoBuffer as _};
 use nokhwa::pixel_format::RgbAFormat;
 use nokhwa::utils::{
@@ -107,22 +108,95 @@ pub fn list_cameras() -> Vec<CameraDevice> {
     query(ApiBackend::Auto)
         .unwrap_or_default()
         .into_iter()
-        .map(|info| CameraDevice {
-            key: match info.index() {
+        .map(|info| {
+            let fallback_key = match info.index() {
                 CameraIndex::Index(number) => number.to_string(),
                 CameraIndex::String(text) => text.clone(),
-            },
-            name: info.human_name(),
+            };
+            #[cfg(windows)]
+            let key = {
+                let misc = info.misc();
+                if misc.trim().is_empty() {
+                    fallback_key
+                } else {
+                    misc
+                }
+            };
+            #[cfg(not(windows))]
+            let key = fallback_key;
+            CameraDevice {
+                key,
+                name: info.human_name(),
+            }
         })
         .collect()
 }
 
-fn camera_index(choice: &DeviceChoice) -> CameraIndex {
-    match choice {
-        DeviceChoice::SystemDefault => CameraIndex::Index(0),
-        DeviceChoice::Device(key) => key
-            .parse()
-            .map_or_else(|_| CameraIndex::String(key.clone()), CameraIndex::Index),
+fn resolve_camera(choice: &DeviceChoice) -> (CameraIndex, String) {
+    #[cfg(windows)]
+    {
+        let queried = query(ApiBackend::Auto).unwrap_or_default();
+        match choice {
+            DeviceChoice::SystemDefault => {
+                let tune_target = queried
+                    .first()
+                    .map(|info| {
+                        let misc = info.misc();
+                        if misc.trim().is_empty() {
+                            info.human_name()
+                        } else {
+                            misc
+                        }
+                    })
+                    .unwrap_or_default();
+                let index = queried
+                    .first()
+                    .map_or(CameraIndex::Index(0), |info| info.index().clone());
+                return (index, tune_target);
+            }
+            DeviceChoice::Device(key) => {
+                if let Some(found) = queried.iter().find(|info| {
+                    let misc = info.misc();
+                    (!misc.is_empty() && misc.eq_ignore_ascii_case(key))
+                        || info.human_name().eq_ignore_ascii_case(key)
+                }) {
+                    let misc = found.misc();
+                    let tune_target = if misc.trim().is_empty() {
+                        found.human_name()
+                    } else {
+                        misc
+                    };
+                    return (found.index().clone(), tune_target);
+                }
+                // Backward compatibility for previously saved numeric indices ("0", "1").
+                if let Ok(number) = key.parse::<u32>() {
+                    let tune_target = queried
+                        .iter()
+                        .find(|info| *info.index() == CameraIndex::Index(number))
+                        .map(|info| {
+                            let misc = info.misc();
+                            if misc.trim().is_empty() {
+                                info.human_name()
+                            } else {
+                                misc
+                            }
+                        })
+                        .unwrap_or_default();
+                    return (CameraIndex::Index(number), tune_target);
+                }
+                return (CameraIndex::String(key.clone()), key.clone());
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let index = match choice {
+            DeviceChoice::SystemDefault => CameraIndex::Index(0),
+            DeviceChoice::Device(key) => key
+                .parse()
+                .map_or_else(|_| CameraIndex::String(key.clone()), CameraIndex::Index),
+        };
+        (index, String::new())
     }
 }
 
@@ -319,6 +393,7 @@ fn open_with_request(
     Ok(camera)
 }
 
+#[cfg(target_os = "linux")]
 fn device_path(index: &CameraIndex) -> Option<String> {
     match index {
         CameraIndex::Index(number) => Some(format!("/dev/video{number}")),
@@ -331,30 +406,48 @@ fn device_path(index: &CameraIndex) -> Option<String> {
     }
 }
 
-fn tune_uvc_controls(index: &CameraIndex) {
-    let Some(device) = device_path(index) else {
-        return;
-    };
-    // Best effort: fixed frame rate (no auto-drop in low light) and 50 Hz mains (CH).
-    let _ = Command::new("v4l2-ctl")
-        .args([
-            "-d",
-            &device,
-            "-c",
-            "exposure_dynamic_framerate=0,power_line_frequency=1",
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+fn tune_uvc_controls(index: &CameraIndex, windows_target: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = windows_target;
+        let Some(device) = device_path(index) else {
+            return;
+        };
+        // Best effort: fixed frame rate (no auto-drop in low light) and 50 Hz mains (CH/EU).
+        let _ = Command::new("v4l2-ctl")
+            .args([
+                "-d",
+                &device,
+                "-c",
+                "exposure_dynamic_framerate=0,power_line_frequency=1",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = index;
+        // Best effort: 50 Hz anti-flicker & disable low-light FPS drop via DirectShow UVC KSPROPERTY.
+        webrtc_sys::webrtc::ffi::tune_windows_camera(windows_target);
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        let _ = (index, windows_target);
+    }
 }
 
-fn accept_opened(index: &CameraIndex, mut camera: Camera) -> Option<(Camera, String)> {
+fn accept_opened(
+    index: &CameraIndex,
+    windows_target: &str,
+    mut camera: Camera,
+) -> Option<(Camera, String)> {
     let got = camera.camera_format();
     if got.frame_rate() < CAPTURE_FPS {
         let _ = camera.stop_stream();
         return None;
     }
-    tune_uvc_controls(index);
+    tune_uvc_controls(index, windows_target);
     let label = format_label(&got);
     Some((camera, label))
 }
@@ -371,6 +464,7 @@ fn try_exact_or_closest(
 
 fn open_from_list(
     index: CameraIndex,
+    windows_target: &str,
     quality: VideoQuality,
     formats: &[CameraFormat],
 ) -> Option<(Camera, String)> {
@@ -378,15 +472,16 @@ fn open_from_list(
         return None;
     };
     let camera = try_exact_or_closest(index.clone(), wanted).ok()?;
-    accept_opened(&index, camera)
+    accept_opened(&index, windows_target, camera)
 }
 
 fn open_picked_format(
     index: CameraIndex,
+    windows_target: &str,
     quality: VideoQuality,
 ) -> std::result::Result<(Camera, String), nokhwa::NokhwaError> {
     let mut camera = Camera::new(
-        index,
+        index.clone(),
         RequestedFormat::new::<RgbAFormat>(RequestedFormatType::AbsoluteHighestFrameRate),
     )?;
     let formats = camera.compatible_camera_formats()?;
@@ -397,15 +492,17 @@ fn open_picked_format(
         RequestedFormatType::Exact(format),
     ))?;
     camera.open_stream()?;
+    tune_uvc_controls(&index, windows_target);
     Ok((camera, format_label(&format)))
 }
 
 fn open_camera(
     index: CameraIndex,
+    windows_target: &str,
     quality: VideoQuality,
 ) -> std::result::Result<(Camera, String), nokhwa::NokhwaError> {
     if cfg!(windows)
-        && let Ok(opened) = open_picked_format(index.clone(), quality)
+        && let Ok(opened) = open_picked_format(index.clone(), windows_target, quality)
     {
         return Ok(opened);
     }
@@ -417,10 +514,10 @@ fn open_camera(
         if let Ok(formats) = camera.compatible_camera_formats() {
             let _ = camera.stop_stream();
             drop(camera);
-            if let Some(opened) = open_from_list(index.clone(), quality, &formats) {
+            if let Some(opened) = open_from_list(index.clone(), windows_target, quality, &formats) {
                 return Ok(opened);
             }
-        } else if let Some(opened) = accept_opened(&index, camera) {
+        } else if let Some(opened) = accept_opened(&index, windows_target, camera) {
             return Ok(opened);
         }
     }
@@ -429,7 +526,7 @@ fn open_camera(
     for candidate in preferred_candidates(quality) {
         match try_exact_or_closest(index.clone(), candidate) {
             Ok(camera) => {
-                if let Some(opened) = accept_opened(&index, camera) {
+                if let Some(opened) = accept_opened(&index, windows_target, camera) {
                     return Ok(opened);
                 }
             }
@@ -440,7 +537,7 @@ fn open_camera(
     // Last resort: AbsoluteHighest may still yield a usable stream on odd backends.
     match open_with_request(index.clone(), RequestedFormatType::AbsoluteHighestFrameRate) {
         Ok(camera) => {
-            tune_uvc_controls(&index);
+            tune_uvc_controls(&index, windows_target);
             let label = format_label(&camera.camera_format());
             Ok((camera, label))
         }
@@ -475,33 +572,25 @@ pub(crate) fn i420_from_nv12(data: &[u8], width: u32, height: u32) -> Option<I42
 }
 
 pub(crate) fn i420_from_yuyv(data: &[u8], width: u32, height: u32) -> Option<I420Buffer> {
-    let (width_pixels, height_rows) = (width as usize, height as usize);
-    let row_bytes = width_pixels * 2;
-    if data.len() < row_bytes * height_rows {
+    let row_bytes = width as usize * 2;
+    if data.len() < row_bytes * height as usize {
         return None;
     }
     let mut buffer = I420Buffer::new(width, height);
     let (stride_y, stride_u, stride_v) = buffer.strides();
     let (plane_y, plane_u, plane_v) = buffer.data_mut();
-    for row in 0..height_rows {
-        let source = &data[row * row_bytes..(row + 1) * row_bytes];
-        let luma_row = &mut plane_y[row * stride_y as usize..][..width_pixels];
-        for (luma, pair) in luma_row.chunks_exact_mut(2).zip(source.chunks_exact(4)) {
-            luma[0] = pair[0];
-            luma[1] = pair[2];
-        }
-    }
-    for row in 0..height_rows / 2 {
-        let upper = &data[row * 2 * row_bytes..][..row_bytes];
-        let lower = &data[(row * 2 + 1) * row_bytes..][..row_bytes];
-        let blue_row = &mut plane_u[row * stride_u as usize..][..width_pixels / 2];
-        let red_row = &mut plane_v[row * stride_v as usize..][..width_pixels / 2];
-        for (column, (blue, red)) in blue_row.iter_mut().zip(red_row.iter_mut()).enumerate() {
-            let offset = column * 4;
-            *blue = ((u16::from(upper[offset + 1]) + u16::from(lower[offset + 1]) + 1) / 2) as u8;
-            *red = ((u16::from(upper[offset + 3]) + u16::from(lower[offset + 3]) + 1) / 2) as u8;
-        }
-    }
+    yuy2_to_i420(
+        data,
+        row_bytes as u32,
+        plane_y,
+        stride_y,
+        plane_u,
+        stride_u,
+        plane_v,
+        stride_v,
+        width as i32,
+        height as i32,
+    );
     Some(buffer)
 }
 
@@ -554,9 +643,9 @@ pub fn start_camera(
     deliver: impl FnMut(I420Buffer) + Send + 'static,
     failed: impl FnOnce(String) + Send + 'static,
 ) -> Result<Capture> {
-    let index = camera_index(choice);
+    let (index, windows_target) = resolve_camera(choice);
     Capture::spawn_thread("camera", move |stop| {
-        let (mut camera, label) = match open_camera(index, quality) {
+        let (mut camera, label) = match open_camera(index, &windows_target, quality) {
             Ok(opened) => opened,
             Err(error) => return failed(error.to_string()),
         };
@@ -830,15 +919,15 @@ mod tests {
     #[test]
     fn camera_choices_map_to_indices_or_names() {
         assert!(matches!(
-            camera_index(&DeviceChoice::SystemDefault),
-            CameraIndex::Index(0)
+            resolve_camera(&DeviceChoice::SystemDefault).0,
+            CameraIndex::Index(_)
         ));
         assert!(matches!(
-            camera_index(&DeviceChoice::Device("2".into())),
+            resolve_camera(&DeviceChoice::Device("2".into())).0,
             CameraIndex::Index(2)
         ));
         assert!(matches!(
-            camera_index(&DeviceChoice::Device("video0".into())),
+            resolve_camera(&DeviceChoice::Device("video0".into())).0,
             CameraIndex::String(_)
         ));
     }
@@ -895,7 +984,7 @@ mod tests {
             return;
         }
         let (mut camera, label) =
-            open_camera(CameraIndex::Index(0), VideoQuality::Auto).expect("camera opens");
+            open_camera(CameraIndex::Index(0), "", VideoQuality::Auto).expect("camera opens");
         assert!(
             camera.camera_format().frame_rate() >= CAPTURE_FPS,
             "opened {label} under 30 fps"

@@ -117,4 +117,6 @@ rust::String create_random_uuid();
 
 rust::Vec<VideoEncoderBackend> video_encoder_backend_list();
 
+void tune_windows_camera(rust::Str target);
+
 }  // namespace livekit_ffi

@@ -308,5 +308,18 @@ pub mod ffi {
             width: i32,
             height: i32,
         ) -> Result<()>;
+
+        unsafe fn yuy2_to_i420(
+            src_yuy2: *const u8,
+            src_stride_yuy2: i32,
+            dst_y: *mut u8,
+            dst_stride_y: i32,
+            dst_u: *mut u8,
+            dst_stride_u: i32,
+            dst_v: *mut u8,
+            dst_stride_v: i32,
+            width: i32,
+            height: i32,
+        ) -> Result<()>;
     }
 }

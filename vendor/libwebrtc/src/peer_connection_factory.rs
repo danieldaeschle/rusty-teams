@@ -146,6 +146,13 @@ pub mod native {
         /// The track will capture audio from the selected recording device.
         fn create_device_audio_track(&self, label: &str) -> RtcAudioTrack;
 
+        /// Create a Platform ADM audio track with explicit WebRTC noise suppression toggle.
+        fn create_device_audio_track_with_options(
+            &self,
+            label: &str,
+            noise_suppression: bool,
+        ) -> RtcAudioTrack;
+
         // Device enumeration
         fn playout_devices(&self) -> i16;
         fn recording_devices(&self) -> i16;
@@ -216,6 +223,14 @@ pub mod native {
 
         fn create_device_audio_track(&self, label: &str) -> RtcAudioTrack {
             self.handle.create_device_audio_track(label)
+        }
+
+        fn create_device_audio_track_with_options(
+            &self,
+            label: &str,
+            noise_suppression: bool,
+        ) -> RtcAudioTrack {
+            self.handle.create_device_audio_track_with_options(label, noise_suppression)
         }
 
         fn playout_devices(&self) -> i16 {

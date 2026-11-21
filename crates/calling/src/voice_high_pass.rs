@@ -1,6 +1,6 @@
 use crate::audio::SAMPLE_RATE;
 
-pub const CUTOFF_HZ: f32 = 120.0;
+pub const CUTOFF_HZ: f32 = 80.0;
 const BUTTERWORTH_FOURTH_ORDER_Q: [f32; 2] = [0.541_196_1, 1.306_563];
 
 #[derive(Debug, Clone, Copy)]
@@ -115,6 +115,6 @@ mod tests {
             "cutoff {}",
             gain_db(CUTOFF_HZ)
         );
-        assert!(gain_db(60.0) < -20.0, "60 Hz {}", gain_db(60.0));
+        assert!(gain_db(40.0) < -20.0, "40 Hz {}", gain_db(40.0));
     }
 }

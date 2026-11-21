@@ -36,12 +36,17 @@ fn named_input(choice: &DeviceChoice) -> Option<Device> {
     let DeviceChoice::Device(wanted) = choice else {
         return None;
     };
+    #[cfg(windows)]
+    let resolved = crate::mic_windows::friendly_name_for_id(wanted);
+    #[cfg(not(windows))]
+    let resolved: Option<String> = None;
+    let target = resolved.as_deref().unwrap_or(wanted.as_str());
     let host = cpal::default_host();
     let mut devices = host.input_devices().ok()?;
     devices.find(|device| {
         device.description().is_ok_and(|description| {
             let name = description.name();
-            name == *wanted || name.contains(wanted) || wanted.contains(&name)
+            name == target || name.contains(target) || target.contains(&name)
         })
     })
 }

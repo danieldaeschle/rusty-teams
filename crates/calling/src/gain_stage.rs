@@ -4,12 +4,14 @@ use webrtc_sys::apm::GainProcessor;
 
 use crate::audio::{FRAME_SAMPLES, SAMPLE_RATE};
 
-/// Start flat; quiet mics climb through adaptive AGC2 instead of blasting a hot PipeWire input.
+/// Start flat; quiet mics climb through adaptive AGC2 instead of blasting a hot input.
 const LIFT_DEFAULT_GAIN_DB: f32 = 0.0;
 const LIFT_GAIN_CHANGE_DB_PER_SECOND: f32 = 6.0;
-const OUTPUT_FIXED_GAIN_DB: f32 = 8.0;
-/// Only restore DeepFilterNet's level drop when the post-filter frame is still quiet.
-const OUTPUT_APPLY_BELOW_DBFS: f32 = -25.0;
+const OUTPUT_MAX_GAIN_DB: f32 = 6.0;
+/// Smooth knee for post-filter level recovery: full boost below -32 dBFS, 0 dB above -18 dBFS.
+const OUTPUT_FULL_BOOST_DBFS: f32 = -32.0;
+const OUTPUT_UNITY_DBFS: f32 = -18.0;
+const OUTPUT_SMOOTH_ALPHA: f32 = 0.15;
 const SPEECH_FLOOR_DBFS: f32 = -55.0;
 const MIN_SPEECH_FRAMES: u32 = 100;
 
@@ -24,12 +26,25 @@ fn frame_dbfs(frame: &[i16]) -> f32 {
     10.0 * (mean_square / 32768.0_f32.powi(2) + 1e-12).log10()
 }
 
-/// One AGC2 (optional adaptive digital gain, then fixed gain, then its limiter) on 10 ms mono frames.
+fn target_output_gain_db(input_dbfs: f32) -> f32 {
+    if input_dbfs >= OUTPUT_UNITY_DBFS {
+        0.0
+    } else if input_dbfs <= OUTPUT_FULL_BOOST_DBFS {
+        OUTPUT_MAX_GAIN_DB
+    } else {
+        let ratio =
+            (OUTPUT_UNITY_DBFS - input_dbfs) / (OUTPUT_UNITY_DBFS - OUTPUT_FULL_BOOST_DBFS);
+        OUTPUT_MAX_GAIN_DB * ratio
+    }
+}
+
+/// One AGC2 (optional adaptive digital gain, or smooth output makeup with limiter) on 10 ms mono frames.
 pub struct GainStage {
     module: GainProcessor,
     measured_gain_db_sum: f32,
     measured_frames: u32,
     learns: bool,
+    smoothed_gain_db: f32,
 }
 
 impl GainStage {
@@ -45,9 +60,9 @@ impl GainStage {
         )
     }
 
-    /// Last stage, fixed: makes up the level DeepFilterNet takes off and limits peaks; a second adaptive stage pumps against the first.
+    /// Last stage: smoothly recovers level lost to DeepFilterNet and limits peaks without hard-threshold step jumps.
     pub fn output() -> GainStage {
-        GainStage::new(false, 0.0, OUTPUT_FIXED_GAIN_DB, 1.0, false)
+        GainStage::new(false, 0.0, 0.0, 1.0, false)
     }
 
     fn new(
@@ -67,6 +82,7 @@ impl GainStage {
             measured_gain_db_sum: 0.0,
             measured_frames: 0,
             learns,
+            smoothed_gain_db: 0.0,
         }
     }
 
@@ -75,11 +91,27 @@ impl GainStage {
             return;
         }
         let input_dbfs = frame_dbfs(frame);
-        if !self.learns && input_dbfs > OUTPUT_APPLY_BELOW_DBFS {
+        if !self.learns {
+            let target_db = target_output_gain_db(input_dbfs);
+            let prev_gain = 10.0_f32.powf(self.smoothed_gain_db / 20.0);
+            self.smoothed_gain_db += (target_db - self.smoothed_gain_db) * OUTPUT_SMOOTH_ALPHA;
+            let next_gain = 10.0_f32.powf(self.smoothed_gain_db / 20.0);
+            if self.smoothed_gain_db > 0.05 || (next_gain - prev_gain).abs() > 1e-4 {
+                let len = frame.len() as f32;
+                for (index, sample) in frame.iter_mut().enumerate() {
+                    let t = (index as f32 + 1.0) / len;
+                    let gain = prev_gain + (next_gain - prev_gain) * t;
+                    *sample = (f32::from(*sample) * gain)
+                        .round()
+                        .clamp(f32::from(i16::MIN), f32::from(i16::MAX))
+                        as i16;
+                }
+                let _ = self.module.process(frame, SAMPLE_RATE as i32);
+            }
             return;
         }
         let processed = self.module.process(frame, SAMPLE_RATE as i32);
-        if processed && self.learns && input_dbfs > SPEECH_FLOOR_DBFS {
+        if processed && input_dbfs > SPEECH_FLOOR_DBFS {
             self.measured_gain_db_sum += frame_dbfs(frame) - input_dbfs;
             self.measured_frames += 1;
         }
@@ -114,21 +146,26 @@ mod tests {
     #[test]
     fn the_fixed_output_stage_adds_its_gain_only_to_quiet_frames() {
         let mut stage = GainStage::output();
-        let mut quiet: Vec<i16> = (0..FRAME_SAMPLES)
+        let quiet_template: Vec<i16> = (0..FRAME_SAMPLES)
             .map(|sample| ((sample as f32 * 0.04).sin() * 200.0) as i16)
             .collect();
-        let before = frame_dbfs(&quiet);
-        stage.process(&mut quiet);
+        let before = frame_dbfs(&quiet_template);
+        let mut quiet = quiet_template.clone();
+        for _ in 0..30 {
+            quiet = quiet_template.clone();
+            stage.process(&mut quiet);
+        }
         assert!(
-            frame_dbfs(&quiet) - before > 6.0,
-            "quiet speech should be lifted"
+            frame_dbfs(&quiet) - before > 4.5,
+            "quiet speech should be lifted smoothly"
         );
 
+        let mut fresh_stage = GainStage::output();
         let mut loud: Vec<i16> = (0..FRAME_SAMPLES)
             .map(|sample| ((sample as f32 * 0.04).sin() * 8000.0) as i16)
             .collect();
         let loud_before = loud.clone();
-        stage.process(&mut loud);
+        fresh_stage.process(&mut loud);
         assert_eq!(loud, loud_before, "already-loud frames stay untouched");
     }
 

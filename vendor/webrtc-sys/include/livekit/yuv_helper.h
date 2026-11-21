@@ -361,4 +361,19 @@ static void argb_to_nv12(const uint8_t* src_argb,
                                     height));
 }
 
+static void yuy2_to_i420(const uint8_t* src_yuy2,
+                         int src_stride_yuy2,
+                         uint8_t* dst_y,
+                         int dst_stride_y,
+                         uint8_t* dst_u,
+                         int dst_stride_u,
+                         uint8_t* dst_v,
+                         int dst_stride_v,
+                         int width,
+                         int height) {
+  THROW_ON_ERROR(libyuv::YUY2ToI420(src_yuy2, src_stride_yuy2, dst_y,
+                                    dst_stride_y, dst_u, dst_stride_u, dst_v,
+                                    dst_stride_v, width, height));
+}
+
 }  // namespace livekit_ffi

@@ -86,7 +86,8 @@ pub enum Flow {
     Render,
 }
 
-/// Endpoint id of the Windows default communications device, which the ADM reports as the device guid.
+/// Endpoint id of the Windows default audio device (preferring eConsole to match the Windows
+/// taskbar switcher and AdmProxy::SystemDefaultFor, with fallback to eCommunications).
 #[cfg(windows)]
 pub fn system_default_id(flow: Flow) -> Option<String> {
     use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
@@ -101,7 +102,7 @@ pub fn system_default_id(flow: Flow) -> Option<String> {
 #[cfg(windows)]
 fn default_endpoint_id(flow: Flow) -> Option<String> {
     use windows::Win32::Media::Audio::{
-        IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eCommunications, eRender,
+        IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eCommunications, eConsole, eRender,
     };
     use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
     let data_flow = match flow {
@@ -112,7 +113,8 @@ fn default_endpoint_id(flow: Flow) -> Option<String> {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
         let device = enumerator
-            .GetDefaultAudioEndpoint(data_flow, eCommunications)
+            .GetDefaultAudioEndpoint(data_flow, eConsole)
+            .or_else(|_| enumerator.GetDefaultAudioEndpoint(data_flow, eCommunications))
             .ok()?;
         let id = device.GetId().ok()?;
         let text = id.to_string().ok();
@@ -261,8 +263,18 @@ pub fn select_input(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> b
 pub fn select_input_index(factory: &PeerConnectionFactory, index: u16) -> bool {
     factory.stop_recording();
     let selected = factory.set_recording_device(index);
-    factory.init_recording();
-    factory.start_recording();
+    let started = factory.init_recording() && factory.start_recording();
+    #[cfg(windows)]
+    if selected && !started {
+        // Bluetooth headsets (HFP/A2DP profile switch) can momentarily reject Init/StartRecording.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        factory.stop_recording();
+        let _ = factory.set_recording_device(index);
+        let _ = factory.init_recording();
+        let _ = factory.start_recording();
+    }
+    #[cfg(not(windows))]
+    let _ = started;
     selected
 }
 
@@ -280,8 +292,18 @@ pub fn select_output(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> 
 pub fn select_output_index(factory: &PeerConnectionFactory, index: u16) -> bool {
     factory.stop_playout();
     let selected = factory.set_playout_device(index);
-    factory.init_playout();
-    factory.start_playout();
+    let started = factory.init_playout() && factory.start_playout();
+    #[cfg(windows)]
+    if selected && !started {
+        // Retry once after Bluetooth A2DP/HFP endpoint renegotiation settles.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        factory.stop_playout();
+        let _ = factory.set_playout_device(index);
+        let _ = factory.init_playout();
+        let _ = factory.start_playout();
+    }
+    #[cfg(not(windows))]
+    let _ = started;
     selected
 }
 

@@ -866,3 +866,44 @@ pub fn argb_to_nv12(
         .unwrap()
     }
 }
+
+pub fn yuy2_to_i420(
+    src_yuy2: &[u8],
+    src_stride_yuy2: u32,
+    dst_y: &mut [u8],
+    dst_stride_y: u32,
+    dst_u: &mut [u8],
+    dst_stride_u: u32,
+    dst_v: &mut [u8],
+    dst_stride_v: u32,
+    width: i32,
+    height: i32,
+) {
+    argb_assert_safety(src_yuy2, src_stride_yuy2, width, height);
+    i420_assert_safety(
+        dst_y,
+        dst_stride_y,
+        dst_u,
+        dst_stride_u,
+        dst_v,
+        dst_stride_v,
+        width,
+        height,
+    );
+
+    unsafe {
+        yuv_sys::ffi::yuy2_to_i420(
+            src_yuy2.as_ptr(),
+            src_stride_yuy2 as i32,
+            dst_y.as_mut_ptr(),
+            dst_stride_y as i32,
+            dst_u.as_mut_ptr(),
+            dst_stride_u as i32,
+            dst_v.as_mut_ptr(),
+            dst_stride_v as i32,
+            width,
+            height,
+        )
+        .unwrap()
+    }
+}

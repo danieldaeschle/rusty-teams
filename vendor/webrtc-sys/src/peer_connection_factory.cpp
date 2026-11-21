@@ -249,11 +249,18 @@ std::shared_ptr<AudioTrack> PeerConnectionFactory::create_audio_track(
 
 std::shared_ptr<AudioTrack> PeerConnectionFactory::create_device_audio_track(
     rust::String label) const {
+  return create_device_audio_track_with_options(std::move(label), true);
+}
+
+std::shared_ptr<AudioTrack>
+PeerConnectionFactory::create_device_audio_track_with_options(
+    rust::String label,
+    bool noise_suppression) const {
   // Create an audio source that uses the ADM for capture
   webrtc::AudioOptions audio_options;
   audio_options.echo_cancellation = true;
   audio_options.auto_gain_control = true;
-  audio_options.noise_suppression = true;
+  audio_options.noise_suppression = noise_suppression;
 
   webrtc::scoped_refptr<webrtc::AudioSourceInterface> audio_source =
       peer_factory_->CreateAudioSource(audio_options);

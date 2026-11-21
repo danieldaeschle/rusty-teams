@@ -10,6 +10,7 @@ use tokio::time::interval;
 
 use crate::audio::{ClipGenerator, FRAME_SAMPLES, SAMPLE_RATE, SineGenerator};
 use crate::devices::{self, DeviceChoice};
+use crate::mic_processing::MicSettings;
 
 const TONE_AMPLITUDE: f32 = 0.3;
 const SOURCE_QUEUE_MS: u32 = 100;
@@ -44,6 +45,7 @@ impl AudioMode {
 pub struct AudioSetup {
     factory: PeerConnectionFactory,
     pub track: RtcAudioTrack,
+    pub track_with_ns: Option<RtcAudioTrack>,
     pub listen_only: bool,
     platform_acquired: bool,
     pub adm_state: String,
@@ -90,9 +92,15 @@ impl AudioSetup {
             }
         }
         if has_input {
+            // Auto mode disables built-in WebRTC NS so DeepFilterNet runs alone on 48 kHz mics
+            // (with single-stage WebRTC NS fallback inside the capture hook for 16 kHz / warm-up).
+            // Low mode switches to `track_with_ns` with built-in WebRTC NS enabled and hook off.
+            let track = factory.create_device_audio_track_with_options("microphone", false);
+            let track_with_ns = Some(factory.create_device_audio_track("microphone-ns"));
             return AudioSetup {
                 factory: factory.clone(),
-                track: factory.create_device_audio_track("microphone"),
+                track,
+                track_with_ns,
                 listen_only: false,
                 platform_acquired,
                 adm_state,
@@ -124,10 +132,27 @@ impl AudioSetup {
         AudioSetup {
             factory: factory.clone(),
             track,
+            track_with_ns: None,
             listen_only: mode == AudioMode::Platform,
             platform_acquired,
             adm_state,
             feeder: Some((task, running)),
+        }
+    }
+
+    pub fn device_track(&self, settings: MicSettings) -> &RtcAudioTrack {
+        if !settings.ml_noise_suppression()
+            && let Some(track) = &self.track_with_ns
+        {
+            return track;
+        }
+        &self.track
+    }
+
+    pub fn set_device_tracks_enabled(&self, enabled: bool) {
+        self.track.set_enabled(enabled);
+        if let Some(track) = &self.track_with_ns {
+            track.set_enabled(enabled);
         }
     }
 

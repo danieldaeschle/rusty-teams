@@ -12,6 +12,7 @@ use libwebrtc::video_frame::I420Buffer;
 use crate::capture::Capture;
 use crate::error::{Error, Result};
 use crate::video_frame::VideoPicture;
+use crate::win_timer::HighResSleep;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShareKind {
@@ -241,7 +242,9 @@ pub fn start_screen_capture(
                 deliver(i420_from_bgra(frame.data(), width, height, frame.stride()));
             }
         });
+        let sleeper = HighResSleep::new();
         while !stop.load(Ordering::SeqCst) {
+            let started = Instant::now();
             let gone = gone_since
                 .lock()
                 .is_ok_and(|since| since.is_some_and(|since| since.elapsed() >= SOURCE_GONE_AFTER));
@@ -250,7 +253,8 @@ pub fn start_screen_capture(
             }
             pump_messages();
             capturer.capture_frame();
-            std::thread::sleep(Duration::from_secs(1) / fps.load(Ordering::Relaxed).max(1));
+            let period = Duration::from_secs(1) / fps.load(Ordering::Relaxed).max(1);
+            sleeper.sleep_until(started + period);
         }
     })
     .map_err(|error| Error::Webrtc(format!("screen thread: {error}")))

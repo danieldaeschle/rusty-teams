@@ -81,6 +81,7 @@ pub mod video_send;
 pub mod voice_high_pass;
 pub mod wav_dump;
 pub mod whiteboard;
+pub(crate) mod win_timer;
 
 pub use audio_io::AudioMode;
 pub use background::{BackgroundCache, BackgroundChoice, BackgroundPicture, DefaultBackground};

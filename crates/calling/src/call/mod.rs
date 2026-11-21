@@ -599,7 +599,7 @@ async fn drive(
         input: input.clone(),
         output: output.clone(),
     });
-    let track = audio.track.clone();
+    let mut track = audio.track.clone();
     live.audio = Some(audio);
     let mut local_video = LocalVideo::new(
         &factory,
@@ -2073,8 +2073,13 @@ async fn drive(
                     }
                 }
                 Some(CallCommand::SetMicSettings(settings)) if !audio_disabled => {
+                    let device_ns_changed =
+                        mic_settings.ml_noise_suppression() != settings.ml_noise_suppression();
                     mic_settings = settings;
-                    sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), false, &mut software_audio, mic_settings, control, timeline);
+                    if let Some(audio) = live.audio.as_ref() {
+                        track = audio.device_track(mic_settings).clone();
+                    }
+                    sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), device_ns_changed, &mut software_audio, mic_settings, control, timeline);
                 }
                 Some(CallCommand::SetMicSettings(settings)) => {
                     mic_settings = settings;
@@ -2873,16 +2878,16 @@ async fn drive(
                     );
                 }
             }
-            Some(()) = device_changes.recv() => {
-                device_debounce.signal(Instant::now());
+            Some(device_id) = device_changes.recv() => {
+                device_debounce.signal_device(Instant::now(), device_id);
             }
             _ = sleep_until(device_debounce.deadline().unwrap_or_else(far_future)), if device_debounce.deadline().is_some() => {
-                if device_debounce.take_due(Instant::now()) {
+                if let Some(touched_ids) = device_debounce.take_due_devices(Instant::now()) {
                     let previous = std::mem::replace(&mut device_lists, devices::list_devices(&factory));
                     control.send(CallUpdate::Devices(device_lists.clone()));
                     if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
-                        let input_changed = follow_device_change(Flow::Capture, (&previous.inputs, &device_lists.inputs), &input, &mut applied_input, |index| devices::select_input_index(&factory, index), timeline, control);
-                        let output_changed = follow_device_change(Flow::Render, (&previous.outputs, &device_lists.outputs), &output, &mut applied_output, |index| devices::select_output_index(&factory, index), timeline, control);
+                        let input_changed = follow_device_change(Flow::Capture, (&previous.inputs, &device_lists.inputs), &input, &mut applied_input, &touched_ids, |index| devices::select_input_index(&factory, index), timeline, control);
+                        let output_changed = follow_device_change(Flow::Render, (&previous.outputs, &device_lists.outputs), &output, &mut applied_output, &touched_ids, |index| devices::select_output_index(&factory, index), timeline, control);
                         if input_changed || output_changed {
                             record_audio_devices(timeline, &device_lists, applied_input.as_ref(), applied_output.as_ref());
                         }

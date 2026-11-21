@@ -64,6 +64,10 @@
 #include "jetson/jetson_encoder_factory.h"
 #endif
 
+#if defined(USE_MF_VIDEO_CODEC)
+#include "mf/mf_encoder_factory.h"
+#endif
+
 namespace livekit_ffi {
 
 namespace {
@@ -340,6 +344,12 @@ rust::Vec<VideoEncoderBackend> video_encoder_backend_list() {
   }
 #endif
 
+#if defined(USE_MF_VIDEO_CODEC)
+  if (webrtc::MFVideoEncoderFactory::IsSupported()) {
+    has_hardware_backend = true;
+  }
+#endif
+
   if (has_hardware_backend && !hardware_backend_listed) {
     backends.push_back(VideoEncoderBackend::Hardware);
   }
@@ -378,6 +388,15 @@ VideoEncoderFactory::InternalFactory::InternalFactory() {
     AddNvencFactory(factories_, preferred_hw_encoder.explicitly_set);
     AddVaapiFactory(factories_, false);
   }
+
+#if defined(USE_MF_VIDEO_CODEC)
+  if (webrtc::MFVideoEncoderFactory::IsSupported()) {
+    AddBackendFactory(
+        factories_,
+        VideoEncoderBackend::Hardware,
+        std::make_unique<webrtc::MFVideoEncoderFactory>());
+  }
+#endif
 }
 
 std::vector<webrtc::SdpVideoFormat>
