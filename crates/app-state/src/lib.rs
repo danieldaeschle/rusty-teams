@@ -37,6 +37,7 @@ pub mod google_calendar_sync;
 pub mod ics_sync;
 pub mod image_view_gallery;
 pub mod importance;
+pub mod keyring_vault;
 pub mod local_previews;
 pub mod manage_team;
 pub mod message_actions;

@@ -70,6 +70,16 @@ impl AgentProfile {
         !self.is_command()
     }
 
+    /// The API key of a chat backend; `None` for a command profile, which has none.
+    pub fn api_key_mut(&mut self) -> Option<&mut String> {
+        match &mut self.backend {
+            AgentBackend::Command => None,
+            AgentBackend::OpenAi { api_key, .. } | AgentBackend::Anthropic { api_key, .. } => {
+                Some(api_key)
+            }
+        }
+    }
+
     pub fn backend_label(&self) -> String {
         match &self.backend {
             AgentBackend::Command => String::new(),
@@ -241,5 +251,36 @@ impl AgentProfile {
             mcp_config_flag: "--additional-mcp-config".to_string(),
             backend: AgentBackend::Command,
         }
+    }
+}
+
+#[cfg(test)]
+mod api_key_tests {
+    use super::*;
+
+    #[test]
+    fn only_chat_backends_have_an_api_key() {
+        let mut command = AgentProfile::default();
+        assert!(command.api_key_mut().is_none());
+        let mut open_ai = AgentProfile {
+            backend: AgentBackend::OpenAi {
+                base_url: "https://api.openai.com/v1".into(),
+                model: "m".into(),
+                api_key: "k1".into(),
+            },
+            ..AgentProfile::default()
+        };
+        *open_ai.api_key_mut().unwrap() = "k2".into();
+        assert!(
+            matches!(&open_ai.backend, AgentBackend::OpenAi { api_key, .. } if api_key == "k2")
+        );
+        let mut anthropic = AgentProfile {
+            backend: AgentBackend::Anthropic {
+                model: "m".into(),
+                api_key: "k".into(),
+            },
+            ..AgentProfile::default()
+        };
+        assert_eq!(anthropic.api_key_mut().map(|key| key.as_str()), Some("k"));
     }
 }

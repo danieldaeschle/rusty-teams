@@ -178,6 +178,15 @@ const STORE_OPEN_ATTEMPTS: u32 = 20;
 const STORE_OPEN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
 fn open_store(path: &std::path::Path) -> Store {
+    // Each tenant database keeps its secrets apart in the OS keyring (ADR 0023).
+    let namespace = path.file_name().map_or_else(
+        || path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    open_store_file(path).with_vault(Arc::new(state::keyring_vault::KeyringVault::new(namespace)))
+}
+
+fn open_store_file(path: &std::path::Path) -> Store {
     for _ in 1..STORE_OPEN_ATTEMPTS {
         match Store::open(path) {
             Ok(store) => return store,
@@ -185,6 +194,22 @@ fn open_store(path: &std::path::Path) -> Store {
         }
     }
     Store::open(path).expect("cache database")
+}
+
+/// The data folder holds the cache, logs and reports: owner-only (ADR 0023).
+#[cfg(unix)]
+fn restrict_data_folder() {
+    use std::os::unix::fs::PermissionsExt as _;
+    const OWNER_ONLY_FOLDER: u32 = 0o700;
+    let folder = data_path("");
+    if let Err(error) = std::fs::create_dir_all(&folder).and_then(|()| {
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(OWNER_ONLY_FOLDER))
+    }) {
+        log::warn!(
+            "data folder {} not restricted to its owner: {error}",
+            folder.display()
+        );
+    }
 }
 
 fn main() {
@@ -249,6 +274,10 @@ fn main() {
         demo::seed(&store);
         store
     } else {
+        #[cfg(unix)]
+        if arguments.database.is_none() {
+            restrict_data_folder();
+        }
         let path = arguments
             .database
             .clone()
