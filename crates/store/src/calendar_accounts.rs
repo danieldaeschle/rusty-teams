@@ -5,6 +5,8 @@ use crate::error::Result;
 use crate::store::Store;
 
 pub const CALENDAR_ACCOUNTS_KEY: &str = "calendar.accounts";
+/// Vault key prefix of an account's Google tokens: `google-calendar/<account id>`.
+const GOOGLE_TOKENS_SECRET: &str = "google-calendar";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -252,17 +254,74 @@ impl CalendarAccounts {
     }
 }
 
+/// The accounts with their Google tokens, which live in the store's secret vault.
 pub fn load_calendar_accounts(store: &Store) -> CalendarAccounts {
+    let Some(mut accounts) = stored_accounts(store) else {
+        return CalendarAccounts::default();
+    };
+    let has_plain_tokens = accounts
+        .google_accounts
+        .iter()
+        .any(|account| account.tokens != GoogleTokenSet::default());
+    if has_plain_tokens {
+        // Written before the vault: move the tokens out of the database once.
+        let _ = save_calendar_accounts(store, &accounts);
+        return accounts;
+    }
+    for account in &mut accounts.google_accounts {
+        account.tokens = store
+            .secret(&google_tokens_key(&account.id))
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+    }
+    accounts
+}
+
+/// Saves the accounts without tokens; tokens go to the secret vault, and the tokens of
+/// disconnected accounts are deleted from it.
+pub fn save_calendar_accounts(store: &Store, accounts: &CalendarAccounts) -> Result<()> {
+    let previous_ids: Vec<String> = stored_accounts(store)
+        .map(|stored| {
+            stored
+                .google_accounts
+                .into_iter()
+                .map(|account| account.id)
+                .collect()
+        })
+        .unwrap_or_default();
+    for account in &accounts.google_accounts {
+        let key = google_tokens_key(&account.id);
+        if account.tokens == GoogleTokenSet::default() {
+            store.delete_secret(&key)?;
+        } else {
+            store.set_secret(&key, &serde_json::to_string(&account.tokens)?)?;
+        }
+    }
+    for id in previous_ids
+        .iter()
+        .filter(|id| accounts.google_account(id).is_none())
+    {
+        store.delete_secret(&google_tokens_key(id))?;
+    }
+    let mut without_tokens = accounts.clone();
+    for account in &mut without_tokens.google_accounts {
+        account.tokens = GoogleTokenSet::default();
+    }
+    store.set_meta(CALENDAR_ACCOUNTS_KEY, &without_tokens.to_json())
+}
+
+fn stored_accounts(store: &Store) -> Option<CalendarAccounts> {
     store
         .meta(CALENDAR_ACCOUNTS_KEY)
         .ok()
         .flatten()
         .and_then(|json| CalendarAccounts::from_json(&json).ok())
-        .unwrap_or_default()
 }
 
-pub fn save_calendar_accounts(store: &Store, accounts: &CalendarAccounts) -> Result<()> {
-    store.set_meta(CALENDAR_ACCOUNTS_KEY, &accounts.to_json())
+fn google_tokens_key(account_id: &str) -> String {
+    format!("{GOOGLE_TOKENS_SECRET}/{account_id}")
 }
 
 /// Save Google tokens refreshed during a fetch without touching anything else.
@@ -323,9 +382,71 @@ pub fn merge_caldav_metadata(store: &Store, fetched: &CalendarAccounts) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::store::Store;
+    use crate::vault::tests::MemoryVault;
     use tempfile::tempdir;
+
+    fn google(id: &str, access: &str) -> GoogleAccount {
+        GoogleAccount {
+            id: id.into(),
+            email: format!("{id}@example.com"),
+            calendars: Vec::new(),
+            tokens: GoogleTokenSet {
+                access_token: access.into(),
+                refresh_token: format!("refresh-{id}"),
+                expires_at: 1,
+            },
+        }
+    }
+
+    /// Regression: access and refresh tokens were stored in plain text in the cache database.
+    #[test]
+    fn google_tokens_are_kept_in_the_vault_not_in_the_database() {
+        let vault = Arc::new(MemoryVault::default());
+        let store = Store::open_in_memory().unwrap().with_vault(vault.clone());
+        let mut accounts = CalendarAccounts::default();
+        accounts.google_accounts.push(google("g1", "access-g1"));
+        save_calendar_accounts(&store, &accounts).unwrap();
+        let raw = store.meta(CALENDAR_ACCOUNTS_KEY).unwrap().unwrap();
+        assert!(
+            !raw.contains("access-g1") && !raw.contains("refresh-g1"),
+            "{raw}"
+        );
+        assert!(vault.0.lock().unwrap()["google-calendar/g1"].contains("refresh-g1"));
+        assert_eq!(load_calendar_accounts(&store), accounts);
+    }
+
+    #[test]
+    fn plain_tokens_from_an_older_version_move_into_the_vault_on_load() {
+        let vault = Arc::new(MemoryVault::default());
+        let store = Store::open_in_memory().unwrap().with_vault(vault.clone());
+        let mut legacy = CalendarAccounts::default();
+        legacy.google_accounts.push(google("g1", "access-g1"));
+        store
+            .set_meta(CALENDAR_ACCOUNTS_KEY, &legacy.to_json())
+            .unwrap();
+        assert_eq!(load_calendar_accounts(&store), legacy);
+        let raw = store.meta(CALENDAR_ACCOUNTS_KEY).unwrap().unwrap();
+        assert!(!raw.contains("access-g1"), "{raw}");
+        assert_eq!(load_calendar_accounts(&store), legacy);
+    }
+
+    #[test]
+    fn disconnecting_an_account_deletes_its_tokens() {
+        let vault = Arc::new(MemoryVault::default());
+        let store = Store::open_in_memory().unwrap().with_vault(vault.clone());
+        let mut accounts = CalendarAccounts::default();
+        accounts.google_accounts.push(google("g1", "access-g1"));
+        accounts.google_accounts.push(google("g2", "access-g2"));
+        save_calendar_accounts(&store, &accounts).unwrap();
+        accounts.disconnect_google("g1");
+        save_calendar_accounts(&store, &accounts).unwrap();
+        let kept: Vec<String> = vault.0.lock().unwrap().keys().cloned().collect();
+        assert_eq!(kept, vec!["google-calendar/g2".to_owned()]);
+    }
 
     #[test]
     fn defaults_to_outlook_home() {

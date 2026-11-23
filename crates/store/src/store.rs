@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 use std::panic::Location;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use directories::ProjectDirs;
@@ -9,6 +9,7 @@ use rusqlite::Connection;
 
 use crate::error::{Error, Result};
 use crate::migrations;
+use crate::vault::SecretVault;
 
 pub const DATA_DIR_NAME: &str = "ms-teams-linux";
 const DATABASE_FILE: &str = "cache.sqlite3";
@@ -34,6 +35,7 @@ pub fn default_database_path() -> Result<PathBuf> {
 
 pub struct Store {
     connection: Mutex<Connection>,
+    pub(crate) vault: Option<Arc<dyn SecretVault>>,
 }
 
 impl Store {
@@ -52,6 +54,7 @@ impl Store {
             })?;
         }
         let connection = Connection::open(path)?;
+        restrict_to_owner(path)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
         Self::from_connection(connection)
     }
@@ -66,6 +69,7 @@ impl Store {
         migrations::migrate(&mut connection)?;
         Ok(Store {
             connection: Mutex::new(connection),
+            vault: None,
         })
     }
 
@@ -130,6 +134,38 @@ impl Drop for StoreGuard<'_> {
     }
 }
 
+/// The cache holds messages and, without a vault, secrets: owner-only, also for the WAL files
+/// SQLite created before (new ones copy the database file's mode).
+#[cfg(unix)]
+fn restrict_to_owner(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    const OWNER_ONLY: u32 = 0o600;
+    const SIDE_FILES: [&str; 2] = ["-wal", "-shm"];
+    let mut files = vec![path.to_path_buf()];
+    files.extend(SIDE_FILES.iter().map(|suffix| {
+        let mut name = path.as_os_str().to_owned();
+        name.push(suffix);
+        PathBuf::from(name)
+    }));
+    for file in files {
+        match std::fs::set_permissions(&file, std::fs::Permissions::from_mode(OWNER_ONLY)) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(Error::Permissions {
+                    path: file.display().to_string(),
+                    source: error,
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
 fn thread_label() -> String {
     let thread = std::thread::current();
     thread
@@ -139,4 +175,36 @@ fn thread_label() -> String {
 
 pub(crate) fn json_ids(ids: &[String]) -> String {
     serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_owned())
+}
+
+#[cfg(all(test, unix))]
+mod permission_tests {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use super::*;
+
+    /// Regression: the cache database and its WAL file were readable by other local users.
+    #[test]
+    fn the_database_and_its_wal_files_are_owner_only() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cache.sqlite3");
+        let store = Store::open(&path).unwrap();
+        store.set_meta("k", "v").unwrap();
+        for suffix in ["", "-wal", "-shm"] {
+            let file = PathBuf::from(format!("{}{suffix}", path.display()));
+            let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{}", file.display());
+        }
+    }
+
+    #[test]
+    fn reopening_restricts_files_left_readable_by_an_older_version() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cache.sqlite3");
+        drop(Store::open(&path).unwrap());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        drop(Store::open(&path).unwrap());
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 }

@@ -24,6 +24,12 @@ impl Store {
         Ok(())
     }
 
+    pub fn delete_meta(&self, key: &str) -> Result<()> {
+        self.lock()?
+            .execute("DELETE FROM meta WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     pub fn meta_time(&self, key: &str) -> Result<Option<DateTime<Utc>>> {
         Ok(self
             .meta(key)?

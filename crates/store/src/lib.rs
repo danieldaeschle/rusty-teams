@@ -25,6 +25,7 @@ mod sync_state;
 mod teams;
 mod text;
 mod time;
+mod vault;
 
 pub use calendar_accounts::{
     CALENDAR_ACCOUNTS_KEY, CalDavAccount, CalDavCalendarInfo, CalendarAccounts, CalendarProvider,
@@ -46,3 +47,4 @@ pub use models::{
 pub use search::{HIGHLIGHT_END, HIGHLIGHT_START};
 pub use store::{DATA_DIR_NAME, Store, default_database_path, report_slow_locks_to};
 pub use text::plain_text;
+pub use vault::SecretVault;
