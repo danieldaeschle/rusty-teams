@@ -195,8 +195,8 @@ mod tests {
     struct MemoryVault(std::sync::Mutex<std::collections::HashMap<String, String>>);
 
     impl store::SecretVault for MemoryVault {
-        fn get(&self, key: &str) -> Option<String> {
-            self.0.lock().unwrap().get(key).cloned()
+        fn get(&self, key: &str) -> Result<Option<String>, String> {
+            Ok(self.0.lock().unwrap().get(key).cloned())
         }
         fn set(&self, key: &str, value: &str) {
             self.0
@@ -207,6 +207,27 @@ mod tests {
         fn delete(&self, key: &str) {
             self.0.lock().unwrap().remove(key);
         }
+    }
+
+    struct LockedVault;
+
+    impl store::SecretVault for LockedVault {
+        fn get(&self, _: &str) -> Result<Option<String>, String> {
+            Err("collection is locked".to_owned())
+        }
+        fn set(&self, _: &str, _: &str) {
+            panic!("a locked keyring must not get a new token");
+        }
+        fn delete(&self, _: &str) {}
+    }
+
+    /// Regression (review): an unreadable keyring looked empty, so a new token replaced the one agents use.
+    #[test]
+    fn an_unreadable_token_is_an_error_not_a_new_token() {
+        let store = Store::open_in_memory()
+            .unwrap()
+            .with_vault(std::sync::Arc::new(LockedVault));
+        assert!(load_or_create_token(&store).is_err());
     }
 
     /// Regression: the token sat in plain text in the cache database.

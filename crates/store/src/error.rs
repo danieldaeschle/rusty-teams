@@ -14,6 +14,8 @@ pub enum Error {
         path: String,
         source: std::io::Error,
     },
+    #[error("secret vault unavailable: {0}")]
+    Vault(String),
     #[error("cannot encode a secret: {0}")]
     SecretEncoding(#[from] serde_json::Error),
     #[error("no platform data directory available")]

@@ -4,7 +4,7 @@
 //! database keeps its own. When the keyring fails, a value stays in memory for this session
 //! only: it is never written to the database instead (ADR 0019, ADR 0023).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use store::SecretVault;
@@ -52,6 +52,9 @@ pub struct KeyringVault {
     backend: Arc<dyn KeyringBackend>,
     /// Read once per key: callers load secrets often, and a locked keyring may prompt.
     cache: Mutex<HashMap<String, Option<String>>>,
+    /// Keys whose read failed this session: their stored value is unknown, so a delete
+    /// (a save that saw an empty value) must not wipe it.
+    unreadable: Mutex<HashSet<String>>,
 }
 
 impl KeyringVault {
@@ -65,7 +68,14 @@ impl KeyringVault {
             namespace: namespace.into(),
             backend,
             cache: Mutex::new(HashMap::new()),
+            unreadable: Mutex::new(HashSet::new()),
         }
+    }
+
+    fn unreadable(&self) -> MutexGuard<'_, HashSet<String>> {
+        self.unreadable
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn cache(&self) -> MutexGuard<'_, HashMap<String, Option<String>>> {
@@ -80,35 +90,52 @@ impl KeyringVault {
         &self,
         key: &str,
         operation: impl FnOnce(&dyn KeyringBackend, &str) -> Result<T, String> + Send + 'static,
-    ) -> Option<T> {
+    ) -> Result<T, String> {
         let backend = self.backend.clone();
         let user = format!("{}/{key}", self.namespace);
         let outcome = std::thread::spawn(move || operation(backend.as_ref(), &user))
             .join()
             .unwrap_or_else(|_| Err("the keyring call panicked".to_owned()));
+        if let Err(error) = &outcome {
+            log::warn!("keyring unavailable for secret {key}: {error}");
+        }
         outcome
-            .map_err(|error| log::warn!("keyring unavailable for secret {key}: {error}"))
-            .ok()
     }
 }
 
 impl SecretVault for KeyringVault {
-    fn get(&self, key: &str) -> Option<String> {
+    fn get(&self, key: &str) -> Result<Option<String>, String> {
         if let Some(cached) = self.cache().get(key) {
-            return cached.clone();
+            return Ok(cached.clone());
         }
-        let value = self.call(key, |backend, user| backend.get(user)).flatten();
-        self.cache().insert(key.to_owned(), value.clone());
-        value
+        match self.call(key, |backend, user| backend.get(user)) {
+            Ok(value) => {
+                self.unreadable().remove(key);
+                self.cache().insert(key.to_owned(), value.clone());
+                Ok(value)
+            }
+            // Not cached: the next read asks the keyring again (it may have been unlocked).
+            Err(error) => {
+                self.unreadable().insert(key.to_owned());
+                Err(error)
+            }
+        }
     }
 
     fn set(&self, key: &str, value: &str) {
+        self.unreadable().remove(key);
         self.cache().insert(key.to_owned(), Some(value.to_owned()));
         let value = value.to_owned();
         let _ = self.call(key, move |backend, user| backend.set(user, &value));
     }
 
     fn delete(&self, key: &str) {
+        if self.unreadable().contains(key) {
+            log::warn!(
+                "keeping secret {key}: it could not be read, so it is not known to be stale"
+            );
+            return;
+        }
         self.cache().insert(key.to_owned(), None);
         let _ = self.call(key, |backend, user| backend.delete(user));
     }
@@ -175,9 +202,9 @@ mod tests {
         let home = KeyringVault::with_backend("cache.sqlite3", keyring.clone());
         home.set("mcp/token", "abc");
         let reopened = KeyringVault::with_backend("cache.sqlite3", keyring.clone());
-        assert_eq!(reopened.get("mcp/token").as_deref(), Some("abc"));
+        assert_eq!(reopened.get("mcp/token").unwrap().as_deref(), Some("abc"));
         let guest = KeyringVault::with_backend("cache-t2.sqlite3", keyring.clone());
-        assert_eq!(guest.get("mcp/token"), None);
+        assert_eq!(guest.get("mcp/token").unwrap(), None);
         reopened.delete("mcp/token");
         assert!(keyring.entries.lock().unwrap().is_empty());
     }
@@ -201,11 +228,67 @@ mod tests {
     #[test]
     fn a_broken_keyring_keeps_the_value_for_this_session_only() {
         let vault = KeyringVault::with_backend("cache.sqlite3", Arc::new(BrokenKeyring));
-        assert_eq!(vault.get("google-calendar/g1"), None);
+        assert!(vault.get("google-calendar/g1").is_err());
         vault.set("google-calendar/g1", "tokens");
-        assert_eq!(vault.get("google-calendar/g1").as_deref(), Some("tokens"));
+        assert_eq!(
+            vault.get("google-calendar/g1").unwrap().as_deref(),
+            Some("tokens")
+        );
         let next_start = KeyringVault::with_backend("cache.sqlite3", Arc::new(BrokenKeyring));
-        assert_eq!(next_start.get("google-calendar/g1"), None);
+        assert!(next_start.get("google-calendar/g1").is_err());
+    }
+
+    /// A keyring that fails reads until unlocked, like a locked Secret Service collection.
+    #[derive(Default)]
+    struct LockedKeyring {
+        inner: FakeKeyring,
+        unlocked: std::sync::atomic::AtomicBool,
+    }
+
+    impl KeyringBackend for LockedKeyring {
+        fn get(&self, user: &str) -> Result<Option<String>, String> {
+            if self.unlocked.load(std::sync::atomic::Ordering::SeqCst) {
+                self.inner.get(user)
+            } else {
+                Err("collection is locked".to_owned())
+            }
+        }
+        fn set(&self, user: &str, value: &str) -> Result<(), String> {
+            self.inner.set(user, value)
+        }
+        fn delete(&self, user: &str) -> Result<(), String> {
+            self.inner.delete(user)
+        }
+    }
+
+    /// Regression (review): a failed read was cached as "no secret" and the next save deleted the real one.
+    #[test]
+    fn a_failed_read_neither_sticks_nor_lets_a_save_delete_the_secret() {
+        let keyring = Arc::new(LockedKeyring::default());
+        keyring
+            .inner
+            .set("cache.sqlite3/google-calendar/g1", "tokens")
+            .unwrap();
+        let vault = KeyringVault::with_backend("cache.sqlite3", keyring.clone());
+        assert!(vault.get("google-calendar/g1").is_err());
+        vault.delete("google-calendar/g1");
+        assert_eq!(
+            keyring
+                .inner
+                .entries
+                .lock()
+                .unwrap()
+                .get("cache.sqlite3/google-calendar/g1")
+                .map(String::as_str),
+            Some("tokens")
+        );
+        keyring
+            .unlocked
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            vault.get("google-calendar/g1").unwrap().as_deref(),
+            Some("tokens")
+        );
     }
 
     #[test]

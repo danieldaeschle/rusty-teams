@@ -5,15 +5,17 @@
 
 use std::sync::Arc;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::store::Store;
 
 const META_PREFIX: &str = "secret:";
 
-/// Where a store keeps its secrets. An implementation handles its own backend failures,
+/// Where a store keeps its secrets. An implementation handles its own write failures,
 /// e.g. by keeping a value in memory for the session, and never writes a secret into the database.
+/// `get` tells a missing secret (`Ok(None)`) from one it could not read (`Err`), so a caller
+/// never mistakes a locked keyring for an empty one.
 pub trait SecretVault: Send + Sync {
-    fn get(&self, key: &str) -> Option<String>;
+    fn get(&self, key: &str) -> std::result::Result<Option<String>, String>;
     fn set(&self, key: &str, value: &str);
     fn delete(&self, key: &str);
 }
@@ -27,7 +29,7 @@ impl Store {
 
     pub fn secret(&self, key: &str) -> Result<Option<String>> {
         match &self.vault {
-            Some(vault) => Ok(vault.get(key)),
+            Some(vault) => vault.get(key).map_err(Error::Vault),
             None => self.meta(&meta_key(key)),
         }
     }
@@ -69,8 +71,8 @@ pub(crate) mod tests {
     pub(crate) struct MemoryVault(pub(crate) Mutex<HashMap<String, String>>);
 
     impl SecretVault for MemoryVault {
-        fn get(&self, key: &str) -> Option<String> {
-            self.0.lock().unwrap().get(key).cloned()
+        fn get(&self, key: &str) -> std::result::Result<Option<String>, String> {
+            Ok(self.0.lock().unwrap().get(key).cloned())
         }
         fn set(&self, key: &str, value: &str) {
             self.0
