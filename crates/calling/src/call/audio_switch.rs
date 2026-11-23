@@ -144,6 +144,19 @@ pub(super) fn apply_mute(
     effect.muted
 }
 
+pub(super) fn silence_for_server_mute(
+    audio: &AudioSetup,
+    software_audio: Option<&SoftwareAudio>,
+    control: &CallControl,
+) {
+    let effect = MuteEffect::for_muted(true);
+    audio.set_device_tracks_enabled(effect.track_enabled);
+    if let Some(software_audio) = software_audio {
+        software_audio.set_microphone_muted(true);
+    }
+    control.send(CallUpdate::Muted(true));
+}
+
 pub(super) fn silence_for_hold(
     on_hold: bool,
     muted: bool,

@@ -32,8 +32,7 @@ fn target_output_gain_db(input_dbfs: f32) -> f32 {
     } else if input_dbfs <= OUTPUT_FULL_BOOST_DBFS {
         OUTPUT_MAX_GAIN_DB
     } else {
-        let ratio =
-            (OUTPUT_UNITY_DBFS - input_dbfs) / (OUTPUT_UNITY_DBFS - OUTPUT_FULL_BOOST_DBFS);
+        let ratio = (OUTPUT_UNITY_DBFS - input_dbfs) / (OUTPUT_UNITY_DBFS - OUTPUT_FULL_BOOST_DBFS);
         OUTPUT_MAX_GAIN_DB * ratio
     }
 }

@@ -10,7 +10,7 @@ use tokio::time::interval;
 
 use crate::audio::{ClipGenerator, FRAME_SAMPLES, SAMPLE_RATE, SineGenerator};
 use crate::devices::{self, DeviceChoice};
-use crate::mic_processing::MicSettings;
+use crate::mic_processing::{MicSettings, NoiseSuppression};
 
 const TONE_AMPLITUDE: f32 = 0.3;
 const SOURCE_QUEUE_MS: u32 = 100;
@@ -143,7 +143,7 @@ impl AudioSetup {
     }
 
     pub fn device_track(&self, settings: MicSettings) -> &RtcAudioTrack {
-        if !settings.ml_noise_suppression()
+        if classical_noise_track(settings)
             && let Some(track) = &self.track_with_ns
         {
             return track;
@@ -178,6 +178,10 @@ impl AudioSetup {
 enum FrameGenerator {
     Sine(SineGenerator),
     Clip(ClipGenerator),
+}
+
+pub(crate) fn classical_noise_track(settings: MicSettings) -> bool {
+    settings.noise_suppression == NoiseSuppression::Low && !settings.music_mode
 }
 
 impl FrameGenerator {
@@ -220,5 +224,19 @@ mod tests {
         assert_eq!(AudioMode::parse(Some("SILENCE")), AudioMode::Silence);
         assert_eq!(AudioMode::parse(Some("file")), AudioMode::File);
         assert_eq!(AudioMode::parse(Some("whatever")), AudioMode::Platform);
+    }
+
+    #[test]
+    fn only_low_uses_the_classical_noise_track() {
+        use crate::mic_processing::{MicSettings, NoiseSuppression};
+        let mut settings = MicSettings::default();
+        assert!(!classical_noise_track(settings));
+        settings.noise_suppression = NoiseSuppression::Low;
+        assert!(classical_noise_track(settings));
+        settings.noise_suppression = NoiseSuppression::Off;
+        assert!(!classical_noise_track(settings));
+        settings.noise_suppression = NoiseSuppression::Low;
+        settings.music_mode = true;
+        assert!(!classical_noise_track(settings));
     }
 }

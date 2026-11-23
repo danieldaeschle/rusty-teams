@@ -112,8 +112,6 @@ impl Feeder {
     }
 }
 
-const DEFAULT_MICROPHONE_NOTICE: &str =
-    "The picked microphone could not be captured while sharing sound, using the default one";
 const NO_MICROPHONE_NOTICE: &str =
     "The microphone could not be captured while sharing sound, others cannot hear you";
 
@@ -171,41 +169,25 @@ impl SoftwareAudio {
                 (FrameSource::Silence, None)
             };
             let microphone_queue = SampleQueue::default();
-            let microphone = match start_microphone(input, microphone_queue.clone()) {
-                Ok(started) => {
-                    microphone_source = Some(started.source);
-                    captures.push(started.capture);
-                    FrameSource::Captured(microphone_queue)
-                }
-                Err(error) => {
-                    if !plan.computer_sound {
-                        return Err(error);
+            let label = crate::devices::input_label(factory, input);
+            let microphone =
+                match start_microphone(input, label.as_deref(), microphone_queue.clone()) {
+                    Ok(started) => {
+                        microphone_source = Some(started.source);
+                        captures.push(started.capture);
+                        FrameSource::Captured(microphone_queue)
                     }
-                    let fallback_queue = SampleQueue::default();
-                    let fallback = Some(input)
-                        .filter(|input| **input != DeviceChoice::SystemDefault)
-                        .and_then(|_| {
-                            start_microphone(&DeviceChoice::SystemDefault, fallback_queue.clone())
-                                .ok()
-                        });
-                    match fallback {
-                        Some(started) => {
-                            microphone_notice = Some(DEFAULT_MICROPHONE_NOTICE);
-                            microphone_source =
-                                Some(format!("{}, picked one failed: {error}", started.source));
-                            captures.push(started.capture);
-                            FrameSource::Captured(fallback_queue)
+                    Err(error) => {
+                        if !plan.computer_sound {
+                            return Err(error);
                         }
-                        None => {
-                            microphone_notice = Some(NO_MICROPHONE_NOTICE);
-                            warning.get_or_insert(format!(
-                                "microphone not captured while sharing sound: {error}"
-                            ));
-                            FrameSource::Silence
-                        }
+                        microphone_notice = Some(NO_MICROPHONE_NOTICE);
+                        warning.get_or_insert(format!(
+                            "microphone not captured while sharing sound: {error}"
+                        ));
+                        FrameSource::Silence
                     }
-                }
-            };
+                };
             (microphone, computer, loopback)
         } else {
             let microphone = if mode == AudioMode::Tone {

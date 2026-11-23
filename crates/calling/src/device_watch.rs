@@ -52,6 +52,19 @@ pub struct DeviceWatcher {
     _stop: std::sync::mpsc::Sender<()>,
 }
 
+pub fn endpoint_delta(previous: &[String], current: &[String]) -> Vec<String> {
+    let mut changed = Vec::new();
+    for id in previous.iter().chain(current.iter()) {
+        let before = previous.iter().any(|key| key.eq_ignore_ascii_case(id));
+        let after = current.iter().any(|key| key.eq_ignore_ascii_case(id));
+        let seen = changed.iter().any(|key: &String| key.eq_ignore_ascii_case(id));
+        if before != after && !seen {
+            changed.push(id.clone());
+        }
+    }
+    changed
+}
+
 pub fn watch() -> (DeviceWatcher, UnboundedReceiver<Option<String>>) {
     let (sender, receiver) = unbounded_channel();
     (platform::start(sender), receiver)
@@ -193,6 +206,24 @@ mod tests {
         assert_eq!(
             debounce.take_due_devices(start + Duration::from_millis(900)),
             None
+        );
+    }
+
+    #[test]
+    fn a_device_that_leaves_and_returns_inside_the_quiet_period_is_one_event() {
+        let start = Instant::now();
+        let present = vec!["{headset}".to_owned()];
+        let gone = Vec::new();
+        let mut debounce = Debounce::default();
+        for id in endpoint_delta(&present, &gone) {
+            debounce.signal_device(start, Some(id));
+        }
+        for id in endpoint_delta(&gone, &present) {
+            debounce.signal_device(start + Duration::from_millis(200), Some(id));
+        }
+        assert_eq!(
+            debounce.take_due_devices(start + DEVICE_CHANGE_QUIET + Duration::from_millis(200)),
+            Some(vec!["{headset}".to_owned()])
         );
     }
 }

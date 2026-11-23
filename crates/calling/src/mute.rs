@@ -22,6 +22,37 @@ impl MuteCommand {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServerMuteSync {
+    pub muted: bool,
+    pub cleared: bool,
+    pub silence_without_signal: bool,
+}
+
+/// Applies an organizer mute locally. A local unmute while the flag is still set
+/// stays cleared until `server_muted` drops, so the same roster update cannot mute again.
+pub fn sync_server_mute(server_muted: bool, muted: bool, cleared: bool) -> ServerMuteSync {
+    if !server_muted {
+        return ServerMuteSync {
+            muted,
+            cleared: false,
+            silence_without_signal: false,
+        };
+    }
+    if cleared || muted {
+        return ServerMuteSync {
+            muted,
+            cleared,
+            silence_without_signal: false,
+        };
+    }
+    ServerMuteSync {
+        muted: true,
+        cleared: false,
+        silence_without_signal: true,
+    }
+}
+
 impl MuteEffect {
     pub fn for_muted(muted: bool) -> Self {
         MuteEffect {
@@ -57,6 +88,22 @@ mod tests {
         let open = MuteEffect::for_muted(false);
         assert!(open.track_enabled);
         assert!(!open.endpoint_is_muted);
+    }
+
+    #[test]
+    fn an_organizer_mute_closes_the_mic_until_the_user_clears_it() {
+        let applied = sync_server_mute(true, false, false);
+        assert!(applied.silence_without_signal);
+        assert!(applied.muted);
+        assert!(!applied.cleared);
+        let held = sync_server_mute(true, false, true);
+        assert!(!held.silence_without_signal);
+        assert!(!held.muted);
+        assert!(held.cleared);
+        let again = sync_server_mute(false, false, true);
+        assert!(!again.cleared);
+        let fresh = sync_server_mute(true, false, again.cleared);
+        assert!(fresh.silence_without_signal);
     }
 
     #[test]

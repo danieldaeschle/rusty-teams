@@ -55,7 +55,7 @@ use crate::hold::{
 };
 use crate::meeting_options::{self, OptionWrite};
 use crate::mic_processing::MicSettings;
-use crate::mute::{MuteCommand, MuteEffect};
+use crate::mute::{MuteCommand, MuteEffect, sync_server_mute};
 use crate::notices::{
     ADMIT_ALL_FAILED_NOTICE, ADMIT_FAILED_NOTICE, ATTENDEE_SETTINGS_FAILED_NOTICE,
     BACKGROUND_IMAGE_FAILED_NOTICE, CALL_TRANSFERRED_NOTICE, CAMERA_RESTART_NOTICE,
@@ -874,6 +874,7 @@ async fn drive(
 
     let initial = MuteEffect::initial(is_meeting);
     let mut muted = initial.muted;
+    let mut server_mute_cleared = false;
     live.audio
         .as_ref()
         .expect("audio set above")
@@ -1617,6 +1618,18 @@ async fn drive(
                             let entries = roster.entries();
                             timeline.record("roster", format!("{} participant(s)", entries.len()));
                             control.send(CallUpdate::Roster(entries));
+                            let own_server_muted = roster
+                                .members()
+                                .iter()
+                                .any(|member| member.mri == own_mri && member.server_muted);
+                            let decision = sync_server_mute(own_server_muted, muted, server_mute_cleared);
+                            server_mute_cleared = decision.cleared;
+                            if decision.silence_without_signal
+                                && let Some(audio) = live.audio.as_ref()
+                            {
+                                silence_for_server_mute(audio, software_audio.as_ref(), control);
+                                muted = true;
+                            }
                             if is_echo && echo_watch.bot_left(roster.members().iter().map(|member| member.mri.as_str())) {
                                 timeline.record("echo bot left", "test call ends like in Teams");
                                 advance(state, CallSignal::RemoteEnd(EndKind::Normal), control);
@@ -2043,6 +2056,13 @@ async fn drive(
             },
             command = control.recv() => match command {
                 Some(CallCommand::Mute(mute)) => {
+                    let own_server_muted = roster
+                        .members()
+                        .iter()
+                        .any(|member| member.mri == own_mri && member.server_muted);
+                    if !mute.target(muted) && own_server_muted {
+                        server_mute_cleared = true;
+                    }
                     if consent_pending && !mute.target(muted) {
                         control.send(CallUpdate::Notice(CONSENT_FIRST_NOTICE.into()));
                     } else {
@@ -2878,6 +2898,25 @@ async fn drive(
                             local_video.camera_capture_summary().unwrap_or_default()
                         ),
                     );
+                    #[cfg(not(windows))]
+                    if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
+                        let listed = devices::list_devices(&factory);
+                        let previous_ids: Vec<String> = device_lists
+                            .inputs
+                            .iter()
+                            .chain(device_lists.outputs.iter())
+                            .map(|device| device.key())
+                            .collect();
+                        let current_ids: Vec<String> = listed
+                            .inputs
+                            .iter()
+                            .chain(listed.outputs.iter())
+                            .map(|device| device.key())
+                            .collect();
+                        for id in device_watch::endpoint_delta(&previous_ids, &current_ids) {
+                            device_debounce.signal_device(Instant::now(), Some(id));
+                        }
+                    }
                 }
             }
             Some(device_id) = device_changes.recv() => {

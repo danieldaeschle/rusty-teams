@@ -145,7 +145,7 @@ pub fn resolve_index(
             .map(|device| device.index),
         DeviceChoice::Device(key) => devices
             .iter()
-            .find(|device| device.key() == *key)
+            .find(|device| device.key().eq_ignore_ascii_case(key))
             .map(|device| device.index),
     }
 }
@@ -249,6 +249,21 @@ fn default_for(choice: &DeviceChoice, flow: Flow) -> Option<String> {
         .flatten()
 }
 
+pub fn device_switch_applied(selected: bool, started: bool) -> bool {
+    selected && started
+}
+
+pub fn input_label(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> Option<String> {
+    let DeviceChoice::Device(key) = choice else {
+        return None;
+    };
+    enumerate(factory)
+        .inputs
+        .into_iter()
+        .find(|device| device.key().eq_ignore_ascii_case(key))
+        .map(|device| device.name)
+}
+
 pub fn select_input(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
     let Some(index) = resolve_index(
         &enumerate(factory).inputs,
@@ -285,12 +300,9 @@ pub fn select_input_index(factory: &PeerConnectionFactory, index: u16) -> bool {
         started
     };
     #[cfg(windows)]
-    return selected && started;
+    return device_switch_applied(selected, started);
     #[cfg(not(windows))]
-    {
-        let _ = started;
-        selected
-    }
+    device_switch_applied(selected, started)
 }
 
 pub fn select_output(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
@@ -319,12 +331,9 @@ pub fn select_output_index(factory: &PeerConnectionFactory, index: u16) -> bool 
         started
     };
     #[cfg(windows)]
-    return selected && started;
+    return device_switch_applied(selected, started);
     #[cfg(not(windows))]
-    {
-        let _ = started;
-        selected
-    }
+    device_switch_applied(selected, started)
 }
 
 #[cfg(test)]
@@ -439,6 +448,21 @@ mod tests {
             ),
             Some(0)
         );
+        assert_eq!(
+            resolve_index(
+                &devices,
+                &DeviceChoice::Device("{0.0.0.00000000}.{BBBB}".into()),
+                None
+            ),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_device_switch_counts_only_when_audio_starts() {
+        assert!(!device_switch_applied(true, false));
+        assert!(device_switch_applied(true, true));
+        assert!(!device_switch_applied(false, true));
     }
 
     fn headset_lists() -> (Vec<AudioDevice>, Vec<AudioDevice>) {

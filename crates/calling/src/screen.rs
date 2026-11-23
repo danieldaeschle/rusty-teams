@@ -177,6 +177,165 @@ fn scaled_bgra(
     })
 }
 
+const SHARE_SEND_MAX_FS: u32 = 8160;
+const MACROBLOCK: u32 = 16;
+
+fn macroblocks(width: u32, height: u32) -> u32 {
+    width.div_ceil(MACROBLOCK) * height.div_ceil(MACROBLOCK)
+}
+
+fn even(value: u32) -> u32 {
+    value & !1
+}
+
+fn buffer_covers(bytes: &[u8], width: u32, height: u32, stride: u32) -> bool {
+    width >= 2
+        && height >= 2
+        && stride as usize >= width as usize * 4
+        && bytes.len() >= stride as usize * height as usize
+}
+
+pub(crate) fn fit_share_size(width: u32, height: u32, max_fs: u32) -> (u32, u32) {
+    let (width, height) = (even(width), even(height));
+    if width < 2 || height < 2 || max_fs == 0 || macroblocks(width, height) <= max_fs {
+        return (width, height);
+    }
+    let mut scale = (f64::from(macroblocks(width, height)) / f64::from(max_fs)).sqrt();
+    let mut target_width = even((f64::from(width) / scale) as u32).max(2);
+    let mut target_height = even((f64::from(height) / scale) as u32).max(2);
+    while macroblocks(target_width, target_height) > max_fs && target_width > 2 && target_height > 2
+    {
+        scale *= 1.05;
+        target_width = even((f64::from(width) / scale) as u32).max(2);
+        target_height = even((f64::from(height) / scale) as u32).max(2);
+    }
+    (target_width, target_height)
+}
+
+fn pixel(bytes: &[u8], stride: u32, x: u32, y: u32) -> [u8; 4] {
+    let offset = y as usize * stride as usize + x as usize * 4;
+    [
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ]
+}
+
+fn half_bgra(bytes: &[u8], width: u32, height: u32, stride: u32) -> (Vec<u8>, u32, u32, u32) {
+    let target_width = even(width / 2).max(2);
+    let target_height = even(height / 2).max(2);
+    let mut out = vec![0u8; target_width as usize * target_height as usize * 4];
+    for y in 0..target_height {
+        for x in 0..target_width {
+            let mut sum = [0u16; 4];
+            for sample in [
+                pixel(bytes, stride, x * 2, y * 2),
+                pixel(bytes, stride, (x * 2 + 1).min(width - 1), y * 2),
+                pixel(bytes, stride, x * 2, (y * 2 + 1).min(height - 1)),
+                pixel(
+                    bytes,
+                    stride,
+                    (x * 2 + 1).min(width - 1),
+                    (y * 2 + 1).min(height - 1),
+                ),
+            ] {
+                for channel in 0..4 {
+                    sum[channel] += u16::from(sample[channel]);
+                }
+            }
+            let offset = (y as usize * target_width as usize + x as usize) * 4;
+            for channel in 0..4 {
+                out[offset + channel] = (sum[channel] / 4) as u8;
+            }
+        }
+    }
+    (out, target_width, target_height, target_width * 4)
+}
+
+fn bilinear_bgra(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+    target_width: u32,
+    target_height: u32,
+) -> Vec<u8> {
+    let mut out = vec![0u8; target_width as usize * target_height as usize * 4];
+    for y in 0..target_height {
+        let src_y = (f64::from(y) + 0.5) * f64::from(height) / f64::from(target_height) - 0.5;
+        let y0 = src_y.floor().clamp(0.0, f64::from(height - 1)) as u32;
+        let y1 = (y0 + 1).min(height - 1);
+        let fy = (src_y - f64::from(y0)).clamp(0.0, 1.0);
+        for x in 0..target_width {
+            let src_x = (f64::from(x) + 0.5) * f64::from(width) / f64::from(target_width) - 0.5;
+            let x0 = src_x.floor().clamp(0.0, f64::from(width - 1)) as u32;
+            let x1 = (x0 + 1).min(width - 1);
+            let fx = (src_x - f64::from(x0)).clamp(0.0, 1.0);
+            let samples = [
+                (pixel(bytes, stride, x0, y0), (1.0 - fx) * (1.0 - fy)),
+                (pixel(bytes, stride, x1, y0), fx * (1.0 - fy)),
+                (pixel(bytes, stride, x0, y1), (1.0 - fx) * fy),
+                (pixel(bytes, stride, x1, y1), fx * fy),
+            ];
+            let offset = (y as usize * target_width as usize + x as usize) * 4;
+            for channel in 0..4 {
+                let mixed: f64 = samples
+                    .iter()
+                    .map(|(sample, weight)| f64::from(sample[channel]) * weight)
+                    .sum();
+                out[offset + channel] = mixed.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    out
+}
+
+fn scale_bgra_to(
+    bytes: &[u8],
+    mut width: u32,
+    mut height: u32,
+    mut stride: u32,
+    target_width: u32,
+    target_height: u32,
+) -> Vec<u8> {
+    let mut current = bytes.to_vec();
+    while width >= target_width.saturating_mul(2)
+        && height >= target_height.saturating_mul(2)
+        && width >= 4
+        && height >= 4
+    {
+        let (next, next_width, next_height, next_stride) =
+            half_bgra(&current, width, height, stride);
+        current = next;
+        width = next_width;
+        height = next_height;
+        stride = next_stride;
+    }
+    if width == target_width && height == target_height {
+        return current;
+    }
+    bilinear_bgra(&current, width, height, stride, target_width, target_height)
+}
+
+fn share_frame(bytes: &[u8], width: u32, height: u32, stride: u32) -> Option<I420Buffer> {
+    let (width, height) = (even(width), even(height));
+    if !buffer_covers(bytes, width, height, stride) {
+        return None;
+    }
+    let (target_width, target_height) = fit_share_size(width, height, SHARE_SEND_MAX_FS);
+    if target_width == width && target_height == height {
+        return Some(i420_from_bgra(bytes, width, height, stride));
+    }
+    let scaled = scale_bgra_to(bytes, width, height, stride, target_width, target_height);
+    Some(i420_from_bgra(
+        &scaled,
+        target_width,
+        target_height,
+        target_width * 4,
+    ))
+}
+
 fn i420_from_bgra(bytes: &[u8], width: u32, height: u32, stride: u32) -> I420Buffer {
     let mut buffer = I420Buffer::new(width, height);
     let (stride_y, stride_u, stride_v) = buffer.strides();
@@ -238,8 +397,8 @@ pub fn start_screen_capture(
                 *since = None;
             }
             let (width, height) = (frame.width() as u32 & !1, frame.height() as u32 & !1);
-            if width >= 2 && height >= 2 {
-                deliver(i420_from_bgra(frame.data(), width, height, frame.stride()));
+            if let Some(picture) = share_frame(frame.data(), width, height, frame.stride()) {
+                deliver(picture);
             }
         });
         let sleeper = HighResSleep::new();
@@ -364,8 +523,8 @@ pub(crate) fn start_portal_capture(
             }
             let Ok(frame) = result else { return };
             let (width, height) = (frame.width() as u32 & !1, frame.height() as u32 & !1);
-            if width >= 2 && height >= 2 {
-                deliver(i420_from_bgra(frame.data(), width, height, frame.stride()));
+            if let Some(picture) = share_frame(frame.data(), width, height, frame.stride()) {
+                deliver(picture);
             }
         });
         if delegated {
@@ -424,6 +583,17 @@ pub(crate) fn start_portal_capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wide_share_fits_the_send_budget_and_a_short_buffer_does_not() {
+        use libwebrtc::video_frame::VideoBuffer;
+        let (width, height) = fit_share_size(2560, 1440, SHARE_SEND_MAX_FS);
+        assert!(macroblocks(width, height) <= SHARE_SEND_MAX_FS);
+        let bytes = vec![0u8; 2560 * 1440 * 4];
+        let frame = share_frame(&bytes, 2560, 1440, 2560 * 4).expect("scaled");
+        assert!(macroblocks(frame.width(), frame.height()) <= SHARE_SEND_MAX_FS);
+        assert!(share_frame(&[0u8; 8], 4, 2, 16).is_none());
+    }
 
     #[test]
     fn sources_get_readable_labels() {

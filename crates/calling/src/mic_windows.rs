@@ -53,10 +53,16 @@ fn open_device(choice: &DeviceChoice) -> Result<IMMDevice> {
         };
         match chosen {
             Some(device) => Ok(device),
-            None => enumerator
-                .GetDefaultAudioEndpoint(eCapture, eConsole)
-                .or_else(|_| enumerator.GetDefaultAudioEndpoint(eCapture, eCommunications))
-                .map_err(|error| audio_error("default microphone", error)),
+            None => match choice {
+                DeviceChoice::Device(key) => Err(audio_error(
+                    "microphone",
+                    format!("`{key}` is not an active capture device"),
+                )),
+                DeviceChoice::SystemDefault => enumerator
+                    .GetDefaultAudioEndpoint(eCapture, eConsole)
+                    .or_else(|_| enumerator.GetDefaultAudioEndpoint(eCapture, eCommunications))
+                    .map_err(|error| audio_error("default microphone", error)),
+            },
         }
     }
 }
@@ -64,15 +70,12 @@ fn open_device(choice: &DeviceChoice) -> Result<IMMDevice> {
 pub fn friendly_name_for_id(id: &str) -> Option<String> {
     unsafe {
         let initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
-        let name = CoCreateInstance::<_, IMMDeviceEnumerator>(
-            &MMDeviceEnumerator,
-            None,
-            CLSCTX_ALL,
-        )
-        .ok()
-        .and_then(|enumerator| enumerator.GetDevice(&HSTRING::from(id)).ok())
-        .map(|device| friendly_name(&device))
-        .filter(|name| !name.is_empty());
+        let name =
+            CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .ok()
+                .and_then(|enumerator| enumerator.GetDevice(&HSTRING::from(id)).ok())
+                .map(|device| friendly_name(&device))
+                .filter(|name| !name.is_empty());
         if initialized {
             CoUninitialize();
         }
