@@ -303,18 +303,10 @@ mod tests {
 
     use super::*;
 
-    /// Published asset name. Linux drops the leading `v` (`rusty-teams-0.5.0-linux-amd64`).
-    /// Windows keeps the tag (`rusty-teams-v0.5.0-windows-amd64.exe`).
+    /// Published asset name drops the leading `v` (`rusty-teams-0.5.0-windows-amd64.exe`).
     fn asset_name(tag: &str) -> String {
-        #[cfg(target_os = "linux")]
-        {
-            let version = tag.strip_prefix('v').unwrap_or(tag);
-            format!("rusty-teams-{version}{ASSET_SUFFIX}")
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            format!("rusty-teams-{tag}{ASSET_SUFFIX}")
-        }
+        let version = tag.strip_prefix('v').unwrap_or(tag);
+        format!("rusty-teams-{version}{ASSET_SUFFIX}")
     }
 
     fn release(tag: &str, prerelease: bool) -> Release {
