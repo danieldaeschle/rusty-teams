@@ -303,13 +303,27 @@ mod tests {
 
     use super::*;
 
+    /// Published asset name. Linux drops the leading `v` (`rusty-teams-0.5.0-linux-amd64`).
+    /// Windows keeps the tag (`rusty-teams-v0.5.0-windows-amd64.exe`).
+    fn asset_name(tag: &str) -> String {
+        #[cfg(target_os = "linux")]
+        {
+            let version = tag.strip_prefix('v').unwrap_or(tag);
+            format!("rusty-teams-{version}{ASSET_SUFFIX}")
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            format!("rusty-teams-{tag}{ASSET_SUFFIX}")
+        }
+    }
+
     fn release(tag: &str, prerelease: bool) -> Release {
         Release {
             tag_name: tag.to_owned(),
             draft: false,
             prerelease,
             assets: vec![ReleaseAsset {
-                name: format!("rusty-teams-{tag}{ASSET_SUFFIX}"),
+                name: asset_name(tag),
                 browser_download_url: format!("https://example.test/{tag}.exe"),
                 size: EXECUTABLE_MAGIC.len() as u64,
                 digest: None,
@@ -381,14 +395,14 @@ mod tests {
         let mut release = release("v0.5.0", false);
         let binary = release.assets.remove(0);
         let tarball = ReleaseAsset {
-            name: "rusty-teams-v0.5.0-linux-amd64.tar.gz".to_owned(),
+            name: "rusty-teams-0.5.0-linux-amd64.tar.gz".to_owned(),
             ..binary.clone()
         };
         release.assets = vec![tarball.clone()];
         assert!(newest_update("v0.4.0", std::slice::from_ref(&release)).is_none());
         release.assets = vec![tarball, binary];
         let (_, asset) = newest_update("v0.4.0", std::slice::from_ref(&release)).unwrap();
-        assert_eq!(asset.name, "rusty-teams-v0.5.0-linux-amd64");
+        assert_eq!(asset.name, "rusty-teams-0.5.0-linux-amd64");
     }
 
     #[test]
