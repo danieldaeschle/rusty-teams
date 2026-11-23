@@ -20,6 +20,11 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
+// NV12 has one chroma sample per 2x2 block; an odd size overruns the buffer below.
+bool IsEvenSize(uint32_t width, uint32_t height) {
+  return width % 2 == 0 && height % 2 == 0;
+}
+
 bool ContainsIdrNal(const uint8_t* data, size_t size) {
   for (size_t i = 0; i + 4 <= size; ++i) {
     size_t start_len = 0;
@@ -559,8 +564,16 @@ int32_t MFH264EncoderImpl::Encode(
   if (static_cast<uint32_t>(i420->width()) != width_ ||
       static_cast<uint32_t>(i420->height()) != height_) {
     // Resolution changed dynamically: re-init MFT or fall back cleanly.
-    width_ = static_cast<uint32_t>(i420->width());
-    height_ = static_cast<uint32_t>(i420->height());
+    const uint32_t width = static_cast<uint32_t>(i420->width());
+    const uint32_t height = static_cast<uint32_t>(i420->height());
+    if (!IsEvenSize(width, height)) {
+      // Keep no MFT sized for the old frame: a later frame of this size would pass the size
+      // check above and overrun the NV12 buffer.
+      Release();
+      return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
+    }
+    width_ = width;
+    height_ = height;
     mft_.Reset();
     codec_api_.Reset();
     event_gen_.Reset();
