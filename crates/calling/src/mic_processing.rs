@@ -89,15 +89,11 @@ impl MicSettings {
         }
     }
 
-    pub fn uses_device_track(self) -> bool {
-        self.uses_device_track_on(cfg!(windows))
-    }
-
     /// Auto and Low use the native WebRTC platform ADM device track on every desktop OS
     /// (WASAPI2/CoreAudio on Windows, Pulse/PipeWire on Linux, CoreAudio on macOS), matching
     /// Web Teams and avoiding software-feeder jitter and unsynchronized AEC.
     /// Music mode and Off run the software chain.
-    pub fn uses_device_track_on(self, _windows: bool) -> bool {
+    pub fn uses_device_track(self) -> bool {
         !self.music_mode
             && matches!(
                 self.noise_suppression,
@@ -117,8 +113,7 @@ mod tests {
     #[test]
     fn auto_uses_the_device_track_on_all_platforms() {
         let settings = MicSettings::default();
-        assert!(settings.uses_device_track_on(false));
-        assert!(settings.uses_device_track_on(true));
+        assert!(settings.uses_device_track());
         assert!(settings.ml_noise_suppression());
         assert_eq!(
             settings.apm_config(),
@@ -137,8 +132,7 @@ mod tests {
             noise_suppression: NoiseSuppression::Low,
             music_mode: false,
         };
-        assert!(settings.uses_device_track_on(false));
-        assert!(settings.uses_device_track_on(true));
+        assert!(settings.uses_device_track());
         assert!(!settings.ml_noise_suppression());
         assert_eq!(
             settings.apm_config(),
@@ -168,25 +162,6 @@ mod tests {
             }
             .ml_noise_suppression()
         );
-    }
-
-    #[test]
-    fn windows_matches_linux_and_macos_for_device_track_selection() {
-        for noise_suppression in NoiseSuppression::ALL {
-            for music_mode in [false, true] {
-                let settings = MicSettings {
-                    noise_suppression,
-                    music_mode,
-                };
-                let expected = !music_mode
-                    && matches!(
-                        noise_suppression,
-                        NoiseSuppression::Auto | NoiseSuppression::Low
-                    );
-                assert_eq!(settings.uses_device_track_on(true), expected);
-                assert_eq!(settings.uses_device_track_on(false), expected);
-            }
-        }
     }
 
     #[test]

@@ -13,7 +13,9 @@ Options were: one software pipeline for every mode, or the same split the browse
 
 ## Decision
 
-On Linux, Auto and Low send through the Pulse device track. On macOS, Auto and Low send through the CoreAudio device track. Music mode, Off, and computer sound use the software chain on both.
+On Linux, Auto and Low send through the Pulse device track. On macOS, Auto and Low send through the CoreAudio device track. On Windows, Auto and Low send through the WASAPI device track. Music mode, Off, and computer sound use the software chain on every desktop OS.
+
+Windows Voice Clarity (`AudioCategory_Communications`) applies only to the software WASAPI capture used by Music mode and Off. The platform device track does not request that category, so a laptop microphone array can keep more room echo in Auto and Low than the software path did.
 
 Hangup tears the audio graph down without hanging the call task. On macOS, camera preview and send use the system camera.
 

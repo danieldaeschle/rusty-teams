@@ -92,10 +92,12 @@ impl AudioSetup {
             }
         }
         if has_input {
-            // Auto mode disables built-in WebRTC NS so DeepFilterNet runs alone on 48 kHz mics
+            // Windows Auto disables built-in WebRTC NS so DeepFilterNet runs alone on 48 kHz mics
             // (with single-stage WebRTC NS fallback inside the capture hook for 16 kHz / warm-up).
+            // Linux and macOS keep WebRTC NS on that track, then DeepFilterNet, as before.
             // Low mode switches to `track_with_ns` with built-in WebRTC NS enabled and hook off.
-            let track = factory.create_device_audio_track_with_options("microphone", false);
+            let track =
+                factory.create_device_audio_track_with_options("microphone", !cfg!(windows));
             let track_with_ns = Some(factory.create_device_audio_track("microphone-ns"));
             return AudioSetup {
                 factory: factory.clone(),

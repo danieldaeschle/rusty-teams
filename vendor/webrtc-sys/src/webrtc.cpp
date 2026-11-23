@@ -192,6 +192,9 @@ rust::String create_random_uuid() {
 
 void tune_windows_camera(rust::Str target) {
 #ifdef WEBRTC_WIN
+  if (target.empty()) {
+    return;
+  }
   using Microsoft::WRL::ComPtr;
 
   static const GUID kPropSetVidCapVideoProcAmp = {
@@ -226,6 +229,9 @@ void tune_windows_camera(rust::Str target) {
     return text;
   };
   const std::wstring wanted_lower = to_lower(wanted);
+  if (wanted_lower.empty()) {
+    return;
+  }
 
   HRESULT hr_com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   const bool com_owned = SUCCEEDED(hr_com);
@@ -242,7 +248,7 @@ void tune_windows_camera(rust::Str target) {
       ComPtr<IMoniker> moniker;
       ULONG fetched = 0;
       while (enum_moniker->Next(1, &moniker, &fetched) == S_OK && moniker) {
-        bool matches = wanted_lower.empty();
+        bool matches = false;
         if (!matches) {
           ComPtr<IPropertyBag> bag;
           if (SUCCEEDED(moniker->BindToStorage(nullptr, nullptr,

@@ -1202,6 +1202,7 @@ impl AppState {
             BackendEvent::LiveRetry(retry) => self.live_retry = Some(retry),
             BackendEvent::Calls(launcher) => {
                 launcher.set_default_camera(self.call_camera.clone());
+                launcher.set_default_mic(self.call_mic);
                 self.call_launcher = Some(launcher);
                 self.load_own_time_zone(cx);
             }

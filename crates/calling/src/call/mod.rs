@@ -171,6 +171,7 @@ pub struct CallOptions {
     pub data_channel: bool,
     pub concurrent: bool,
     pub start_camera: bool,
+    pub mic: MicSettings,
 }
 
 impl Default for CallOptions {
@@ -194,6 +195,7 @@ impl Default for CallOptions {
             data_channel: data_channel_from_env(),
             concurrent: false,
             start_camera: false,
+            mic: MicSettings::default(),
         }
     }
 }
@@ -599,7 +601,8 @@ async fn drive(
         input: input.clone(),
         output: output.clone(),
     });
-    let mut track = audio.track.clone();
+    let mut mic_settings = options.mic;
+    let mut track = audio.device_track(mic_settings).clone();
     live.audio = Some(audio);
     let mut local_video = LocalVideo::new(
         &factory,
@@ -929,7 +932,6 @@ async fn drive(
     }
     let mut software_audio: Option<SoftwareAudio> = None;
     let mut share_sound_wanted = false;
-    let mut mic_settings = MicSettings::default();
     let mut audio_disabled = false;
     let mut remote_audio: Option<RtcAudioTrack> = None;
     sync_software_audio(

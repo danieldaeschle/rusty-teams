@@ -260,6 +260,16 @@ pub fn select_input(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> b
     select_input_index(factory, index)
 }
 
+#[cfg(windows)]
+fn pause_for_endpoint_retry() {
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(150));
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::task::block_in_place(pause);
+    } else {
+        pause();
+    }
+}
+
 pub fn select_input_index(factory: &PeerConnectionFactory, index: u16) -> bool {
     factory.stop_recording();
     let selected = factory.set_recording_device(index);
@@ -267,7 +277,7 @@ pub fn select_input_index(factory: &PeerConnectionFactory, index: u16) -> bool {
     #[cfg(windows)]
     let started = if selected && !started {
         // Bluetooth headsets (HFP/A2DP profile switch) can momentarily reject Init/StartRecording.
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        pause_for_endpoint_retry();
         factory.stop_recording();
         let reselected = factory.set_recording_device(index);
         reselected && factory.init_recording() && factory.start_recording()
@@ -301,7 +311,7 @@ pub fn select_output_index(factory: &PeerConnectionFactory, index: u16) -> bool 
     #[cfg(windows)]
     let started = if selected && !started {
         // Retry once after Bluetooth A2DP/HFP endpoint renegotiation settles.
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        pause_for_endpoint_retry();
         factory.stop_playout();
         let reselected = factory.set_playout_device(index);
         reselected && factory.init_playout() && factory.start_playout()

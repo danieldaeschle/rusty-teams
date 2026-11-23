@@ -13,7 +13,7 @@
 #include <wrl/client.h>
 
 #include <cstdint>
-#include <deque>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -63,11 +63,12 @@ class MFH264EncoderImpl : public VideoEncoder {
   bool ProcessOneOutputSample();
   void EmitEncodedBuffer(const uint8_t* data,
                          size_t size,
-                         bool clean_point);
+                         bool clean_point,
+                         LONGLONG sample_time);
   void SetCodecUint32(const GUID& key, uint32_t value);
   void SetCodecBool(const GUID& key, bool value);
 
-  const Environment& env_;
+  const Environment env_;
   const SdpVideoFormat format_;
   EncodedImageCallback* encoded_image_callback_ = nullptr;
   H264PacketizationMode packetization_mode_ =
@@ -96,7 +97,7 @@ class MFH264EncoderImpl : public VideoEncoder {
   Microsoft::WRL::ComPtr<ICodecAPI> codec_api_;
   Microsoft::WRL::ComPtr<IMFMediaEventGenerator> event_gen_;
 
-  std::deque<PendingFrameMeta> pending_meta_;
+  std::map<LONGLONG, PendingFrameMeta> pending_meta_;
 };
 
 }  // namespace webrtc

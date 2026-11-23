@@ -5,6 +5,7 @@
 #include <oleauto.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 
 #include "api/video/i420_buffer.h"
@@ -176,6 +177,12 @@ bool MFH264EncoderImpl::ConfigureMft(uint32_t width,
   out_type->SetUINT32(MF_MT_AVG_BITRATE, bitrate_bps);
   out_type->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
   out_type->SetUINT32(MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Base);
+  // Level 3.1 covers 720p30. Anything larger is level 4.0, matching the
+  // 42e028 offer so the SPS does not exceed the negotiated level.
+  const uint32_t h264_level =
+      (height > 720 || fps > 30) ? eAVEncH264VLevel4 : eAVEncH264VLevel3_1;
+  out_type->SetUINT32(MF_MT_MPEG2_LEVEL, h264_level);
+  SetCodecUint32(CODECAPI_AVEncMPVLevel, h264_level);
   MFSetAttributeSize(out_type.Get(), MF_MT_FRAME_SIZE, width, height);
   MFSetAttributeRatio(out_type.Get(), MF_MT_FRAME_RATE, fps, 1);
   MFSetAttributeRatio(out_type.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1);
@@ -301,15 +308,22 @@ int32_t MFH264EncoderImpl::Release() {
 
 void MFH264EncoderImpl::EmitEncodedBuffer(const uint8_t* data,
                                           size_t size,
-                                          bool clean_point) {
+                                          bool clean_point,
+                                          LONGLONG sample_time) {
   if (!encoded_image_callback_ || !data || size == 0) {
     return;
   }
 
   PendingFrameMeta meta = {0, 0, std::nullopt};
-  if (!pending_meta_.empty()) {
-    meta = pending_meta_.front();
-    pending_meta_.pop_front();
+  auto matched = pending_meta_.find(sample_time);
+  if (matched != pending_meta_.end()) {
+    meta = matched->second;
+  }
+  // Drop this sample and any older unmatched input. A dropped MFT frame must
+  // not shift the RTP timestamp of every later frame.
+  if (sample_time >= 0) {
+    auto end = pending_meta_.upper_bound(sample_time);
+    pending_meta_.erase(pending_meta_.begin(), end);
   }
 
   const bool is_key = clean_point || ContainsIdrNal(data, size);
@@ -384,6 +398,8 @@ bool MFH264EncoderImpl::ProcessOneOutputSample() {
 
   UINT32 clean_point = 0;
   sample->GetUINT32(MFSampleExtension_CleanPoint, &clean_point);
+  LONGLONG sample_time = -1;
+  sample->GetSampleTime(&sample_time);
 
   ComPtr<IMFMediaBuffer> contiguous;
   if (SUCCEEDED(sample->ConvertToContiguousBuffer(&contiguous)) && contiguous) {
@@ -391,7 +407,7 @@ bool MFH264EncoderImpl::ProcessOneOutputSample() {
     DWORD cur_len = 0;
     if (SUCCEEDED(contiguous->Lock(&ptr, nullptr, &cur_len)) && ptr &&
         cur_len > 0) {
-      EmitEncodedBuffer(ptr, cur_len, clean_point != 0);
+      EmitEncodedBuffer(ptr, cur_len, clean_point != 0, sample_time);
       contiguous->Unlock();
     }
   }
@@ -449,6 +465,8 @@ bool MFH264EncoderImpl::DrainSyncOutput() {
 
     UINT32 clean_point = 0;
     sample->GetUINT32(MFSampleExtension_CleanPoint, &clean_point);
+    LONGLONG sample_time = -1;
+    sample->GetSampleTime(&sample_time);
 
     ComPtr<IMFMediaBuffer> contiguous;
     if (SUCCEEDED(sample->ConvertToContiguousBuffer(&contiguous)) &&
@@ -457,7 +475,7 @@ bool MFH264EncoderImpl::DrainSyncOutput() {
       DWORD cur_len = 0;
       if (SUCCEEDED(contiguous->Lock(&ptr, nullptr, &cur_len)) && ptr &&
           cur_len > 0) {
-        EmitEncodedBuffer(ptr, cur_len, clean_point != 0);
+        EmitEncodedBuffer(ptr, cur_len, clean_point != 0, sample_time);
         contiguous->Unlock();
       }
     }
@@ -465,9 +483,20 @@ bool MFH264EncoderImpl::DrainSyncOutput() {
 }
 
 bool MFH264EncoderImpl::PumpAsyncUntilInputNeeded() {
-  for (int attempts = 0; attempts < 32 && async_need_input_ <= 0; ++attempts) {
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+  while (async_need_input_ <= 0) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      RTC_LOG(LS_WARNING)
+          << "MFH264: async MFT sent no input event within 200 ms";
+      return false;
+    }
     ComPtr<IMFMediaEvent> event;
-    HRESULT hr = event_gen_->GetEvent(0, &event);
+    HRESULT hr = event_gen_->GetEvent(MF_EVENT_FLAG_NO_WAIT, &event);
+    if (hr == MF_E_NO_EVENTS_AVAILABLE) {
+      Sleep(1);
+      continue;
+    }
     if (FAILED(hr) || !event) {
       return false;
     }
@@ -577,26 +606,26 @@ int32_t MFH264EncoderImpl::Encode(
   in_sample->AddBuffer(in_buffer.Get());
 
   const LONGLONG duration_100ns = 10000000LL / std::max<uint32_t>(max_fps_, 1);
-  in_sample->SetSampleTime(frame_index_ * duration_100ns);
+  const LONGLONG sample_time = frame_index_ * duration_100ns;
+  in_sample->SetSampleTime(sample_time);
   in_sample->SetSampleDuration(duration_100ns);
   ++frame_index_;
 
-  pending_meta_.push_back(PendingFrameMeta{
+  pending_meta_[sample_time] = PendingFrameMeta{
       input_frame.rtp_timestamp(),
       input_frame.render_time_ms(),
       input_frame.color_space(),
-  });
-  while (pending_meta_.size() > 8) {
-    pending_meta_.pop_front();
-  }
+  };
 
   if (is_async_) {
     if (!PumpAsyncUntilInputNeeded()) {
+      pending_meta_.erase(sample_time);
       return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
     }
     --async_need_input_;
     HRESULT hr = mft_->ProcessInput(in_stream_id_, in_sample.Get(), 0);
     if (FAILED(hr)) {
+      pending_meta_.erase(sample_time);
       RTC_LOG(LS_WARNING) << "MFH264: async ProcessInput failed: 0x" << std::hex
                           << hr;
       return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
@@ -607,6 +636,7 @@ int32_t MFH264EncoderImpl::Encode(
   } else {
     HRESULT hr = mft_->ProcessInput(in_stream_id_, in_sample.Get(), 0);
     if (FAILED(hr)) {
+      pending_meta_.erase(sample_time);
       RTC_LOG(LS_WARNING) << "MFH264: sync ProcessInput failed: 0x" << std::hex
                           << hr;
       return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;

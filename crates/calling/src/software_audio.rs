@@ -134,21 +134,14 @@ pub struct SoftwareAudio {
 
 impl SoftwareAudioPlan {
     pub fn wanted(mic: MicSettings, sharing_sound: bool, uses_devices: bool) -> Option<Self> {
-        Self::wanted_on(cfg!(windows), mic, sharing_sound, uses_devices)
+        Self::wanted_on(mic, sharing_sound, uses_devices)
     }
 
-    pub fn wanted_on(
-        windows: bool,
-        mic: MicSettings,
-        sharing_sound: bool,
-        uses_devices: bool,
-    ) -> Option<Self> {
-        (sharing_sound || (uses_devices && !mic.uses_device_track_on(windows))).then(|| {
-            SoftwareAudioPlan {
-                processing: mic.apm_config(),
-                ml_noise: mic.ml_noise_suppression(),
-                computer_sound: sharing_sound,
-            }
+    pub fn wanted_on(mic: MicSettings, sharing_sound: bool, uses_devices: bool) -> Option<Self> {
+        (sharing_sound || (uses_devices && !mic.uses_device_track())).then(|| SoftwareAudioPlan {
+            processing: mic.apm_config(),
+            ml_noise: mic.ml_noise_suppression(),
+            computer_sound: sharing_sound,
         })
     }
 }
@@ -342,14 +335,12 @@ mod tests {
     #[test]
     fn default_settings_use_the_device_track_on_all_platforms() {
         let default = MicSettings::default();
-        assert!(SoftwareAudioPlan::wanted_on(true, default, false, true).is_none());
-        assert!(SoftwareAudioPlan::wanted_on(false, default, false, true).is_none());
+        assert!(SoftwareAudioPlan::wanted_on(default, false, true).is_none());
         let low = MicSettings {
             noise_suppression: NoiseSuppression::Low,
             music_mode: false,
         };
-        assert!(SoftwareAudioPlan::wanted_on(true, low, false, true).is_none());
-        assert!(SoftwareAudioPlan::wanted_on(false, low, false, true).is_none());
+        assert!(SoftwareAudioPlan::wanted_on(low, false, true).is_none());
     }
 
     #[test]
@@ -363,11 +354,11 @@ mod tests {
             noise_suppression: NoiseSuppression::Low,
             music_mode: false,
         };
-        assert_eq!(SoftwareAudioPlan::wanted_on(false, low, false, true), None);
-        assert_eq!(SoftwareAudioPlan::wanted_on(false, off, false, false), None);
-        let mic_only = SoftwareAudioPlan::wanted_on(false, off, false, true).unwrap();
+        assert_eq!(SoftwareAudioPlan::wanted_on(low, false, true), None);
+        assert_eq!(SoftwareAudioPlan::wanted_on(off, false, false), None);
+        let mic_only = SoftwareAudioPlan::wanted_on(off, false, true).unwrap();
         assert!(!mic_only.computer_sound && mic_only.processing.is_passthrough());
-        let sharing = SoftwareAudioPlan::wanted_on(false, auto, true, false).unwrap();
+        let sharing = SoftwareAudioPlan::wanted_on(auto, true, false).unwrap();
         assert!(sharing.computer_sound && sharing.processing.echo_canceller);
     }
 
@@ -380,14 +371,10 @@ mod tests {
                     music_mode,
                 };
                 assert_eq!(
-                    SoftwareAudioPlan::wanted_on(true, mic, false, true).is_some(),
-                    !mic.uses_device_track_on(true)
+                    SoftwareAudioPlan::wanted_on(mic, false, true).is_some(),
+                    !mic.uses_device_track()
                 );
-                assert!(SoftwareAudioPlan::wanted_on(true, mic, false, false).is_none());
-                assert_eq!(
-                    SoftwareAudioPlan::wanted_on(false, mic, false, true).is_some(),
-                    !mic.uses_device_track_on(false)
-                );
+                assert!(SoftwareAudioPlan::wanted_on(mic, false, false).is_none());
             }
         }
     }
@@ -396,7 +383,6 @@ mod tests {
     fn rnnoise_runs_in_the_software_path_only_for_auto() {
         let ml_noise = |noise_suppression, music_mode| {
             SoftwareAudioPlan::wanted_on(
-                true,
                 MicSettings {
                     noise_suppression,
                     music_mode,

@@ -11,6 +11,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 
 #include "mf_h264_encoder_impl.h"
@@ -20,7 +21,7 @@ namespace webrtc {
 
 MFVideoEncoderFactory::MFVideoEncoderFactory() {
   std::map<std::string, std::string> baseline_parameters = {
-      {"profile-level-id", "42e01f"},
+      {"profile-level-id", "42e028"},
       {"level-asymmetry-allowed", "1"},
       {"packetization-mode", "1"},
   };
@@ -29,7 +30,9 @@ MFVideoEncoderFactory::MFVideoEncoderFactory() {
 
 MFVideoEncoderFactory::~MFVideoEncoderFactory() = default;
 
-bool MFVideoEncoderFactory::IsSupported() {
+namespace {
+
+bool ProbeHardwareEncoder() {
   HRESULT hr_com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   const bool com_owned = SUCCEEDED(hr_com);
 
@@ -74,6 +77,15 @@ bool MFVideoEncoderFactory::IsSupported() {
   } else {
     RTC_LOG(LS_INFO) << "No Media Foundation hardware H.264 encoder found";
   }
+  return supported;
+}
+
+}  // namespace
+
+bool MFVideoEncoderFactory::IsSupported() {
+  static std::once_flag once;
+  static bool supported = false;
+  std::call_once(once, [] { supported = ProbeHardwareEncoder(); });
   return supported;
 }
 

@@ -252,11 +252,11 @@ impl NoiseStage {
         let apm = self.fallback_ns[channel_index]
             .get_or_insert_with(|| AudioProcessingModule::new(false, false, false, true));
         self.fallback_pcm.clear();
-        self.fallback_pcm.extend(
-            samples
-                .iter()
-                .map(|sample| sample.round().clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16),
-        );
+        self.fallback_pcm.extend(samples.iter().map(|sample| {
+            sample
+                .round()
+                .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
+        }));
         if apm
             .process_stream(&mut self.fallback_pcm, sample_rate, 1)
             .is_ok()
@@ -426,7 +426,7 @@ mod tests {
         assert!(!should_arm_hook(auto, false));
         assert!(!should_arm_hook(low, true));
         assert!(!should_arm_hook(music, true));
-        assert!(should_arm_hook(auto, auto.uses_device_track_on(true)));
+        assert!(should_arm_hook(auto, auto.uses_device_track()));
 
         clear();
         apply_for_outgoing(auto, true);
@@ -434,7 +434,7 @@ mod tests {
 
         OVERLOADED.store(true, Ordering::Relaxed);
         apply_for_outgoing(auto, true);
-        // Hook stays armed so fallback WebRTC NS keeps protecting the Auto track (which has built-in NS off).
+        // Hook stays armed so fallback WebRTC NS keeps protecting the Windows Auto track (built-in NS off).
         assert!(HOOK_ARMED.load(Ordering::Relaxed));
         assert!(overloaded());
 
