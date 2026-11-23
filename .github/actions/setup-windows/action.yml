@@ -15,7 +15,12 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        manifestPath="$(cargo metadata --format-version 1 --filter-platform x86_64-pc-windows-msvc |
+        host_arch="$(uname -m 2>/dev/null || echo x86_64)"
+        case "$host_arch" in
+          aarch64|arm64) filter_platform=aarch64-pc-windows-msvc ;;
+          *) filter_platform=x86_64-pc-windows-msvc ;;
+        esac
+        manifestPath="$(cargo metadata --format-version 1 --filter-platform "$filter_platform" |
           jq -re '[.packages[] | select(.name == "gpui-pre-windows") | .manifest_path] | first')"
         # cygpath first, then dirname: the old `jq | xargs dirname | cygpath` chain let
         # xargs eat the backslashes of the Windows manifest path as escapes, which left
