@@ -186,12 +186,17 @@ pub fn offer_modalities(video: bool, sharing: bool) -> Vec<String> {
 }
 
 const SCREEN_SHARER: &str = "ScreenSharer";
+/// The Teams web client declares it on every 1:1 create, answer and re-answer
+/// (`["Audio","ScreenViewer"]`, with `"Video"` when the camera is on); without it the peer may
+/// answer the screen-share line with port 0.
+const SCREEN_VIEWER: &str = "ScreenViewer";
 
 pub fn accepted_modalities(video: bool) -> Vec<String> {
     let mut modalities = vec!["Audio".to_owned()];
     if video {
         modalities.push("Video".to_owned());
     }
+    modalities.push(SCREEN_VIEWER.to_owned());
     modalities
 }
 
@@ -317,15 +322,18 @@ mod tests {
 
     #[test]
     fn accepting_with_video_adds_the_modality() {
-        assert_eq!(accepted_modalities(false), vec!["Audio"]);
-        assert_eq!(accepted_modalities(true), vec!["Audio", "Video"]);
+        assert_eq!(accepted_modalities(false), vec!["Audio", "ScreenViewer"]);
+        assert_eq!(
+            accepted_modalities(true),
+            vec!["Audio", "Video", "ScreenViewer"]
+        );
         assert_eq!(
             super::offer_modalities(false, true),
-            vec!["Audio", "ScreenSharer"]
+            vec!["Audio", "ScreenViewer", "ScreenSharer"]
         );
         assert_eq!(
             super::offer_modalities(true, true),
-            vec!["Audio", "Video", "ScreenSharer"]
+            vec!["Audio", "Video", "ScreenViewer", "ScreenSharer"]
         );
     }
 }

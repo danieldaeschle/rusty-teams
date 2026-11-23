@@ -3451,10 +3451,17 @@ mod tests {
 
     #[test]
     fn a_video_call_names_the_video_modality_only_when_the_camera_sends() {
-        assert_eq!(accepted_modalities(false), vec!["Audio".to_owned()]);
+        assert_eq!(
+            accepted_modalities(false),
+            vec!["Audio".to_owned(), "ScreenViewer".to_owned()]
+        );
         assert_eq!(
             accepted_modalities(true),
-            vec!["Audio".to_owned(), "Video".to_owned()]
+            vec![
+                "Audio".to_owned(),
+                "Video".to_owned(),
+                "ScreenViewer".to_owned()
+            ]
         );
     }
 
