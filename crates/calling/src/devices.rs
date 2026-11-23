@@ -302,7 +302,10 @@ pub fn select_input_index(factory: &PeerConnectionFactory, index: u16) -> bool {
     #[cfg(windows)]
     return device_switch_applied(selected, started);
     #[cfg(not(windows))]
-    device_switch_applied(selected, started)
+    {
+        let _ = started;
+        selected
+    }
 }
 
 pub fn select_output(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
@@ -333,7 +336,10 @@ pub fn select_output_index(factory: &PeerConnectionFactory, index: u16) -> bool 
     #[cfg(windows)]
     return device_switch_applied(selected, started);
     #[cfg(not(windows))]
-    device_switch_applied(selected, started)
+    {
+        let _ = started;
+        selected
+    }
 }
 
 #[cfg(test)]

@@ -376,4 +376,17 @@ static void yuy2_to_i420(const uint8_t* src_yuy2,
                                     dst_stride_v, width, height));
 }
 
+static void argb_scale(const uint8_t* src_argb,
+                       int src_stride_argb,
+                       int src_width,
+                       int src_height,
+                       uint8_t* dst_argb,
+                       int dst_stride_argb,
+                       int dst_width,
+                       int dst_height) {
+  THROW_ON_ERROR(libyuv::ARGBScale(src_argb, src_stride_argb, src_width,
+                                   src_height, dst_argb, dst_stride_argb,
+                                   dst_width, dst_height, libyuv::kFilterBox));
+}
+
 }  // namespace livekit_ffi

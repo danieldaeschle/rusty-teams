@@ -2,7 +2,7 @@
 
 ### Requirement: Screen frames are reduced before I420 conversion
 
-A shared screen or window frame SHALL be scaled so its macroblock count is at most the 1080p send budget before it is converted to I420. Halving uses a 2x2 average, then at most one bilinear step. A buffer shorter than the claimed stride and height MUST NOT be converted.
+A shared screen or window frame SHALL be scaled with libyuv so its macroblock count is at most the 1080p send budget before it is converted to I420. A buffer shorter than the claimed stride and height MUST NOT be converted.
 
 #### Scenario: A wide frame fits the send budget
 

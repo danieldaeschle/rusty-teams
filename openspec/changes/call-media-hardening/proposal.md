@@ -5,9 +5,9 @@ Live calls still lose the local microphone after an organizer mute, send the wro
 ## What Changes
 
 - A server mute of the local participant closes the microphone in the call and in the button. The next toggle clears that mute. A later organizer mute applies again.
-- Low is the only mode that publishes the WebRTC noise-suppression track. A named software-path microphone matches the device list name exactly, or the capture fails with the existing notice. Selecting a device counts as applied only when recording or playout actually starts.
+- Low is the only mode that publishes the WebRTC noise-suppression track. A named software-path microphone matches the listed name exactly on Windows. On Linux and macOS either name may contain the other, because cpal names differ from Pulse and CoreAudio. While sharing computer sound, a failed named microphone falls back to the default microphone. Selecting a device counts as applied only when recording or playout starts on Windows. On Linux and macOS it counts when the index is selected.
 - An H.264 answer level rises to the lowest table level that covers the peer's `max-fs` and `max-mbps`. The level is never lowered. An answer without those limits is unchanged.
-- Screen share scales the captured frame down to the 1080p macroblock budget before the I420 conversion. A short buffer produces no frame.
+- Screen share scales the captured frame with libyuv down to the 1080p macroblock budget before the I420 conversion. A short buffer produces no frame.
 - On Linux and macOS the call compares the audio device list once a second and feeds the existing device-change path when an endpoint appears or disappears.
 
 ## Capabilities

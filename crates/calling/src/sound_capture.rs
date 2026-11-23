@@ -33,7 +33,22 @@ fn audio_error(what: &str, error: impl std::fmt::Display) -> Error {
 }
 
 pub fn capture_name_matches(device_name: &str, target: &str) -> bool {
-    !target.is_empty() && device_name.eq_ignore_ascii_case(target)
+    if target.is_empty() {
+        return false;
+    }
+    if device_name.eq_ignore_ascii_case(target) {
+        return true;
+    }
+    // cpal on Linux and macOS uses ALSA or CoreAudio names, which differ from
+    // the Pulse or CoreAudio descriptions in the device list.
+    #[cfg(not(windows))]
+    {
+        let device = device_name.to_ascii_lowercase();
+        let wanted = target.to_ascii_lowercase();
+        return device.contains(&wanted) || wanted.contains(&device);
+    }
+    #[cfg(windows)]
+    false
 }
 
 fn named_input(wanted: &str, label: Option<&str>) -> Option<Device> {
@@ -290,7 +305,7 @@ mod tests {
     use super::capture_name_matches;
 
     #[test]
-    fn a_named_microphone_matches_the_listed_name_only() {
+    fn a_named_microphone_matches_the_listed_name() {
         assert!(capture_name_matches(
             "Headset Microphone",
             "headset microphone"
@@ -299,7 +314,20 @@ mod tests {
             "Headset Microphone",
             "{0.0.0.00000000}.{bbbb}"
         ));
-        assert!(!capture_name_matches("Headset Microphone", "Microphone"));
         assert!(!capture_name_matches("Mic", ""));
+        #[cfg(windows)]
+        assert!(!capture_name_matches("Headset Microphone", "Microphone"));
+        #[cfg(not(windows))]
+        {
+            assert!(capture_name_matches("sysdefault:CARD=Jabra", "Jabra"));
+            assert!(capture_name_matches(
+                "Jabra Speak 750 Mono",
+                "Jabra Speak 750"
+            ));
+            assert!(capture_name_matches(
+                "Jabra Speak 750",
+                "Jabra Speak 750 Mono"
+            ));
+        }
     }
 }

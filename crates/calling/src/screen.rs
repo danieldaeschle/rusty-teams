@@ -6,7 +6,7 @@ use libwebrtc::desktop_capturer::{
     CaptureError, CaptureSource, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
     PortalPickerEvent,
 };
-use libwebrtc::native::yuv_helper::argb_to_i420;
+use libwebrtc::native::yuv_helper::{argb_scale, argb_to_i420};
 use libwebrtc::video_frame::I420Buffer;
 
 use crate::capture::Capture;
@@ -212,48 +212,7 @@ pub(crate) fn fit_share_size(width: u32, height: u32, max_fs: u32) -> (u32, u32)
     (target_width, target_height)
 }
 
-fn pixel(bytes: &[u8], stride: u32, x: u32, y: u32) -> [u8; 4] {
-    let offset = y as usize * stride as usize + x as usize * 4;
-    [
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-    ]
-}
-
-fn half_bgra(bytes: &[u8], width: u32, height: u32, stride: u32) -> (Vec<u8>, u32, u32, u32) {
-    let target_width = even(width / 2).max(2);
-    let target_height = even(height / 2).max(2);
-    let mut out = vec![0u8; target_width as usize * target_height as usize * 4];
-    for y in 0..target_height {
-        for x in 0..target_width {
-            let mut sum = [0u16; 4];
-            for sample in [
-                pixel(bytes, stride, x * 2, y * 2),
-                pixel(bytes, stride, (x * 2 + 1).min(width - 1), y * 2),
-                pixel(bytes, stride, x * 2, (y * 2 + 1).min(height - 1)),
-                pixel(
-                    bytes,
-                    stride,
-                    (x * 2 + 1).min(width - 1),
-                    (y * 2 + 1).min(height - 1),
-                ),
-            ] {
-                for channel in 0..4 {
-                    sum[channel] += u16::from(sample[channel]);
-                }
-            }
-            let offset = (y as usize * target_width as usize + x as usize) * 4;
-            for channel in 0..4 {
-                out[offset + channel] = (sum[channel] / 4) as u8;
-            }
-        }
-    }
-    (out, target_width, target_height, target_width * 4)
-}
-
-fn bilinear_bgra(
+fn scale_bgra_to(
     bytes: &[u8],
     width: u32,
     height: u32,
@@ -261,61 +220,18 @@ fn bilinear_bgra(
     target_width: u32,
     target_height: u32,
 ) -> Vec<u8> {
-    let mut out = vec![0u8; target_width as usize * target_height as usize * 4];
-    for y in 0..target_height {
-        let src_y = (f64::from(y) + 0.5) * f64::from(height) / f64::from(target_height) - 0.5;
-        let y0 = src_y.floor().clamp(0.0, f64::from(height - 1)) as u32;
-        let y1 = (y0 + 1).min(height - 1);
-        let fy = (src_y - f64::from(y0)).clamp(0.0, 1.0);
-        for x in 0..target_width {
-            let src_x = (f64::from(x) + 0.5) * f64::from(width) / f64::from(target_width) - 0.5;
-            let x0 = src_x.floor().clamp(0.0, f64::from(width - 1)) as u32;
-            let x1 = (x0 + 1).min(width - 1);
-            let fx = (src_x - f64::from(x0)).clamp(0.0, 1.0);
-            let samples = [
-                (pixel(bytes, stride, x0, y0), (1.0 - fx) * (1.0 - fy)),
-                (pixel(bytes, stride, x1, y0), fx * (1.0 - fy)),
-                (pixel(bytes, stride, x0, y1), (1.0 - fx) * fy),
-                (pixel(bytes, stride, x1, y1), fx * fy),
-            ];
-            let offset = (y as usize * target_width as usize + x as usize) * 4;
-            for channel in 0..4 {
-                let mixed: f64 = samples
-                    .iter()
-                    .map(|(sample, weight)| f64::from(sample[channel]) * weight)
-                    .sum();
-                out[offset + channel] = mixed.round().clamp(0.0, 255.0) as u8;
-            }
-        }
-    }
-    out
-}
-
-fn scale_bgra_to(
-    bytes: &[u8],
-    mut width: u32,
-    mut height: u32,
-    mut stride: u32,
-    target_width: u32,
-    target_height: u32,
-) -> Vec<u8> {
-    let mut current = bytes.to_vec();
-    while width >= target_width.saturating_mul(2)
-        && height >= target_height.saturating_mul(2)
-        && width >= 4
-        && height >= 4
-    {
-        let (next, next_width, next_height, next_stride) =
-            half_bgra(&current, width, height, stride);
-        current = next;
-        width = next_width;
-        height = next_height;
-        stride = next_stride;
-    }
-    if width == target_width && height == target_height {
-        return current;
-    }
-    bilinear_bgra(&current, width, height, stride, target_width, target_height)
+    let mut scaled = vec![0u8; target_width as usize * target_height as usize * 4];
+    argb_scale(
+        bytes,
+        stride,
+        width as i32,
+        height as i32,
+        &mut scaled,
+        target_width * 4,
+        target_width as i32,
+        target_height as i32,
+    );
+    scaled
 }
 
 fn share_frame(bytes: &[u8], width: u32, height: u32, stride: u32) -> Option<I420Buffer> {

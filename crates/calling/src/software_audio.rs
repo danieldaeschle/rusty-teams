@@ -112,6 +112,8 @@ impl Feeder {
     }
 }
 
+const DEFAULT_MICROPHONE_NOTICE: &str =
+    "The picked microphone could not be captured while sharing sound, using the default one";
 const NO_MICROPHONE_NOTICE: &str =
     "The microphone could not be captured while sharing sound, others cannot hear you";
 
@@ -181,11 +183,33 @@ impl SoftwareAudio {
                         if !plan.computer_sound {
                             return Err(error);
                         }
-                        microphone_notice = Some(NO_MICROPHONE_NOTICE);
-                        warning.get_or_insert(format!(
-                            "microphone not captured while sharing sound: {error}"
-                        ));
-                        FrameSource::Silence
+                        let fallback_queue = SampleQueue::default();
+                        let fallback = (input != &DeviceChoice::SystemDefault)
+                            .then(|| {
+                                start_microphone(
+                                    &DeviceChoice::SystemDefault,
+                                    None,
+                                    fallback_queue.clone(),
+                                )
+                                .ok()
+                            })
+                            .flatten();
+                        match fallback {
+                            Some(started) => {
+                                microphone_notice = Some(DEFAULT_MICROPHONE_NOTICE);
+                                microphone_source =
+                                    Some(format!("{}, picked one failed: {error}", started.source));
+                                captures.push(started.capture);
+                                FrameSource::Captured(fallback_queue)
+                            }
+                            None => {
+                                microphone_notice = Some(NO_MICROPHONE_NOTICE);
+                                warning.get_or_insert(format!(
+                                    "microphone not captured while sharing sound: {error}"
+                                ));
+                                FrameSource::Silence
+                            }
+                        }
                     }
                 };
             (microphone, computer, loopback)

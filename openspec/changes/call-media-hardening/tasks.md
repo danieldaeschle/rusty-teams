@@ -7,9 +7,9 @@
 ## 2. Microphone selection
 
 - [x] 2.1 Return the noise-suppression track only for Low
-- [x] 2.2 Match named software-path inputs by listed name, exact and case-insensitive
-- [x] 2.3 Fail a missing Windows named endpoint instead of opening the default
-- [x] 2.4 Report device selection as applied only when start succeeds
+- [x] 2.2 Match named software-path inputs by listed name. Windows is exact and case-insensitive. Linux and macOS also match when either name contains the other
+- [x] 2.3 Fall back to the default microphone while sharing computer sound, and stay silent only when that also fails
+- [x] 2.4 Report a device switch as applied only when start succeeds on Windows. On Linux and macOS report it when the index is selected
 - [x] 2.5 Unit tests for track choice, name match, and the start result
 
 ## 3. H.264 level
@@ -19,7 +19,7 @@
 
 ## 4. Screen share scale
 
-- [x] 4.1 Scale live share frames to 8160 macroblocks before I420 and reject short buffers
+- [x] 4.1 Scale live share frames with libyuv to 8160 macroblocks before I420 and reject short buffers
 - [x] 4.2 Unit test the 2560 by 1440 budget and the short buffer
 
 ## 5. Device list poll

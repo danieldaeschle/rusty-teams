@@ -912,3 +912,30 @@ pub fn yuy2_to_i420(
         .unwrap()
     }
 }
+
+pub fn argb_scale(
+    src: &[u8],
+    src_stride: u32,
+    src_width: i32,
+    src_height: i32,
+    dst: &mut [u8],
+    dst_stride: u32,
+    dst_width: i32,
+    dst_height: i32,
+) {
+    argb_assert_safety(src, src_stride, src_width, src_height);
+    argb_assert_safety(dst, dst_stride, dst_width, dst_height);
+    unsafe {
+        yuv_sys::ffi::argb_scale(
+            src.as_ptr(),
+            src_stride as i32,
+            src_width,
+            src_height,
+            dst.as_mut_ptr(),
+            dst_stride as i32,
+            dst_width,
+            dst_height,
+        )
+        .unwrap()
+    }
+}
