@@ -501,6 +501,7 @@ impl Browser {
             let port = self.inner.config.port;
             let _ = tokio::task::spawn_blocking(move || launcher.terminate_listener(port)).await;
         } else if let Some(info) = self.version().await {
+            keep_msal_cache_key(&info.websocket_url).await;
             close_over_cdp(&info.websocket_url).await;
         }
     }
@@ -569,6 +570,27 @@ async fn cdp_call(
     tokio::time::timeout(timeout, exchange)
         .await
         .map_err(|_| BrowserError::Cdp(format!("{method} timed out")))?
+}
+
+/// Gives MSAL's session-cookie cache key an expiry so the next start can still read the token
+/// cache (#84). Best effort: a failure only means one more sign-in, so it is logged and the stop goes on.
+async fn keep_msal_cache_key(websocket_url: &str) {
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let outcome = async {
+        let cookies = cdp_call(websocket_url, "Storage.getCookies", json!({}), CDP_TIMEOUT).await?;
+        let Some(params) = crate::msal_key::persisted_key_cookies(&cookies, now_secs) else {
+            return Ok(());
+        };
+        cdp_call(websocket_url, "Storage.setCookies", params, CDP_TIMEOUT)
+            .await
+            .map(|_| ())
+    }
+    .await;
+    if let Err(error) = outcome {
+        log::warn!("MSAL cache key not kept across the restart: {error}");
+    }
 }
 
 async fn close_over_cdp(websocket_url: &str) {
