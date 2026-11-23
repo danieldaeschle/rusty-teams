@@ -112,6 +112,10 @@ webrtc::Thread* RtcRuntime::signaling_thread() const {
 
 std::shared_ptr<MediaStreamTrack> RtcRuntime::get_or_create_media_stream_track(
     webrtc::scoped_refptr<webrtc::MediaStreamTrackInterface> rtc_track) {
+  // A sender cleared with SetTrack(nullptr) has no track: the Rust side maps nullptr to None.
+  if (!rtc_track) {
+    return nullptr;
+  }
   webrtc::MutexLock lock(&mutex_);
   for (std::weak_ptr<MediaStreamTrack> weak_existing_track :
        media_stream_tracks_) {

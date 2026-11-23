@@ -955,9 +955,9 @@ mod tests {
                 libwebrtc::media_stream_track::MediaStreamTrack::Video(video.camera_track()),
             ))
             .expect("attach");
-        // Do not call sender.track() afterwards: the FFI track() wrapper crashes on a null
-        // webrtc track (get_or_create_media_stream_track).
         sender.set_track(None).expect("detach must accept nullptr");
+        // Reading a cleared sender used to dereference the null webrtc track and kill the process.
+        assert!(sender.track().is_none());
         peer.close();
     }
 
