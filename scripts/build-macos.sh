@@ -6,7 +6,7 @@
 # Optional signing / notarization when Apple credentials are present:
 #   MACOS_CODESIGN_IDENTITY   e.g. "Developer ID Application: …"
 #   MACOS_NOTARY_PROFILE      notarytool keychain profile (from `xcrun notarytool store-credentials`)
-# Without those env vars the .app stays unsigned (fine for local / internal RC).
+# Without those env vars the .app is ad-hoc signed (fine for local / internal RC).
 #
 # Usage: scripts/build-macos.sh [crate-dir, default crates/app] [binary-or-example-name, default: the crate's only binary]
 set -euo pipefail
@@ -119,7 +119,10 @@ cp "$iconset/icon_64x64.png" "$iconset/icon_32x32@2x.png"
 cp "$iconset/icon_256x256.png" "$iconset/icon_128x128@2x.png"
 iconutil -c icns "$iconset" -o "$app/Contents/Resources/icon.icns"
 
-# Developer ID signing when a certificate is configured in the build environment.
+# Developer ID signing when a certificate is configured in the build environment;
+# otherwise ad-hoc sign the bundle so both universal slices share a valid
+# CodeDirectory bound to Info.plist (CFBundleIdentifier) instead of leaving
+# arm64 linker-signed and x86_64 unsigned (which breaks TCC matching on Apple Silicon).
 if [ -n "${MACOS_CODESIGN_IDENTITY:-}" ]; then
   echo "codesign with $MACOS_CODESIGN_IDENTITY"
   codesign --force --options runtime --timestamp \
@@ -130,6 +133,10 @@ if [ -n "${MACOS_CODESIGN_IDENTITY:-}" ]; then
     --entitlements "$entitlements" \
     --sign "$MACOS_CODESIGN_IDENTITY" \
     "$app"
+  codesign --verify --deep --strict --verbose=2 "$app"
+else
+  echo "codesign ad-hoc (-)"
+  codesign --force --sign - "$app"
   codesign --verify --deep --strict --verbose=2 "$app"
 fi
 
