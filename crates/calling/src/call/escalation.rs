@@ -23,6 +23,12 @@ pub(super) fn video_possible(remote_set: bool, layout: Layout, path: MediaPath) 
     remote_set && !(layout == Layout::OneToOne && path == MediaPath::Mixer)
 }
 
+/// A direct 1:1 whose share line Teams rejected cannot share on it, and this client cannot move
+/// the call to the mixer by itself: say so instead of failing on the stopped line.
+pub(super) fn direct_share_refused(direct: bool, sharing: bool, share_line_rejected: bool) -> bool {
+    direct && !sharing && share_line_rejected
+}
+
 /// Re-queuing while `next` is set spins the call task (defer -> pending -> defer...).
 pub(super) fn camera_may_start(pending: bool, next_is_some: bool, possible: bool) -> bool {
     pending && !next_is_some && possible

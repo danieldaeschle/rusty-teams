@@ -2248,6 +2248,8 @@ async fn drive(
                     } else if !local_video.sharing() && next.is_some() {
                         portal_pending = Some(kind);
                         control.send(CallUpdate::Notice(SHARE_QUEUED_NOTICE.into()));
+                    } else if direct_share_refused(direct, local_video.sharing(), local_video.share_line_rejected()) {
+                        control.send(CallUpdate::Notice(SHARE_REFUSED_NOTICE.into()));
                     } else if direct && !local_video.sharing() && (same_peer.is_some() || glare_resend.is_some()) {
                         control.send(CallUpdate::Notice(CHANGE_RUNNING_NOTICE.into()));
                     } else if direct
@@ -2293,6 +2295,8 @@ async fn drive(
                     } else if next.is_some() {
                         share_pending = Some(source);
                         control.send(CallUpdate::Notice(SHARE_QUEUED_NOTICE.into()));
+                    } else if direct_share_refused(direct, local_video.sharing(), local_video.share_line_rejected()) {
+                        control.send(CallUpdate::Notice(SHARE_REFUSED_NOTICE.into()));
                     } else if direct && local_video.share_sending() {
                         match local_video.start_share(&source) {
                             Ok(()) => announce_share(control, &source),
@@ -3105,6 +3109,24 @@ mod tests {
     fn escalation_keeps_the_software_track_when_it_runs() {
         assert_eq!(*pick_track(Some(&1), &0), 1);
         assert_eq!(*pick_track(None, &0), 0);
+    }
+
+    /// Regression: a direct 1:1 retried sharing on the line Teams had rejected ("video line is stopped").
+    #[test]
+    fn a_rejected_direct_share_line_is_reported_not_retried() {
+        assert!(direct_share_refused(true, false, true));
+        assert!(
+            !direct_share_refused(true, false, false),
+            "a live line still shares"
+        );
+        assert!(
+            !direct_share_refused(false, false, true),
+            "the mixer path has its own lines"
+        );
+        assert!(
+            !direct_share_refused(true, true, true),
+            "stopping a running share is not refused"
+        );
     }
 
     #[test]

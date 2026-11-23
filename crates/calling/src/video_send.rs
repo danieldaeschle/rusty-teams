@@ -524,6 +524,14 @@ impl LocalVideo {
         Ok(())
     }
 
+    /// Teams answered the share line with port 0, so WebRTC stopped it: it can never send.
+    pub fn share_line_rejected(&self) -> bool {
+        self.lines
+            .as_ref()
+            .and_then(|lines| lines.share.as_ref())
+            .is_some_and(|share| share.direction() == RtpTransceiverDirection::Stopped)
+    }
+
     pub fn share_sending(&self) -> bool {
         self.lines
             .as_ref()
