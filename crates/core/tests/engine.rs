@@ -94,6 +94,7 @@ struct Fake {
     failing_team: Mutex<Option<String>>,
     failing_cards: Mutex<bool>,
     chat_calls: Mutex<usize>,
+    chat_cursors: Mutex<Vec<Option<String>>>,
     chat_page_calls: Mutex<usize>,
     team_calls: Mutex<usize>,
     calls: Mutex<Vec<String>>,
@@ -298,8 +299,13 @@ impl Remote for Handle {
         &self,
         _chat_id: &str,
         before: Option<DateTime<Utc>>,
+        older_cursor: Option<&str>,
         top: usize,
     ) -> Result<RemotePage> {
+        self.chat_cursors
+            .lock()
+            .unwrap()
+            .push(older_cursor.map(str::to_owned));
         let calls = {
             let mut calls = self.chat_calls.lock().unwrap();
             *calls += 1;
@@ -327,10 +333,11 @@ impl Remote for Handle {
         matching.sort_by_key(|message| std::cmp::Reverse(message.created_date_time));
         let has_more = matching.len() > top;
         matching.truncate(top);
-        page_of(
-            matching,
-            has_more.then(|| "https://graph.microsoft.com/v1.0/next".to_owned()),
-        )
+        let cursor = matching
+            .last()
+            .map(|oldest| format!("before:{}", oldest.id))
+            .filter(|_| has_more);
+        page_of(matching, cursor)
     }
 
     async fn chat_message_window(
@@ -1710,6 +1717,47 @@ async fn load_older_pages_back_to_the_start() {
     *fake.chat_calls.lock().unwrap() = 0;
     assert!(engine.load_older(CHAT).await.unwrap().is_empty());
     assert_eq!(*fake.chat_calls.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn older_pages_follow_the_cursor_of_the_page_before() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(25));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.load_older(CHAT).await.unwrap();
+    engine.load_older(CHAT).await.unwrap();
+    assert_eq!(
+        *fake.chat_cursors.lock().unwrap(),
+        [
+            None,
+            Some("before:m0016".to_owned()),
+            Some("before:m0006".to_owned())
+        ]
+    );
+    assert_eq!(
+        engine
+            .store()
+            .sync_state(CHAT)
+            .unwrap()
+            .unwrap()
+            .older_cursor,
+        None
+    );
+}
+
+#[tokio::test]
+async fn a_state_saved_without_a_cursor_pages_by_time() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(25));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    let mut state = engine.store().sync_state(CHAT).unwrap().unwrap();
+    state.older_cursor = None;
+    engine.store().set_sync_state(CHAT, &state).unwrap();
+
+    let older = engine.load_older(CHAT).await.unwrap();
+    assert_eq!(older[0].message_id, "m0006");
+    assert_eq!(fake.chat_cursors.lock().unwrap().last(), Some(&None));
 }
 
 #[tokio::test]

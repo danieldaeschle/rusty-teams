@@ -7,6 +7,8 @@ use crate::pins::{CSA_RESOURCE, CSA_SCOPE, CsaTransport, DEFAULT_REGION, Session
 
 const VIEW: &str = "view=msnp24Equivalent";
 const NEWEST_ANCHOR_SLACK_MS: i64 = 60_000;
+const MESSAGES_SEGMENT: &str = "messages";
+const EPOCH_SEGMENT: &str = "epochTimeStamp";
 
 /// One page of the conversation list as the chat service sends it; `next_url` lists older conversations.
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +22,8 @@ pub struct MessagePage {
     pub messages: Vec<Value>,
     pub has_older: bool,
     pub oldest_arrival_ms: Option<i64>,
+    /// Where Teams says the older page is: `epochTimeStamp/<ms>?<query>`, for [`ChatListing::messages_at`].
+    pub older_cursor: Option<String>,
 }
 
 /// One chat with its members and meeting details, from the chat service aggregator.
@@ -111,7 +115,7 @@ impl<T: MessageTransport> ChatListing<T> {
         page_size: usize,
     ) -> Result<MessagePage> {
         let base = format!(
-            "{}/{}/messages",
+            "{}/{}/{MESSAGES_SEGMENT}",
             self.conversations_url(),
             encode(conversation_id)
         );
@@ -120,28 +124,28 @@ impl<T: MessageTransport> ChatListing<T> {
             |before_ms| before_ms - 1,
         );
         let url = format!(
-            "{base}/epochTimeStamp/{anchor_ms}?pageSize={page_size}&direction=BACKWARD&includeMetadata=true&locationType=Primary"
+            "{base}/{EPOCH_SEGMENT}/{anchor_ms}?pageSize={page_size}&direction=BACKWARD&includeMetadata=true&locationType=Primary"
         );
         let body = self.get(&url).await?;
-        let messages: Vec<Value> = body
-            .get("messages")
-            .and_then(Value::as_array)
-            .cloned()
-            .ok_or_else(|| Error::UnexpectedAnswer("no messages list".into()))?
-            .into_iter()
-            .filter(|message| before_ms.is_none_or(|before| arrival_ms(message) < Some(before)))
-            .collect();
-        let has_older = body
-            .pointer("/_metadata/backwardLink")
-            .and_then(Value::as_str)
-            .is_some_and(|link| !link.is_empty())
-            && !messages.is_empty();
-        let oldest_arrival_ms = messages.iter().filter_map(arrival_ms).min();
-        Ok(MessagePage {
-            messages,
-            has_older,
-            oldest_arrival_ms,
-        })
+        message_page(&body, before_ms)
+    }
+
+    /// The older page a previous page's `older_cursor` points to. Only the anchor and query come
+    /// from Teams: the host and conversation stay ours. The notes chat answered 404
+    /// `LocationLookupFailed` to the anchor [`ChatListing::messages`] builds by hand.
+    pub async fn messages_at(&self, conversation_id: &str, cursor: &str) -> Result<MessagePage> {
+        if !is_older_cursor(cursor) {
+            return Err(Error::UnexpectedAnswer(format!(
+                "not an older page cursor: {cursor}"
+            )));
+        }
+        let url = format!(
+            "{}/{}/{MESSAGES_SEGMENT}/{cursor}",
+            self.conversations_url(),
+            encode(conversation_id)
+        );
+        let body = self.get(&url).await?;
+        message_page(&body, None)
     }
 
     pub async fn message(&self, conversation_id: &str, message_id: &str) -> Result<Value> {
@@ -159,6 +163,56 @@ impl<T: MessageTransport> ChatListing<T> {
         ensure_success(&answer)?;
         Ok(answer.body)
     }
+}
+
+fn message_page(body: &Value, before_ms: Option<i64>) -> Result<MessagePage> {
+    let messages: Vec<Value> = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .cloned()
+        .ok_or_else(|| Error::UnexpectedAnswer("no messages list".into()))?
+        .into_iter()
+        .filter(|message| before_ms.is_none_or(|before| arrival_ms(message) < Some(before)))
+        .collect();
+    let backward_link = body
+        .pointer("/_metadata/backwardLink")
+        .and_then(Value::as_str)
+        .filter(|link| !link.is_empty() && !messages.is_empty());
+    let oldest_arrival_ms = messages.iter().filter_map(arrival_ms).min();
+    Ok(MessagePage {
+        has_older: backward_link.is_some(),
+        older_cursor: backward_link.and_then(older_cursor),
+        messages,
+        oldest_arrival_ms,
+    })
+}
+
+/// `.../messages/epochTimeStamp/<ms>?<query>` becomes `epochTimeStamp/<ms>?<query>`; any other shape has none.
+fn older_cursor(link: &str) -> Option<String> {
+    let url = url::Url::parse(link).ok()?;
+    let segments: Vec<&str> = url.path_segments()?.collect();
+    let [.., messages, epoch, anchor] = segments.as_slice() else {
+        return None;
+    };
+    if *messages != MESSAGES_SEGMENT || *epoch != EPOCH_SEGMENT || !is_digits(anchor) {
+        return None;
+    }
+    Some(match url.query() {
+        Some(query) => format!("{EPOCH_SEGMENT}/{anchor}?{query}"),
+        None => format!("{EPOCH_SEGMENT}/{anchor}"),
+    })
+}
+
+fn is_older_cursor(cursor: &str) -> bool {
+    let (path, query) = cursor.split_once('?').unwrap_or((cursor, ""));
+    path.strip_prefix(EPOCH_SEGMENT)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .is_some_and(is_digits)
+        && !query.contains(['#', '/', '\\'])
+}
+
+fn is_digits(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn arrival_ms(message: &Value) -> Option<i64> {
@@ -228,5 +282,75 @@ mod tests {
         assert_eq!(page.messages, vec![json!({"id": "900"})]);
         assert!(page.has_older);
         assert!(transport.requests.lock().unwrap()[0].contains("/messages/epochTimeStamp/999?"));
+    }
+
+    const NOTES_BACKWARD_LINK: &str = "https://emea.ng.msg.teams.microsoft.com/v1/users/ME/conversations/48%3Anotes/messages/epochTimeStamp/1791368000009?pageSize=20&direction=BACKWARD&includeMetadata=true";
+
+    #[tokio::test]
+    async fn a_page_keeps_the_older_cursor_teams_links() {
+        let transport = canned(vec![json!({
+            "messages": [{"id": "1791368000010"}],
+            "_metadata": {"backwardLink": NOTES_BACKWARD_LINK},
+        })]);
+        let listing = ChatListing::with_transport(&transport, "emea");
+        let page = listing.messages("48:notes", None, 20).await.unwrap();
+        assert_eq!(
+            page.older_cursor.as_deref(),
+            Some(
+                "epochTimeStamp/1791368000009?pageSize=20&direction=BACKWARD&includeMetadata=true"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn the_older_page_follows_the_cursor_on_our_host() {
+        let transport = canned(vec![json!({"messages": [{"id": "5"}], "_metadata": {}})]);
+        let listing = ChatListing::with_transport(&transport, "emea");
+        let page = listing
+            .messages_at("48:notes", &older_cursor(NOTES_BACKWARD_LINK).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(page.messages, vec![json!({"id": "5"})]);
+        assert!(!page.has_older);
+        assert_eq!(
+            transport.requests.lock().unwrap()[0],
+            "https://teams.cloud.microsoft/api/chatsvc/emea/v1/users/ME/conversations/48%3Anotes/messages/epochTimeStamp/1791368000009?pageSize=20&direction=BACKWARD&includeMetadata=true"
+        );
+    }
+
+    #[test]
+    fn links_of_another_shape_give_no_cursor() {
+        for link in [
+            "https://h/v1/users/ME/conversations/48%3Anotes/messages?startTime=1&syncState=x",
+            "https://h/v1/users/ME/conversations/48%3Anotes/messages/epochTimeStamp/12a?x=1",
+            "https://h/v1/users/ME/conversations/48%3Anotes/messages/epochTimeStamp/?x=1",
+            "https://h/v1/users/ME/conversations/48%3Anotes/threads/epochTimeStamp/12",
+            "https://h/messages/epochTimeStamp/12/..",
+            "not a link",
+        ] {
+            assert_eq!(older_cursor(link), None, "{link}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cursor_of_another_shape_is_refused_without_a_request() {
+        let transport = canned(Vec::new());
+        let listing = ChatListing::with_transport(&transport, "emea");
+        for cursor in [
+            "../../threads/x",
+            "epochTimeStamp/12/../x",
+            "epochTimeStamp/12?a=1#frag",
+            "epochTimeStamp/12?a=/../x",
+            "chatsvc:older",
+        ] {
+            assert!(
+                matches!(
+                    listing.messages_at("48:notes", cursor).await,
+                    Err(Error::UnexpectedAnswer(_))
+                ),
+                "{cursor}"
+            );
+        }
+        assert!(transport.requests.lock().unwrap().is_empty());
     }
 }

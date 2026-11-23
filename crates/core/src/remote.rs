@@ -64,10 +64,12 @@ pub trait Remote {
     async fn chat_members(&self, chat_id: &str) -> Result<Vec<Member>>;
     async fn joined_teams(&self) -> Result<Vec<Team>>;
     async fn channels_for_teams(&self, team_ids: &[String]) -> Result<Vec<Result<Vec<Channel>>>>;
+    /// The page before `before`, or the one `older_cursor` (a previous page's `next_link`) points to.
     async fn chat_messages(
         &self,
         chat_id: &str,
         before: Option<DateTime<Utc>>,
+        older_cursor: Option<&str>,
         top: usize,
     ) -> Result<RemotePage>;
     async fn chat_message(&self, chat_id: &str, message_id: &str) -> Result<Message>;
@@ -702,10 +704,11 @@ impl Remote for Graph {
         &self,
         chat_id: &str,
         before: Option<DateTime<Utc>>,
+        older_cursor: Option<&str>,
         top: usize,
     ) -> Result<RemotePage> {
         NativeChats::new(self.session())
-            .messages(chat_id, before, top)
+            .messages(chat_id, before, older_cursor, top)
             .await
     }
 

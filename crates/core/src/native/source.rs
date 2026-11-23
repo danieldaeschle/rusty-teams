@@ -148,26 +148,37 @@ impl<'a> NativeChats<'a> {
             .collect())
     }
 
+    /// With `older_cursor` from a previous page's `next_link`, the page Teams linked; otherwise
+    /// the page before `before`. The marker of a link Teams gave in another shape counts as none.
     pub async fn messages(
         &self,
         chat_id: &str,
         before: Option<DateTime<Utc>>,
+        older_cursor: Option<&str>,
         page_size: usize,
     ) -> Result<RemotePage> {
-        let page = ChatListing::new(self.session)
-            .messages(
-                chat_id,
-                before.map(|time| time.timestamp_millis()),
-                page_size,
-            )
-            .await?;
+        let listing = ChatListing::new(self.session);
+        let page = match older_cursor.filter(|cursor| *cursor != OLDER_PAGE_MARKER) {
+            Some(cursor) => listing.messages_at(chat_id, cursor).await?,
+            None => {
+                listing
+                    .messages(
+                        chat_id,
+                        before.map(|time| time.timestamp_millis()),
+                        page_size,
+                    )
+                    .await?
+            }
+        };
         Ok(RemotePage {
             items: page
                 .messages
                 .iter()
                 .filter_map(|message| graph_message(chat_id, message))
                 .collect(),
-            next_link: page.has_older.then(|| OLDER_PAGE_MARKER.to_owned()),
+            next_link: page
+                .older_cursor
+                .or_else(|| page.has_older.then(|| OLDER_PAGE_MARKER.to_owned())),
             oldest_at: page
                 .oldest_arrival_ms
                 .and_then(DateTime::from_timestamp_millis),

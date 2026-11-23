@@ -451,13 +451,20 @@ impl<R: Remote> SyncEngine<R> {
         let mut oldest_fetched: Option<DateTime<Utc>> = None;
         let mut reached_known = false;
         let mut has_next = false;
+        let mut older_cursor: Option<String> = None;
         for _ in 0..self.config.max_catch_up_pages.max(1) {
             let page = self
                 .remote
-                .chat_messages(conversation_id, before, self.config.page_size)
+                .chat_messages(
+                    conversation_id,
+                    before,
+                    older_cursor.as_deref(),
+                    self.config.page_size,
+                )
                 .await?;
             let page_oldest = oldest_created(&page);
             has_next = page.next_link.is_some();
+            older_cursor.clone_from(&page.next_link);
             collected.extend(
                 page.items
                     .iter()
@@ -479,7 +486,7 @@ impl<R: Remote> SyncEngine<R> {
                 newest_seen: newest_fetched,
                 oldest_loaded: oldest_fetched,
                 has_more: has_next,
-                older_cursor: None,
+                older_cursor,
                 delta_link: None,
             },
             Some(known) if reached_known => SyncState {
@@ -490,7 +497,7 @@ impl<R: Remote> SyncEngine<R> {
                 newest_seen: Some(known.max(newest_fetched.unwrap_or(known))),
                 oldest_loaded: oldest_fetched,
                 has_more: true,
-                older_cursor: None,
+                older_cursor,
                 delta_link: None,
             },
         };
@@ -511,7 +518,12 @@ impl<R: Remote> SyncEngine<R> {
     ) -> Result<Vec<MessageRecord>> {
         let page = self
             .remote
-            .chat_messages(conversation_id, state.oldest_loaded, self.config.page_size)
+            .chat_messages(
+                conversation_id,
+                state.oldest_loaded,
+                state.older_cursor.as_deref(),
+                self.config.page_size,
+            )
             .await?;
         let page_oldest = oldest_created(&page);
         let has_more = page.next_link.is_some() && page_oldest.is_some();
@@ -539,6 +551,7 @@ impl<R: Remote> SyncEngine<R> {
             &SyncState {
                 oldest_loaded: page_oldest.or(state.oldest_loaded),
                 has_more,
+                older_cursor: page.next_link.clone().filter(|_| has_more),
                 ..state
             },
         )?;
