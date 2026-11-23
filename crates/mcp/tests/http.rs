@@ -717,6 +717,16 @@ async fn a_second_server_on_the_same_port_reports_it_clearly() {
 }
 
 #[tokio::test]
+async fn the_server_does_not_start_without_a_token() {
+    let store = Arc::new(Store::open_in_memory().unwrap());
+    let (ui, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let hub = AgentHub::new(store.clone(), AgentPolicy::default(), ui);
+    let result = mcp::start(hub, Arc::new(FakeSource { store }), 0, String::new()).await;
+    let error = result.err().expect("an empty token keeps the server off");
+    assert!(matches!(error, mcp::ServerError::MissingToken), "{error}");
+}
+
+#[tokio::test]
 async fn meetings_and_transcripts_need_their_switches() {
     let harness = Harness::start(true).await;
     let client = harness.client().await;

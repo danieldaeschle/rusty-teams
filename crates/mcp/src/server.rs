@@ -21,6 +21,8 @@ pub enum ServerError {
     PortInUse { port: u16 },
     #[error("cannot start the MCP server on port {port}: {source}")]
     Bind { port: u16, source: std::io::Error },
+    #[error("the MCP server has no access token, so it stays off")]
+    MissingToken,
 }
 
 pub struct ServerHandle {
@@ -42,6 +44,10 @@ pub async fn start(
     port: u16,
     token: String,
 ) -> Result<ServerHandle, ServerError> {
+    // Fail closed: with an empty token any `Bearer ` header would compare equal.
+    if token.is_empty() {
+        return Err(ServerError::MissingToken);
+    }
     let listener = TcpListener::bind(("127.0.0.1", port))
         .await
         .map_err(|source| match source.kind() {

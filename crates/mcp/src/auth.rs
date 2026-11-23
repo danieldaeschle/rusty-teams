@@ -50,7 +50,9 @@ impl AuthState {
     fn token_valid(&self, headers: &HeaderMap) -> bool {
         header_text(headers, AUTHORIZATION)
             .and_then(|value| value.strip_prefix(BEARER_PREFIX))
-            .is_some_and(|presented| presented.as_bytes().ct_eq(self.token.as_bytes()).into())
+            .is_some_and(|presented| {
+                !self.token.is_empty() && presented.as_bytes().ct_eq(self.token.as_bytes()).into()
+            })
     }
 }
 
@@ -151,5 +153,20 @@ mod tests {
             );
         }
         assert!(!auth().token_valid(&HeaderMap::new()));
+    }
+
+    /// Regression: an empty token (store failure at startup) matched an empty bearer value.
+    #[test]
+    fn an_empty_token_accepts_nothing() {
+        let empty = AuthState {
+            port: 47615,
+            token: String::new(),
+        };
+        for value in ["Bearer ", "Bearer", ""] {
+            assert!(
+                !empty.token_valid(&headers(&[(AUTHORIZATION, value)])),
+                "{value:?}"
+            );
+        }
     }
 }
