@@ -65,12 +65,17 @@ pub fn find_app_tab(targets: &[Target], app: App) -> Option<&Target> {
             && app
                 .origins()
                 .iter()
-                .any(|origin| target.url.starts_with(origin))
+                .any(|origin| has_origin(&target.url, origin))
     })
 }
 
 pub fn is_login_url(url: &str) -> bool {
-    LOGIN_ORIGINS.iter().any(|origin| url.starts_with(origin))
+    LOGIN_ORIGINS.iter().any(|origin| has_origin(url, origin))
+}
+
+/// Exact origin match: a prefix check would also accept `https://teams.cloud.microsoft.evil.com`.
+fn has_origin(url: &str, origin: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|parsed| parsed.origin().ascii_serialization() == origin)
 }
 
 pub fn has_login_tab(targets: &[Target]) -> bool {
@@ -123,6 +128,20 @@ mod tests {
         let teams = find_app_tab(&parked, App::Teams).unwrap();
         assert!(App::Teams.is_park_url(&teams.url));
         assert!(!App::Teams.is_park_url("https://teams.cloud.microsoft/v2/"));
+    }
+
+    /// Regression: `starts_with` took a look-alike host for the Teams or login origin.
+    #[test]
+    fn look_alike_hosts_are_neither_the_app_tab_nor_a_login_tab() {
+        let fake: Vec<Target> = serde_json::from_str(
+            r#"[{"type":"page","url":"https://teams.cloud.microsoft.evil.com/v2/","webSocketDebuggerUrl":"ws://x/7"}]"#,
+        )
+        .unwrap();
+        assert!(find_app_tab(&fake, App::Teams).is_none());
+        assert!(!is_login_url(
+            "https://login.microsoftonline.com.evil.example/common"
+        ));
+        assert!(is_login_url("https://login.live.com/oauth20_authorize.srf"));
     }
 
     #[test]
