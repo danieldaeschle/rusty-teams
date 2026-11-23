@@ -20,9 +20,12 @@ pub const TOKEN_DOMAINS: [&str; 8] = [
     "live.com",
 ];
 
-/// Whether a request to `url` may carry an account token: `https`, no user info, a Microsoft host.
+/// Schemes a token may travel over: HTTPS requests and the page's secure websockets (SignalR, Augloop).
+const TOKEN_SCHEMES: [&str; 2] = ["https", "wss"];
+
+/// Whether a request to `url` may carry an account token: TLS, no user info, a Microsoft host.
 pub fn may_carry_token(url: &str) -> bool {
-    https_url(url)
+    secure_url(url, &TOKEN_SCHEMES)
         .and_then(|parsed| parsed.host_str().map(str::to_owned))
         .is_some_and(|host| {
             TOKEN_DOMAINS
@@ -35,9 +38,14 @@ pub fn may_carry_token(url: &str) -> bool {
 ///
 /// The host of the result is lower case; a default port reads as `None`.
 pub fn https_url(url: &str) -> Option<Url> {
+    secure_url(url, &["https"])
+}
+
+fn secure_url(url: &str, schemes: &[&str]) -> Option<Url> {
     let parsed = Url::parse(url).ok()?;
     let has_user_info = !parsed.username().is_empty() || parsed.password().is_some();
-    (parsed.scheme() == "https" && !has_user_info && parsed.host_str().is_some()).then_some(parsed)
+    (schemes.contains(&parsed.scheme()) && !has_user_info && parsed.host_str().is_some())
+        .then_some(parsed)
 }
 
 /// Whether `host` is `domain` itself or one of its subdomains.
@@ -113,6 +121,7 @@ mod tests {
             "https://login.microsoftonline.com/common/oauth2/v2.0/token",
             "https://teams.live.com/api/x",
             "https://statics.teams.cdn.office.net/x",
+            "wss://augloop.office.com/",
         ] {
             assert!(may_carry_token(url), "{url}");
         }
@@ -124,6 +133,8 @@ mod tests {
             "https://media0.giphy.com/media/a/giphy.gif",
             "http://graph.microsoft.com/v1.0/me",
             "https://user@graph.microsoft.com/v1.0/me",
+            "ws://augloop.office.com/",
+            "wss://evil.example/",
         ] {
             assert!(!may_carry_token(url), "{url}");
         }

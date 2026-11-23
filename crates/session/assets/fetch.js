@@ -200,6 +200,10 @@
     socket.onclose = () => finish(received.length ? 200 : 0);
   });
   const run = async (request) => {
+    // The host check runs in Rust (TOKEN_DOMAINS); an URL outside it never gets the token.
+    if (!request.anonymous && !request.tokenAllowed) {
+      return {status: 0, body: 'refusing to send an account token outside Microsoft domains'};
+    }
     if (request.signalr) return exchange(request);
     if (request.augloop) return converse(request);
     try {

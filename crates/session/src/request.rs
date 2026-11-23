@@ -196,6 +196,9 @@ pub(crate) struct WireRequest<'a> {
     pub body_base64: Option<&'a str>,
     pub binary: bool,
     pub anonymous: bool,
+    /// Whether the page may add the account token: decided here, so the allowlist lives in one place.
+    #[serde(rename = "tokenAllowed")]
+    pub token_allowed: bool,
     #[serde(rename = "bodyTokens")]
     pub body_tokens: &'a [BodyToken],
     pub signalr: Option<&'a SignalrExchange>,
@@ -224,6 +227,7 @@ impl<'a> From<&'a Request> for WireRequest<'a> {
             body_base64: request.body_base64.as_deref(),
             binary: request.binary,
             anonymous: request.anonymous,
+            token_allowed: crate::host_check::may_carry_token(&request.url),
             body_tokens: &request.body_tokens,
             signalr: request.signalr.as_ref(),
             augloop: request.augloop.as_ref(),
@@ -313,6 +317,17 @@ mod tests {
         let request = Request::binary_get("u");
         assert!(WireRequest::from(&request).binary);
         assert!(!WireRequest::from(&Request::get("u")).binary);
+    }
+
+    /// Regression: the page added the bearer to any URL a batch handed over to it.
+    #[test]
+    fn the_page_may_add_the_token_for_microsoft_hosts_only() {
+        let teams = Request::get("https://graph.microsoft.com/v1.0/me");
+        assert!(WireRequest::from(&teams).token_allowed);
+        let foreign = Request::binary_get("https://evil.com\\@x.asyncgw.teams.microsoft.com/a.png");
+        assert!(!WireRequest::from(&foreign).token_allowed);
+        let wire = serde_json::to_value(WireRequest::from(&foreign)).unwrap();
+        assert_eq!(wire["tokenAllowed"], false);
     }
 
     #[test]
