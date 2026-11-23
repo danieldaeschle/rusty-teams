@@ -87,7 +87,7 @@ use crate::screen::{
 };
 use crate::sdp::{
     LineRole, OfferPlan, RemoteOffer, SignaledOffer, from_teams_offer, stream_lines,
-    to_browser_answer, to_teams_answer, to_teams_offer,
+    to_browser_answer, to_teams_answer, to_teams_offer, with_previous_dtls,
 };
 use crate::send_control::{BitrateGovernor, RequestFilter, parse_request};
 use crate::signaling::{

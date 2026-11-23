@@ -380,7 +380,12 @@ pub(super) async fn answer_offer_with(
     mixer: bool,
 ) -> Result<AnsweredMedia> {
     let remote = from_teams_offer(teams_offer)?;
-    let description = parse_sdp(&remote.browser_sdp, SdpType::Offer)?;
+    // A same-peer re-offer may come without DTLS attributes; a new peer has no previous description.
+    let browser_sdp = match peer.current_remote_description() {
+        Some(previous) => with_previous_dtls(&remote.browser_sdp, &previous.to_string())?,
+        None => remote.browser_sdp.clone(),
+    };
+    let description = parse_sdp(&browser_sdp, SdpType::Offer)?;
     peer.set_remote_description(description)
         .await
         .map_err(|error| {

@@ -1354,6 +1354,48 @@ pub fn from_teams_offer(teams_sdp: &str) -> Result<RemoteOffer> {
     })
 }
 
+/// Fills in the DTLS fingerprint (and setup role) that a same-peer re-offer from Teams left out,
+/// from the remote description already in place: on the same peer the DTLS transport does not
+/// change, and libwebrtc refuses an offer without a fingerprint ("Called with SDP without DTLS
+/// fingerprint"). An offer that carries a fingerprint anywhere is returned unchanged.
+pub fn with_previous_dtls(browser_offer: &str, previous_remote: &str) -> Result<String> {
+    let mut offer = parse(browser_offer)?;
+    let has_fingerprint = |attributes: &[Attribute]| {
+        attributes
+            .iter()
+            .any(|attribute| attribute.name == "fingerprint")
+    };
+    if has_fingerprint(&offer.session.attributes)
+        || offer
+            .media
+            .iter()
+            .any(|media| has_fingerprint(&media.attributes))
+    {
+        return Ok(browser_offer.to_owned());
+    }
+    let previous = parse(previous_remote)?;
+    let previous_value = |name: &str| {
+        previous
+            .media
+            .iter()
+            .flat_map(|media| media.attributes.iter())
+            .chain(&previous.session.attributes)
+            .find(|attribute| attribute.name == name)
+            .cloned()
+    };
+    let Some(fingerprint) = previous_value("fingerprint") else {
+        return Ok(browser_offer.to_owned());
+    };
+    let setup = previous_value("setup");
+    for media in &mut offer.media {
+        media.attributes.push(fingerprint.clone());
+        if let Some(setup) = setup.as_ref().filter(|_| !media.has("setup")) {
+            media.attributes.push(setup.clone());
+        }
+    }
+    Ok(write(&offer))
+}
+
 fn transport_from_teams(source: &Media, session: &Session) -> Vec<Attribute> {
     TRANSPORT_ATTRIBUTES
         .iter()
@@ -1500,6 +1542,38 @@ mod tests {
             next += 1;
             next
         }
+    }
+
+    const PREVIOUS_REMOTE: &str = "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0 1\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na=setup:active\r\na=fingerprint:sha-256 AA:BB\r\na=rtpmap:111 opus/48000/2\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\nc=IN IP4 0.0.0.0\r\na=mid:1\r\na=setup:active\r\na=fingerprint:sha-256 AA:BB\r\na=rtpmap:96 H264/90000\r\n";
+
+    /// Regression: Teams' same-peer re-offer had no fingerprint and libwebrtc refused it
+    /// ("Called with SDP without DTLS fingerprint"), so every renegotiation was rejected.
+    #[test]
+    fn a_re_offer_without_dtls_gets_the_previous_fingerprint_and_setup() {
+        let without = PREVIOUS_REMOTE
+            .replace("a=setup:active\r\n", "")
+            .replace("a=fingerprint:sha-256 AA:BB\r\n", "");
+        let filled = parse(&with_previous_dtls(&without, PREVIOUS_REMOTE).unwrap()).unwrap();
+        for media in &filled.media {
+            assert_eq!(
+                media.value("fingerprint"),
+                Some("sha-256 AA:BB"),
+                "{:?}",
+                media.mid()
+            );
+            assert_eq!(media.value("setup"), Some("active"), "{:?}", media.mid());
+        }
+    }
+
+    #[test]
+    fn a_re_offer_with_its_own_dtls_or_nothing_to_copy_stays_as_it_is() {
+        assert_eq!(
+            with_previous_dtls(PREVIOUS_REMOTE, PREVIOUS_REMOTE).unwrap(),
+            PREVIOUS_REMOTE
+        );
+        let without = PREVIOUS_REMOTE.replace("a=fingerprint:sha-256 AA:BB\r\n", "");
+        let no_history = without.clone();
+        assert_eq!(with_previous_dtls(&without, &no_history).unwrap(), without);
     }
 
     #[test]
