@@ -27,9 +27,9 @@ impl HighResSleep {
                     None,
                     None,
                     CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
-                    TIMER_ALL_ACCESS,
+                    TIMER_ALL_ACCESS.0,
                 )
-                .or_else(|_| CreateWaitableTimerExW(None, None, 0, TIMER_ALL_ACCESS))
+                .or_else(|_| CreateWaitableTimerExW(None, None, 0, TIMER_ALL_ACCESS.0))
                 .unwrap_or_else(|_| HANDLE::default())
             };
             HighResSleep { handle }
