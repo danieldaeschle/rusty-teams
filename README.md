@@ -92,7 +92,7 @@
 |---|---|---|---|
 | Support | Main target | Supported | Supported |
 | Sign-in | Embedded WebView2 | Your browser, headless | Your browser, headless |
-| Download | `.exe` | `.tar.gz`, self-installs to the app menu | Universal `.app` (arm64 + x86_64) |
+| Download | `.exe` | `.tar.gz`, self-installs to the app menu | Universal `.app` (arm64 + x86_64), macOS 14+ |
 | Tray icon | Yes | StatusNotifierItem | Menu bar |
 | Auto-update | - | Yes | - |
 
