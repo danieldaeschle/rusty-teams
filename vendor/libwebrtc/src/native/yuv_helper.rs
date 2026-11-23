@@ -879,6 +879,11 @@ pub fn yuy2_to_i420(
     width: i32,
     height: i32,
 ) {
+    let row_bytes = width.unsigned_abs().saturating_mul(2);
+    assert!(
+        src_stride_yuy2 >= row_bytes,
+        "yuy2 stride is shorter than the row"
+    );
     argb_assert_safety(src_yuy2, src_stride_yuy2, width, height);
     i420_assert_safety(
         dst_y,

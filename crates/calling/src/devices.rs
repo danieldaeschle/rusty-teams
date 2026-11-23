@@ -265,17 +265,22 @@ pub fn select_input_index(factory: &PeerConnectionFactory, index: u16) -> bool {
     let selected = factory.set_recording_device(index);
     let started = factory.init_recording() && factory.start_recording();
     #[cfg(windows)]
-    if selected && !started {
+    let started = if selected && !started {
         // Bluetooth headsets (HFP/A2DP profile switch) can momentarily reject Init/StartRecording.
         std::thread::sleep(std::time::Duration::from_millis(150));
         factory.stop_recording();
-        let _ = factory.set_recording_device(index);
-        let _ = factory.init_recording();
-        let _ = factory.start_recording();
-    }
+        let reselected = factory.set_recording_device(index);
+        reselected && factory.init_recording() && factory.start_recording()
+    } else {
+        started
+    };
+    #[cfg(windows)]
+    return selected && started;
     #[cfg(not(windows))]
-    let _ = started;
-    selected
+    {
+        let _ = started;
+        selected
+    }
 }
 
 pub fn select_output(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
@@ -294,17 +299,22 @@ pub fn select_output_index(factory: &PeerConnectionFactory, index: u16) -> bool 
     let selected = factory.set_playout_device(index);
     let started = factory.init_playout() && factory.start_playout();
     #[cfg(windows)]
-    if selected && !started {
+    let started = if selected && !started {
         // Retry once after Bluetooth A2DP/HFP endpoint renegotiation settles.
         std::thread::sleep(std::time::Duration::from_millis(150));
         factory.stop_playout();
-        let _ = factory.set_playout_device(index);
-        let _ = factory.init_playout();
-        let _ = factory.start_playout();
-    }
+        let reselected = factory.set_playout_device(index);
+        reselected && factory.init_playout() && factory.start_playout()
+    } else {
+        started
+    };
+    #[cfg(windows)]
+    return selected && started;
     #[cfg(not(windows))]
-    let _ = started;
-    selected
+    {
+        let _ = started;
+        selected
+    }
 }
 
 #[cfg(test)]
