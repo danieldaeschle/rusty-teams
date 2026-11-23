@@ -843,10 +843,15 @@ fn with_full_hd_level(fmtp: &str) -> String {
     let Some(range) = range else {
         return fmtp.to_owned();
     };
-    let current = fmtp
+    // A level that is not two hex digits (or a range cutting a multibyte character) is left alone:
+    // replace_range would panic on a non-boundary, and an unknown value is not ours to rewrite.
+    let Some(current) = fmtp
         .get(range.clone())
-        .and_then(|level| u8::from_str_radix(level, 16).ok());
-    if current.is_some_and(|level| level >= needed) {
+        .and_then(|level| u8::from_str_radix(level, 16).ok())
+    else {
+        return fmtp.to_owned();
+    };
+    if current >= needed {
         return fmtp.to_owned();
     }
     let mut raised = fmtp.to_owned();
@@ -1574,6 +1579,16 @@ mod tests {
         let without = PREVIOUS_REMOTE.replace("a=fingerprint:sha-256 AA:BB\r\n", "");
         let no_history = without.clone();
         assert_eq!(with_previous_dtls(&without, &no_history).unwrap(), without);
+    }
+
+    #[test]
+    /// Regression: a remote fmtp whose level slice cuts a multibyte character panicked in replace_range.
+    #[test]
+    fn a_malformed_remote_level_is_left_alone_instead_of_panicking() {
+        let multibyte = "98 profile-level-id=42e01é;max-fs=8160;max-mbps=244800";
+        assert_eq!(with_full_hd_level(multibyte), multibyte);
+        let not_hex = "98 profile-level-id=42e0zz;max-fs=8160;max-mbps=244800";
+        assert_eq!(with_full_hd_level(not_hex), not_hex);
     }
 
     #[test]
