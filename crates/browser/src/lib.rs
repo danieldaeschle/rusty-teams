@@ -2,6 +2,7 @@ mod bidi;
 mod bidi_transport;
 mod browser;
 mod config;
+mod devtools_port;
 mod error;
 mod host;
 mod http;

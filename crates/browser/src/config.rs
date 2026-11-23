@@ -152,12 +152,20 @@ impl Config {
         )?;
         let path_variable = crate::host::path_variable();
         let chosen = crate::sign_in_choice::chosen_executable(platform, home_dir.as_deref());
-        Ok(config.select_browser(
+        let config = config.select_browser(
             chosen,
             home_dir.as_deref(),
             &path_variable,
             &crate::host::is_file,
-        ))
+        );
+        // Windows hosts WebView2 instead; under WSL a port free here says nothing about Windows.
+        Ok(if platform.uses_unix_paths() {
+            let port_file = config.mode_parent.join(format!("{PROFILE_NAME}.port"));
+            let port = crate::devtools_port::installation_port(&port_file);
+            config.with_port(port)
+        } else {
+            config
+        })
     }
 
     /// Uses `chosen` as the sign-in browser, else the first Chromium browser, else the first

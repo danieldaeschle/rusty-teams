@@ -144,6 +144,9 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
         }
     };
     let _ = LINUX_BROWSER.set(browser.clone());
+    // The browser listens on this installation's own DevTools port, not the well-known default.
+    let endpoint = format!("http://127.0.0.1:{}", browser.config().port);
+    let endpoint = endpoint.as_str();
     let (init_done_tx, init_done_rx) = watch::channel(false);
     let headless_notify = Arc::new(Notify::new());
     let supervisor_browser = browser.clone();
