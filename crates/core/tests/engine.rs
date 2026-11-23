@@ -2297,6 +2297,32 @@ async fn a_file_in_the_home_drive_is_shared_by_email() {
     );
 }
 
+/// Regression: a member without an email was skipped silently, so the file looked shared to everyone.
+#[tokio::test]
+async fn a_home_drive_file_reports_members_it_could_not_share_with() {
+    let fake = Arc::new(Fake::default());
+    let mut with_bot = chat(CHAT, Some("Planning"), 5, 5, ME, false);
+    with_bot
+        .members
+        .push(serde_json::from_value(json!({"userId": "user-bot", "displayName": "Bot"})).unwrap());
+    *fake.chats.lock().unwrap() = vec![with_bot];
+    let engine = engine_with(&fake, small_pages());
+    engine.refresh_sidebar().await.unwrap();
+    let file = UploadedFile {
+        home_drive: true,
+        ..uploaded()
+    };
+    let error = engine.share_attachment(CHAT, &file).await.unwrap_err();
+    assert!(
+        error.to_string().contains("1 chat member(s) have no email"),
+        "{error}"
+    );
+    assert!(
+        fake.calls()
+            .contains(&"share item-1 ada@example.com".to_owned())
+    );
+}
+
 #[tokio::test]
 async fn sharing_fails_loudly_when_the_chat_members_are_unknown() {
     let fake = Arc::new(Fake::default());

@@ -303,12 +303,22 @@ impl<R: Remote> SyncEngine<R> {
             return Ok(());
         }
         let other_members = self.other_member_ids(conversation_id).await?;
-        let recipients = if uploaded.home_drive {
-            self.member_emails(conversation_id, &other_members).await?
-        } else {
-            other_members.into_iter().map(Recipient::ObjectId).collect()
-        };
-        self.remote.share_file(uploaded, &recipients).await
+        if !uploaded.home_drive {
+            let recipients: Vec<Recipient> =
+                other_members.into_iter().map(Recipient::ObjectId).collect();
+            return self.remote.share_file(uploaded, &recipients).await;
+        }
+        let recipients = self.member_emails(conversation_id, &other_members).await?;
+        self.remote.share_file(uploaded, &recipients).await?;
+        // Members without an email cannot be invited: say so, or the file looks shared to them.
+        let left_out = other_members.len().saturating_sub(recipients.len());
+        if left_out > 0 {
+            return Err(graph::Error::Upload(format!(
+                "{left_out} chat member(s) have no email address and cannot open the file"
+            ))
+            .into());
+        }
+        Ok(())
     }
 
     /// The home tenant does not know the guest org's user ids, so a file there is shared by email.
