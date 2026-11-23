@@ -216,13 +216,38 @@ pub(super) fn restore_device_track(
     timeline: &Timeline,
 ) {
     use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
-    if !factory.adm_recording_enabled() {
-        factory.set_adm_recording_enabled(true);
-        devices::select_input(factory, input);
-    }
-    if let Err(error) = swap_audio_track(peer, device_track) {
+    let restored = unmount_software_track(
+        || swap_audio_track(peer, device_track),
+        || {
+            if !factory.adm_recording_enabled() {
+                factory.set_adm_recording_enabled(true);
+                devices::select_input(factory, input);
+            }
+        },
+    );
+    if let Err(error) = restored {
         timeline.record("microphone track not restored", error.to_string());
     }
+}
+
+// The ADM pushes the microphone straight into the audio send stream whatever track the sender
+// holds, so it must not run while the software track feeds that stream too: WebRTC aborts the
+// process when two threads send audio at once (`audio_send_stream.cc` race check).
+
+/// Stops the ADM before the software track reaches the sender.
+fn mount_software_track(stop_adm: impl FnOnce(), mount: impl FnOnce() -> Result<()>) -> Result<()> {
+    stop_adm();
+    mount()
+}
+
+/// Starts the ADM again only once the device track is back on the sender.
+fn unmount_software_track(
+    mount_device: impl FnOnce() -> Result<()>,
+    start_adm: impl FnOnce(),
+) -> Result<()> {
+    let mounted = mount_device();
+    start_adm();
+    mounted
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -266,7 +291,18 @@ pub(super) fn sync_software_audio(
         muted,
         remote_audio,
     )
-    .and_then(|audio| swap_audio_track(peer, &audio.track).map(|()| audio));
+    .and_then(|audio| {
+        mount_software_track(
+            || {
+                if options.audio == AudioMode::Platform {
+                    use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
+                    factory.set_adm_recording_enabled(false);
+                }
+            },
+            || swap_audio_track(peer, &audio.track),
+        )
+        .map(|()| audio)
+    });
     match started {
         Ok(audio) => {
             timeline.record(
@@ -275,10 +311,6 @@ pub(super) fn sync_software_audio(
             );
             if let Some(source) = &audio.microphone_source {
                 timeline.record("mic capture", source.clone());
-            }
-            if audio.microphone_source.is_some() {
-                use libwebrtc::peer_connection_factory::native::PeerConnectionFactoryExt;
-                factory.set_adm_recording_enabled(false);
             }
             if let Some(warning) = &audio.warning {
                 timeline.record("computer sound warning", warning.clone());
@@ -321,5 +353,40 @@ pub(super) async fn record_track(
             let summary = (rms(&second), tone_ratio(&second, tone_hz));
             recording.per_second.push(summary);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use super::*;
+
+    #[test]
+    fn the_adm_stops_before_the_software_track_is_mounted() {
+        let steps = RefCell::new(Vec::new());
+        mount_software_track(
+            || steps.borrow_mut().push("stop adm"),
+            || {
+                steps.borrow_mut().push("mount software");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(*steps.borrow(), ["stop adm", "mount software"]);
+    }
+
+    #[test]
+    fn the_adm_starts_only_after_the_device_track_is_back() {
+        let steps = RefCell::new(Vec::new());
+        let unmounted = unmount_software_track(
+            || {
+                steps.borrow_mut().push("mount device");
+                Err(Error::Webrtc("no audio sender".into()))
+            },
+            || steps.borrow_mut().push("start adm"),
+        );
+        assert!(unmounted.is_err());
+        assert_eq!(*steps.borrow(), ["mount device", "start adm"]);
     }
 }
