@@ -151,8 +151,11 @@ fn host_of(url: &str) -> Result<&str> {
 }
 
 /// Bearer requests only go to Teams hosts; links come from server answers.
+/// The host is parsed like the HTTP client reads it, so `\`, `#` or user info cannot hide another host.
 pub fn ensure_teams_url(url: &str) -> Result<()> {
-    let host = host_of(url)?;
+    let parsed =
+        session::https_url(url).ok_or_else(|| Error::Signaling("link is not https".into()))?;
+    let host = parsed.host_str().unwrap_or_default();
     if ALLOWED_HOST_SUFFIXES
         .iter()
         .any(|suffix| host.ends_with(suffix))
@@ -1651,6 +1654,17 @@ mod tests {
         assert!(ensure_teams_url("https://conv-euno-06-prod-aks.conv.skype.com/conv/1").is_err());
         assert!(ensure_teams_url("https://evil.example/?x=.teams.microsoft.com").is_err());
         assert!(ensure_teams_url("http://api.flightproxy.teams.microsoft.com/x").is_err());
+    }
+
+    /// Regression: the hand-split host saw `.teams.microsoft.com`, the HTTP client connects to evil.com.
+    #[test]
+    fn a_backslash_hash_or_user_info_does_not_pass_as_a_teams_host() {
+        assert!(
+            ensure_teams_url("https://evil.com\\@api.flightproxy.teams.microsoft.com/x").is_err()
+        );
+        assert!(ensure_teams_url("https://evil.com#.teams.microsoft.com/x").is_err());
+        assert!(ensure_teams_url("https://user@api.flightproxy.teams.microsoft.com/x").is_err());
+        assert!(routed_url("https://evil.com\\@api.flightproxy.teams.microsoft.com/x").is_err());
     }
 
     #[test]
