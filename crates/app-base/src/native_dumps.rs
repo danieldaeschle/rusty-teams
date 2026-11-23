@@ -77,8 +77,7 @@ mod windows_impl {
 
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::Diagnostics::Debug::{
-        EXCEPTION_POINTERS, MINIDUMP_EXCEPTION_INFORMATION, MINIDUMP_TYPE,
-        MiniDumpWithIndirectlyReferencedMemory, MiniDumpWithThreadInfo,
+        EXCEPTION_POINTERS, MINIDUMP_EXCEPTION_INFORMATION, MINIDUMP_TYPE, MiniDumpWithThreadInfo,
         MiniDumpWithUnloadedModules, MiniDumpWriteDump, SetUnhandledExceptionFilter,
     };
     use windows::Win32::System::Threading::{
@@ -210,11 +209,8 @@ mod windows_impl {
         let exception_parameter = exception_information
             .as_mut()
             .map(|information| information as *const MINIDUMP_EXCEPTION_INFORMATION);
-        let dump_type = MINIDUMP_TYPE(
-            MiniDumpWithThreadInfo.0
-                | MiniDumpWithUnloadedModules.0
-                | MiniDumpWithIndirectlyReferencedMemory.0,
-        );
+        // No heap memory: it would hold access tokens and message text.
+        let dump_type = MINIDUMP_TYPE(MiniDumpWithThreadInfo.0 | MiniDumpWithUnloadedModules.0);
         let written = unsafe {
             MiniDumpWriteDump(
                 GetCurrentProcess(),
