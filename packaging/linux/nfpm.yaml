@@ -1,9 +1,9 @@
-# .deb and .rpm packages (nfpm: https://nfpm.goreleaser.com). Run by package.sh, which stages
+# .deb, .rpm and Arch packages (nfpm: https://nfpm.goreleaser.com). Run by package.sh, which stages
 # the file tree, substitutes its path for ${STAGE} and the binary's glibc floor for ${GLIBC_MIN}
-# (nfpm doesn't expand env vars in `src` or `depends`) and exports VERSION, NFPM_ARCH and
-# RUSTY_TEAMS_MAINTAINER.
+# (nfpm doesn't expand env vars in `src` or `depends`) and exports VERSION, NFPM_ARCH,
+# NFPM_PACMAN_ARCH and RUSTY_TEAMS_MAINTAINER.
 #
-#   packaging/linux/package.sh --formats "deb rpm"
+#   packaging/linux/package.sh --formats "deb rpm archlinux"
 name: rusty-teams
 arch: ${NFPM_ARCH}
 platform: linux
@@ -92,6 +92,32 @@ overrides:
       - libva.so.2()(64bit)
       - libgbm.so.1()(64bit)
       - xdg-desktop-portal
+  archlinux:
+    arch: ${NFPM_PACMAN_ARCH}
+    depends:
+      - glibc>=${GLIBC_MIN}
+      - gcc-libs
+      - glib2
+      - alsa-lib
+      - fontconfig
+      - freetype2
+      - libxcb
+      - libxkbcommon
+      - wayland
+      - libx11
+      - vulkan-icd-loader
+      - libglvnd
+    recommends:
+      - mesa
+      - libpulse
+      - pipewire
+      - libva
+      - xdg-desktop-portal
+      - libxcomposite
+      - libxdamage
+      - libxext
+      - libxfixes
+      - libxrandr
 
 contents:
   - src: ${STAGE}/usr/bin/teams

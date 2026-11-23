@@ -20,7 +20,18 @@ pub const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const RELEASES_URL: &str =
     "https://api.github.com/repos/danieldaeschle/rusty-teams/releases?per_page=10";
 /// The release asset this platform installs, and the magic bytes it must start with.
-#[cfg(windows)]
+fn asset_suffix_for(os: &str, arch: &str) -> &'static str {
+    match (os, arch) {
+        ("windows", "aarch64") => "-windows-arm64.exe",
+        ("windows", _) => "-windows-amd64.exe",
+        ("linux", _) => "-linux-amd64",
+        _ => "-unsupported",
+    }
+}
+
+#[cfg(all(windows, target_arch = "aarch64"))]
+const ASSET_SUFFIX: &str = "-windows-arm64.exe";
+#[cfg(all(windows, not(target_arch = "aarch64")))]
 const ASSET_SUFFIX: &str = "-windows-amd64.exe";
 #[cfg(windows)]
 const EXECUTABLE_MAGIC: &[u8] = b"MZ";
@@ -321,6 +332,36 @@ mod tests {
                 digest: None,
             }],
         }
+    }
+
+    #[test]
+    fn windows_arm_and_amd64_look_for_different_exes() {
+        assert_eq!(asset_suffix_for("windows", "aarch64"), "-windows-arm64.exe");
+        assert_eq!(asset_suffix_for("windows", "x86_64"), "-windows-amd64.exe");
+        assert!(
+            !"rusty-teams-0.5.0-windows-amd64.exe"
+                .ends_with(asset_suffix_for("windows", "aarch64"))
+        );
+        assert!(
+            "rusty-teams-0.5.0-windows-arm64.exe".ends_with(asset_suffix_for("windows", "aarch64"))
+        );
+    }
+
+    #[test]
+    fn the_installed_suffix_matches_this_target() {
+        let os = if cfg!(windows) {
+            "windows"
+        } else if cfg!(target_os = "linux") {
+            "linux"
+        } else {
+            "other"
+        };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else {
+            "x86_64"
+        };
+        assert_eq!(ASSET_SUFFIX, asset_suffix_for(os, arch));
     }
 
     #[test]

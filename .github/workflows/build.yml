@@ -53,6 +53,13 @@ jobs:
       - name: Build
         run: cargo build -p app --release
 
+      # Before packaging. A later Flatpak or package failure must not drop the binary.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: teams-linux-amd64
+          path: target/release/teams
+          if-no-files-found: error
+
       # nfpm builds the deb and rpm, zsync the AppImage's .zsync; desktop-file-utils
       # and appstream validate the metadata. AppImage tooling is downloaded by
       # package.sh at pinned digests.
@@ -73,8 +80,34 @@ jobs:
           RUSTY_TEAMS_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: packaging/linux/package.sh --skip-build --formats "appimage deb rpm"
 
+      # deb, rpm, AppImage and its .zsync. Uploaded before Arch and Flatpak, so a
+      # later failure leaves these artifacts in the run.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: teams-linux-packages
+          path: dist/release/*
+          if-no-files-found: error
+
+      # Arch is its own artifact. A failure here does not drop deb/rpm/AppImage,
+      # and Flatpak still runs. The job goes red at the end if either is missing.
+      - name: Arch
+        id: arch
+        continue-on-error: true
+        env:
+          RUSTY_TEAMS_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: packaging/linux/package.sh --skip-build --formats archlinux
+
+      - uses: actions/upload-artifact@v7
+        if: steps.arch.outcome == 'success'
+        with:
+          name: teams-linux-arch
+          path: dist/release/*.pkg.tar.zst
+          if-no-files-found: error
+
       # The Flatpak repackages a tarball built only for it; the release keeps its own tarball.
       - name: Flatpak
+        id: flatpak
+        continue-on-error: true
         env:
           RUSTY_TEAMS_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
@@ -84,16 +117,18 @@ jobs:
           DIST="$RUNNER_TEMP/flatpak" packaging/linux/package.sh --skip-build --formats tar
           packaging/linux/flatpak-bundle.sh --no-test "$RUNNER_TEMP"/flatpak/rusty-teams-*-linux-x86_64.tar.gz
 
-      # The runner is x86_64; the artifact name carries the architecture.
       - uses: actions/upload-artifact@v7
+        if: steps.flatpak.outcome == 'success'
         with:
-          name: teams-linux-amd64
-          path: target/release/teams
+          name: teams-linux-flatpak
+          path: dist/release/*.flatpak
+          if-no-files-found: error
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: teams-linux-packages
-          path: dist/release/*
+      - name: Require Arch and Flatpak
+        if: steps.arch.outcome != 'success' || steps.flatpak.outcome != 'success'
+        run: |
+          echo "arch=${{ steps.arch.outcome }} flatpak=${{ steps.flatpak.outcome }}"
+          exit 1
 
   windows:
     name: Windows
@@ -178,7 +213,9 @@ jobs:
   release:
     name: Release
     needs: [linux, windows, windows-arm, macos]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A failed platform must not hide the artifacts the other jobs already uploaded.
+    # The job stays red afterwards when an expected asset is missing.
+    if: always() && !cancelled() && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -190,31 +227,77 @@ jobs:
       # Artifacts drop the executable bit, the tarball restores it.
       # Asset names use the version without the leading v (rusty-teams-0.5.0-…).
       - name: Package
+        id: package
         env:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           ver="${TAG#v}"
           mkdir release
-          chmod +x dist/teams-linux-amd64/teams
-          tar -czf "release/rusty-teams-$ver-linux-amd64.tar.gz" -C dist/teams-linux-amd64 teams
-          # The bare binary is what the Linux self-update downloads (release_feed.rs).
-          cp dist/teams-linux-amd64/teams "release/rusty-teams-$ver-linux-amd64"
-          cp dist/teams-windows-amd64/teams.exe "release/rusty-teams-$ver-windows-amd64.exe"
-          cp dist/teams-windows-arm64/teams.exe "release/rusty-teams-$ver-windows-arm64.exe"
-          cp dist/teams-macos/teams-macos.zip "release/rusty-teams-$ver-macos-universal.zip"
-          # deb, rpm, Flatpak, AppImage and its .zsync, named rusty-teams-<version>-linux-x86_64.*;
-          # the AppImage's update information looks for that .zsync name.
-          cp dist/teams-linux-packages/* release/
+          missing=()
+          take() {
+            local src="$1" dest="$2" label="$3"
+            if [[ -f "$src" ]]; then
+              cp "$src" "$dest"
+            else
+              echo "missing $label" >&2
+              missing+=("$label")
+            fi
+          }
+          if [[ -f dist/teams-linux-amd64/teams ]]; then
+            chmod +x dist/teams-linux-amd64/teams
+            tar -czf "release/rusty-teams-$ver-linux-amd64.tar.gz" -C dist/teams-linux-amd64 teams
+            # The bare binary is what the Linux self-update downloads (release_feed.rs).
+            cp dist/teams-linux-amd64/teams "release/rusty-teams-$ver-linux-amd64"
+          else
+            missing+=("linux-amd64")
+          fi
+          take dist/teams-windows-amd64/teams.exe "release/rusty-teams-$ver-windows-amd64.exe" "windows-amd64"
+          take dist/teams-windows-arm64/teams.exe "release/rusty-teams-$ver-windows-arm64.exe" "windows-arm64"
+          take dist/teams-macos/teams-macos.zip "release/rusty-teams-$ver-macos-universal.zip" "macos"
           shopt -s nullglob
-          flatpaks=(release/*.flatpak)
-          if [[ ${#flatpaks[@]} -eq 0 ]]; then
-            echo "Flatpak bundle missing from teams-linux-packages — refusing to publish" >&2
-            exit 1
+          packages=(dist/teams-linux-packages/*)
+          if (( ${#packages[@]} )); then
+            # deb, rpm, AppImage and its .zsync. The AppImage update information looks for that .zsync name.
+            cp "${packages[@]}" release/
+          else
+            missing+=("linux-packages")
+          fi
+          flatpaks=(dist/teams-linux-flatpak/*.flatpak)
+          if (( ${#flatpaks[@]} )); then
+            cp "${flatpaks[@]}" release/
+          else
+            missing+=("flatpak")
+          fi
+          archpkgs=(dist/teams-linux-arch/*.pkg.tar.zst)
+          if (( ${#archpkgs[@]} )); then
+            cp "${archpkgs[@]}" release/
+          else
+            missing+=("arch")
+          fi
+          assets=(release/*)
+          if (( ${#assets[@]} )); then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+          if (( ${#missing[@]} )); then
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+            echo "missing=${missing[*]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+            echo "missing=" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: softprops/action-gh-release@v3
+        if: steps.package.outputs.publish == 'true'
         with:
           files: release/*
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+      - name: Fail when an asset is missing
+        if: always() && !cancelled() && steps.package.outputs.complete != 'true'
+        run: |
+          echo "Published the assets that were built. Still missing: ${{ steps.package.outputs.missing }}"
+          exit 1

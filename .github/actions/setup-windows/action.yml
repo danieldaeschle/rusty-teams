@@ -15,10 +15,13 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        host_arch="$(uname -m 2>/dev/null || echo x86_64)"
-        case "$host_arch" in
-          aarch64|arm64) filter_platform=aarch64-pc-windows-msvc ;;
-          *) filter_platform=x86_64-pc-windows-msvc ;;
+        # Git Bash on an ARM runner can report x86_64 when it is emulated.
+        # rustc's host triple is the toolchain this job will compile with.
+        host="$(rustc -vV | sed -n 's/^host: //p')"
+        case "$host" in
+          aarch64-pc-windows-msvc) filter_platform=aarch64-pc-windows-msvc ;;
+          x86_64-pc-windows-msvc) filter_platform=x86_64-pc-windows-msvc ;;
+          *) echo "unexpected rustc host: ${host:-<empty>}" >&2; exit 1 ;;
         esac
         manifestPath="$(cargo metadata --format-version 1 --filter-platform "$filter_platform" |
           jq -re '[.packages[] | select(.name == "gpui-pre-windows") | .manifest_path] | first')"
