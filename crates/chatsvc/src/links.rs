@@ -16,6 +16,7 @@ const VIEWS_SEGMENT: &str = "/views/";
 const FULL_SIZE_VIEW_PREFIX: &str = "imgpsh_fullsize";
 /// The view Teams opens in its image viewer; `_anim` keeps animated GIFs moving.
 const FULL_SIZE_VIEW: &str = "imgpsh_fullsize_anim";
+const AMS_OBJECTS_PATH: &str = "/v1/objects/";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageLinks {
@@ -40,10 +41,14 @@ pub struct LinkImage {
     pub content_type: String,
 }
 
+/// The Teams link-preview proxy, the only host a preview image request may carry the token to.
 pub fn is_link_image_url(url: &str) -> bool {
-    url.strip_prefix("https://")
-        .and_then(|rest| rest.split(['/', '?', '#']).next())
-        .is_some_and(|host| host.ends_with(LINK_PROXY_HOST_SUFFIX))
+    session::https_url(url).is_some_and(|parsed| {
+        parsed.port().is_none()
+            && parsed
+                .host_str()
+                .is_some_and(|host| host.ends_with(LINK_PROXY_HOST_SUFFIX))
+    })
 }
 
 /// The AMS image behind a Graph chat `hostedContents/{id}/$value` link: the id encodes `id=..,type=..,url=<AMS url>`.
@@ -61,11 +66,13 @@ pub fn hosted_content_image_url(graph_url: &str) -> Option<String> {
 
 /// An AMS object view (`https://*.asm.skype.com/v1/objects/...`), the inline images of chat service messages.
 pub fn is_ams_image_url(url: &str) -> bool {
-    url.strip_prefix("https://")
-        .and_then(|rest| rest.split_once('/'))
-        .is_some_and(|(host, path)| {
-            host.ends_with(AMS_HOST_SUFFIX) && path.starts_with("v1/objects/")
-        })
+    session::https_url(url).is_some_and(|parsed| {
+        parsed.port().is_none()
+            && parsed.path().starts_with(AMS_OBJECTS_PATH)
+            && parsed
+                .host_str()
+                .is_some_and(|host| host.ends_with(AMS_HOST_SUFFIX))
+    })
 }
 
 /// The full-resolution view of the AMS image at `url` (a plain AMS view or a Graph `hostedContents` link to one).
@@ -359,5 +366,40 @@ mod tests {
         assert!(!is_link_image_url(
             "http://de-prod.asyncgw.teams.microsoft.com/x"
         ));
+    }
+
+    /// Regression: the HTTP client reads `\` as a path separator, so these went to evil.com with the token.
+    #[test]
+    fn a_backslash_or_user_info_does_not_pass_as_a_proxy_host() {
+        assert!(!is_link_image_url(
+            "https://evil.com\\@x.asyncgw.teams.microsoft.com/urlp/v1/url/image"
+        ));
+        assert!(!is_link_image_url(
+            "https://evil.com#.asyncgw.teams.microsoft.com/urlp/v1/url/image"
+        ));
+        assert!(!is_link_image_url(
+            "https://user@de-prod.asyncgw.teams.microsoft.com/urlp/v1/url/image"
+        ));
+        assert!(!is_link_image_url(
+            "https://de-prod.asyncgw.teams.microsoft.com:8443/urlp/v1/url/image"
+        ));
+    }
+
+    /// Regression: `?` ended the hand-split host early, so this went to evil.com with the Skype token.
+    #[test]
+    fn a_query_or_backslash_does_not_pass_as_an_ams_host() {
+        assert!(!is_ams_image_url(
+            "https://evil.com?.asm.skype.com/v1/objects/x"
+        ));
+        assert!(!is_ams_image_url(
+            "https://evil.com\\@eu-api.asm.skype.com/v1/objects/x/views/imgo"
+        ));
+        assert_eq!(
+            hosted_content_image_url(&format!(
+                "https://graph.microsoft.com/v1.0/chats/c/messages/1/hostedContents/{}/$value",
+                STANDARD.encode("id=x,type=1,url=https://evil.com?.asm.skype.com/v1/objects/x")
+            )),
+            None
+        );
     }
 }

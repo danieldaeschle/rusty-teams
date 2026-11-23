@@ -1,6 +1,7 @@
 mod app;
 mod error;
 mod events;
+mod host_check;
 mod http;
 mod native;
 mod page_script;
@@ -12,6 +13,7 @@ mod transport;
 pub use app::{App, Target, find_app_tab, has_login_tab, is_login_url};
 pub use error::{Error, Result};
 pub use events::{TabChannel, TabCommand, TabControl, TabEvent, TabEvents};
+pub use host_check::{TOKEN_DOMAINS, host_in_domain, https_url, may_carry_token};
 pub use native::ensure_crypto_provider;
 pub use page_script::token_acquirer_script;
 pub use request::{

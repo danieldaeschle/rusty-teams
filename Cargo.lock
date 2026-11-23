@@ -8660,6 +8660,7 @@ version = "0.6.1"
 dependencies = [
  "base64 0.22.1",
  "futures-util",
+ "log",
  "reqwest 0.13.5",
  "rustls",
  "serde",

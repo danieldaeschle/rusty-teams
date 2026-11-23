@@ -8,6 +8,7 @@ use futures_util::future::join_all;
 use serde_json::{Value, json};
 
 use crate::app::App;
+use crate::host_check::may_carry_token;
 use crate::request::{ApiResponse, Method, Request};
 use crate::scope::Scope;
 use crate::session::Session;
@@ -145,6 +146,9 @@ impl NativeHttp {
         request: &Request,
         credential: Option<&(App, String)>,
     ) -> reqwest::Result<ApiResponse> {
+        if credential.is_some() && !request.anonymous && !may_carry_token(&request.url) {
+            return Ok(refused(&request.url));
+        }
         let mut builder = self.client.request(method(request.method), &request.url);
         let mut has_content_type = false;
         for (name, value) in &request.headers {
@@ -229,6 +233,20 @@ impl NativeHttp {
 }
 
 const TEAMS_BEARER_PATHS: [&str; 2] = ["/api/", "/registrar/"];
+
+/// The answer for a token-carrying request to a host outside [`crate::TOKEN_DOMAINS`]: nothing is sent.
+fn refused(url: &str) -> ApiResponse {
+    let host = url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "an unparsable URL".to_owned());
+    log::warn!("refusing to send an account token to {host}");
+    ApiResponse {
+        status: 0,
+        body: Value::String(format!("refusing to send an account token to {host}")),
+        retry_after: None,
+    }
+}
 
 /// Both rustls providers end up compiled in through dependencies, and then rustls refuses to pick one on its own.
 pub fn ensure_crypto_provider() {
@@ -335,6 +353,30 @@ mod tests {
         let answer = http.exchange(&Request::delete(&url), None).await.unwrap();
         assert_eq!(answer.status, 200);
         assert!(server.await.unwrap().contains("content-length: 0"));
+    }
+
+    /// Regression: the token went to any https URL a caller let through.
+    #[tokio::test]
+    async fn a_token_is_never_sent_outside_microsoft_domains() {
+        let http = NativeHttp::new(Duration::from_secs(5), 1024).unwrap();
+        let credential = (App::Teams, "secret-token".to_owned());
+        for (url, host) in [
+            (
+                "https://evil.com\\@x.asyncgw.teams.microsoft.com/urlp/v1/url/image",
+                "evil.com",
+            ),
+            ("https://evil.example/collect", "evil.example"),
+        ] {
+            let answer = http
+                .exchange(&Request::binary_get(url), Some(&credential))
+                .await
+                .expect("refused locally, without a network error");
+            assert_eq!(answer.status, 0, "{url}");
+            assert_eq!(
+                answer.body,
+                Value::String(format!("refusing to send an account token to {host}"))
+            );
+        }
     }
 
     #[test]
