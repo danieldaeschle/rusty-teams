@@ -5,19 +5,46 @@ use store::Store;
 
 use crate::policy::{Access, AgentPolicy, DEFAULT_PORT};
 
-const SETTINGS_KEY: &str = "agents.settings";
+const SETTINGS_KEY: &str = "mcp.policy";
+/// MCP policy lived under this key before agent settings moved in; the two formats are incompatible.
+const LEGACY_SETTINGS_KEY: &str = "agents.settings";
+/// Where versions before the secret vault kept the token, in plain text.
 const TOKEN_KEY: &str = "agents.token";
 const TOKEN_BYTES: usize = 32;
 const ALL_KEYWORD: &str = "all";
 const SELECTED_PREFIX: &str = "selected:";
 
+fn looks_like_policy(text: &str) -> bool {
+    text.lines().any(|line| {
+        [
+            "enabled=",
+            "port=",
+            "chats=",
+            "channels=",
+            "write=",
+            "review=",
+            "calendar=",
+            "transcripts=",
+            "meetings=",
+            "propose=",
+        ]
+        .iter()
+        .any(|key| line.starts_with(key))
+    })
+}
+
 pub fn load(store: &Store) -> AgentPolicy {
-    store
-        .meta(SETTINGS_KEY)
-        .ok()
-        .flatten()
-        .map(|text| parse(&text))
-        .unwrap_or_default()
+    if let Some(text) = store.meta(SETTINGS_KEY).ok().flatten() {
+        return parse(&text);
+    }
+    if let Some(text) = store.meta(LEGACY_SETTINGS_KEY).ok().flatten()
+        && looks_like_policy(&text)
+    {
+        let policy = parse(&text);
+        save(store, &policy);
+        return policy;
+    }
+    AgentPolicy::default()
 }
 
 pub fn save(store: &Store, policy: &AgentPolicy) {
@@ -108,7 +135,30 @@ fn parse(text: &str) -> AgentPolicy {
 
 #[cfg(test)]
 mod tests {
+    use store::Store;
+
     use super::*;
+
+    #[test]
+    fn agent_settings_json_is_not_read_as_mcp_policy() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .set_meta(LEGACY_SETTINGS_KEY, r#"{"agents":[],"actions":[]}"#)
+            .unwrap();
+        assert_eq!(load(&store), AgentPolicy::default());
+        assert!(store.meta(SETTINGS_KEY).ok().flatten().is_none());
+    }
+
+    #[test]
+    fn a_legacy_policy_is_migrated_to_its_own_key() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .set_meta(LEGACY_SETTINGS_KEY, "enabled=true\ntranscripts=true")
+            .unwrap();
+        let policy = load(&store);
+        assert!(policy.enabled && policy.transcripts);
+        assert!(store.meta(SETTINGS_KEY).ok().flatten().is_some());
+    }
 
     #[test]
     fn round_trips_every_field() {
