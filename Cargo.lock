@@ -331,7 +331,6 @@ dependencies = [
  "serde",
  "serde_json",
  "session",
- "sha2 0.10.9",
  "store",
  "sys-locale",
  "teams-core",

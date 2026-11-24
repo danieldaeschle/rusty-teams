@@ -9,7 +9,6 @@ use super::widgets::icon;
 use crate::app_state::Mode;
 use crate::appearance::AppIcon;
 use crate::theme;
-use crate::updater::UpdateStatus;
 
 pub const TITLE_BAR_HEIGHT: f32 = 40.;
 const SEARCH_WIDTH: f32 = 380.;
@@ -73,45 +72,6 @@ pub fn mode_label(mode: Mode) -> Option<&'static str> {
     } else {
         None
     }
-}
-
-pub fn update_button(
-    update: &UpdateStatus,
-    on_restart: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> Option<AnyElement> {
-    let installing = match update {
-        UpdateStatus::Ready => false,
-        UpdateStatus::Installing => true,
-        UpdateStatus::UpToDate | UpdateStatus::Failed(_) => return None,
-    };
-    Some(
-        div()
-            .id("title-update-restart")
-            .debug_selector(|| "shell/title-bar/update".into())
-            .flex_none()
-            .h(px(24.))
-            .px(px(10.))
-            .flex()
-            .items_center()
-            .rounded(px(6.))
-            .bg(theme::accent())
-            .text_color(theme::on_accent())
-            .text_size(px(12.))
-            .font_weight(FontWeight::SEMIBOLD)
-            .when(!installing, |button| {
-                button
-                    .cursor_pointer()
-                    .hover(|button| button.bg(theme::accent_text()))
-                    .on_click(on_restart)
-            })
-            .when(installing, |button| button.opacity(0.7))
-            .child(if installing {
-                "Restarting..."
-            } else {
-                "Restart to update"
-            })
-            .into_any_element(),
-    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -294,29 +254,24 @@ impl RenderOnce for TitleBarRow {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::{Cell, RefCell};
+    use std::cell::RefCell;
     use std::rc::Rc;
 
     use gpui_kit::component::button::{Button, ButtonVariants as _};
     use gpui_kit::{
-        Context, Hitbox, HitboxBehavior, InteractiveElement as _, IntoElement, Modifiers,
-        ParentElement, Render, Styled, TestAppContext, Window, canvas, div, px, size,
+        Context, Hitbox, HitboxBehavior, InteractiveElement as _, IntoElement, ParentElement, Render,
+        Styled, TestAppContext, Window, canvas, div, px, size,
     };
 
-    use super::{
-        AppIcon, SEARCH_MIN_WIDTH, SEARCH_WIDTH, UpdateStatus, render_title_bar, search_span,
-        update_button,
-    };
+    use super::{AppIcon, SEARCH_MIN_WIDTH, SEARCH_WIDTH, render_title_bar, search_span};
 
     struct CaptionHarness {
         caption: Rc<RefCell<Option<Hitbox>>>,
-        restarts: Rc<Cell<usize>>,
     }
 
     impl Render for CaptionHarness {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             let caption = self.caption.clone();
-            let restarts = self.restarts.clone();
             let own = div()
                 .debug_selector(|| "shell/title-bar/own-status".into())
                 .child(Button::new("own").ghost().size(px(32.)).child("O"))
@@ -335,14 +290,7 @@ mod tests {
                 .child(render_title_bar(
                     AppIcon::ALL[0],
                     Some("Demo"),
-                    [
-                        update_button(&UpdateStatus::Ready, move |_, _, _| {
-                            restarts.set(restarts.get() + 1)
-                        }),
-                        Some(own),
-                    ]
-                    .into_iter()
-                    .flatten(),
+                    [Some(own)].into_iter().flatten(),
                     |_, _, _| {},
                 ))
         }
@@ -353,11 +301,9 @@ mod tests {
         cx.update(gpui_kit::init);
         cx.update(crate::theme::apply);
         let caption = Rc::new(RefCell::new(None));
-        let restarts = Rc::new(Cell::new(0));
         let (_, window_cx) = cx.add_window_view({
             let caption = caption.clone();
-            let restarts = restarts.clone();
-            move |_, _| CaptionHarness { caption, restarts }
+            move |_, _| CaptionHarness { caption }
         });
         window_cx.simulate_resize(size(px(1280.), px(800.)));
         for _ in 0..2 {
@@ -365,7 +311,6 @@ mod tests {
         }
         let mut found = Vec::new();
         for (selector, caption_expected) in [
-            ("shell/title-bar/update", false),
             ("shell/title-bar/own-status", false),
             ("shell/title-bar/search", false),
             ("shell/title-bar/leading", true),
@@ -386,11 +331,6 @@ mod tests {
             }
         }
         assert!(found.is_empty(), "{}", found.join("\n"));
-        let update = window_cx
-            .debug_bounds("shell/title-bar/update")
-            .expect("update button rendered");
-        window_cx.simulate_click(update.center(), Modifiers::default());
-        assert_eq!(restarts.get(), 1);
     }
 
     #[test]

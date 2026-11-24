@@ -37,7 +37,7 @@ use super::splash::{self, Phase, Splash, StartupFacts};
 use super::status_menu::{own_status_button, settings_more_button};
 use super::status_message_dialog::{StatusMessageDialog, StatusMessageDialogEvent};
 use super::switcher::{Switcher, SwitcherEvent, candidates_from};
-use super::title_bar::{mode_label, render_title_bar, update_button};
+use super::title_bar::{mode_label, render_title_bar};
 use super::window_zoom::{WindowZoom, change_zoom};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRunsEvent, StartDialog, StartDialogEvent, StartRequest};
@@ -50,7 +50,6 @@ use crate::settings::{SettingsDialog, SettingsDialogEvent};
 use crate::settings_section::SettingsSection;
 use crate::sidebar_model::Step;
 use crate::theme;
-use crate::updater::{self, IdleInputs, UpdateStatus};
 use crate::user_activity::{self, UserInput};
 use app_ui_kit::layout::{ISLAND_GAP, SIDEBAR_WIDTH};
 use app_ui_kit::render::hooks::RenderHooks;
@@ -142,33 +141,6 @@ fn jump_to_quoted(message_id: String, cx: &mut App) {
     });
 }
 
-#[cfg(windows)]
-fn watch_releases(running_tag: &'static str, cx: &mut App) {
-    use app_base::release_feed;
-    cx.spawn(async move |cx| {
-        cx.background_executor()
-            .timer(release_feed::FIRST_CHECK_DELAY)
-            .await;
-        loop {
-            let Some(paths) = updater::current_paths() else {
-                return;
-            };
-            let fetch = cx.update(|cx| release_feed::fetch_update(running_tag, paths, cx));
-            match fetch.await {
-                Ok(Some(tag)) => log::info!("release {tag} downloaded for the next restart"),
-                Ok(None) => {}
-                Err(error) => log::warn!("release check failed: {error}"),
-            }
-            cx.background_executor()
-                .timer(release_feed::CHECK_INTERVAL)
-                .await;
-        }
-    })
-    .detach();
-}
-
-const DEMO_UPDATE_VARIABLE: &str = "TEAMS_DEMO_UPDATE";
-
 /// Entities created with the first main window that a reopened one takes over.
 #[derive(Clone)]
 struct KeptParts {
@@ -202,7 +174,6 @@ pub struct AppShell {
     profile_card: Option<Entity<ProfileCard>>,
     focus_handle: FocusHandle,
     open_target: Option<OpenTarget>,
-    update: UpdateStatus,
     splash: Splash,
     toasts: NoticeToasts,
     user_input: Arc<UserInput>,
@@ -217,12 +188,6 @@ pub struct AppShell {
 }
 
 impl AppShell {
-    #[cfg(test)]
-    pub(crate) fn set_update_status(&mut self, update: UpdateStatus, cx: &mut Context<Self>) {
-        self.update = update;
-        cx.notify();
-    }
-
     fn focus_opened_quick_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let quick_view = self.state.read(cx).quick_view;
         if std::mem::replace(&mut self.shown_quick_view, quick_view) != quick_view
@@ -459,7 +424,6 @@ impl AppShell {
             profile_card: None,
             focus_handle,
             open_target,
-            update: UpdateStatus::UpToDate,
             splash: Splash::default(),
             toasts: NoticeToasts::default(),
             user_input,
@@ -476,9 +440,6 @@ impl AppShell {
         shell
             .state
             .update(cx, |state, cx| state.refresh_connection_banner(cx));
-        if shell.state.read(cx).mode.demo && std::env::var_os(DEMO_UPDATE_VARIABLE).is_some() {
-            shell.update = UpdateStatus::Ready;
-        }
         let Startup {
             switcher_query,
             composer_text,
@@ -513,83 +474,7 @@ impl AppShell {
                 });
             });
         }
-        #[cfg(any(windows, target_os = "linux"))]
-        cx.spawn_in(window, async move |this, cx| {
-            loop {
-                cx.background_executor().timer(updater::POLL_INTERVAL).await;
-                if this
-                    .update_in(cx, |this, window, cx| this.poll_update(window, cx))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-        // Linux asks before downloading (`linux_update`); Windows downloads quietly.
-        #[cfg(windows)]
-        if let Some(running_tag) = app_base::version::release_tag() {
-            watch_releases(running_tag, cx);
-        }
         shell
-    }
-
-    #[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
-    fn poll_update(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(
-            self.update,
-            UpdateStatus::Failed(_) | UpdateStatus::Installing
-        ) {
-            return;
-        }
-        let Some(paths) = updater::current_paths() else {
-            return;
-        };
-        if self.update == UpdateStatus::UpToDate {
-            if !updater::check(&paths) {
-                return;
-            }
-            self.update = UpdateStatus::Ready;
-            let update_exe = paths.update_exe.clone();
-            cx.background_spawn(async move { updater::prescan(&update_exe) })
-                .detach();
-        }
-        let conversation = self.conversation.read(cx);
-        let idle = updater::is_idle(IdleInputs {
-            window_active: window.is_window_active(),
-            composer_empty: conversation.composer_is_empty(cx),
-            send_in_flight: conversation.send_in_flight(),
-            in_call: self.state.read(cx).call.is_some(),
-        });
-        // On Linux only the user restarts: the update dialog or the title bar button.
-        if idle && cfg!(not(target_os = "linux")) {
-            self.restart_into_update(cx);
-        }
-        cx.notify();
-    }
-
-    fn restart_into_update(&mut self, cx: &mut Context<Self>) {
-        if self.update == UpdateStatus::Installing {
-            return;
-        }
-        let Some(paths) = updater::current_paths() else {
-            return;
-        };
-        self.update = UpdateStatus::Installing;
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move { updater::install_and_relaunch(&paths) })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => cx.quit(),
-                    Err(message) => this.update = UpdateStatus::Failed(message),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     fn apply_open_target(&mut self, cx: &mut Context<Self>) {
@@ -1090,12 +975,6 @@ impl Render for AppShell {
         }
         let notice = self.state.read(cx).notice.clone();
         self.toasts.sync(&self.state, notice.as_ref(), window, cx);
-        let update_failure = match &self.update {
-            UpdateStatus::Failed(message) => Some(message.clone()),
-            _ => None,
-        };
-        self.toasts
-            .update_failed(update_failure.as_deref(), window, cx);
         let calendar_tab = self.sidebar.read(cx).tab() == SidebarTab::Calendar;
         let chats_tab = self.sidebar.read(cx).tab() == SidebarTab::Chats;
         let calls_tab = self.sidebar.read(cx).tab() == SidebarTab::Calls;
@@ -1121,10 +1000,6 @@ impl Render for AppShell {
             crate::active_appearance::current(cx).app_icon,
             mode_label(state.mode),
             [
-                update_button(
-                    &self.update,
-                    cx.listener(|this, _, _, cx| this.restart_into_update(cx)),
-                ),
                 Some(settings_more_button(&self.state)),
                 own_status_button(&self.state, state),
             ]

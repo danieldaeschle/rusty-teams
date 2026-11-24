@@ -18,7 +18,6 @@ mod linux_browser;
 mod linux_install;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod linux_park;
-#[cfg(target_os = "linux")]
 mod linux_update;
 mod main_window;
 pub mod notify;
@@ -226,8 +225,6 @@ fn main() {
             return;
         }
     }
-    #[cfg(any(windows, target_os = "linux"))]
-    updater::clean_up_old_binary();
     let mode = Mode {
         demo: arguments.demo,
         read_only: arguments.read_only,
@@ -398,6 +395,8 @@ fn main() {
             #[cfg(target_os = "linux")]
             if !arguments.demo {
                 linux_install::start(cx);
+            }
+            if !arguments.demo {
                 linux_update::start(cx);
             }
             if !arguments.autostart {
