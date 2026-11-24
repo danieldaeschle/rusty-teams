@@ -107,7 +107,7 @@ fn search_person(user: graph::User, query: &str) -> Option<SearchPerson> {
     Some(SearchPerson {
         company_name: crate::native::known_profile(&user.id)
             .and_then(|profile| profile.tenant_name),
-        mri: Some(format!("8:orgid:{}", user.id)),
+        mri: Some(chatsvc::members::user_mri(&user.id)),
         email_addresses: email.into_iter().collect(),
         display_name: user.display_name.unwrap_or_default(),
         user_principal_name: user.user_principal_name,

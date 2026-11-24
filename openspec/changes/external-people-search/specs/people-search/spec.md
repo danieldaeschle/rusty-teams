@@ -34,6 +34,11 @@ When the query is a complete email address and the organization directory has no
 - **WHEN** the external lookup returns the queried email only as the user principal name
 - **THEN** the person still appears as a person result
 
+#### Scenario: Personal Microsoft account
+
+- **WHEN** the external lookup returns one profile with an `8:live` MRI, no directory object id, and the queried email in `emailsInfo`
+- **THEN** the person appears as a person result and keeps that `8:live` MRI as the id
+
 #### Scenario: Directory miss does not hide the external person
 
 - **WHEN** the directory lookup for a complete email returns no person or reports that the address is unknown
@@ -61,12 +66,17 @@ When the query is a complete email address and the organization directory has no
 
 ### Requirement: Person rows identify who the person is
 
-A person result SHALL keep an id taken from the directory object id or, when that is absent, from an `8:orgid` MRI. The row subtitle SHALL show the job title when present, otherwise the email, and SHALL include the organization name when one is known. Choosing the person SHALL open the existing 1:1 chat or create one.
+A person result SHALL keep an id taken from the directory object id or, when that is absent, from an `8:orgid` MRI. A personal Microsoft account SHALL keep its full `8:live` MRI as the id. The row subtitle SHALL show the job title when present, otherwise the email, and SHALL include the organization name when one is known. Choosing the person SHALL open the existing 1:1 chat or create one.
 
 #### Scenario: MRI supplies the id
 
 - **WHEN** a person result has an `8:orgid` MRI and no directory object id
 - **THEN** the result still appears and can be chosen
+
+#### Scenario: Personal MRI supplies the id
+
+- **WHEN** a person result has an `8:live` MRI and no directory object id
+- **THEN** the result still appears and the id stays the full `8:live` MRI
 
 #### Scenario: Subtitle shows organization
 

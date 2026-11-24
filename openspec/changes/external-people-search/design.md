@@ -23,11 +23,11 @@ See proposal.md. Name suggestions come from substrate people requests filtered t
 
 1. **Widen the existing people filter** rather than a second query. Add `ImplicitContact`, `ChatImplicitContact`, `OrganizationContact`, `EDUser`, and `Unknown` next to the current subtypes. Suggestions and query already share `people_filter`.
 
-2. **External lookup stays behind a complete email.** `is_email_address` is unchanged. `externalsearchv3` gains `includeEDUsers=true`. The profile parser reads `email`, `mail`, and `userPrincipalName` into the mail field, and accepts a single profile object as well as a `value` array.
+2. **External lookup stays behind a complete email.** `is_email_address` is unchanged. `externalsearchv3` gains `includeEDUsers=true`. The profile parser reads `email`, `mail`, `emailsInfo`, and `userPrincipalName` into the mail field, and accepts a single profile object as well as a `value` array. A personal account comes back as an `8:live` MRI with no `objectId`.
 
 3. **Directory failure does not skip the external lookup.** For a complete email, an unknown address (HTTP 400 or 404, or an empty directory) is treated as no directory person, then `search_external` runs. Any other Graph error still tries the external lookup. If that lookup returns a person whose mail or user principal name matches, that person is the result. If it returns nobody or fails, the Graph error is returned and is not cached. A non-email Graph error is still returned without an external lookup. A person matches the query when mail or user principal name equals it, ignoring case.
 
-4. **Id from MRI.** `person()` sets `user_id` from `ExternalDirectoryObjectId`, otherwise from an `8:orgid:` MRI. The switcher keeps requiring `user_id`.
+4. **Id from MRI.** `person()` sets `user_id` from `ExternalDirectoryObjectId`, otherwise from an `8:orgid:` MRI with that prefix removed. An `8:live:` MRI is kept in full, because chat creation treats an id that already contains `:` as a complete MRI and would otherwise prefix `8:orgid:`. The switcher keeps requiring `user_id`.
 
 5. **Subtitle.** Job title when set, otherwise the first email. Organization name when `company_name` is set; department remains only when there is a job title and no organization, so existing organization rows stay readable. New-chat rows use the same pair: email, then organization when known. `remember_external` already stores the tenant name; the recipient row reads it for directory-shaped users.
 
