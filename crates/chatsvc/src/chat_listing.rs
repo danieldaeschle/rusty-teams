@@ -201,17 +201,16 @@ fn message_page(body: &Value, before_ms: Option<i64>) -> Result<MessagePage> {
         .pointer("/_metadata/syncState")
         .and_then(Value::as_str)
         .filter(|link| !link.is_empty());
-    let has_older = !messages.is_empty() && (backward_link.is_some() || sync_link.is_some());
+    let older_cursor = backward_link
+        .and_then(older_cursor)
+        .or_else(|| backward_link.and_then(sync_state_of))
+        .or_else(|| sync_link.and_then(sync_state_of));
+    // A page can be empty after our local `before` filter while Teams still links to older data.
+    // Keep that link so the user can continue instead of losing the rest of the history.
+    let has_older = older_cursor.is_some();
     let oldest_arrival_ms = messages.iter().filter_map(arrival_ms).min();
     Ok(MessagePage {
-        older_cursor: if messages.is_empty() {
-            None
-        } else {
-            backward_link
-                .and_then(older_cursor)
-                .or_else(|| backward_link.and_then(sync_state_of))
-                .or_else(|| sync_link.and_then(sync_state_of))
-        },
+        older_cursor,
         has_older,
         messages,
         oldest_arrival_ms,
@@ -315,7 +314,7 @@ mod tests {
     async fn older_messages_end_before_the_anchor() {
         let transport = canned(vec![json!({
             "messages": [{"id": "1000"}, {"id": "900"}],
-            "_metadata": {"backwardLink": "https://older"},
+            "_metadata": {"backwardLink": "https://older/messages/epochTimeStamp/800?pageSize=20"},
         })]);
         let listing = ChatListing::with_transport(&transport, "emea");
         let page = listing
@@ -325,6 +324,25 @@ mod tests {
         assert_eq!(page.messages, vec![json!({"id": "900"})]);
         assert!(page.has_older);
         assert!(transport.requests.lock().unwrap()[0].contains("/messages/epochTimeStamp/999?"));
+    }
+
+    #[tokio::test]
+    async fn an_empty_filtered_page_keeps_the_older_link() {
+        let transport = canned(vec![json!({
+            "messages": [{"id": "1000"}, {"id": "1001"}],
+            "_metadata": {"backwardLink": "https://older/messages/epochTimeStamp/900?pageSize=20"},
+        })]);
+        let listing = ChatListing::with_transport(&transport, "emea");
+        let page = listing
+            .messages("19:a@thread.v2", Some(1000), 20)
+            .await
+            .unwrap();
+        assert!(page.messages.is_empty());
+        assert!(page.has_older);
+        assert_eq!(
+            page.older_cursor.as_deref(),
+            Some("epochTimeStamp/900?pageSize=20")
+        );
     }
 
     const NOTES_BACKWARD_LINK: &str = "https://emea.ng.msg.teams.microsoft.com/v1/users/ME/conversations/48%3Anotes/messages/epochTimeStamp/1791368000009?pageSize=20&direction=BACKWARD&includeMetadata=true";
