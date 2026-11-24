@@ -76,7 +76,7 @@ const TODAY_MARK_HEIGHT: f32 = 3.;
 const NOW_DOT_SIZE: f32 = 8.;
 const CLOCK_TICK: Duration = Duration::from_secs(30);
 const CHROME_HEIGHT: f32 = HEADER_HEIGHT + DAY_HEADER_HEIGHT + ALL_DAY_HEIGHT;
-const SELECTION_FILL_OPACITY: f32 = 0.18;
+const SELECTION_FILL_OPACITY: f32 = 0.24;
 /// Height below which the picked block drops its time label.
 const SELECTION_LABEL_HEIGHT: f32 = 18.;
 
@@ -418,7 +418,7 @@ impl CalendarView {
             })
     }
 
-    /// The picked block: an accent outline with its times when there is room.
+    /// The picked block: an accent fill and bar, with its times when there is room.
     fn selection_block(&self, selection: &SlotSelection) -> Div {
         let row = self.hour_height;
         let top = selection.start_minute as f32 / 60. * row;
@@ -443,19 +443,31 @@ impl CalendarView {
             .right_0()
             .px(px(BLOCK_GAP))
             .child(
-                div()
+                h_flex()
                     .size_full()
+                    .items_start()
                     .overflow_hidden()
                     .rounded(px(6.))
-                    .border_1()
-                    .border_color(theme::accent())
                     .bg(theme::accent().opacity(SELECTION_FILL_OPACITY))
-                    .px(px(6.))
-                    .text_size(px(11.))
-                    .line_height(px(16.))
-                    .text_color(theme::accent_text())
-                    .truncate()
-                    .when(height >= SELECTION_LABEL_HEIGHT, |block| block.child(label)),
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(STATUS_BAR_WIDTH))
+                            .h_full()
+                            .bg(theme::accent()),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .pl(px(5.))
+                            .pr(px(4.))
+                            .text_size(px(11.))
+                            .line_height(px(16.))
+                            .text_color(theme::accent_text())
+                            .truncate()
+                            .when(height >= SELECTION_LABEL_HEIGHT, |text| text.child(label)),
+                    ),
             )
     }
 
