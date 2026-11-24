@@ -105,31 +105,109 @@ impl CameraCaptureStats {
 }
 
 pub fn list_cameras() -> Vec<CameraDevice> {
-    query(ApiBackend::Auto)
-        .unwrap_or_default()
+    query_camera_infos()
         .into_iter()
-        .map(|info| {
-            let fallback_key = match info.index() {
-                CameraIndex::Index(number) => number.to_string(),
-                CameraIndex::String(text) => text.clone(),
-            };
-            #[cfg(windows)]
-            let key = {
-                let misc = info.misc();
-                if misc.trim().is_empty() {
-                    fallback_key
-                } else {
-                    misc
-                }
-            };
-            #[cfg(not(windows))]
-            let key = fallback_key;
-            CameraDevice {
-                key,
-                name: info.human_name(),
-            }
-        })
+        .map(camera_device)
         .collect()
+}
+
+fn camera_device(info: nokhwa::utils::CameraInfo) -> CameraDevice {
+    let fallback_key = match info.index() {
+        CameraIndex::Index(number) => number.to_string(),
+        CameraIndex::String(text) => text.clone(),
+    };
+    #[cfg(windows)]
+    let key = {
+        let misc = info.misc();
+        if misc.trim().is_empty() {
+            fallback_key
+        } else {
+            misc
+        }
+    };
+    #[cfg(not(windows))]
+    let key = fallback_key;
+    CameraDevice {
+        key,
+        name: info.human_name(),
+    }
+}
+
+fn query_camera_infos() -> Vec<nokhwa::utils::CameraInfo> {
+    let queried = query(ApiBackend::Auto).unwrap_or_default();
+    #[cfg(target_os = "linux")]
+    {
+        return queried.into_iter().filter(linux_keeps_camera).collect();
+    }
+    #[cfg(not(target_os = "linux"))]
+    queried
+}
+
+/// Keep a node unless we know it cannot capture video. Unknown stays listed.
+#[cfg(any(target_os = "linux", test))]
+fn keeps_when_capture_known(captures: Option<bool>) -> bool {
+    captures.unwrap_or(true)
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn captures_from_querycap(capabilities: u32, device_caps: u32) -> bool {
+    const VIDEO_CAPTURE: u32 = 0x0000_0001;
+    const DEVICE_CAPS: u32 = 0x8000_0000;
+    let caps = if capabilities & DEVICE_CAPS != 0 {
+        device_caps
+    } else {
+        capabilities
+    };
+    caps & VIDEO_CAPTURE != 0
+}
+
+#[cfg(test)]
+fn first_listed_index(nodes: &[(u32, Option<bool>)]) -> u32 {
+    nodes
+        .iter()
+        .find(|(_, captures)| keeps_when_capture_known(*captures))
+        .map(|(index, _)| *index)
+        .unwrap_or(0)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_keeps_camera(info: &nokhwa::utils::CameraInfo) -> bool {
+    let CameraIndex::Index(number) = info.index() else {
+        return true;
+    };
+    keeps_when_capture_known(node_captures_video(*number))
+}
+
+#[cfg(target_os = "linux")]
+fn node_captures_video(index: u32) -> Option<bool> {
+    let path = std::ffi::CString::new(format!("/dev/video{index}")).ok()?;
+    let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_NONBLOCK) };
+    if fd < 0 {
+        return None;
+    }
+    let mut caps = V4l2Capability::default();
+    let rc = unsafe { libc::ioctl(fd, V4L2_QUERYCAP, &mut caps) };
+    unsafe { libc::close(fd) };
+    if rc < 0 {
+        return None;
+    }
+    Some(captures_from_querycap(caps.capabilities, caps.device_caps))
+}
+
+#[cfg(target_os = "linux")]
+const V4L2_QUERYCAP: libc::c_ulong = 0x8068_5600;
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+#[derive(Default)]
+struct V4l2Capability {
+    driver: [u8; 16],
+    card: [u8; 32],
+    bus_info: [u8; 32],
+    version: u32,
+    capabilities: u32,
+    device_caps: u32,
+    reserved: [u32; 3],
 }
 
 fn resolve_camera(choice: &DeviceChoice) -> (CameraIndex, String) {
@@ -191,7 +269,10 @@ fn resolve_camera(choice: &DeviceChoice) -> (CameraIndex, String) {
     #[cfg(not(windows))]
     {
         let index = match choice {
-            DeviceChoice::SystemDefault => CameraIndex::Index(0),
+            DeviceChoice::SystemDefault => query_camera_infos()
+                .first()
+                .map(|info| info.index().clone())
+                .unwrap_or(CameraIndex::Index(0)),
             DeviceChoice::Device(key) => key
                 .parse()
                 .map_or_else(|_| CameraIndex::String(key.clone()), CameraIndex::Index),
@@ -734,6 +815,64 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].choice, DeviceChoice::SystemDefault);
         assert_eq!(entries[1].choice, DeviceChoice::Device("0".into()));
+    }
+
+    #[test]
+    fn linux_metadata_node_is_dropped_and_same_name_capture_stays() {
+        let devices = [
+            CameraDevice {
+                key: "0".into(),
+                name: "Logitech Webcam C930e".into(),
+            },
+            CameraDevice {
+                key: "1".into(),
+                name: "Logitech Webcam C930e".into(),
+            },
+        ];
+        let caps = [
+            Some(captures_from_querycap(0x84a0_0001, 0x0420_0001)),
+            Some(captures_from_querycap(0x84a0_0001, 0x04a0_0000)),
+        ];
+        let listed: Vec<_> = devices
+            .into_iter()
+            .zip(caps)
+            .filter(|(_, captures)| keeps_when_capture_known(*captures))
+            .map(|(device, _)| device)
+            .collect();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].key, "0");
+        assert_eq!(listed[0].name, "Logitech Webcam C930e");
+        assert!(keeps_when_capture_known(None));
+    }
+
+    #[test]
+    fn system_default_uses_the_first_remaining_capture_node() {
+        assert_eq!(first_listed_index(&[(0, Some(false)), (1, Some(true))]), 1);
+        let (index, _) = resolve_camera(&DeviceChoice::SystemDefault);
+        let expected = list_cameras()
+            .first()
+            .map(|camera| {
+                camera.key.parse().map_or_else(
+                    |_| CameraIndex::String(camera.key.clone()),
+                    CameraIndex::Index,
+                )
+            })
+            .unwrap_or(CameraIndex::Index(0));
+        assert_eq!(index, expected);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn this_machine_lists_one_c930e_capture_node() {
+        let logitech: Vec<_> = list_cameras()
+            .into_iter()
+            .filter(|camera| camera.name.contains("C930e"))
+            .collect();
+        if logitech.is_empty() {
+            return;
+        }
+        assert_eq!(logitech.len(), 1);
+        assert_eq!(logitech[0].key, "0");
     }
 
     #[test]
