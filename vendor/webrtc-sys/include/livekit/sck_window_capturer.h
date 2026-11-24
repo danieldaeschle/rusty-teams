@@ -34,9 +34,10 @@ enum class SckCaptureStatus {
   kInterrupted,
 };
 
-// ScreenCaptureKit single-window DesktopCapturer backed by SCContentSharingPicker.
-// WebRTC's DesktopCapturer::CreateWindowCapturer on macOS only creates legacy
-// WindowCapturerMac (CGWindowList without a system picker).
+// ScreenCaptureKit single-window DesktopCapturer backed by
+// SCContentSharingPicker. WebRTC's DesktopCapturer::CreateWindowCapturer on
+// macOS only creates legacy WindowCapturerMac (CGWindowList without a system
+// picker).
 class SckWindowCapturer : public webrtc::DesktopCapturer {
  public:
   virtual SckCaptureStatus last_status() const = 0;

@@ -115,8 +115,7 @@ API_AVAILABLE(macos(14.0))
     _endStatus = livekit_ffi::SckCaptureStatus::kActive;
     _maxFps = maxFps;
     _includeCursor = includeCursor;
-    _captureQueue =
-        dispatch_queue_create("org.rusty-teams.sck-window", DISPATCH_QUEUE_SERIAL);
+    _captureQueue = dispatch_queue_create("org.rusty-teams.sck-window", DISPATCH_QUEUE_SERIAL);
   }
   return self;
 }
@@ -147,14 +146,12 @@ API_AVAILABLE(macos(14.0))
 
 - (void)startPicker {
   SCContentSharingPicker* picker = [SCContentSharingPicker sharedPicker];
-  if (picker.maximumStreamCount == nil ||
-      [picker.maximumStreamCount unsignedIntValue] == 0) {
+  if (picker.maximumStreamCount == nil || [picker.maximumStreamCount unsignedIntValue] == 0) {
     picker.maximumStreamCount = @1;
   }
   [picker addObserver:self];
   picker.active = YES;
-  SCContentSharingPickerConfiguration* config =
-      [[SCContentSharingPickerConfiguration alloc] init];
+  SCContentSharingPickerConfiguration* config = [[SCContentSharingPickerConfiguration alloc] init];
   config.allowedPickerModes = SCContentSharingPickerModeSingleWindow;
   config.allowsChangingSelectedContent = YES;
   picker.defaultConfiguration = config;
@@ -223,8 +220,7 @@ API_AVAILABLE(macos(14.0))
 
   BOOL captured = NO;
   if (IOSurfaceLock(surface, kIOSurfaceLockReadOnly, NULL) == kIOReturnSuccess) {
-    const uint8_t* base =
-        static_cast<const uint8_t*>(IOSurfaceGetBaseAddress(surface));
+    const uint8_t* base = static_cast<const uint8_t*>(IOSurfaceGetBaseAddress(surface));
     size_t surfW = IOSurfaceGetWidth(surface);
     size_t surfH = IOSurfaceGetHeight(surface);
     size_t stride = IOSurfaceGetBytesPerRow(surface);
@@ -240,8 +236,8 @@ API_AVAILABLE(macos(14.0))
         size_t cy = static_cast<size_t>(crop.origin.y);
         size_t cw = static_cast<size_t>(crop.size.width);
         size_t ch = static_cast<size_t>(crop.size.height);
-        if (cx < surfW && cy < surfH && cw >= kMinCaptureDimension &&
-            ch >= kMinCaptureDimension && cx + cw <= surfW && cy + ch <= surfH) {
+        if (cx < surfW && cy < surfH && cw >= kMinCaptureDimension && ch >= kMinCaptureDimension &&
+            cx + cw <= surfW && cy + ch <= surfH) {
           x = cx;
           y = cy;
           w = cw;
@@ -254,15 +250,13 @@ API_AVAILABLE(macos(14.0))
         size_t availableBytes = totalBytes - offset;
         size_t rowBytes = w * 4;
         size_t minNeeded = (h - 1) * stride + rowBytes;
-        if (w <= INT_MAX && h <= INT_MAX && stride <= INT_MAX &&
-            availableBytes >= minNeeded) {
+        if (w <= INT_MAX && h <= INT_MAX && stride <= INT_MAX && availableBytes >= minNeeded) {
           auto frame = std::make_unique<webrtc::BasicDesktopFrame>(
               webrtc::DesktopSize(static_cast<int>(w), static_cast<int>(h)));
           frame->CopyPixelsFrom(
               base + offset,
               static_cast<int>(stride),
-              webrtc::DesktopRect::MakeWH(static_cast<int>(w),
-                                          static_cast<int>(h)));
+              webrtc::DesktopRect::MakeWH(static_cast<int>(w), static_cast<int>(h)));
           frame->set_may_contain_cursor(_includeCursor ? true : false);
           *outFrame = std::move(frame);
           captured = YES;
@@ -365,9 +359,7 @@ API_AVAILABLE(macos(14.0))
     if (_stream != nil) {
       existingStream = _stream;
     } else {
-      newStream = [[SCStream alloc] initWithFilter:filter
-                                     configuration:config
-                                          delegate:self];
+      newStream = [[SCStream alloc] initWithFilter:filter configuration:config delegate:self];
       _stream = newStream;
       queue = _captureQueue;
     }
@@ -460,13 +452,11 @@ API_AVAILABLE(macos(14.0))
   if (ioSurface == NULL) {
     return;
   }
-  CFArrayRef attachments =
-      CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, false);
+  CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, false);
   if (attachments == NULL || CFArrayGetCount(attachments) == 0) {
     return;
   }
-  NSDictionary* dict =
-      (__bridge NSDictionary*)CFArrayGetValueAtIndex(attachments, 0);
+  NSDictionary* dict = (__bridge NSDictionary*)CFArrayGetValueAtIndex(attachments, 0);
   if (dict == nil) {
     return;
   }
@@ -495,8 +485,7 @@ API_AVAILABLE(macos(14.0))
   CGRect contentRect = CGRectZero;
   id rectObj = dict[SCStreamFrameInfoContentRect];
   if (rectObj != nil) {
-    if (!CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)rectObj,
-                                                &contentRect)) {
+    if (!CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)rectObj, &contentRect)) {
       contentRect = CGRectZero;
     }
   }
@@ -521,10 +510,8 @@ API_AVAILABLE(macos(14.0))
   }
 
   if (!CGRectIsEmpty(contentRect)) {
-    size_t desiredW =
-        clamp_dimension((contentRect.size.width / contentScale) * scaleFactor);
-    size_t desiredH =
-        clamp_dimension((contentRect.size.height / contentScale) * scaleFactor);
+    size_t desiredW = clamp_dimension((contentRect.size.width / contentScale) * scaleFactor);
+    size_t desiredH = clamp_dimension((contentRect.size.height / contentScale) * scaleFactor);
     [self maybeReconfigureWidth:desiredW height:desiredH];
   }
 
@@ -549,8 +536,7 @@ API_AVAILABLE(macos(14.0))
 // Stopping from the menu bar arrives as SCStreamErrorUserStopped.
 - (void)stream:(SCStream*)stream didStopWithError:(NSError*)error {
   @synchronized(self) {
-    if (!_stopped && stream == _stream &&
-        _endStatus == livekit_ffi::SckCaptureStatus::kActive) {
+    if (!_stopped && stream == _stream && _endStatus == livekit_ffi::SckCaptureStatus::kActive) {
       _endStatus = status_for_stop_error(error);
     }
   }
@@ -580,8 +566,7 @@ namespace livekit_ffi {
 
 namespace {
 
-class API_AVAILABLE(macos(14.0)) SckWindowCapturerImpl final
-    : public SckWindowCapturer {
+class API_AVAILABLE(macos(14.0)) SckWindowCapturerImpl final : public SckWindowCapturer {
  public:
   explicit SckWindowCapturerImpl(const webrtc::DesktopCaptureOptions& options)
       : include_cursor_(options.prefer_cursor_embedded()) {}
@@ -602,9 +587,8 @@ class API_AVAILABLE(macos(14.0)) SckWindowCapturerImpl final
         [session_ stop];
         session_ = nil;
       }
-      session_ = [[LiveKitMacWindowSession alloc]
-          initWithMaxFps:max_fps_
-           includeCursor:include_cursor_ ? YES : NO];
+      session_ = [[LiveKitMacWindowSession alloc] initWithMaxFps:max_fps_
+                                                   includeCursor:include_cursor_ ? YES : NO];
       [session_ startPicker];
     }
   }
@@ -636,8 +620,7 @@ class API_AVAILABLE(macos(14.0)) SckWindowCapturerImpl final
         return;
       }
       last_status_ = status;
-      if (status == SckCaptureStatus::kActive ||
-          status == SckCaptureStatus::kWindowGone) {
+      if (status == SckCaptureStatus::kActive || status == SckCaptureStatus::kWindowGone) {
         callback_->OnCaptureResult(Result::ERROR_TEMPORARY, nullptr);
       } else {
         callback_->OnCaptureResult(Result::ERROR_PERMANENT, nullptr);
