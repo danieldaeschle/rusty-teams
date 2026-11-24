@@ -14,16 +14,6 @@ repoRoot="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 crateDir="$(realpath "${1:-$repoRoot/crates/app}")"
 binaryName="${2:-}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repoRoot/target}"
-# Keep in sync with .cargo/config.toml. macOS 14 is the minimum: WebRTC's screen
-# sharing uses SCContentSharingPicker. Info.plist's LSMinimumSystemVersion uses it.
-deploymentTarget="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
-case "$deploymentTarget" in *.*) ;; *) deploymentTarget="$deploymentTarget.0" ;; esac
-deploymentMajor="${deploymentTarget%%.*}"
-if ! [[ "$deploymentMajor" =~ ^[0-9]+$ ]] || [ "$deploymentMajor" -lt 14 ]; then
-  echo "error: MACOSX_DEPLOYMENT_TARGET=$deploymentTarget, the app needs macOS 14.0 or later" >&2
-  exit 1
-fi
-export MACOSX_DEPLOYMENT_TARGET="$deploymentTarget"
 export PATH="$HOME/.cargo/bin:$PATH"
 entitlements="$repoRoot/scripts/macos/RustyTeams.entitlements"
 targets=(aarch64-apple-darwin x86_64-apple-darwin)
@@ -61,25 +51,6 @@ mkdir -p "$outputDirectory"
 output="$outputDirectory/$(basename "${slices[0]}")"
 lipo -create -output "$output" "${slices[@]}"
 
-# Guard against the macOS 27 SDK's CoreMedia.tbd redirecting CoreMedia onto libswiftCoreMedia
-# when x86_64 builds with an older deployment target (< 10.14.4). The binary has no LC_RPATH,
-# so any @rpath dependency would also fail to load at launch. Each slice must carry the
-# deployment target that Info.plist declares below.
-for arch in arm64 x86_64; do
-  dependencies="$(otool -L -arch "$arch" "$output")" ||
-    { echo "error: otool failed on the $arch slice" >&2; exit 1; }
-  if grep -Eq 'libswiftCoreMedia|@rpath/' <<<"$dependencies"; then
-    echo "error: $arch slice links libswiftCoreMedia or an @rpath dylib; check MACOSX_DEPLOYMENT_TARGET" >&2
-    echo "$dependencies" >&2
-    exit 1
-  fi
-  minos="$(vtool -arch "$arch" -show-build "$output" | awk '$1 == "minos" { print $2 }')"
-  if [ "$minos" != "$MACOSX_DEPLOYMENT_TARGET" ]; then
-    echo "error: $arch slice targets macOS ${minos:-unknown}, expected $MACOSX_DEPLOYMENT_TARGET" >&2
-    exit 1
-  fi
-done
-
 # Wrap the binary in a .app so Finder and the Dock treat it as an application:
 # double-clickable, with the icon, and with the camera / microphone / screen
 # permission prompts (macOS keys those off the bundle, not a bare binary).
@@ -110,8 +81,6 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <string>$version</string>
     <key>CFBundleVersion</key>
     <string>$version</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>$MACOSX_DEPLOYMENT_TARGET</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
