@@ -12,8 +12,8 @@ use chrono::{DateTime, Local};
 use gpui_kit::*;
 use mcp::install::{Homes, Location};
 use mcp::{
-    Access, AgentHub, AgentPolicy, McpEndpoint, Outcome, Proposal, ReactionOutcome,
-    ReactionProposal, ServerHandle,
+    Access, AgentHub, AgentPolicy, ConversationKind, McpEndpoint, Outcome, Proposal,
+    ReactionOutcome, ReactionProposal, ServerHandle,
 };
 use store::Store;
 
@@ -186,6 +186,10 @@ pub fn handle(cx: &App) -> Option<Entity<AgentApi>> {
 fn feature_enabled(cx: &App) -> bool {
     cx.try_global::<AppHandle>()
         .is_some_and(|handle| handle.0.read(cx).agents_mcp_enabled)
+}
+
+fn caption_allowed(policy: &AgentPolicy, meeting_chat_id: &str) -> bool {
+    policy.can_read_transcripts() && policy.can_read(ConversationKind::Meeting, meeting_chat_id)
 }
 
 pub fn mcp_endpoint(cx: &App) -> Option<McpEndpoint> {
@@ -484,7 +488,7 @@ pub fn note_caption(meeting_chat_id: &str, caption_id: &str, speaker: &str, text
     };
     let hub = &api.read(cx).hub;
     let policy = hub.policy();
-    if feature_enabled(cx) && policy.can_read_transcripts() {
+    if feature_enabled(cx) && caption_allowed(&policy, meeting_chat_id) {
         hub.push_caption(meeting_chat_id, caption_id, speaker, text);
     }
 }
@@ -751,7 +755,9 @@ mod tests {
     use gpui_kit::{AppContext as _, TestAppContext};
     use store::Store;
 
-    use super::{agent_label, demo_port, feature_enabled};
+    use mcp::{Access, AgentPolicy};
+
+    use super::{agent_label, caption_allowed, demo_port, feature_enabled};
     use crate::app_state::{AppHandle, AppState, Mode};
 
     #[gpui_kit::test]
@@ -765,6 +771,20 @@ mod tests {
             app.update(cx, |state, cx| state.set_agents_mcp_enabled(true, cx));
             assert!(feature_enabled(cx));
         });
+    }
+
+    #[test]
+    fn captions_are_cached_only_for_allowed_chats() {
+        let mut policy = AgentPolicy {
+            enabled: true,
+            transcripts: true,
+            ..AgentPolicy::default()
+        };
+        policy.chats = Access::Selected(["19:a@thread.v2".to_owned()].into_iter().collect());
+        assert!(caption_allowed(&policy, "19:a@thread.v2"));
+        assert!(!caption_allowed(&policy, "19:b@thread.v2"));
+        policy.transcripts = false;
+        assert!(!caption_allowed(&policy, "19:a@thread.v2"));
     }
 
     #[test]

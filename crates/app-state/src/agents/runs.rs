@@ -353,10 +353,16 @@ impl AgentRuns {
             wakeups,
         };
         mcp_bridge::set_app_sessions(agent_runs.app_session_ids(), cx);
-        agent_runs.ensure_ticking(cx);
-        agent_runs.start_resumes(cx);
-        agent_runs.arm_wakeups(cx);
+        if agent_runs.app.read(cx).agents_mcp_enabled {
+            agent_runs.start_when_enabled(cx);
+        }
         agent_runs
+    }
+
+    pub fn start_when_enabled(&mut self, cx: &mut Context<Self>) {
+        self.ensure_ticking(cx);
+        self.start_resumes(cx);
+        self.arm_wakeups(cx);
     }
 
     fn start_resumes(&mut self, cx: &mut Context<Self>) {
@@ -1356,7 +1362,11 @@ pub(super) mod tests {
             .unwrap();
         run_store::save_settings(&store, &fake_settings(command));
         cx.update(|cx| {
-            let app = cx.new(|_| AppState::new(store, Mode::default()));
+            let app = cx.new(|_| {
+                let mut state = AppState::new(store, Mode::default());
+                state.agents_mcp_enabled = true;
+                state
+            });
             let runs = cx.new(|cx| AgentRuns::new(app.clone(), cx));
             (app, runs)
         })

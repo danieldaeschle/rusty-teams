@@ -463,11 +463,14 @@ impl AppState {
         let _ = self
             .store
             .set_meta(AGENTS_MCP_META_KEY, if on { "1" } else { "0" });
-        if !on {
+        if on {
+            if let Some(runs) = crate::agents::runs_handle(cx) {
+                runs.update(cx, |runs, cx| runs.start_when_enabled(cx));
+            }
+        } else {
             crate::agent_api::update_policy(cx, |policy| policy.enabled = false);
             crate::agent_api::uninstall_agent_configs(cx);
         }
-        cx.notify();
     }
 
     fn load_collapsed(&self) -> HashSet<String> {
