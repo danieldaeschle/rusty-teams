@@ -80,10 +80,16 @@ pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> Banner
             }),
             ..text("auth.banner.offline")
         },
-        BannerKind::SignIn => BannerText {
-            action: Some(app_base::ui_locale::tr("auth.sign_in")),
-            ..text("auth.banner.sign_in")
-        },
+        BannerKind::SignIn => {
+            let mut banner = text("auth.banner.sign_in");
+            // Windows signs in through the embedded view. The managed window exists
+            // only on Linux and macOS, so other platforms get no button.
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                banner.action = Some(app_base::ui_locale::tr("auth.sign_in"));
+            }
+            banner
+        }
         BannerKind::LiveUnavailable => BannerText {
             action: Some(app_base::ui_locale::tr("common.retry")),
             ..text("auth.banner.live_unavailable")
@@ -305,7 +311,10 @@ mod tests {
                 .action
                 .is_some()
         );
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         assert!(banner_text(BannerKind::SignIn, None).action.is_some());
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        assert!(banner_text(BannerKind::SignIn, None).action.is_none());
         assert!(banner_text(BannerKind::Offline, None).action.is_none());
     }
 }

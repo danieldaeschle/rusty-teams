@@ -1125,6 +1125,7 @@ impl Render for AppShell {
                                 );
                                 if signing_in {
                                     crate::linux_browser::request_login_window(true);
+                                    return;
                                 }
                             }
                             state.retry_live();
