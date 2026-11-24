@@ -57,7 +57,9 @@ pub fn endpoint_delta(previous: &[String], current: &[String]) -> Vec<String> {
     for id in previous.iter().chain(current.iter()) {
         let before = previous.iter().any(|key| key.eq_ignore_ascii_case(id));
         let after = current.iter().any(|key| key.eq_ignore_ascii_case(id));
-        let seen = changed.iter().any(|key: &String| key.eq_ignore_ascii_case(id));
+        let seen = changed
+            .iter()
+            .any(|key: &String| key.eq_ignore_ascii_case(id));
         if before != after && !seen {
             changed.push(id.clone());
         }
