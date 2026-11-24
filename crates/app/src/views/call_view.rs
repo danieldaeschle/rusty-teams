@@ -806,8 +806,20 @@ fn share_button(
         .into_any_element()
 }
 
-fn sharing_banner(app: &Entity<AppState>, model: &CallModel, sound: bool) -> Option<AnyElement> {
+/// One label for every surface: the call's real state first, the saved preference second.
+pub(super) fn share_sound_status(active: bool, wanted: bool) -> &'static str {
+    if active {
+        "Computer sound is ON"
+    } else if wanted {
+        "Computer sound OFF (requested, could not start)"
+    } else {
+        "Computer sound is OFF"
+    }
+}
+
+fn sharing_banner(app: &Entity<AppState>, model: &CallModel, wanted: bool) -> Option<AnyElement> {
     let label = model.local_share.as_ref()?;
+    let sound_active = model.share_sound;
     let sound_app = app.clone();
     let app = app.clone();
     Some(
@@ -837,13 +849,26 @@ fn sharing_banner(app: &Entity<AppState>, model: &CallModel, sound: bool) -> Opt
                     .bg(theme::on_accent().opacity(0.2))
                     .cursor_pointer()
                     .hover(|button| button.opacity(0.9))
-                    .child(if sound {
-                        "Computer sound on"
-                    } else {
-                        "Computer sound off"
+                    .child(icon(
+                        if sound_active {
+                            IconName::Volume2
+                        } else {
+                            IconName::VolumeOff
+                        },
+                        14.,
+                        theme::on_accent(),
+                    ))
+                    .child(share_sound_status(sound_active, wanted))
+                    .tooltip(move |window, cx| {
+                        Tooltip::new(if sound_active {
+                            "Others can hear your computer sound. Click to turn it off."
+                        } else {
+                            "Others cannot hear your computer sound. Click to include it."
+                        })
+                        .build(window, cx)
                     })
                     .on_click(move |_, _, cx| {
-                        sound_app.update(cx, |state, cx| state.set_call_share_sound(!sound, cx))
+                        sound_app.update(cx, |state, cx| state.set_call_share_sound(!wanted, cx))
                     }),
             )
             .child(
@@ -1647,5 +1672,20 @@ mod tests {
             avatar: 96.,
         });
         assert_eq!((stage.text_size, stage.inset), (12., 8.));
+    }
+}
+
+#[cfg(test)]
+mod share_sound_status_tests {
+    use super::share_sound_status;
+
+    #[test]
+    fn the_label_follows_the_real_state_not_only_the_preference() {
+        assert_eq!(share_sound_status(true, true), "Computer sound is ON");
+        assert_eq!(
+            share_sound_status(false, true),
+            "Computer sound OFF (requested, could not start)"
+        );
+        assert_eq!(share_sound_status(false, false), "Computer sound is OFF");
     }
 }

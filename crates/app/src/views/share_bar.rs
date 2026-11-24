@@ -1,3 +1,4 @@
+use super::widgets::icon;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{h_flex, tooltip::Tooltip};
 use gpui_kit::*;
@@ -52,18 +53,52 @@ fn stop_button(app: &Entity<AppState>) -> Stateful<Div> {
         .on_click(move |_, _, cx| app.update(cx, |state, cx| state.stop_call_share(cx)))
 }
 
-fn sound_button(app: &Entity<AppState>, sound: bool) -> Stateful<Div> {
+/// The button shows what the call actually sends, not the saved preference: the engine can refuse
+/// computer sound while the preference is still on.
+fn sound_button(app: &Entity<AppState>, active: bool, wanted: bool) -> Stateful<Div> {
     let app = app.clone();
-    let (glyph, background, foreground) = if sound {
+    let (glyph, background, foreground) = if active {
         (IconName::Volume2, theme::accent(), theme::on_accent())
+    } else if wanted {
+        (IconName::VolumeOff, theme::amber(), theme::text_strong())
     } else {
         (IconName::VolumeOff, theme::surface(), theme::text())
     };
-    round_control("share-bar-sound", glyph, background, foreground)
-        .size(px(BUTTON_SIZE))
-        .tooltip(|window, cx| Tooltip::new("Include computer sound").build(window, cx))
+    let label = if active {
+        "Sound on"
+    } else if wanted {
+        "Sound off"
+    } else {
+        "Sound off"
+    };
+    h_flex()
+        .id("share-bar-sound")
+        .h(px(STOP_HEIGHT))
+        .px(px(8.))
+        .gap(px(4.))
+        .flex_none()
+        .items_center()
+        .rounded_full()
+        .bg(background)
+        .text_color(foreground)
+        .text_size(theme::text_caption())
+        .font_weight(FontWeight::SEMIBOLD)
+        .cursor_pointer()
+        .hover(|chip| chip.opacity(0.85))
+        .child(icon(glyph, 14., foreground))
+        .child(label)
+        .tooltip(move |window, cx| {
+            Tooltip::new(if active {
+                "Computer sound is being shared. Click to turn it off."
+            } else if wanted {
+                "Computer sound is not being shared. The call could not start it. Click to try again."
+            } else {
+                "Computer sound is not being shared. Click to include it."
+            })
+            .build(window, cx)
+        })
         .on_click(move |_, _, cx| {
-            app.update(cx, |state, cx| state.set_call_share_sound(!sound, cx))
+            app.update(cx, |state, cx| state.set_call_share_sound(!wanted, cx))
         })
 }
 
@@ -142,7 +177,11 @@ impl Render for ShareBarView {
                 BUTTON_SIZE,
             ))
             .child(camera_button(&self.app, &call.model).size(px(BUTTON_SIZE)))
-            .child(sound_button(&self.app, state.call_share_sound))
+            .child(sound_button(
+                &self.app,
+                call.model.share_sound,
+                state.call_share_sound,
+            ))
             .child(stop_button(&self.app))
             .child(pin_button(&self.windows, pinned))
             .into_any_element()
