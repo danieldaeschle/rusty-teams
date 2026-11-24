@@ -12,6 +12,10 @@ const LIST_VIEW: &str = "msnp24Equivalent";
 const HOSTED_CONTENTS_SEGMENT: &str = "/hostedContents/";
 const HOSTED_URL_KEY: &str = ",url=";
 const AMS_HOST_SUFFIX: &str = ".asm.skype.com";
+const VIEWS_SEGMENT: &str = "/views/";
+const FULL_SIZE_VIEW_PREFIX: &str = "imgpsh_fullsize";
+/// The view Teams opens in its image viewer; `_anim` keeps animated GIFs moving.
+const FULL_SIZE_VIEW: &str = "imgpsh_fullsize_anim";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageLinks {
@@ -62,6 +66,26 @@ pub fn is_ams_image_url(url: &str) -> bool {
         .is_some_and(|(host, path)| {
             host.ends_with(AMS_HOST_SUFFIX) && path.starts_with("v1/objects/")
         })
+}
+
+/// The full-resolution view of the AMS image at `url` (a plain AMS view or a Graph `hostedContents` link to one).
+/// Messages carry the compressed `imgo` view; Teams swaps to this view when the image is opened.
+/// `None` for other images, video clips and thumbnails, and views that already are full size.
+pub fn ams_full_size_url(url: &str) -> Option<String> {
+    let decoded = hosted_content_image_url(url);
+    let url = decoded.as_deref().unwrap_or(url);
+    let is_object = |host: &str, path: &str| {
+        path.starts_with("v1/objects/")
+            && (host.ends_with(AMS_HOST_SUFFIX) || host.ends_with(LINK_PROXY_HOST_SUFFIX))
+    };
+    let (host, path) = url.strip_prefix("https://")?.split_once('/')?;
+    if !is_object(host, path) {
+        return None;
+    }
+    let (object, view) = url.rsplit_once(VIEWS_SEGMENT)?;
+    let still_picture = view.starts_with("img") && !view.contains(['/', '?', '#']);
+    (still_picture && !view.starts_with(FULL_SIZE_VIEW_PREFIX))
+        .then(|| format!("{object}{VIEWS_SEGMENT}{FULL_SIZE_VIEW}"))
 }
 
 pub fn parse_message_links(body: &Value) -> Vec<MessageLinks> {
@@ -223,6 +247,51 @@ mod tests {
         assert!(!is_ams_image_url(
             "https://eu-api.asm.skype.com/v1/users/me"
         ));
+    }
+
+    #[test]
+    fn an_inline_ams_image_opens_in_its_full_size_view() {
+        assert_eq!(
+            ams_full_size_url("https://eu-api.asm.skype.com/v1/objects/0-weu-d1-abc/views/imgo")
+                .as_deref(),
+            Some("https://eu-api.asm.skype.com/v1/objects/0-weu-d1-abc/views/imgpsh_fullsize_anim")
+        );
+        assert_eq!(
+            ams_full_size_url(
+                "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-weu-d4-abc/views/imgo"
+            )
+            .as_deref(),
+            Some(
+                "https://de-prod.asyncgw.teams.microsoft.com/v1/objects/0-weu-d4-abc/views/imgpsh_fullsize_anim"
+            )
+        );
+        let ams = "https://eu-api.asm.skype.com/v1/objects/0-frca-d14-abc/views/imgo";
+        let id = STANDARD.encode(format!("id=x_0-frca-d14-abc,type=1,url={ams}"));
+        assert_eq!(
+            ams_full_size_url(&format!(
+                "https://graph.microsoft.com/v1.0/chats/19:a/messages/1/hostedContents/{id}/$value"
+            ))
+            .as_deref(),
+            Some(
+                "https://eu-api.asm.skype.com/v1/objects/0-frca-d14-abc/views/imgpsh_fullsize_anim"
+            )
+        );
+    }
+
+    #[test]
+    fn full_size_and_non_picture_views_have_no_separate_full_size() {
+        for url in [
+            "https://eu-api.asm.skype.com/v1/objects/a/views/imgpsh_fullsize",
+            "https://eu-api.asm.skype.com/v1/objects/a/views/imgpsh_fullsize_anim",
+            "https://eu-api.asm.skype.com/v1/objects/a/views/video",
+            "https://eu-api.asm.skype.com/v1/objects/a/views/thumbnail",
+            "https://eu-api.asm.skype.com/v1/objects/a",
+            "https://evil.example/v1/objects/a/views/imgo",
+            "https://de-prod.asyncgw.teams.microsoft.com/urlp/v1/url/content?url=x/views/imgo",
+            "https://graph.microsoft.com/v1.0/chats/c/messages/1/hostedContents/aGk=/$value",
+        ] {
+            assert_eq!(ams_full_size_url(url), None, "{url}");
+        }
     }
 
     #[test]
