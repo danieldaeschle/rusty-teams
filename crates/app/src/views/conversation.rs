@@ -813,6 +813,11 @@ impl ConversationView {
     }
 
     #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn composer_is_empty(&self, cx: &App) -> bool {
+        self.composer.read(cx).is_empty(cx)
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub fn opening_title(&self) -> Option<String> {
         let loading = self
             .rows
@@ -823,6 +828,12 @@ impl ConversationView {
             .as_ref()
             .filter(|_| loading)
             .map(|current| current.title.clone())
+    }
+
+    pub fn send_in_flight(&self) -> bool {
+        self.pending
+            .iter()
+            .any(|row| matches!(row.delivery, Delivery::Sending))
     }
 
     fn on_window_activation(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -866,3 +866,76 @@ pub fn argb_to_nv12(
         .unwrap()
     }
 }
+
+pub fn yuy2_to_i420(
+    src_yuy2: &[u8],
+    src_stride_yuy2: u32,
+    dst_y: &mut [u8],
+    dst_stride_y: u32,
+    dst_u: &mut [u8],
+    dst_stride_u: u32,
+    dst_v: &mut [u8],
+    dst_stride_v: u32,
+    width: i32,
+    height: i32,
+) {
+    let row_bytes = width.unsigned_abs().saturating_mul(2);
+    assert!(
+        src_stride_yuy2 >= row_bytes,
+        "yuy2 stride is shorter than the row"
+    );
+    argb_assert_safety(src_yuy2, src_stride_yuy2, width, height);
+    i420_assert_safety(
+        dst_y,
+        dst_stride_y,
+        dst_u,
+        dst_stride_u,
+        dst_v,
+        dst_stride_v,
+        width,
+        height,
+    );
+
+    unsafe {
+        yuv_sys::ffi::yuy2_to_i420(
+            src_yuy2.as_ptr(),
+            src_stride_yuy2 as i32,
+            dst_y.as_mut_ptr(),
+            dst_stride_y as i32,
+            dst_u.as_mut_ptr(),
+            dst_stride_u as i32,
+            dst_v.as_mut_ptr(),
+            dst_stride_v as i32,
+            width,
+            height,
+        )
+        .unwrap()
+    }
+}
+
+pub fn argb_scale(
+    src: &[u8],
+    src_stride: u32,
+    src_width: i32,
+    src_height: i32,
+    dst: &mut [u8],
+    dst_stride: u32,
+    dst_width: i32,
+    dst_height: i32,
+) {
+    argb_assert_safety(src, src_stride, src_width, src_height);
+    argb_assert_safety(dst, dst_stride, dst_width, dst_height);
+    unsafe {
+        yuv_sys::ffi::argb_scale(
+            src.as_ptr(),
+            src_stride as i32,
+            src_width,
+            src_height,
+            dst.as_mut_ptr(),
+            dst_stride as i32,
+            dst_width,
+            dst_height,
+        )
+        .unwrap()
+    }
+}

@@ -1247,6 +1247,7 @@ mod frames {
         "shell/title-bar/leading",
         "shell/title-bar/mode-pill",
         "shell/title-bar/trailing",
+        "shell/title-bar/update",
         OWN_STATUS,
     ];
     const TITLE_SEARCH_SIZES: [(f32, f32, bool); 3] = [
@@ -1259,6 +1260,18 @@ mod frames {
     fn title_search_is_centered_on_the_window(cx: &mut TestAppContext) {
         let (handle, _) = mount(cx);
         let mut visual = VisualTestContext::from_window(handle, cx);
+        let shell = visual.update(|window, cx| {
+            window
+                .root::<gpui_kit::base::Root>()
+                .flatten()
+                .and_then(|root| root.read(cx).view().clone().downcast::<AppShell>().ok())
+                .expect("app shell is the root view")
+        });
+        visual.update(|_, cx| {
+            shell.update(cx, |shell, cx| {
+                shell.set_update_status(crate::updater::UpdateStatus::Ready, cx)
+            })
+        });
         let mut found = Vec::new();
         for (width, height, centered) in TITLE_SEARCH_SIZES {
             visual.simulate_resize(size(px(width), px(height)));

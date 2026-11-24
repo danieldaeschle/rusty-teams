@@ -225,6 +225,8 @@ fn main() {
             return;
         }
     }
+    #[cfg(any(windows, target_os = "linux"))]
+    updater::clean_up_old_binary();
     let mode = Mode {
         demo: arguments.demo,
         read_only: arguments.read_only,

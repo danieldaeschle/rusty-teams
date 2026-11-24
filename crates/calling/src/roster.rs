@@ -73,6 +73,7 @@ pub struct Member {
     pub mri: String,
     pub display_name: String,
     pub muted: bool,
+    pub server_muted: bool,
     pub in_lobby: bool,
     pub audio_sources: Vec<u32>,
     pub video_source: Option<u32>,
@@ -324,6 +325,9 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
             .iter()
             .any(|endpoint| endpoint.get("lobby").is_some());
     let muted = !in_call.is_empty() && in_call.iter().all(|endpoint| endpoint_muted(endpoint));
+    let server_muted = in_call
+        .iter()
+        .any(|endpoint| endpoint_server_muted(endpoint));
     let audio_sources = in_call
         .iter()
         .flat_map(|endpoint| audio_streams(endpoint))
@@ -337,6 +341,7 @@ fn member_from(mri: &str, participant: &Value, version: u64, previous: Option<&M
         mri: mri.to_owned(),
         display_name,
         muted,
+        server_muted,
         in_lobby,
         audio_sources,
         video_source: sending_source(&in_call, VIDEO),
@@ -479,7 +484,11 @@ fn audio_streams(endpoint: &Value) -> impl Iterator<Item = &Value> {
 
 fn endpoint_muted(endpoint: &Value) -> bool {
     endpoint["endpointState"]["state"]["isMuted"].as_bool() == Some(true)
-        || audio_streams(endpoint).any(|stream| stream["serverMuted"].as_bool() == Some(true))
+        || endpoint_server_muted(endpoint)
+}
+
+fn endpoint_server_muted(endpoint: &Value) -> bool {
+    audio_streams(endpoint).any(|stream| stream["serverMuted"].as_bool() == Some(true))
 }
 
 fn source_id(value: &Value) -> Option<u32> {
@@ -576,6 +585,12 @@ mod tests {
         forced["endpoints"]["ep"]["call"]["mediaStreams"][0]["serverMuted"] = json!(true);
         roster.apply(&delta(json!({"8:orgid:a": forced})));
         assert!(roster.members()[0].muted);
+        assert!(roster.members()[0].server_muted);
+        let mut local = participant("Ana", 2, "active", true, 201);
+        local["endpoints"]["ep"]["call"]["mediaStreams"][0]["serverMuted"] = json!(false);
+        roster.apply(&delta(json!({"8:orgid:a": local})));
+        assert!(roster.members()[0].muted);
+        assert!(!roster.members()[0].server_muted);
     }
 
     #[test]

@@ -51,25 +51,51 @@ pub(super) fn record_audio_devices(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn follow_device_change(
     flow: Flow,
     (previous, current): (&[AudioDevice], &[AudioDevice]),
     choice: &DeviceChoice,
     applied: &mut Option<AppliedDevice>,
+    touched_ids: &[String],
     select: impl Fn(u16) -> bool,
     timeline: &Timeline,
     control: &CallControl,
 ) -> bool {
     let system_default = devices::system_default_id(flow);
-    let (index, fell_back) =
+    let (index, fell_back, recovery) =
         match devices::reselect(applied.as_ref(), current, choice, system_default.as_deref()) {
-            Reselect::Keep => return false,
-            Reselect::Select(index) => (index, false),
-            Reselect::FallBack(index) => (index, true),
+            Reselect::Keep => {
+                // On Windows, a Bluetooth headset profile switch or brief disconnect+reconnect
+                // within the debounce window can leave the same endpoint index while the legacy
+                // WASAPI render/capture thread has already died on timeout/invalidation.
+                let Some(active) = applied.as_ref() else {
+                    return false;
+                };
+                let active_touched = touched_ids
+                    .iter()
+                    .any(|id| id.eq_ignore_ascii_case(&active.key));
+                if !active_touched {
+                    return false;
+                }
+                let Some(still_present) = current
+                    .iter()
+                    .find(|device| device.key().eq_ignore_ascii_case(&active.key))
+                else {
+                    return false;
+                };
+                (still_present.index, false, true)
+            }
+            Reselect::Select(index) => (index, false, false),
+            Reselect::FallBack(index) => (index, true, false),
         };
     let selected = select(index);
     timeline.record(
-        "device change",
+        if recovery {
+            "device recovery"
+        } else {
+            "device change"
+        },
         format!("{flow:?} {choice:?} -> index {index} fallback={fell_back} applied={selected}"),
     );
     if selected {
@@ -99,7 +125,7 @@ pub(super) fn apply_mute(
     control: &CallControl,
 ) -> bool {
     let effect = MuteEffect::for_muted(command.target(currently_muted));
-    audio.track.set_enabled(effect.track_enabled);
+    audio.set_device_tracks_enabled(effect.track_enabled);
     if let Some(software_audio) = software_audio {
         software_audio.set_microphone_muted(effect.muted);
     }
@@ -118,6 +144,19 @@ pub(super) fn apply_mute(
     effect.muted
 }
 
+pub(super) fn silence_for_server_mute(
+    audio: &AudioSetup,
+    software_audio: Option<&SoftwareAudio>,
+    control: &CallControl,
+) {
+    let effect = MuteEffect::for_muted(true);
+    audio.set_device_tracks_enabled(effect.track_enabled);
+    if let Some(software_audio) = software_audio {
+        software_audio.set_microphone_muted(true);
+    }
+    control.send(CallUpdate::Muted(true));
+}
+
 pub(super) fn silence_for_hold(
     on_hold: bool,
     muted: bool,
@@ -126,9 +165,7 @@ pub(super) fn silence_for_hold(
 ) {
     let silent = on_hold || muted;
     if let Some(audio) = audio {
-        audio
-            .track
-            .set_enabled(MuteEffect::for_muted(silent).track_enabled);
+        audio.set_device_tracks_enabled(MuteEffect::for_muted(silent).track_enabled);
     }
     if let Some(software_audio) = software_audio {
         software_audio.set_microphone_muted(silent);

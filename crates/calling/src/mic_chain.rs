@@ -56,6 +56,7 @@ impl MicChain {
             high_pass.process(frame);
         }
         if let Some(front) = self.front.as_mut() {
+            let _ = front.set_stream_delay_ms(40);
             let _ = front.process_stream(frame, SAMPLE_RATE as i32, 1);
         }
         self.dump(2, frame);

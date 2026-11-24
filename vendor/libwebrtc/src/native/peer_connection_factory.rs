@@ -133,6 +133,22 @@ impl PeerConnectionFactory {
         }
     }
 
+    /// Create an audio track that uses the Platform ADM for capture with explicit
+    /// WebRTC noise suppression control (e.g. off when an external ML post-processor replaces it).
+    pub fn create_device_audio_track_with_options(
+        &self,
+        label: &str,
+        noise_suppression: bool,
+    ) -> RtcAudioTrack {
+        RtcAudioTrack {
+            handle: imp_at::RtcAudioTrack {
+                sys_handle: self
+                    .sys_handle
+                    .create_device_audio_track_with_options(label.to_string(), noise_suppression),
+            },
+        }
+    }
+
     pub fn get_rtp_sender_capabilities(&self, media_type: MediaType) -> RtpCapabilities {
         self.sys_handle.rtp_sender_capabilities(media_type.into()).into()
     }

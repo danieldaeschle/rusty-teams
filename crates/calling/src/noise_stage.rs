@@ -3,6 +3,7 @@ use std::sync::{Mutex, Once};
 use std::time::{Duration, Instant};
 
 use df::tract::{DfParams, DfTract, ReduceMask, RuntimeParams};
+use libwebrtc::native::apm::AudioProcessingModule;
 use ndarray::{ArrayView2, ArrayViewMut2};
 
 use crate::audio::{FRAME_SAMPLES, SAMPLE_RATE};
@@ -115,10 +116,15 @@ fn capture_hook(channel_index: usize, samples: &mut [f32]) {
     let Ok(mut stage) = HOOK_STAGE.try_lock() else {
         return;
     };
+    let overloaded = OVERLOADED.load(Ordering::Relaxed);
     let started = Instant::now();
-    stage.process(channel_index, samples);
-    if stage.over_budget(started.elapsed()) {
-        HOOK_ARMED.store(false, Ordering::Relaxed);
+    let used_ml = !overloaded && stage.process_ml_only(channel_index, samples);
+    if used_ml {
+        let _ = stage.over_budget(started.elapsed());
+    } else {
+        // 16/32 kHz headset, DeepFilterNet still loading, or CPU budget exceeded:
+        // run single-stage WebRTC NS instead of leaving the track unfiltered or double-stacking.
+        stage.process_fallback_ns(channel_index, samples);
     }
 }
 
@@ -127,14 +133,15 @@ fn install_hook(armed: bool) {
     webrtc_sys::noise_hook::set_capture_hook(armed.then_some(capture_hook));
 }
 
-/// Arms DeepFilterNet on the capture hook only while the Pulse / CoreAudio device track is the
-/// outgoing microphone. WebRTC's own noise suppression keeps running before it either way.
+/// Arms the capture hook while the platform ADM device track is outgoing in Auto mode.
+/// WebRTC's built-in NS is disabled on the Auto device track so DeepFilterNet runs alone on
+/// 48 kHz microphones, while 16 kHz headsets, warm-up frames and overloaded CPUs fall back
+/// cleanly to single-stage WebRTC NS inside the hook.
 pub fn apply_for_outgoing(settings: MicSettings, device_track_outgoing: bool) {
     if settings.ml_noise_suppression() {
         prepare();
     }
-    let armed =
-        should_arm_hook(settings, device_track_outgoing) && !OVERLOADED.load(Ordering::Relaxed);
+    let armed = should_arm_hook(settings, device_track_outgoing);
     install_hook(armed);
 }
 
@@ -173,6 +180,8 @@ impl FrameBudget {
 
 pub struct NoiseStage {
     channels: Vec<Option<DfTract>>,
+    fallback_ns: Vec<Option<AudioProcessingModule>>,
+    fallback_pcm: Vec<i16>,
     input: Vec<f32>,
     output: Vec<f32>,
     pcm: Vec<f32>,
@@ -183,6 +192,8 @@ impl NoiseStage {
     pub const fn new() -> Self {
         NoiseStage {
             channels: Vec::new(),
+            fallback_ns: Vec::new(),
+            fallback_pcm: Vec::new(),
             input: Vec::new(),
             output: Vec::new(),
             pcm: Vec::new(),
@@ -190,9 +201,11 @@ impl NoiseStage {
         }
     }
 
-    pub fn process(&mut self, channel_index: usize, samples: &mut [f32]) {
+    /// Runs DeepFilterNet if the frame is 48 kHz (480 samples) and the model is loaded.
+    /// Returns true if DeepFilterNet processed the frame.
+    fn process_ml_only(&mut self, channel_index: usize, samples: &mut [f32]) -> bool {
         if samples.len() != FRAME_SAMPLES {
-            return;
+            return false;
         }
         while self.channels.len() <= channel_index {
             self.channels.push(None);
@@ -202,7 +215,7 @@ impl NoiseStage {
             *channel = ready_model();
         }
         let Some(model) = channel.as_mut() else {
-            return;
+            return false;
         };
         self.input.clear();
         self.input
@@ -212,14 +225,50 @@ impl NoiseStage {
             ArrayView2::from_shape((1, FRAME_SAMPLES), &self.input),
             ArrayViewMut2::from_shape((1, FRAME_SAMPLES), &mut self.output),
         ) else {
-            return;
+            return false;
         };
         if model.process(noisy, enhanced).is_err() {
-            return;
+            return false;
         }
         for (sample, enhanced) in samples.iter_mut().zip(&self.output) {
             *sample = enhanced * PCM_SCALE;
         }
+        true
+    }
+
+    /// Single-stage WebRTC NS fallback for non-48 kHz headsets (e.g. 16 kHz Bluetooth/wireless HFP),
+    /// while DeepFilterNet is warming up, or after CPU budget overload.
+    fn process_fallback_ns(&mut self, channel_index: usize, samples: &mut [f32]) {
+        let sample_rate = match samples.len() {
+            80 => 8_000,
+            160 => 16_000,
+            320 => 32_000,
+            480 => 48_000,
+            _ => return,
+        };
+        while self.fallback_ns.len() <= channel_index {
+            self.fallback_ns.push(None);
+        }
+        let apm = self.fallback_ns[channel_index]
+            .get_or_insert_with(|| AudioProcessingModule::new(false, false, false, true));
+        self.fallback_pcm.clear();
+        self.fallback_pcm.extend(samples.iter().map(|sample| {
+            sample
+                .round()
+                .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
+        }));
+        if apm
+            .process_stream(&mut self.fallback_pcm, sample_rate, 1)
+            .is_ok()
+        {
+            for (sample, cleaned) in samples.iter_mut().zip(&self.fallback_pcm) {
+                *sample = f32::from(*cleaned);
+            }
+        }
+    }
+
+    pub fn process(&mut self, channel_index: usize, samples: &mut [f32]) {
+        let _ = self.process_ml_only(channel_index, samples);
     }
 
     /// Reports and remembers for this call when frames keep running over their budget.
@@ -364,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn only_linux_and_macos_auto_arm_the_hook_and_an_overload_keeps_it_off_until_hangup() {
+    fn auto_arms_the_hook_on_all_platforms_and_overload_falls_back_until_hangup() {
         let auto = MicSettings::default();
         let low = MicSettings {
             noise_suppression: NoiseSuppression::Low,
@@ -377,21 +426,22 @@ mod tests {
         assert!(!should_arm_hook(auto, false));
         assert!(!should_arm_hook(low, true));
         assert!(!should_arm_hook(music, true));
-        assert!(!should_arm_hook(auto, auto.uses_device_track_on(true)));
+        assert!(should_arm_hook(auto, auto.uses_device_track()));
 
         clear();
         apply_for_outgoing(auto, true);
-        assert_eq!(HOOK_ARMED.load(Ordering::Relaxed), auto.uses_device_track());
+        assert!(HOOK_ARMED.load(Ordering::Relaxed));
 
         OVERLOADED.store(true, Ordering::Relaxed);
         apply_for_outgoing(auto, true);
-        assert!(!HOOK_ARMED.load(Ordering::Relaxed));
+        // Hook stays armed so fallback WebRTC NS keeps protecting the Windows Auto track (built-in NS off).
+        assert!(HOOK_ARMED.load(Ordering::Relaxed));
         assert!(overloaded());
 
         clear();
         assert!(!overloaded());
-        apply_for_outgoing(auto, true);
-        assert_eq!(HOOK_ARMED.load(Ordering::Relaxed), auto.uses_device_track());
+        apply_for_outgoing(low, true);
+        assert!(!HOOK_ARMED.load(Ordering::Relaxed));
         clear();
     }
 }

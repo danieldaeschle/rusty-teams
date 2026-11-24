@@ -825,8 +825,8 @@ install:
     en: Updates
     de: Updates
   updates_detail:
-    en: "%{version}. Rusty Teams tells you when a newer release is out"
-    de: "%{version}. Rusty Teams sagt Bescheid, wenn ein neueres Release da ist"
+    en: "%{version}. An installed copy updates itself. Other copies open the release page"
+    de: "%{version}. Eine Installation aktualisiert sich. Sonst öffnet sich die Release-Seite"
   updates_detail_dev:
     en: "%{version}. This build does not look for releases"
     de: "%{version}. Dieser Build sucht nicht nach Releases"
@@ -840,17 +840,38 @@ install:
     en: Checking for updates...
     de: Suche nach Updates...
   auto_updates:
-    en: Release notices
-    de: Release-Hinweise
+    en: Updates
+    de: Updates
   auto_updates_detail:
-    en: Look for new releases and tell me
-    de: Nach neuen Releases suchen und Bescheid sagen
+    en: Look for new releases. An installed copy updates itself; other copies open the release page
+    de: Nach neuen Releases suchen. Eine Installation aktualisiert sich, sonst öffnet sich die Release-Seite
   update_available_title:
     en: Update available
     de: Update verfügbar
   update_available_body:
     en: "Rusty Teams %{version} is available. You have %{current}."
     de: "Rusty Teams %{version} ist verfügbar. Installiert ist %{current}."
+  update_now:
+    en: Update
+    de: Aktualisieren
+  update_downloading:
+    en: "Downloading %{version}... %{percent}%"
+    de: "%{version} wird heruntergeladen... %{percent} %"
+  hide:
+    en: Hide
+    de: Ausblenden
+  update_ready_title:
+    en: Update ready
+    de: Update bereit
+  update_ready_body:
+    en: "%{version} is downloaded. Restart Rusty Teams to finish the update."
+    de: "%{version} ist heruntergeladen. Starte Rusty Teams neu, um das Update abzuschliessen."
+  later:
+    en: Later
+    de: Später
+  restart_now:
+    en: Restart now
+    de: Jetzt neu starten
   open_release:
     en: Open release
     de: Release öffnen

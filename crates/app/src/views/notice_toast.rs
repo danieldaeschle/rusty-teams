@@ -7,11 +7,13 @@ use crate::app_state::AppState;
 use crate::notice::Notice;
 
 struct NoticeToast;
+struct UpdateFailedToast;
 
 /// Mirrors `AppState::notice` as a toast bottom right; the state keeps the 6 s lifetime.
 #[derive(Default)]
 pub struct NoticeToasts {
     shown: Option<u64>,
+    update_failure: Option<String>,
 }
 
 fn toast_placement() -> Anchor {
@@ -70,6 +72,20 @@ impl NoticeToasts {
                 }
             })
         });
+        window.defer(cx, move |window, cx| window.push_notification(toast, cx));
+    }
+
+    pub fn update_failed(&mut self, message: Option<&str>, window: &mut Window, cx: &mut App) {
+        if message == self.update_failure.as_deref() {
+            return;
+        }
+        self.update_failure = message.map(str::to_owned);
+        let Some(message) = message else {
+            return;
+        };
+        let toast = Notification::error(format!("Update failed: {message}"))
+            .id::<UpdateFailedToast>()
+            .placement(toast_placement());
         window.defer(cx, move |window, cx| window.push_notification(toast, cx));
     }
 }

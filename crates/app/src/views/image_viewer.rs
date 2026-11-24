@@ -9,6 +9,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use image::{Frame, ImageReader};
+use teams_core::ImageRef;
 
 use super::avatar::person_avatar;
 use super::shortcuts::{ZoomIn, ZoomOut, ZoomReset};
@@ -58,6 +59,13 @@ struct RotatedImage {
     render: Arc<RenderImage>,
 }
 
+/// The file last drawn for the picture at `index`, to notice when its full-size view replaces the inline one.
+struct Shown {
+    index: usize,
+    key: String,
+    size: Option<(u32, u32)>,
+}
+
 #[derive(Clone, Copy)]
 struct Layout {
     stage: Pair,
@@ -72,11 +80,14 @@ pub struct ImageViewer {
     conversation_id: String,
     conversation_title: String,
     items: Vec<GalleryItem>,
+    /// Per item, the full-resolution view fetched when it is opened; messages carry a compressed one.
+    full_sizes: Vec<Option<ImageRef>>,
     index: usize,
     scale: Option<f32>,
     pan: Pair,
     quarter_turns: u8,
     rotated: Option<RotatedImage>,
+    shown: Option<Shown>,
     entered_fullscreen: bool,
     drag_from: Option<Point<Pixels>>,
     notice: Option<String>,
@@ -209,11 +220,17 @@ impl ImageViewer {
             conversation_id: request.conversation_id,
             conversation_title: request.conversation_title,
             index: request.index.min(request.items.len().saturating_sub(1)),
+            full_sizes: request
+                .items
+                .iter()
+                .map(|item| item.image.full_size())
+                .collect(),
             items: request.items,
             scale: None,
             pan: (0., 0.),
             quarter_turns: 0,
             rotated: None,
+            shown: None,
             entered_fullscreen: false,
             drag_from: None,
             notice: None,
@@ -249,12 +266,14 @@ impl ImageViewer {
             .saturating_sub(1)
             .max((self.index + 1).min(last_index));
         let directory = &self.app.read(cx).directory;
+        let full_size = self.full_sizes.get(self.index).cloned().flatten();
         let missing: Vec<_> = self
             .items
             .get(first..=last)
             .unwrap_or_default()
             .iter()
             .map(|item| item.image.clone())
+            .chain(full_size)
             .filter(|image| directory.image(&image.url).is_none())
             .collect();
         if !missing.is_empty() {
@@ -290,10 +309,59 @@ impl ImageViewer {
             .is_some_and(|item| self.app.read(cx).directory.image_failed(&item.image.url))
     }
 
-    fn current_path(&self, cx: &App) -> Option<PathBuf> {
+    /// Cache key of what is drawn for the current picture: its full-size view once downloaded, until then the inline one.
+    fn shown_key(&self, cx: &App) -> Option<&str> {
         let item = self.current()?;
-        let entry = self.app.read(cx).directory.image(&item.image.url)?;
+        let directory = &self.app.read(cx).directory;
+        let full_size = self
+            .full_sizes
+            .get(self.index)
+            .and_then(Option::as_ref)
+            .map(|full| full.url.as_str())
+            .filter(|url| directory.image(url).is_some());
+        Some(full_size.unwrap_or(item.image.url.as_str()))
+    }
+
+    fn current_path(&self, cx: &App) -> Option<PathBuf> {
+        let entry = self.app.read(cx).directory.image(self.shown_key(cx)?)?;
         Some(entry.path.clone())
+    }
+
+    /// Keeps the zoom and rotation when the full-size view replaces the inline one under them.
+    fn follow_full_size(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(key) = self.shown_key(cx).map(str::to_owned) else {
+            self.shown = None;
+            return;
+        };
+        let size = self
+            .app
+            .read(cx)
+            .directory
+            .image(&key)
+            .and_then(|entry| entry.size);
+        let previous = self.shown.replace(Shown {
+            index: self.index,
+            key: key.clone(),
+            size,
+        });
+        let Some(previous) = previous.filter(|shown| shown.index == self.index && shown.key != key)
+        else {
+            return;
+        };
+        let widths = previous
+            .size
+            .zip(size)
+            .map(|(before, after)| (before.0, after.0));
+        if let (Some(scale), Some((before, after))) = (self.scale, widths)
+            && after > 0
+        {
+            self.scale = Some(scale * before as f32 / after as f32);
+        }
+        if self.quarter_turns != 0
+            && let Some(path) = self.current_path(cx)
+        {
+            self.start_rotation(path, window, cx);
+        }
     }
 
     fn stage_size(window: &Window) -> Pair {
@@ -306,7 +374,7 @@ impl ImageViewer {
 
     fn layout(&self, window: &Window, cx: &App) -> Option<Layout> {
         let item = self.current()?;
-        let entry = self.app.read(cx).directory.image(&item.image.url)?;
+        let entry = self.app.read(cx).directory.image(self.shown_key(cx)?)?;
         let stage = Self::stage_size(window);
         let declared = item.image.width.zip(item.image.height);
         let source = entry
@@ -442,47 +510,57 @@ impl ImageViewer {
     }
 
     fn rotate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(path), Some(item)) = (self.current_path(cx), self.current()) else {
+        let Some(path) = self.current_path(cx) else {
             return;
         };
-        let url = item.image.url.clone();
         self.quarter_turns = next_rotation(self.quarter_turns);
         self.scale = None;
         self.pan = (0., 0.);
         self.release_rotated(window);
-        let quarter_turns = self.quarter_turns;
-        if quarter_turns != 0 {
-            cx.spawn_in(window, async move |this, cx| {
-                let rotated = cx
-                    .background_spawn(async move { rotated_render(&path, quarter_turns) })
-                    .await;
-                this.update_in(cx, |this, window, cx| {
-                    let still_current = this.quarter_turns == quarter_turns
-                        && this.current().is_some_and(|item| item.image.url == url);
-                    if !still_current {
-                        return;
-                    }
-                    match rotated {
-                        Some(render) => {
-                            this.release_rotated(window);
-                            this.rotated = Some(RotatedImage {
-                                url,
-                                quarter_turns,
-                                render: Arc::new(render),
-                            });
-                        }
-                        None => {
-                            this.quarter_turns = 0;
-                            this.show_notice("Could not rotate", cx);
-                        }
-                    }
-                    cx.notify();
-                })
-                .ok();
-            })
-            .detach();
+        if self.quarter_turns != 0 {
+            self.start_rotation(path, window, cx);
         }
         cx.notify();
+    }
+
+    /// Turns the file at `path` by the current rotation; the previous rotated picture stays until this one is ready.
+    fn start_rotation(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(item) = self.current() else {
+            return;
+        };
+        let url = item.image.url.clone();
+        let quarter_turns = self.quarter_turns;
+        cx.spawn_in(window, async move |this, cx| {
+            let source = path.clone();
+            let rotated = cx
+                .background_spawn(async move { rotated_render(&source, quarter_turns) })
+                .await;
+            this.update_in(cx, |this, window, cx| {
+                let still_current = this.quarter_turns == quarter_turns
+                    && this.current().is_some_and(|item| item.image.url == url)
+                    && this.current_path(cx).as_ref() == Some(&path);
+                if !still_current {
+                    return;
+                }
+                match rotated {
+                    Some(render) => {
+                        this.release_rotated(window);
+                        this.rotated = Some(RotatedImage {
+                            url,
+                            quarter_turns,
+                            render: Arc::new(render),
+                        });
+                    }
+                    None => {
+                        this.quarter_turns = 0;
+                        this.show_notice("Could not rotate", cx);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn show_notice(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
@@ -798,15 +876,11 @@ impl ImageViewer {
     fn picture(&self, layout: Layout, cx: &mut Context<Self>) -> AnyElement {
         let display = display_size(layout.source, layout.scale);
         let origin = image_origin(display, layout.stage, layout.pan);
-        let Some(item) = self.current() else {
+        if self.current().is_none() {
             return div().into_any_element();
-        };
+        }
         let source: Option<ImageSource> = if self.quarter_turns == 0 {
-            self.app
-                .read(cx)
-                .directory
-                .image(&item.image.url)
-                .map(|entry| entry.path.clone().into())
+            self.current_path(cx).map(Into::into)
         } else {
             self.rotated_render()
                 .map(|render| ImageSource::Render(render.clone()))
@@ -965,6 +1039,7 @@ fn loading_placeholder() -> AnyElement {
 
 impl Render for ImageViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.follow_full_size(window, cx);
         let layout = self.layout(window, cx);
         let stage = Self::stage_size(window);
         let has_previous = self.index > 0;

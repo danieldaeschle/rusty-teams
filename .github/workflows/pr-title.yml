@@ -1,0 +1,26 @@
+# A squash merge uses the PR title as the commit subject, and the release notes
+# (cliff.toml) show it as is. CONTRIBUTING.md has the format.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  title:
+    name: Conventional title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|refactor|docs|test|chore|ci|build)(\([a-z0-9-]+\))?!?: [^[:space:]].*$'
+          if [[ "$TITLE" =~ $pattern ]]; then
+            echo "ok: $TITLE"
+          else
+            echo "::error::PR title must look like 'fix(chat): a sent image no longer blinks' (type(scope): message, no emoji). Got: $TITLE"
+            exit 1
+          fi

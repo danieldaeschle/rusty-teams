@@ -74,6 +74,7 @@ pub mod ffi {
         fn create_random_uuid() -> String;
         fn video_encoder_backend_list() -> Vec<VideoEncoderBackend>;
         fn new_log_sink(fnc: fn(String, LoggingSeverity)) -> UniquePtr<LogSink>;
+        fn tune_windows_camera(target: &str);
     }
 }
 
