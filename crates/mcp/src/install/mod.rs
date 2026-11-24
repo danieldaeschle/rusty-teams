@@ -276,3 +276,11 @@ pub fn reinstall_all(
     }
     results
 }
+
+/// Remove our server entry from every installed agent config. Token and proposals are untouched.
+pub fn uninstall_all(homes: &Homes) -> Vec<(Target, Result<(), InstallError>)> {
+    Target::ALL
+        .into_iter()
+        .map(|target| (target, uninstall(target, homes)))
+        .collect()
+}

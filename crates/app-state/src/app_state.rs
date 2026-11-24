@@ -465,6 +465,7 @@ impl AppState {
             .set_meta(AGENTS_MCP_META_KEY, if on { "1" } else { "0" });
         if !on {
             crate::agent_api::update_policy(cx, |policy| policy.enabled = false);
+            crate::agent_api::uninstall_agent_configs(cx);
         }
         cx.notify();
     }

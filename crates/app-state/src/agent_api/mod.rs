@@ -495,6 +495,20 @@ pub fn clear_captions(meeting_chat_id: &str, cx: &App) {
     }
 }
 
+/// Remove our entry from installed agent CLIs. The token and proposals stay so re-enabling can
+/// restore them without asking the user to set up the agents again.
+pub fn uninstall_agent_configs(cx: &mut App) {
+    let Some(api) = handle(cx) else {
+        return;
+    };
+    let demo = api.read(cx).demo;
+    let task = cx.background_spawn(async move { mcp::install::uninstall_all(&agent_homes(demo)) });
+    cx.spawn(async move |_| {
+        let _ = task.await;
+    })
+    .detach();
+}
+
 impl AgentApi {
     pub fn status(&self) -> &ServerStatus {
         &self.status
