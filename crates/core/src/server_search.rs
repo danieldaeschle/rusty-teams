@@ -15,17 +15,40 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     /// An empty text returns the zero-query state (top people, recent searches).
+    /// A complete email that the people index misses is resolved through `search_people`.
     pub async fn server_suggestions(
         &self,
         search_session: &SearchSession,
         text: &str,
+    ) -> Result<Suggestions> {
+        self.collect_suggestions(search_session, text, true).await
+    }
+
+    /// People-index suggestions without the complete-email directory lookup.
+    /// The new-chat field calls `search_people` itself.
+    pub async fn server_suggestions_without_email_lookup(
+        &self,
+        search_session: &SearchSession,
+        text: &str,
+    ) -> Result<Suggestions> {
+        self.collect_suggestions(search_session, text, false).await
+    }
+
+    async fn collect_suggestions(
+        &self,
+        search_session: &SearchSession,
+        text: &str,
+        resolve_email: bool,
     ) -> Result<Suggestions> {
         let identity = self.search_identity().await?;
         let mut suggestions = self
             .remote
             .server_suggestions(&identity, search_session, text)
             .await?;
-        if crate::native::is_email_address(text) && !has_person_with_email(&suggestions, text) {
+        if resolve_email
+            && crate::native::is_email_address(text)
+            && !has_person_with_email(&suggestions, text)
+        {
             let external = self.search_people(text).await.unwrap_or_default();
             suggestions.people.extend(
                 external

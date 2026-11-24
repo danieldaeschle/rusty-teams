@@ -10,8 +10,8 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::ChatRecord;
-use teams_core::MentionCandidate;
 use teams_core::substrate_search::{SearchPerson, SearchSession};
+use teams_core::MentionCandidate;
 
 use super::avatar::person_avatar;
 use super::switcher::clamp_highlight;
@@ -407,10 +407,12 @@ impl NewChatDraft {
                 self.search = Some(cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(SEARCH_DEBOUNCE).await;
                     let receiver = runtime::spawn(async move {
-                        let directory = engine.search_people(&query).await;
-                        let suggestions = engine
-                            .server_suggestions(&search_session, &query)
-                            .await
+                        let (directory, suggestions) = tokio::join!(
+                            engine.search_people(&query),
+                            engine
+                                .server_suggestions_without_email_lookup(&search_session, &query,),
+                        );
+                        let suggestions = suggestions
                             .map(|suggestions| suggestions.people)
                             .unwrap_or_default();
                         (directory, suggestions)
@@ -910,10 +912,10 @@ mod tests {
     use store::{ChatRecord, MemberRecord};
 
     use super::{
-        EnterAction, Pick, composer_placeholder, enter_action, merge_remote, pick_detail,
-        search_results, suggested_people,
+        composer_placeholder, enter_action, merge_remote, pick_detail, search_results,
+        suggested_people, EnterAction, Pick,
     };
-    use crate::data::{Person, existing_one_on_one};
+    use crate::data::{existing_one_on_one, Person};
 
     fn me() -> Person {
         Person {

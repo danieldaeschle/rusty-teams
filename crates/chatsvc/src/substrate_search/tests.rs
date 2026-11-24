@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use session::{ApiResponse, Method, Request};
 
 use super::*;
@@ -169,6 +169,7 @@ fn suggestions_fixture_parses_every_group() {
     assert_eq!(person.email_addresses, ["erika.mustermann@contoso.example"]);
 
     let chat = &suggestions.chats[0];
+    assert_eq!(chat.thread_id, "19:group01@thread.v2");
     assert_eq!(chat.name, None);
     assert_eq!(chat.total_members, 3);
     assert_eq!(chat.members.len(), 2);
