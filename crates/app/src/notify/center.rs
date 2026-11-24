@@ -831,11 +831,59 @@ impl NotificationCenter {
             .map(|toast| (CallToast::Meeting(toast.id), MEETING_HEIGHT));
         rings.chain(meetings).collect()
     }
+}
+
+fn call_cards_while_desktop_connected(toasts: &[(CallToast, f32)]) -> Vec<(CallToast, f32)> {
+    toasts
+        .iter()
+        .copied()
+        .filter(|(key, _)| matches!(key, CallToast::Ring(_) | CallToast::Meeting(_)))
+        .collect()
+}
+
+impl NotificationCenter {
+    /// Ring and meeting cards stay on screen when a notification service is connected.
+    /// Chat toasts stay desktop notifications.
+    fn sync_ring_cards(&mut self, cx: &mut Context<Self>) {
+        let rings = call_cards_while_desktop_connected(&self.call_toasts(cx));
+        let stale: Vec<CallToast> = self
+            .call_windows
+            .keys()
+            .copied()
+            .filter(|key| !rings.iter().any(|(toast, _)| toast == key))
+            .collect();
+        for key in stale {
+            self.close_call_window(key, cx);
+        }
+        let area = self.work_area(cx);
+        let heights: Vec<f32> = rings.iter().map(|(_, height)| *height).collect();
+        let slots = layout::stack_slots(area, self.settings.corner, &heights, false);
+        for ((key, _), slot) in rings.iter().zip(slots.toasts.iter()) {
+            self.place_call_toast(*key, *slot, area, cx);
+        }
+    }
+
+    fn finish_ring_card(&mut self, ring_id: u64, cx: &mut Context<Self>) {
+        #[cfg(target_os = "linux")]
+        {
+            let still_ringing = self
+                .app
+                .read(cx)
+                .rings
+                .ringing()
+                .any(|entry| entry.ring.ring_id == ring_id);
+            if !still_ringing {
+                self.queue_desktop_close(DesktopKey::Ring(ring_id));
+            }
+        }
+        self.sync_windows(cx);
+    }
 
     fn sync_windows(&mut self, cx: &mut Context<Self>) {
         #[cfg(target_os = "linux")]
         if self.desktop.is_some() {
             self.sync_desktop(cx);
+            self.sync_ring_cards(cx);
             return;
         }
         let visible = self.visible_ids();
@@ -915,8 +963,9 @@ impl NotificationCenter {
         if !self.call_opening.insert(key) {
             return;
         }
+        let options = ring_card_options(slot, area);
         open_popup(
-            popup_options(slot, area),
+            options,
             cx,
             move |center, _, cx| match key {
                 CallToast::Ring(ring_id) => {
@@ -1565,6 +1614,13 @@ impl NotificationCenter {
         self.raise_main_window(cx);
         self.app
             .update(cx, |state, cx| state.accept_ring(ring_id, mode, cx));
+        self.finish_ring_card(ring_id, cx);
+    }
+
+    pub fn decline_ring(&mut self, ring_id: u64, cx: &mut Context<Self>) {
+        self.app
+            .update(cx, |state, cx| state.decline_ring(ring_id, cx));
+        self.finish_ring_card(ring_id, cx);
     }
 
     fn raise_main_window(&mut self, cx: &mut Context<Self>) {
@@ -1982,6 +2038,18 @@ fn parse_logical_key(key: &str) -> Option<DesktopKey> {
     }
 }
 
+fn ring_card_options(slot: Slot, area: WorkArea) -> WindowOptions {
+    // Wayland treats PopUp as a normal toplevel, so Hyprland tiles ring and meeting cards.
+    #[cfg(target_os = "linux")]
+    {
+        let mut options = popup_options(slot, area);
+        options.kind = WindowKind::Floating;
+        return options;
+    }
+    #[cfg(not(target_os = "linux"))]
+    popup_options(slot, area)
+}
+
 fn popup_options(slot: Slot, area: WorkArea) -> WindowOptions {
     let scale = area.scale;
     let bounds = Bounds::new(
@@ -2118,6 +2186,57 @@ mod tests {
             WindowBackgroundAppearance::Transparent
         );
         assert_eq!(options.kind, WindowKind::PopUp);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_ring_card_is_a_floating_window() {
+        use super::ring_card_options;
+
+        let slot = Slot {
+            x: 10,
+            y: 20,
+            width: 360,
+            height: 140,
+        };
+        let area = WorkArea {
+            left: 0,
+            top: 0,
+            right: 1920,
+            bottom: 1080,
+            scale: 1.,
+        };
+        let options = ring_card_options(slot, area);
+        assert_eq!(options.kind, WindowKind::Floating);
+        assert!(!options.focus);
+    }
+
+    #[test]
+    fn call_cards_while_desktop_connected_keep_rings_and_meetings() {
+        use super::{CallToast, call_cards_while_desktop_connected};
+
+        let toasts = vec![
+            (CallToast::Ring(7), 140.),
+            (CallToast::Meeting(3), 96.),
+            (CallToast::Ring(9), 140.),
+        ];
+        let cards = call_cards_while_desktop_connected(&toasts);
+        assert_eq!(
+            cards,
+            vec![
+                (CallToast::Ring(7), 140.),
+                (CallToast::Meeting(3), 96.),
+                (CallToast::Ring(9), 140.)
+            ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn ring_card_close_token_matches_the_published_ring() {
+        use super::DesktopKey;
+
+        assert_eq!(DesktopKey::Ring(7).replace_token(), "ring:7");
     }
 
     fn sidebar() -> Sidebar {
