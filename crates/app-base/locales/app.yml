@@ -697,6 +697,9 @@ settings:
     ringtones:
       en: Ringtones
       de: Klingeltöne
+    screen_gone:
+      en: The shared screen is no longer available. Sharing stopped.
+      de: Der geteilte Bildschirm ist nicht mehr verfügbar. Die Freigabe wurde beendet.
 rail:
   activity:
     en: Activity

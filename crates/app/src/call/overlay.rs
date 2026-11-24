@@ -15,6 +15,7 @@ use super::share_overlay::{
     minimize_on_share_start, overlay_plan,
 };
 use crate::app_state::AppState;
+use crate::i18n::tr;
 use crate::notify::platform::{self, NativeHandle, ScreenRect, ShareGeometry, WorkArea};
 use crate::views::call_mini_window::MiniWindowView;
 use crate::views::call_pop_out::{POP_OUT_SIZE, POP_OUT_TITLE, SharePopOutView};
@@ -168,25 +169,34 @@ fn overlay_options(role: Role, rect: ScreenRect, scale: f32) -> WindowOptions {
     }
 }
 
+enum SourceResolution {
+    Found(ShareSource),
+    Fallback(ShareSource),
+    Missing,
+}
+
 /// Two screens can both render as "Entire screen", so a label match alone puts the red border on
-/// the primary monitor. Prefer the exact source reported by the call; fall back to the label for
-/// demo calls and older updates that only carried text.
+/// the primary monitor. Prefer the exact source reported by the call. If it is gone (unplugged
+/// monitor, source list refresh), do not fall back to another screen: stop sharing instead.
 fn resolve_share_source(
     sources: &[ShareSource],
     label: &str,
     exact: Option<&ShareSource>,
-) -> Option<ShareSource> {
-    if let Some(exact) = exact
-        && let Some(current) = sources
+) -> SourceResolution {
+    if let Some(exact) = exact {
+        return sources
             .iter()
             .find(|source| source.kind == exact.kind && source.id == exact.id)
-    {
-        return Some(current.clone());
+            .cloned()
+            .map(SourceResolution::Found)
+            .unwrap_or(SourceResolution::Missing);
     }
     sources
         .iter()
         .find(|source| source.label() == label)
         .cloned()
+        .map(SourceResolution::Fallback)
+        .unwrap_or(SourceResolution::Missing)
 }
 
 impl CallWindows {
@@ -473,18 +483,21 @@ impl CallWindows {
     fn local_share(&self, cx: &App) -> Option<Option<ShareSource>> {
         let model = &self.app.read(cx).call.as_ref()?.model;
         let label = model.local_share.as_ref()?;
-        let resolved = resolve_share_source(
+        match resolve_share_source(
             &model.share_sources,
             label,
             model.local_share_source.as_ref(),
-        );
-        Some(resolved.or_else(|| {
-            model.share_kind.map(|kind| ShareSource {
+        ) {
+            SourceResolution::Found(source) | SourceResolution::Fallback(source) => {
+                Some(Some(source))
+            }
+            SourceResolution::Missing if model.local_share_source.is_some() => Some(None),
+            SourceResolution::Missing => Some(model.share_kind.map(|kind| ShareSource {
                 id: 0,
                 kind,
                 title: label.clone(),
-            })
-        }))
+            })),
+        }
     }
 
     fn portal_picker(&self, cx: &App) -> bool {
@@ -498,6 +511,14 @@ impl CallWindows {
     fn sync_share(&mut self, refresh_geometry: bool, cx: &mut Context<Self>) {
         let Some(source) = self.local_share(cx) else {
             self.end_share(cx);
+            return;
+        };
+        let Some(source) = source else {
+            self.end_share(cx);
+            self.app.update(cx, |state, cx| {
+                state.stop_call_share(cx);
+                state.raise_notice(tr("calls.screen_gone"), None, cx);
+            });
             return;
         };
         let mut refresh_geometry = refresh_geometry;
@@ -514,7 +535,7 @@ impl CallWindows {
         let Some(session) = self.share.as_mut() else {
             return;
         };
-        session.source = source;
+        session.source = Some(source);
         let shared_window = session
             .source
             .as_ref()
@@ -864,7 +885,7 @@ impl CallWindows {
 mod share_source_tests {
     use calling::{ShareKind, ShareSource};
 
-    use super::resolve_share_source;
+    use super::{SourceResolution, resolve_share_source};
 
     fn screen(id: u64) -> ShareSource {
         ShareSource {
@@ -878,14 +899,31 @@ mod share_source_tests {
     fn the_second_screen_wins_even_when_both_have_the_same_label() {
         let sources = [screen(0), screen(1)];
         let exact = sources[1].clone();
-        let picked = resolve_share_source(&sources, "Display", Some(&exact)).unwrap();
+        let SourceResolution::Found(picked) =
+            resolve_share_source(&sources, "Display", Some(&exact))
+        else {
+            panic!("exact source should resolve");
+        };
         assert_eq!(picked.id, 1);
     }
 
     #[test]
     fn the_label_is_only_a_fallback() {
         let sources = [screen(0), screen(1)];
-        let picked = resolve_share_source(&sources, "Display", None).unwrap();
+        let SourceResolution::Fallback(picked) = resolve_share_source(&sources, "Display", None)
+        else {
+            panic!("label should fall back");
+        };
         assert_eq!(picked.id, 0);
+    }
+
+    #[test]
+    fn a_gone_exact_source_is_not_replaced_by_the_primary_screen() {
+        let sources = [screen(0)];
+        let exact = screen(1);
+        assert!(matches!(
+            resolve_share_source(&sources, "Display", Some(&exact)),
+            SourceResolution::Missing
+        ));
     }
 }

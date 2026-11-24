@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use calling::{DeviceEntry, MicSettings, NoiseSuppression, Reaction, ShareKind, VideoKey};
+use calling::{
+    DeviceEntry, MicSettings, NoiseSuppression, Reaction, ShareKind, ShareSource, VideoKey,
+};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
@@ -694,8 +696,16 @@ fn share_items(
         } else {
             format!("Share screen {}", index + 1)
         };
-        let thumbnail = model.share_thumbnail(source);
-        let source = source.clone();
+        let thumbnail = model.share_thumbnail(&source);
+        let title = if single_screen {
+            "Entire screen".to_owned()
+        } else {
+            format!("Screen {}", index + 1)
+        };
+        let source = ShareSource {
+            title,
+            ..source.clone()
+        };
         let app = app.clone();
         popup = popup.item(
             share_source_item(label, thumbnail, IconName::Monitor, SCREEN_THUMBNAIL).on_click(
