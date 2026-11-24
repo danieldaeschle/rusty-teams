@@ -122,7 +122,10 @@ impl<R: Remote> SyncEngine<R> {
     async fn refresh_chat_states(&self) -> Option<Vec<ConversationState>> {
         match self.remote.chat_states().await {
             Ok(states) => {
-                *self.chat_states.lock().unwrap() = states
+                *self
+                    .chat_states
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = states
                     .iter()
                     .map(|state| (state.id.clone(), state.clone()))
                     .collect();
@@ -182,13 +185,19 @@ impl<R: Remote> SyncEngine<R> {
     async fn refresh_app_channel_horizon(&self) -> i64 {
         match self.remote.app_consumption_horizon().await {
             Ok(horizon) => {
-                let mut known = self.app_channel_horizon_ms.lock().unwrap();
+                let mut known = self
+                    .app_channel_horizon_ms
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 *known = horizon.channel_ms.max(*known);
                 *known
             }
             Err(error) => {
                 self.report(format!("cannot read the mark all as read horizon: {error}"));
-                *self.app_channel_horizon_ms.lock().unwrap()
+                *self
+                    .app_channel_horizon_ms
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
             }
         }
     }
@@ -257,26 +266,44 @@ impl<R: Remote> SyncEngine<R> {
     fn chat_refresh_is_full(&self) -> Result<bool> {
         let last_full = self.store.meta_time(META_CHATS_FULL_AT)?;
         Ok(self.store.chat_count()? == 0
-            || !self.chat_paging.lock().unwrap().is_known()
+            || !self
+                .chat_paging
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_known()
             || is_due(last_full, self.config.full_chat_refresh_interval))
     }
 
     fn remember_chat_continuation(&self, continuation: Option<String>) -> Result<()> {
-        let mut paging = self.chat_paging.lock().unwrap();
+        let mut paging = self
+            .chat_paging
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         paging.adopt_continuation(continuation);
         store_chat_paging(&self.store, &paging)
     }
 
     pub fn has_older_chats(&self) -> bool {
-        self.chat_paging.lock().unwrap().has_more()
+        self.chat_paging
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .has_more()
     }
 
     pub fn is_loading_older_chats(&self) -> bool {
-        self.chat_paging.lock().unwrap().is_loading()
+        self.chat_paging
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_loading()
     }
 
     pub async fn load_older_chats(&self) -> Result<usize> {
-        let Some((link, epoch)) = self.chat_paging.lock().unwrap().begin() else {
+        let Some((link, epoch)) = self
+            .chat_paging
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .begin()
+        else {
             return Ok(0);
         };
         let _ = self.events.send(CoreEvent::SidebarChanged);
@@ -288,7 +315,12 @@ impl<R: Remote> SyncEngine<R> {
 
     async fn fetch_older_chats(&self, link: &str) -> Result<(String, ChatsPage)> {
         let my_user_id = self.my_user_id().await?;
-        if self.chat_states.lock().unwrap().is_empty() {
+        if self
+            .chat_states
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_empty()
+        {
             self.refresh_chat_states().await;
         }
         let page = self.remote.chats_at(link).await?;
@@ -298,7 +330,10 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     fn apply_older_chats(&self, fetched: Result<(String, ChatsPage)>, epoch: u64) -> Result<usize> {
-        let mut paging = self.chat_paging.lock().unwrap();
+        let mut paging = self
+            .chat_paging
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let (my_user_id, page) = match fetched {
             Ok(fetched) => fetched,
             Err(error) => {
@@ -352,7 +387,10 @@ impl<R: Remote> SyncEngine<R> {
         self.fill_kept_previews(&records)?;
         self.store.remove_chats(&hidden)?;
         let muted: Vec<(String, bool)> = {
-            let states = self.chat_states.lock().unwrap();
+            let states = self
+                .chat_states
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             records
                 .iter()
                 .filter_map(|record| states.get(&record.id))
@@ -373,7 +411,10 @@ impl<R: Remote> SyncEngine<R> {
             split_hidden(
                 page,
                 my_user_id,
-                &self.chat_states.lock().unwrap(),
+                &self
+                    .chat_states
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()),
                 &self.bot_partners(),
                 locally,
                 now,

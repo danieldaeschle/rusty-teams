@@ -50,7 +50,13 @@ impl CallLauncher {
             )
             .await;
             crate::diagnostics::record("calls: engine ready, registered with the registrar");
-            engine.set_default_camera(running.default_camera.lock().expect("camera lock").clone());
+            engine.set_default_camera(
+                running
+                    .default_camera
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone(),
+            );
             engine.set_default_mic(*running.default_mic.lock().expect("mic lock"));
             running.engine.send_replace(Some(engine));
             while let Some(event) = events.recv().await {
@@ -76,7 +82,10 @@ impl CallLauncher {
     }
 
     pub fn set_default_camera(&self, camera: DeviceChoice) {
-        *self.default_camera.lock().expect("camera lock") = camera.clone();
+        *self
+            .default_camera
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = camera.clone();
         if let Some(engine) = self.engine() {
             engine.set_default_camera(camera);
         }
@@ -450,6 +459,28 @@ mod tests {
     use calling::CallCommand;
 
     use super::*;
+
+    #[test]
+    fn a_poisoned_camera_lock_does_not_break_later_camera_changes() {
+        let launcher = CallLauncher {
+            engine: watch::channel(None).0,
+            default_camera: Mutex::new(DeviceChoice::SystemDefault),
+            default_mic: Mutex::new(MicSettings::default()),
+        };
+        let camera = &launcher.default_camera;
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = camera.lock().unwrap();
+            panic!("Poisoning the lock");
+        }));
+        launcher.set_default_camera(DeviceChoice::Device("camera-1".into()));
+        assert!(matches!(
+            &*launcher
+                .default_camera
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            DeviceChoice::Device(id) if id == "camera-1"
+        ));
+    }
 
     #[test]
     fn engine_start_survives_errors_and_panics() {

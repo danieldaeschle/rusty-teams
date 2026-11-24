@@ -261,7 +261,10 @@ impl FolderSource for ChatsvcFolderSource {
     fn team_layout(&self) -> BoxFuture<'_, Result<Vec<TeamLayoutRecord>>> {
         Box::pin(async {
             let layout = self.pins.team_layout().await?;
-            *self.group_ids.lock().unwrap() = group_ids_by_thread(&layout);
+            *self
+                .group_ids
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = group_ids_by_thread(&layout);
             let unknown: Vec<String> = layout
                 .iter()
                 .flat_map(|team| &team.channels)
@@ -287,15 +290,28 @@ impl FolderSource for ChatsvcFolderSource {
         Box::pin(async {
             let properties = self.settings.properties().await?;
             let sections = parse_chat_sections(&properties);
-            *self.skin_tone.lock().unwrap() = parse_skin_tone(&properties);
-            *self.default_reactions.lock().unwrap() = parse_default_reactions(&properties);
-            *self.properties.lock().unwrap() = Some(properties);
+            *self
+                .skin_tone
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = parse_skin_tone(&properties);
+            *self
+                .default_reactions
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                parse_default_reactions(&properties);
+            *self
+                .properties
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(properties);
             Ok(sections)
         })
     }
 
     fn preferred_skin_tone(&self) -> Option<u8> {
-        *self.skin_tone.lock().unwrap()
+        *self
+            .skin_tone
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn set_skin_tone(&self, tone: u8) -> BoxFuture<'_, Result<()>> {
@@ -303,7 +319,10 @@ impl FolderSource for ChatsvcFolderSource {
     }
 
     fn default_reactions(&self) -> Option<Vec<String>> {
-        self.default_reactions.lock().unwrap().clone()
+        self.default_reactions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     fn set_default_reactions<'a>(
@@ -315,12 +334,20 @@ impl FolderSource for ChatsvcFolderSource {
 
     fn teams_order(&self) -> BoxFuture<'_, Result<Vec<(String, i64)>>> {
         Box::pin(async {
-            let cached = self.properties.lock().unwrap().take();
+            let cached = self
+                .properties
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
             let properties = match cached {
                 Some(properties) => properties,
                 None => self.settings.properties().await?,
             };
-            let known = self.group_ids.lock().unwrap().clone();
+            let known = self
+                .group_ids
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
             let group_ids = if known.is_empty() {
                 group_ids_by_thread(&self.pins.team_layout().await?)
             } else {

@@ -96,7 +96,10 @@ impl<R: Remote> SyncEngine<R> {
         let mut snapshot = self.remote.activity_feed().await?;
         let mentions;
         let changed = {
-            let mut state = self.activity.lock().unwrap();
+            let mut state = self
+                .activity
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             state.apply_local_marks(&mut snapshot);
             mentions = mentions_of(&snapshot);
             state.commit(&self.store, snapshot)?
@@ -109,14 +112,24 @@ impl<R: Remote> SyncEngine<R> {
 
     /// A push on the feed conversation: one refresh at a time, a push during it triggers one more.
     pub async fn refresh_activity(&self) {
-        if !self.activity.lock().unwrap().begin_refresh() {
+        if !self
+            .activity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .begin_refresh()
+        {
             return;
         }
         loop {
             if let Err(error) = self.refresh_activity_feed().await {
                 self.report(format!("cannot refresh the activity feed: {error}"));
             }
-            if !self.activity.lock().unwrap().refresh_again() {
+            if !self
+                .activity
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .refresh_again()
+            {
                 break;
             }
         }
@@ -125,11 +138,15 @@ impl<R: Remote> SyncEngine<R> {
     pub async fn mark_activity_read(&self, message_id: &str) -> Result<()> {
         self.activity
             .lock()
-            .unwrap()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .marked_read
             .insert(message_id.to_owned());
         if let Err(error) = self.remote.mark_activity_read(message_id).await {
-            self.activity.lock().unwrap().marked_read.remove(message_id);
+            self.activity
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .marked_read
+                .remove(message_id);
             return Err(error);
         }
         self.update_stored_feed(|snapshot| {
@@ -139,16 +156,25 @@ impl<R: Remote> SyncEngine<R> {
 
     pub async fn mark_all_activity_read(&self) -> Result<()> {
         let now_ms = Utc::now().timestamp_millis();
-        self.activity.lock().unwrap().marked_all_read_ms = Some(now_ms);
+        self.activity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .marked_all_read_ms = Some(now_ms);
         if let Err(error) = self.remote.mark_all_activity_read(now_ms).await {
-            self.activity.lock().unwrap().marked_all_read_ms = None;
+            self.activity
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .marked_all_read_ms = None;
             return Err(error);
         }
         self.update_stored_feed(|snapshot| snapshot.mark_all_read(now_ms))
     }
 
     fn update_stored_feed(&self, change: impl FnOnce(&mut ActivitySnapshot)) -> Result<()> {
-        let mut state = self.activity.lock().unwrap();
+        let mut state = self
+            .activity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let Some(mut snapshot) = state.current(&self.store) else {
             return Ok(());
         };
@@ -162,9 +188,25 @@ impl<R: Remote> SyncEngine<R> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use chatsvc::{ActivityHorizons, ActivityItem};
 
     use super::*;
+
+    #[test]
+    fn a_poisoned_activity_state_still_allows_a_refresh() {
+        let activity = Mutex::new(ActivityState::default());
+        let shared = &activity;
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = shared.lock().unwrap();
+            panic!("Poisoning the lock");
+        }));
+        let mut state = activity
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(state.begin_refresh());
+    }
 
     fn unread_item(message_id: &str) -> ActivityItem {
         ActivityItem {

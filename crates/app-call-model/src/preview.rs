@@ -49,7 +49,10 @@ impl CameraPreview {
 
     pub fn start(&mut self, choice: &DeviceChoice, quality: calling::VideoQuality) {
         self.release_capture();
-        *self.failure.lock().expect("preview failure lock") = None;
+        *self
+            .failure
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
         self.frames.store(0, Ordering::Relaxed);
         self.counted = (Instant::now(), 0);
         self.fps = None;
@@ -72,12 +75,19 @@ impl CameraPreview {
                     hub.publish(VideoKey::LocalCamera, picture);
                 }
             },
-            move |reason| *failure.lock().expect("preview failure lock") = Some(reason),
+            move |reason| {
+                *failure
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reason)
+            },
         );
         match started {
             Ok(capture) => self.capture = Some(capture),
             Err(error) => {
-                *self.failure.lock().expect("preview failure lock") = Some(error.to_string())
+                *self
+                    .failure
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(error.to_string())
             }
         }
     }
@@ -94,7 +104,7 @@ impl CameraPreview {
         let mut latest = self
             .background_request
             .lock()
-            .expect("background request lock");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *latest += 1;
         let request = *latest;
         match choice {
@@ -107,7 +117,9 @@ impl CameraPreview {
                     let Ok(picture) = BackgroundPicture::load(&path) else {
                         return;
                     };
-                    let latest = latest_request.lock().expect("background request lock");
+                    let latest = latest_request
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     if *latest == request {
                         blur.set_picture(Some(Arc::new(picture)));
                         blur.set_enabled(true);
@@ -135,7 +147,10 @@ impl CameraPreview {
     }
 
     pub fn failure(&self) -> Option<String> {
-        self.failure.lock().expect("preview failure lock").clone()
+        self.failure
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     pub fn fps(&self) -> Option<f32> {
@@ -231,6 +246,18 @@ mod tests {
             .map(|(pick, _)| pick)
             .collect();
         assert_eq!(picks, vec![BackgroundPick::None, BackgroundPick::Blur]);
+    }
+
+    #[test]
+    fn a_panicked_callback_poisoning_the_failure_lock_does_not_hide_the_error() {
+        let (preview, _receiver) = CameraPreview::new();
+        let failure = preview.failure.clone();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut value = failure.lock().unwrap();
+            *value = Some("camera gone".to_owned());
+            panic!("Poisoning the lock");
+        }));
+        assert_eq!(preview.failure().as_deref(), Some("camera gone"));
     }
 
     #[test]
