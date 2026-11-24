@@ -1,7 +1,7 @@
 # .deb, .rpm and Arch packages (nfpm: https://nfpm.goreleaser.com). Run by package.sh, which stages
 # the file tree, substitutes its path for ${STAGE} and the binary's glibc floor for ${GLIBC_MIN}
-# (nfpm doesn't expand env vars in `src` or `depends`) and exports VERSION, NFPM_ARCH,
-# NFPM_PACMAN_ARCH and RUSTY_TEAMS_MAINTAINER.
+# (nfpm doesn't expand env vars in `src` or `depends`) and exports VERSION, NFPM_ARCH and
+# RUSTY_TEAMS_MAINTAINER. nfpm maps NFPM_ARCH (amd64) to the pacman name (x86_64).
 #
 #   packaging/linux/package.sh --formats "deb rpm archlinux"
 name: rusty-teams
@@ -93,7 +93,6 @@ overrides:
       - libgbm.so.1()(64bit)
       - xdg-desktop-portal
   archlinux:
-    arch: ${NFPM_PACMAN_ARCH}
     depends:
       - glibc>=${GLIBC_MIN}
       - gcc-libs

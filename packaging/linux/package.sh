@@ -99,8 +99,6 @@ if has deb || has rpm || has archlinux; then
   command -v nfpm >/dev/null || { echo "error: nfpm not found (https://nfpm.goreleaser.com/install/)" >&2; exit 1; }
   export VERSION
   export NFPM_ARCH="$DEB_ARCH"
-  # pacman names the architecture x86_64/aarch64, not the Debian amd64/arm64.
-  export NFPM_PACMAN_ARCH="$ARCH"
   # nfpm expands env vars in fields like `version` and `arch`, but not in `contents[].src` or
   # the dependency lists.
   sed -e "s|\${STAGE}|$STAGE|g" -e "s|\${GLIBC_MIN}|$GLIBC_MIN|g" "$HERE/nfpm.yaml" >"$WORK/nfpm.yaml"
