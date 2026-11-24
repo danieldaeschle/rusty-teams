@@ -4,7 +4,7 @@
 
 ### Requirement: Linux lists capture nodes only
 
-On Linux the camera list MUST include a node only when that node can capture video. A metadata node that shares the capture node's name MUST NOT appear. One physical camera MUST appear once. The default camera MUST be a capture node. Windows and macOS lists MUST stay unchanged.
+On Linux the camera list MUST drop a node only when that node is known not to capture video. A node whose capture capability is unknown MUST stay listed. A metadata node that shares the capture node's name MUST NOT appear. One physical camera MUST appear once. The default camera MUST be a capture node when one is known. Windows and macOS lists MUST stay unchanged.
 
 #### Scenario: C930e metadata node is hidden
 
@@ -15,6 +15,11 @@ On Linux the camera list MUST include a node only when that node can capture vid
 
 - **WHEN** the user starts the camera with the default choice and a metadata twin exists
 - **THEN** the app opens the capture node, not the metadata node
+
+#### Scenario: Unknown capability stays listed
+
+- **WHEN** the capability query cannot open the node
+- **THEN** the node stays in the camera list
 
 #### Scenario: Capture node still fails
 

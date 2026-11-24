@@ -181,7 +181,9 @@ fn linux_keeps_camera(info: &nokhwa::utils::CameraInfo) -> bool {
 #[cfg(target_os = "linux")]
 fn node_captures_video(index: u32) -> Option<bool> {
     let path = std::ffi::CString::new(format!("/dev/video{index}")).ok()?;
-    let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_NONBLOCK) };
+    // QUERYCAP does not need write access. O_RDWR hides a metadata node the
+    // user can read but not write, and that node then stays in the list.
+    let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
     if fd < 0 {
         return None;
     }
