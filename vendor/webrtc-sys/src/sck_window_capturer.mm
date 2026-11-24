@@ -110,6 +110,13 @@ API_AVAILABLE(macos(14.0))
   dispatch_queue_t _captureQueue;
   // The picker this session observes. Only touched on the capturer thread.
   SCContentSharingPicker* _picker;
+  // A picked filter is being applied to the running stream. replayd checks each
+  // updateConfiguration against the picked content; one sent before the new
+  // filter is in place fails that check and falls back to the Screen Recording
+  // permission. Configuration updates wait for the filter update to complete.
+  BOOL _filterUpdatePending;
+  // Bumped for each filter update; only the latest completion applies its config.
+  uint64_t _filterGeneration;
 }
 
 - (instancetype)initWithMaxFps:(uint32_t)maxFps includeCursor:(BOOL)includeCursor {
@@ -168,7 +175,8 @@ API_AVAILABLE(macos(14.0))
       return;
     }
     _maxFps = maxFps;
-    if (_stream != nil && _configuredWidth >= kMinCaptureDimension &&
+    // A pending filter update applies the new rate when it completes.
+    if (_stream != nil && !_filterUpdatePending && _configuredWidth >= kMinCaptureDimension &&
         _configuredHeight >= kMinCaptureDimension) {
       stream = _stream;
       config = [self buildConfigWithWidth:_configuredWidth
@@ -306,7 +314,8 @@ API_AVAILABLE(macos(14.0))
   SCStream* stream = nil;
   SCStreamConfiguration* config = nil;
   @synchronized(self) {
-    if (_stopped || _stream == nil) {
+    // Retried on a later frame once the filter update completes.
+    if (_stopped || _stream == nil || _filterUpdatePending) {
       return;
     }
     long dw = static_cast<long>(desiredW) - static_cast<long>(_configuredWidth);
@@ -335,6 +344,7 @@ API_AVAILABLE(macos(14.0))
   SCStream* newStream = nil;
   SCStreamConfiguration* config = nil;
   dispatch_queue_t queue = nil;
+  uint64_t generation = 0;
 
   @synchronized(self) {
     if (_stopped) {
@@ -360,6 +370,8 @@ API_AVAILABLE(macos(14.0))
 
     if (_stream != nil) {
       existingStream = _stream;
+      _filterUpdatePending = YES;
+      generation = ++_filterGeneration;
     } else {
       newStream = [[SCStream alloc] initWithFilter:filter configuration:config delegate:self];
       _stream = newStream;
@@ -368,8 +380,34 @@ API_AVAILABLE(macos(14.0))
   }
 
   if (existingStream != nil) {
-    [existingStream updateContentFilter:filter completionHandler:nil];
-    [existingStream updateConfiguration:config completionHandler:nil];
+    // Weak: the stream keeps this handler until the update completes.
+    __weak LiveKitMacWindowSession* weakSelf = self;
+    __weak SCStream* weakStream = existingStream;
+    [existingStream updateContentFilter:filter
+                      completionHandler:^(NSError* _Nullable filterError) {
+                        LiveKitMacWindowSession* strongSelf = weakSelf;
+                        if (strongSelf == nil) {
+                          return;
+                        }
+                        SCStream* strongStream = weakStream;
+                        SCStreamConfiguration* latest = nil;
+                        @synchronized(strongSelf) {
+                          if (generation != strongSelf->_filterGeneration) {
+                            return;
+                          }
+                          strongSelf->_filterUpdatePending = NO;
+                          if (filterError != nil || strongSelf->_stopped || strongStream == nil ||
+                              strongSelf->_stream != strongStream) {
+                            return;
+                          }
+                          // Built now: the frame size or rate may have changed meanwhile.
+                          latest = [strongSelf buildConfigWithWidth:strongSelf->_configuredWidth
+                                                             height:strongSelf->_configuredHeight
+                                                             maxFps:strongSelf->_maxFps
+                                                      includeCursor:strongSelf->_includeCursor];
+                        }
+                        [strongStream updateConfiguration:latest completionHandler:nil];
+                      }];
     return;
   }
 
