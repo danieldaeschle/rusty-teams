@@ -215,7 +215,7 @@ pub fn start_communications_microphone(
     })
     .map_err(|error| audio_error("microphone thread", error))?;
     let (name, effects) = ready
-        .recv()
+        .recv_timeout(crate::capture::CAPTURE_START_TIMEOUT)
         .map_err(|_| Error::Audio("microphone thread ended".into()))??;
     Ok((capture, name, effects))
 }

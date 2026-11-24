@@ -124,6 +124,8 @@ const BROKER_IDLE_WAIT: Duration = Duration::from_millis(500);
 const BROKER_RETRY_WAIT: Duration = Duration::from_secs(3);
 const CAMERA_EFFECTS_FAILED_NOTICE: &str =
     "Background effects could not start, your camera is sent without them";
+const CAPTURE_ENDED_NOTICE: &str =
+    "Audio capture stopped, the other people may not hear you; check your microphone";
 const SETUP_STEP_TIMEOUT: Duration = Duration::from_secs(30);
 const DIRECT_OUTGOING_TIMEOUT: Duration = Duration::from_secs(185);
 const FAR_FUTURE: Duration = Duration::from_secs(60 * 60 * 24 * 365);
@@ -932,6 +934,7 @@ async fn drive(
         control.send(CallUpdate::Camera(true));
     }
     let mut software_audio: Option<SoftwareAudio> = None;
+    let mut capture_notice_sent = false;
     let mut share_sound_wanted = false;
     let mut audio_disabled = false;
     let mut remote_audio: Option<RtcAudioTrack> = None;
@@ -2726,6 +2729,13 @@ async fn drive(
                 }
             },
             _ = stats_tick.tick(), if remote_set => {
+                if !capture_notice_sent
+                    && software_audio.as_ref().is_some_and(SoftwareAudio::capture_ended)
+                {
+                    capture_notice_sent = true;
+                    timeline.record("audio capture", "ended unexpectedly");
+                    control.send(CallUpdate::Notice(CAPTURE_ENDED_NOTICE.into()));
+                }
                 if local_video.take_effects_failure() {
                     timeline.record("camera effects failed", "segmentation model did not load");
                     control.send(CallUpdate::Notice(CAMERA_EFFECTS_FAILED_NOTICE.into()));

@@ -129,7 +129,7 @@ pub struct SoftwareAudio {
     running: Arc<AtomicBool>,
     feeder: Option<std::thread::JoinHandle<()>>,
     far_end_task: Option<JoinHandle<()>>,
-    _captures: Vec<Capture>,
+    captures: Vec<Capture>,
 }
 
 impl SoftwareAudioPlan {
@@ -267,8 +267,13 @@ impl SoftwareAudio {
             running,
             feeder: Some(thread),
             far_end_task,
-            _captures: captures,
+            captures,
         })
+    }
+
+    /// The OS capture thread exits when a device disappears or its driver fails.
+    pub fn capture_ended(&self) -> bool {
+        self.captures.iter().any(Capture::ended)
     }
 
     pub fn set_microphone_muted(&self, muted: bool) {

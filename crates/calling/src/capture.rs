@@ -5,6 +5,9 @@ use std::time::{Duration, Instant};
 
 use tokio::task::JoinHandle as TaskHandle;
 
+/// How long a caller waits for an audio capture to report that it started. A driver that never
+/// answers used to block the call setup forever.
+pub const CAPTURE_START_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_WAIT: Duration = Duration::from_secs(2);
 const STOP_POLL: Duration = Duration::from_millis(5);
 
@@ -37,26 +40,41 @@ pub enum Capture {
     Thread {
         stop: Arc<AtomicBool>,
         thread: Option<JoinHandle<()>>,
+        ended: Arc<AtomicBool>,
     },
     Task(TaskHandle<()>),
 }
 
 impl Capture {
+    /// True once the capture thread has exited (device lost, driver error, or normal stop).
+    pub fn ended(&self) -> bool {
+        match self {
+            Capture::Thread { ended, .. } => ended.load(Ordering::SeqCst),
+            Capture::Task(task) => task.is_finished(),
+        }
+    }
+
     pub fn spawn_thread(
         name: &str,
         body: impl FnOnce(Arc<AtomicBool>) + Send + 'static,
     ) -> std::io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
+        let ended = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
+        let thread_ended = ended.clone();
         let thread = std::thread::Builder::new()
             .name(name.to_owned())
             .spawn(move || {
                 wait_for_stopping_captures();
-                body(thread_stop)
+                body(thread_stop);
+                // Also set when the body returns after a normal stop; the caller checks it before
+                // deciding that the device has gone away.
+                thread_ended.store(true, Ordering::SeqCst);
             })?;
         Ok(Capture::Thread {
             stop,
             thread: Some(thread),
+            ended,
         })
     }
 }
@@ -64,7 +82,7 @@ impl Capture {
 impl Drop for Capture {
     fn drop(&mut self) {
         match self {
-            Capture::Thread { stop, thread } => {
+            Capture::Thread { stop, thread, .. } => {
                 stop.store(true, Ordering::SeqCst);
                 if let Some(thread) = thread.take() {
                     STOPPING
@@ -95,6 +113,16 @@ mod tests {
         let started = Instant::now();
         drop(capture);
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_capture_that_exits_is_reported_as_ended() {
+        let capture = Capture::spawn_thread("device-lost", |_| {}).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !capture.ended() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(capture.ended());
     }
 
     #[test]

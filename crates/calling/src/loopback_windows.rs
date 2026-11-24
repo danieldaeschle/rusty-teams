@@ -221,7 +221,7 @@ fn start(queue: SampleQueue, process_id: u32, mode: PROCESS_LOOPBACK_MODE) -> Re
     })
     .map_err(|error| audio_error("loopback thread", error))?;
     ready
-        .recv()
+        .recv_timeout(crate::capture::CAPTURE_START_TIMEOUT)
         .map_err(|_| Error::Audio("loopback thread ended".into()))??;
     Ok(capture)
 }

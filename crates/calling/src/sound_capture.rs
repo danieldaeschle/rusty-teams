@@ -259,7 +259,7 @@ fn start_cpal_input(
     })
     .map_err(|error| audio_error("input thread", error))?;
     ready
-        .recv()
+        .recv_timeout(crate::capture::CAPTURE_START_TIMEOUT)
         .map_err(|_| Error::Audio("input thread ended".into()))??;
     Ok(capture)
 }
@@ -271,7 +271,8 @@ fn build_stream(
     queue: SampleQueue,
 ) -> Result<Stream> {
     let channels = usize::from(config.channels);
-    let mut resampler = MonoResampler::new(config.sample_rate);
+    let mut resampler = MonoResampler::new(config.sample_rate)
+        .ok_or_else(|| Error::Audio(format!("output device reported {} Hz", config.sample_rate)))?;
     let mut converted = Vec::new();
     let failed = |_error| {};
     match format {

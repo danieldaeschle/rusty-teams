@@ -43,12 +43,13 @@ pub struct MonoResampler {
 }
 
 impl MonoResampler {
-    pub fn new(source_rate: u32) -> Self {
-        MonoResampler {
+    /// A device reporting 0 Hz cannot be resampled: the interpolation would never advance.
+    pub fn new(source_rate: u32) -> Option<Self> {
+        (source_rate > 0).then(|| MonoResampler {
             step: f64::from(source_rate) / f64::from(SAMPLE_RATE),
             position: 0.0,
             previous: 0.0,
-        }
+        })
     }
 
     pub fn convert(&mut self, interleaved: &[f32], channels: usize, output: &mut Vec<i16>) {
@@ -78,6 +79,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_zero_sample_rate_is_refused() {
+        assert!(MonoResampler::new(0).is_none());
+    }
+
+    #[test]
     fn partial_frames_stay_queued_until_a_full_frame_is_ready() {
         let queue = SampleQueue::default();
         queue.push(&[1, 2, 3]);
@@ -105,7 +111,7 @@ mod tests {
 
     #[test]
     fn stereo_at_24_khz_becomes_mono_at_48_khz() {
-        let mut resampler = MonoResampler::new(24_000);
+        let mut resampler = MonoResampler::new(24_000).unwrap();
         let mut output = Vec::new();
         resampler.convert(&[0.5, 0.5].repeat(240), 2, &mut output);
         assert_eq!(output.len(), 480);
@@ -118,7 +124,7 @@ mod tests {
 
     #[test]
     fn the_native_rate_passes_through() {
-        let mut resampler = MonoResampler::new(48_000);
+        let mut resampler = MonoResampler::new(48_000).unwrap();
         let mut output = Vec::new();
         resampler.convert(&[0.25; 480], 1, &mut output);
         assert_eq!(output.len(), 480);
