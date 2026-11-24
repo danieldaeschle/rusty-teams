@@ -137,6 +137,14 @@ impl Store {
         Ok(optional_from_millis(read_until.flatten()))
     }
 
+    /// All channels we have cached; used to refetch messages after a realtime loss.
+    pub fn channel_ids(&self) -> Result<Vec<String>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached("SELECT id FROM channels ORDER BY id")?;
+        Ok(statement
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?)
+    }
     pub fn channel(&self, channel_id: &str) -> Result<Option<ChannelRecord>> {
         let connection = self.lock()?;
         let mut statement = connection.prepare_cached(&format!(

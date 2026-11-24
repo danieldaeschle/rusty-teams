@@ -1707,6 +1707,37 @@ async fn message_loss_refetches_messages_of_cached_chats() {
 }
 
 #[tokio::test]
+async fn message_loss_refetches_cached_channels_too() {
+    let fake = Arc::new(Fake::default());
+    *fake.teams.lock().unwrap() =
+        vec![serde_json::from_value(json!({"id": "team-1", "displayName": "Squad"})).unwrap()];
+    *fake.channel_pages.lock().unwrap() = vec![vec![thread(1, 1, 0)]];
+    let engine = engine_with(&fake, small_pages());
+    engine
+        .store()
+        .upsert_teams(&[TeamRecord {
+            id: "team-1".into(),
+            name: "Squad".into(),
+        }])
+        .unwrap();
+    engine
+        .store()
+        .upsert_channels(&[ChannelRecord {
+            id: CHANNEL.into(),
+            team_id: "team-1".into(),
+            name: "General".into(),
+            membership_type: None,
+            last_message_at: None,
+            unread: false,
+        }])
+        .unwrap();
+
+    let added = engine.resync_after_message_loss().await;
+    assert!(added > 0);
+    assert!(engine.store().message_count(CHANNEL).unwrap() > 0);
+}
+
+#[tokio::test]
 async fn load_older_pages_back_to_the_start() {
     let fake = Arc::new(Fake::default());
     fake.set_chat_messages(numbered(25));
