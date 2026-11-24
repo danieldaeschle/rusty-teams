@@ -271,11 +271,18 @@ impl AppState {
                 )
                 .await
                 {
-                    Ok(events) => {
+                    Ok((events, account_errors)) => {
                         // Keep only refreshed tokens: a toggle made meanwhile must survive.
                         let _ = store::merge_google_tokens(&store, &fetched_accounts);
                         google_count = Some(events.len());
                         combined.extend(events);
+                        for message in account_errors {
+                            failures.push(CalendarLoadFailure {
+                                source: CalendarSource::Google,
+                                sign_in: crate::google_calendar_sync::needs_sign_in(&message),
+                                message,
+                            });
+                        }
                     }
                     Err(error) => failures.push(CalendarLoadFailure {
                         source: CalendarSource::Google,

@@ -569,10 +569,16 @@ async fn calendar_loop(session: Session, store: Arc<Store>, events: EventSender)
         match crate::google_calendar_sync::fetch_google_events(&mut fetched_accounts, start, end)
             .await
         {
-            Ok(google_events) => {
+            Ok((google_events, account_errors)) => {
                 // Only refreshed tokens: a calendar toggle made during the fetch stays.
                 let _ = store::merge_google_tokens(&store, &fetched_accounts);
                 combined.extend(google_events);
+                for message in account_errors {
+                    crate::diagnostics::record(format!(
+                        "calls: google account not loaded: {}",
+                        shorten(&message)
+                    ));
+                }
             }
             Err(error) => crate::diagnostics::record(format!(
                 "calls: google calendar not loaded: {}",
