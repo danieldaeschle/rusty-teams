@@ -5,11 +5,12 @@
 #   $DIST/rusty-teams-<version>-linux-<arch>.AppImage.zsync  delta updates (needs zsyncmake)
 #   $DIST/rusty-teams-<version>-linux-<arch>.deb             Debian, Ubuntu, Mint, Pop!_OS, ...
 #   $DIST/rusty-teams-<version>-linux-<arch>.rpm             Fedora, openSUSE, RHEL, ...
+#   $DIST/rusty-teams-<version>-linux-<arch>.pkg.tar.zst     Arch Linux
 #   $DIST/rusty-teams-<version>-linux-<arch>.tar.gz          plain FHS-style tree (bin/, share/)
 #
-# Usage: packaging/linux/package.sh [--skip-build] [--formats "appimage deb rpm tar"]
+# Usage: packaging/linux/package.sh [--skip-build] [--formats "appimage deb rpm archlinux tar"]
 #
-# Needs: cargo and the Linux build setup from the README (clang 21+, mold); nfpm for deb/rpm
+# Needs: cargo and the Linux build setup from the README (clang 21+, mold); nfpm for deb/rpm/Arch
 # (https://nfpm.goreleaser.com); objdump (binutils). AppImage tooling is downloaded at verified
 # pins into $CARGO_TARGET_DIR. Build on an old distro (CI: Ubuntu 22.04, glibc 2.35) so the
 # binary runs on newer ones. Optional: desktop-file-validate, appstreamcli, zsyncmake (the zsync
@@ -28,12 +29,12 @@ DESKTOP_ID=rusty-teams
 COMPONENT_ID=io.github.danieldaeschle.RustyTeams
 
 SKIP_BUILD=0
-FORMATS="appimage deb rpm tar"
+FORMATS="appimage deb rpm archlinux tar"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-build) SKIP_BUILD=1; shift ;;
     --formats) FORMATS="$2"; shift 2 ;;
-    -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -93,17 +94,22 @@ if has tar; then
   echo "wrote $DIST/$BASENAME.tar.gz"
 fi
 
-# ---- .deb / .rpm --------------------------------------------------------------------------------
-if has deb || has rpm; then
+# ---- .deb / .rpm / Arch -------------------------------------------------------------------------
+if has deb || has rpm || has archlinux; then
   command -v nfpm >/dev/null || { echo "error: nfpm not found (https://nfpm.goreleaser.com/install/)" >&2; exit 1; }
   export VERSION
   export NFPM_ARCH="$DEB_ARCH"
+  # pacman names the architecture x86_64/aarch64, not the Debian amd64/arm64.
+  export NFPM_PACMAN_ARCH="$ARCH"
   # nfpm expands env vars in fields like `version` and `arch`, but not in `contents[].src` or
   # the dependency lists.
   sed -e "s|\${STAGE}|$STAGE|g" -e "s|\${GLIBC_MIN}|$GLIBC_MIN|g" "$HERE/nfpm.yaml" >"$WORK/nfpm.yaml"
   for fmt in deb rpm; do
     if has "$fmt"; then (cd "$ROOT" && nfpm package -f "$WORK/nfpm.yaml" -p "$fmt" -t "$DIST/$BASENAME.$fmt"); fi
   done
+  if has archlinux; then
+    (cd "$ROOT" && nfpm package -f "$WORK/nfpm.yaml" -p archlinux -t "$DIST/$BASENAME.pkg.tar.zst")
+  fi
 fi
 
 # ---- AppImage -----------------------------------------------------------------------------------

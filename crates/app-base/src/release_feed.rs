@@ -20,7 +20,18 @@ pub const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const RELEASES_URL: &str =
     "https://api.github.com/repos/danieldaeschle/rusty-teams/releases?per_page=10";
 /// The release asset this platform installs, and the magic bytes it must start with.
-#[cfg(windows)]
+fn asset_suffix_for(os: &str, arch: &str) -> &'static str {
+    match (os, arch) {
+        ("windows", "aarch64") => "-windows-arm64.exe",
+        ("windows", _) => "-windows-amd64.exe",
+        ("linux", _) => "-linux-amd64",
+        _ => "-unsupported",
+    }
+}
+
+#[cfg(all(windows, target_arch = "aarch64"))]
+const ASSET_SUFFIX: &str = "-windows-arm64.exe";
+#[cfg(all(windows, not(target_arch = "aarch64")))]
 const ASSET_SUFFIX: &str = "-windows-amd64.exe";
 #[cfg(windows)]
 const EXECUTABLE_MAGIC: &[u8] = b"MZ";
@@ -303,18 +314,54 @@ mod tests {
 
     use super::*;
 
+    /// Published asset name drops the leading `v` (`rusty-teams-0.5.0-windows-amd64.exe`).
+    fn asset_name(tag: &str) -> String {
+        let version = tag.strip_prefix('v').unwrap_or(tag);
+        format!("rusty-teams-{version}{ASSET_SUFFIX}")
+    }
+
     fn release(tag: &str, prerelease: bool) -> Release {
         Release {
             tag_name: tag.to_owned(),
             draft: false,
             prerelease,
             assets: vec![ReleaseAsset {
-                name: format!("rusty-teams-{tag}{ASSET_SUFFIX}"),
+                name: asset_name(tag),
                 browser_download_url: format!("https://example.test/{tag}.exe"),
                 size: EXECUTABLE_MAGIC.len() as u64,
                 digest: None,
             }],
         }
+    }
+
+    #[test]
+    fn windows_arm_and_amd64_look_for_different_exes() {
+        assert_eq!(asset_suffix_for("windows", "aarch64"), "-windows-arm64.exe");
+        assert_eq!(asset_suffix_for("windows", "x86_64"), "-windows-amd64.exe");
+        assert!(
+            !"rusty-teams-0.5.0-windows-amd64.exe"
+                .ends_with(asset_suffix_for("windows", "aarch64"))
+        );
+        assert!(
+            "rusty-teams-0.5.0-windows-arm64.exe".ends_with(asset_suffix_for("windows", "aarch64"))
+        );
+    }
+
+    #[test]
+    fn the_installed_suffix_matches_this_target() {
+        let os = if cfg!(windows) {
+            "windows"
+        } else if cfg!(target_os = "linux") {
+            "linux"
+        } else {
+            "other"
+        };
+        let arch = if cfg!(target_arch = "aarch64") {
+            "aarch64"
+        } else {
+            "x86_64"
+        };
+        assert_eq!(ASSET_SUFFIX, asset_suffix_for(os, arch));
     }
 
     #[test]
@@ -381,14 +428,14 @@ mod tests {
         let mut release = release("v0.5.0", false);
         let binary = release.assets.remove(0);
         let tarball = ReleaseAsset {
-            name: "rusty-teams-v0.5.0-linux-amd64.tar.gz".to_owned(),
+            name: "rusty-teams-0.5.0-linux-amd64.tar.gz".to_owned(),
             ..binary.clone()
         };
         release.assets = vec![tarball.clone()];
         assert!(newest_update("v0.4.0", std::slice::from_ref(&release)).is_none());
         release.assets = vec![tarball, binary];
         let (_, asset) = newest_update("v0.4.0", std::slice::from_ref(&release)).unwrap();
-        assert_eq!(asset.name, "rusty-teams-v0.5.0-linux-amd64");
+        assert_eq!(asset.name, "rusty-teams-0.5.0-linux-amd64");
     }
 
     #[test]
