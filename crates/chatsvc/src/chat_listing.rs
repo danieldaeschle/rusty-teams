@@ -7,6 +7,7 @@ use crate::pins::{CSA_RESOURCE, CSA_SCOPE, CsaTransport, DEFAULT_REGION, Session
 
 const VIEW: &str = "view=msnp24Equivalent";
 const NEWEST_ANCHOR_SLACK_MS: i64 = 60_000;
+const NOTES_CHAT_ID: &str = "48:notes";
 
 /// One page of the conversation list as the chat service sends it; `next_url` lists older conversations.
 #[derive(Debug, Clone, PartialEq)]
@@ -119,8 +120,15 @@ impl<T: MessageTransport> ChatListing<T> {
             || chrono::Utc::now().timestamp_millis() + NEWEST_ANCHOR_SLACK_MS,
             |before_ms| before_ms - 1,
         );
+        // The notes chat answers LocationLookupFailed to locationType=Primary on a hand-built
+        // older-page anchor; Teams' own link for it does not carry that parameter.
+        let location = if conversation_id == NOTES_CHAT_ID {
+            ""
+        } else {
+            "&locationType=Primary"
+        };
         let url = format!(
-            "{base}/epochTimeStamp/{anchor_ms}?pageSize={page_size}&direction=BACKWARD&includeMetadata=true&locationType=Primary"
+            "{base}/epochTimeStamp/{anchor_ms}?pageSize={page_size}&direction=BACKWARD&includeMetadata=true{location}"
         );
         let body = self.get(&url).await?;
         let messages: Vec<Value> = body
@@ -228,5 +236,15 @@ mod tests {
         assert_eq!(page.messages, vec![json!({"id": "900"})]);
         assert!(page.has_older);
         assert!(transport.requests.lock().unwrap()[0].contains("/messages/epochTimeStamp/999?"));
+    }
+
+    #[tokio::test]
+    async fn the_notes_chat_omits_location_type_from_the_older_anchor() {
+        let transport = canned(vec![json!({"messages": [{"id": "5"}], "_metadata": {}})]);
+        let listing = ChatListing::with_transport(&transport, "emea");
+        listing.messages("48:notes", None, 20).await.unwrap();
+        let requests = transport.requests.lock().unwrap();
+        assert!(!requests[0].contains("locationType"));
+        assert!(requests[0].contains("direction=BACKWARD"));
     }
 }

@@ -3,7 +3,7 @@ use gpui_kit::*;
 use teams_core::{JumpPlan, WindowDirection, WindowPage, jump_plan};
 
 use super::ConversationView;
-use crate::notice::short_error;
+use crate::notice::{is_location_lookup_failure, short_error};
 use crate::runtime;
 
 pub(super) struct DetachedWindow {
@@ -212,7 +212,12 @@ impl ConversationView {
                     _ => detached.newer_cursor = None,
                 }
                 if let Ok(Err(error)) = failure {
-                    self.notice = Some(format!("Could not load messages: {}", short_error(&error)));
+                    let reason = error.to_string();
+                    self.notice = Some(if is_location_lookup_failure(&reason) {
+                        "Messages around this one are not available in this chat".to_owned()
+                    } else {
+                        format!("Could not load messages: {}", short_error(&error))
+                    });
                 }
                 self.rebuild(false, cx);
                 return;

@@ -88,7 +88,7 @@ use crate::emoji;
 use crate::emoticons;
 use crate::i18n::tr;
 use crate::image_view_gallery::{ViewerRequest, collect_gallery, position_of};
-use crate::notice::short_error;
+use crate::notice::{is_location_lookup_failure, short_error};
 use crate::outbox::{Delivered, deliver, new_outbox_id, outbox_record, outgoing_of};
 use crate::pending_rows::pending_row;
 use crate::people::{local_names, resolve_names};
@@ -2644,15 +2644,17 @@ impl ConversationView {
                 current.older_blocked = true;
             }
             Ok(Err(error)) => {
+                let reason = error.to_string();
                 app_base::diagnostics::record(&format!(
                     "chat: older page failed: {}",
                     short_error(&error)
                 ));
                 current.older_blocked = true;
-                self.notice = Some(format!(
-                    "Could not load older messages: {}",
-                    short_error(&error)
-                ));
+                self.notice = Some(if is_location_lookup_failure(&reason) {
+                    "Older messages are not available in this chat".to_owned()
+                } else {
+                    format!("Could not load older messages: {}", short_error(&error))
+                });
             }
             Err(_) => current.older_blocked = true,
         }

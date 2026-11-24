@@ -32,6 +32,13 @@ pub struct Notice {
     pub action: Option<NoticeAction>,
 }
 
+/// Teams answers some virtual chats (the notes stream) with this 404 when a page is addressed by
+/// the wrong location. It is a dead end, not a failure worth showing a raw HTTP error for.
+pub fn is_location_lookup_failure(text: &str) -> bool {
+    text.contains("LocationLookupFailed")
+        || (text.contains("HTTP 404") && text.contains("teamsstream"))
+}
+
 pub fn short_error(error: &dyn std::fmt::Display) -> String {
     error.to_string().chars().take(MAX_REASON_CHARS).collect()
 }
@@ -105,5 +112,18 @@ mod tests {
     #[test]
     fn errors_are_capped() {
         assert_eq!(short_error(&"y".repeat(500)).chars().count(), 140);
+    }
+}
+
+#[cfg(test)]
+mod location_failure_tests {
+    use super::is_location_lookup_failure;
+
+    #[test]
+    fn the_notes_lookup_failure_is_recognised() {
+        assert!(is_location_lookup_failure(
+            r#"HTTP 404: {"subCode":"LocationLookupFailed","details":"Location lookup failed for thread 19:teamsstream_notes_x"}"#
+        ));
+        assert!(!is_location_lookup_failure("HTTP 500: server error"));
     }
 }

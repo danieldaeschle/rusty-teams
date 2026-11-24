@@ -5,6 +5,7 @@ use crate::error::{Error, Result};
 use crate::messages::{MessageTransport, Messages, encode, ensure_success};
 
 const EPOCH_SEGMENT: &str = "epochTimeStamp/";
+const NOTES_CHAT_ID: &str = "48:notes";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowDirection {
@@ -73,8 +74,13 @@ impl<T: MessageTransport> Messages<T> {
         direction: WindowDirection,
         page_size: usize,
     ) -> String {
+        let location = if chat_id == NOTES_CHAT_ID {
+            ""
+        } else {
+            "&locationType=Primary"
+        };
         format!(
-            "{}/{}/messages/{EPOCH_SEGMENT}{}?pageSize={page_size}&direction={}&includeMetadata=true&locationType=Primary",
+            "{}/{}/messages/{EPOCH_SEGMENT}{}?pageSize={page_size}&direction={}&includeMetadata=true{location}",
             self.base_url,
             encode(chat_id),
             encode(anchor_id),
@@ -135,6 +141,23 @@ mod tests {
                 "forwardLink": "https://other.host/v1/users/ME/conversations/19%3Aabc%40thread.v2/messages/epochTimeStamp/1791368000031?pageSize=20&direction=FORWARD",
             }
         })
+    }
+
+    #[tokio::test]
+    async fn the_notes_chat_uses_the_link_teams_can_resolve() {
+        let messages = Messages::with_transport(
+            Canned {
+                body: fixture(),
+                requests: Mutex::new(Vec::new()),
+            },
+            "emea",
+        );
+        messages
+            .message_window("48:notes", "1791368000020", WindowDirection::Backward, 20)
+            .await
+            .unwrap();
+        let requests = messages.transport.requests.lock().unwrap();
+        assert!(!requests[0].url.contains("locationType=Primary"));
     }
 
     #[test]
