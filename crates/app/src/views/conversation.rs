@@ -4611,18 +4611,20 @@ impl Render for ConversationView {
                     Some(snapshot) => {
                         column.child(runway(self.render_forward_footer(snapshot, cx), comfy))
                     }
-                    None => {
-                        column.child(runway(
-                            v_flex()
-                                .w_full()
-                                .children(self.render_absence_notice(cx))
-                                .children(self.render_proposal_card(cx).map(|card| {
-                                    div().w_full().pb(px(COMPOSER_TOP_GAP)).child(card)
-                                }))
-                                .child(self.composer.clone()),
-                            comfy,
-                        ))
-                    }
+                    None => column.child(runway(
+                        v_flex()
+                            .w_full()
+                            .children(self.render_absence_notice(cx))
+                            .children(
+                                self.render_proposal_card(cx)
+                                    .filter(|_| self.find_panel.is_none())
+                                    .map(|card| {
+                                        div().w_full().pb(px(COMPOSER_TOP_GAP)).child(card)
+                                    }),
+                            )
+                            .child(self.composer.clone()),
+                        comfy,
+                    )),
                 },
             )
             .child(self.render_drop_overlay(cx));
