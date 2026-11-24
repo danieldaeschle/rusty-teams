@@ -12,9 +12,9 @@ impl Default for RecordingPolicy {
     fn default() -> Self {
         RecordingPolicy {
             meeting_recording: true,
-            meeting_transcription: true,
+            meeting_transcription: false,
             call_recording: true,
-            call_transcription: true,
+            call_transcription: false,
         }
     }
 }
@@ -24,16 +24,21 @@ pub fn recording_policy_body() -> Value {
 }
 
 pub fn parse_recording_policy(body: &Value) -> RecordingPolicy {
-    let flag = |pointer: &str| {
+    let recording = |pointer: &str| {
         body.pointer(pointer)
             .and_then(Value::as_bool)
             .unwrap_or(true)
     };
+    let transcription = |pointer: &str| {
+        body.pointer(pointer)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    };
     RecordingPolicy {
-        meeting_recording: flag("/meetingPolicy/value/allowCloudRecording"),
-        meeting_transcription: flag("/meetingPolicy/value/allowTranscription"),
-        call_recording: flag("/callingPolicy/value/allowCloudRecordingForCalls"),
-        call_transcription: flag("/callingPolicy/value/allowTranscriptionForCalling"),
+        meeting_recording: recording("/meetingPolicy/value/allowCloudRecording"),
+        meeting_transcription: transcription("/meetingPolicy/value/allowTranscription"),
+        call_recording: recording("/callingPolicy/value/allowCloudRecordingForCalls"),
+        call_transcription: transcription("/callingPolicy/value/allowTranscriptionForCalling"),
     }
 }
 
@@ -67,14 +72,14 @@ mod tests {
     }
 
     #[test]
-    fn missing_fields_are_allowed() {
+    fn missing_fields_close_transcription_but_keep_recording() {
         assert_eq!(
             parse_recording_policy(&json!({})),
             RecordingPolicy::default()
         );
-        let partial = json!({"meetingPolicy": {"value": {"allowTranscription": false}}});
+        let partial = json!({"meetingPolicy": {"value": {"allowTranscription": true}}});
         let policy = parse_recording_policy(&partial);
-        assert!(policy.meeting_recording && !policy.meeting_transcription);
-        assert!(policy.call_recording && policy.call_transcription);
+        assert!(policy.meeting_recording && policy.meeting_transcription);
+        assert!(policy.call_recording && !policy.call_transcription);
     }
 }

@@ -475,7 +475,7 @@ pub fn note_caption(meeting_chat_id: &str, caption_id: &str, speaker: &str, text
     };
     let hub = &api.read(cx).hub;
     let policy = hub.policy();
-    if policy.enabled && policy.transcripts {
+    if policy.can_read_transcripts() {
         hub.push_caption(meeting_chat_id, caption_id, speaker, text);
     }
 }

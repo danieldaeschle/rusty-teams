@@ -203,11 +203,14 @@ mod tests {
     }
 
     #[test]
-    fn everything_is_allowed_when_nothing_is_known() {
-        for model in [meeting(), direct(), group()] {
+    fn recording_is_allowed_by_default_but_transcription_is_opt_in() {
+        for mut model in [meeting(), direct(), group()] {
             assert_eq!(model.record_block(), None);
-            assert_eq!(model.transcribe_block(), None);
+            assert!(model.transcribe_block().is_some());
             assert!(model.can_record() && !model.record_hidden());
+            model.recording_policy.meeting_transcription = true;
+            model.recording_policy.call_transcription = true;
+            assert_eq!(model.transcribe_block(), None);
         }
     }
 
@@ -288,11 +291,13 @@ mod tests {
         let no_calls = RecordingPolicy {
             call_recording: false,
             call_transcription: false,
+            meeting_transcription: true,
             ..RecordingPolicy::default()
         };
         let no_meetings = RecordingPolicy {
             meeting_recording: false,
             meeting_transcription: false,
+            call_transcription: true,
             ..RecordingPolicy::default()
         };
         for (mut model, policy, blocked) in [
@@ -324,6 +329,7 @@ mod tests {
     #[test]
     fn the_meeting_capability_blocks_only_when_it_says_false() {
         let mut model = meeting();
+        model.recording_policy.meeting_transcription = true;
         model.capability = capability(|capability| capability.allow_cloud_recording = Some(true));
         assert_eq!(model.record_block(), None);
         model.capability = capability(|capability| capability.allow_cloud_recording = Some(false));
@@ -390,6 +396,7 @@ mod tests {
     #[test]
     fn the_menu_locks_only_when_both_features_are_blocked_and_nothing_runs() {
         let mut model = meeting();
+        model.recording_policy.meeting_transcription = true;
         model.own_role = Some(MeetingRole::Attendee);
         assert_eq!(
             model.record_menu_block(),

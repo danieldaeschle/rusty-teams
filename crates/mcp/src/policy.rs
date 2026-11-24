@@ -75,6 +75,11 @@ impl AgentPolicy {
     pub fn can_organize_meetings(&self) -> bool {
         self.enabled && self.meetings
     }
+    /// Transcripts are a separate opt-in: they are never sent to an agent by enabling the server
+    /// alone, and turning them off stops live captions and stored transcript reads at once.
+    pub fn can_read_transcripts(&self) -> bool {
+        self.enabled && self.transcripts
+    }
 
     pub fn can_read_any_kind(&self, conversation_id: &str) -> bool {
         self.enabled
@@ -212,6 +217,17 @@ mod tests {
         );
         assert_eq!(policy.chats, Access::None);
         assert_eq!(policy.channels, Access::None);
+    }
+    #[test]
+    fn transcripts_need_both_the_server_and_the_transcript_opt_in() {
+        let mut policy = AgentPolicy::default();
+        assert!(!policy.can_read_transcripts());
+        policy.transcripts = true;
+        assert!(!policy.can_read_transcripts());
+        policy.enabled = true;
+        assert!(policy.can_read_transcripts());
+        policy.transcripts = false;
+        assert!(!policy.can_read_transcripts());
     }
 
     #[test]

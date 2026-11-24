@@ -2121,6 +2121,10 @@ mod tests {
         let (organizer, mut control) = app_with_commands(cx, live_meeting(true), None);
         cx.update(|cx| {
             organizer.update(cx, |state, cx| {
+                if let Some(call) = state.call.as_mut() {
+                    call.model.recording_policy.meeting_transcription = true;
+                    call.model.recording_policy.call_transcription = true;
+                }
                 state.run_call_record_action(RecordAction::Start(RecordingKind::AudioOnly), cx);
                 state
                     .run_call_record_action(RecordAction::Start(RecordingKind::TranscriptOnly), cx);

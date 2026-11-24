@@ -1050,7 +1050,7 @@ impl TeamsTools {
     ) -> Result<String, String> {
         ensure_short(&[("meeting_chat_id", &params.meeting_chat_id)])?;
         let policy = self.hub.policy();
-        if !policy.enabled || !policy.transcripts {
+        if !policy.can_read_transcripts() {
             return Err(TRANSCRIPTS_DISABLED.to_owned());
         }
         let store = self.store()?;
