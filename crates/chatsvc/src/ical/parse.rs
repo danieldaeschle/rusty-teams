@@ -163,7 +163,7 @@ fn parse_vevent(lines: &[String]) -> Option<ParsedEvent> {
 
     let start = start?;
     let end = end
-        .or_else(|| duration.map(|d| start + d))
+        .or_else(|| duration.and_then(|d| start.checked_add_signed(d)))
         .unwrap_or_else(|| {
             if all_day {
                 start + Duration::days(1)
@@ -281,15 +281,13 @@ fn parse_duration(value: &str) -> Option<Duration> {
         return None;
     }
     rest = &rest[1..];
-    let mut total = Duration::zero();
-    if let Some((date, time)) = rest.split_once('T') {
-        total += parse_duration_date(date)?;
-        total += parse_duration_time(time)?;
+    let total = if let Some((date, time)) = rest.split_once('T') {
+        parse_duration_date(date)?.checked_add(&parse_duration_time(time)?)?
     } else if rest.contains('T') {
-        total += parse_duration_time(rest.trim_start_matches('T'))?;
+        parse_duration_time(rest.trim_start_matches('T'))?
     } else {
-        total += parse_duration_date(rest)?;
-    }
+        parse_duration_date(rest)?
+    };
     Some(if negative { -total } else { total })
 }
 
@@ -306,11 +304,13 @@ fn parse_duration_date(value: &str) -> Option<Duration> {
         }
         let n: i64 = num.parse().ok()?;
         num.clear();
-        total += match ch {
-            'D' => Duration::days(n),
-            'W' => Duration::weeks(n),
+        // A feed value too large for a duration drops the field instead of panicking.
+        let part = match ch {
+            'D' => Duration::try_days(n)?,
+            'W' => Duration::try_weeks(n)?,
             _ => return None,
         };
+        total = total.checked_add(&part)?;
     }
     Some(total)
 }
@@ -325,12 +325,13 @@ fn parse_duration_time(value: &str) -> Option<Duration> {
         }
         let n: i64 = num.parse().ok()?;
         num.clear();
-        total += match ch {
-            'H' => Duration::hours(n),
-            'M' => Duration::minutes(n),
-            'S' => Duration::seconds(n),
+        let part = match ch {
+            'H' => Duration::try_hours(n)?,
+            'M' => Duration::try_minutes(n)?,
+            'S' => Duration::try_seconds(n)?,
             _ => return None,
         };
+        total = total.checked_add(&part)?;
     }
     Some(total)
 }
@@ -388,6 +389,17 @@ fn unescape(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durations_too_large_for_a_date_are_dropped_instead_of_panicking() {
+        assert_eq!(parse_duration("PT99999999999999999S"), None);
+        assert_eq!(parse_duration("P9999999999999D"), None);
+        assert_eq!(parse_duration("-PT15M"), Some(-Duration::minutes(15)));
+        let ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:1\r\nSUMMARY:Long\r\nDTSTART:20260101T100000Z\r\nDURATION:P99999999D\r\nBEGIN:VALARM\r\nTRIGGER:-PT99999999999999999M\r\nEND:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let events = parse_calendar(ics);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].end - events[0].start, Duration::hours(1));
+    }
 
     #[test]
     fn unfolds_and_parses_all_day_exclusive_end() {

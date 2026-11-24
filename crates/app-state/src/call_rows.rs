@@ -278,7 +278,7 @@ impl CallTimeline {
             .or_else(|| {
                 ended
                     .duration_seconds
-                    .map(|seconds| ended_at - chrono::Duration::seconds(seconds as i64))
+                    .and_then(|seconds| started_before(ended_at, seconds))
             })
             .unwrap_or(ended_at);
         let recording = recording_card(
@@ -368,6 +368,12 @@ fn participants(event: &CallEvent, names: &CallNames) -> Vec<CallParticipant> {
             })
         })
         .collect()
+}
+
+/// The server sends the duration: one too large for a date is ignored instead of panicking.
+fn started_before(ended_at: DateTime<Utc>, duration_seconds: u64) -> Option<DateTime<Utc>> {
+    let seconds = i64::try_from(duration_seconds).ok()?;
+    ended_at.checked_sub_signed(chrono::Duration::try_seconds(seconds)?)
 }
 
 fn recording_card(
@@ -725,6 +731,17 @@ mod tests {
             notice_line(shown.last().unwrap()),
             "Recording has been saved to Vera Organizer's OneDrive and will expire in 56 days."
         );
+    }
+
+    #[test]
+    fn a_huge_server_duration_gives_no_start_instead_of_panicking() {
+        let ended_at = Utc.with_ymd_and_hms(2026, 10, 15, 9, 55, 0).unwrap();
+        assert_eq!(
+            started_before(ended_at, 60),
+            Some(Utc.with_ymd_and_hms(2026, 10, 15, 9, 54, 0).unwrap())
+        );
+        assert_eq!(started_before(ended_at, u64::MAX), None);
+        assert_eq!(started_before(ended_at, i64::MAX as u64), None);
     }
 
     #[test]

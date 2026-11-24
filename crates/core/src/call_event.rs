@@ -247,7 +247,7 @@ pub fn parse_duration_seconds(text: &str) -> Option<u64> {
         time_part,
         &[('H', SECONDS_PER_HOUR), ('M', SECONDS_PER_MINUTE), ('S', 1)],
     )?;
-    Some(days + time)
+    days.checked_add(time)
 }
 
 fn sum_components(part: &str, units: &[(char, u64)]) -> Option<u64> {
@@ -260,7 +260,8 @@ fn sum_components(part: &str, units: &[(char, u64)]) -> Option<u64> {
         }
         let (_, factor) = units.iter().find(|(unit, _)| *unit == character)?;
         let value: f64 = number.parse().ok()?;
-        total += (value * *factor as f64) as u64;
+        // `as` saturates a huge value; checked_add keeps the sum from wrapping.
+        total = u64::checked_add(total, (value * *factor as f64) as u64)?;
         number.clear();
     }
     number.is_empty().then_some(total)
@@ -286,6 +287,15 @@ pub fn format_duration(seconds: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_duration_too_large_to_add_up_is_rejected() {
+        assert_eq!(parse_duration_seconds("PT1H2M3S"), Some(3723));
+        assert_eq!(
+            parse_duration_seconds("P99999999999999999999DT99999999999999999999H"),
+            None
+        );
+    }
 
     fn fixture(name: &str) -> Value {
         let path = format!(
