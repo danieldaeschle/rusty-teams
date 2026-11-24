@@ -8,7 +8,7 @@ use gpui_kit::base::{
 };
 use gpui_kit::*;
 
-use super::blocks::{CODE_PADDING, EMOJI_PLACEHOLDER};
+use super::blocks::{CODE_PADDING, EMOJI_PADDING, EMOJI_PLACEHOLDER};
 use super::hooks::{open_link, open_profile_link};
 
 pub(super) const TIME_ROOM: char = '\u{2007}';
@@ -356,6 +356,7 @@ impl Element for SelectableRichText {
             copied.push_str(
                 &self.text[range.start..end_index]
                     .replace(CODE_PADDING, "")
+                    .replace(EMOJI_PADDING, "")
                     .replace(EMOJI_PLACEHOLDER, ""),
             );
             let (Some(start), Some(end)) = (

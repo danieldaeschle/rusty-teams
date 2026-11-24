@@ -5,7 +5,7 @@ use std::rc::Rc;
 use gpui_kit::base::{TextSelection, TextSelectionRegistration, TextSelectionRun, Theme};
 use gpui_kit::*;
 
-use super::blocks::CODE_PADDING;
+use super::blocks::{CODE_PADDING, EMOJI_PADDING};
 use super::hooks::open_profile_link;
 use super::selectable::{HIT_SLOP, PILL_INSET_Y, PILL_OUTSET, Participant, Pill, TIME_ROOM};
 
@@ -674,7 +674,11 @@ impl Element for FlowText {
                 copied.push('\n');
             }
             previous_end = Some(end_index);
-            copied.push_str(&self.text[start_index..end_index].replace(CODE_PADDING, ""));
+            copied.push_str(
+                &self.text[start_index..end_index]
+                    .replace(CODE_PADDING, "")
+                    .replace(EMOJI_PADDING, ""),
+            );
             let (Some(from), Some(to)) = (
                 painted.layout.position_for_index(range.start),
                 painted.layout.position_for_index(end_index - offset),

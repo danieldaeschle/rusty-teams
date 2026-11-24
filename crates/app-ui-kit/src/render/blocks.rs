@@ -5,6 +5,7 @@ use teams_core::{FontSize, PROFILE_LINK_PREFIX, Span};
 
 pub const IMAGE_PLACEHOLDER: &str = "[image]";
 pub const CODE_PADDING: &str = "\u{2004}";
+pub const EMOJI_PADDING: &str = "\u{2005}";
 pub const EMOJI_PLACEHOLDER: &str = "\u{25a0}\u{25a0}";
 const URL_PREFIXES: [&str; 3] = ["https://", "http://", "www."];
 const TRAILING_PUNCTUATION: &str = ".,;:!?'\"";
@@ -136,7 +137,7 @@ impl Inline {
             .iter()
             .map(|segment| &self.text[segment.range.clone()])
             .filter(|text| *text != EMOJI_PLACEHOLDER)
-            .map(|text| text.replace(CODE_PADDING, ""))
+            .map(|text| text.replace(CODE_PADDING, "").replace(EMOJI_PADDING, ""))
             .collect()
     }
 
@@ -847,11 +848,14 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
             Span::CustomEmoji { url, .. } => {
                 out.push_part(EMOJI_PLACEHOLDER, style, link, Some(url))
             }
-            Span::Emoticon { id, glyph } => {
-                let image = emoticons::resolve(id.as_deref(), glyph)
-                    .map(|resolved| resolved.still_image_url());
-                out.push_part(glyph, style, link, image.as_deref())
-            }
+            Span::Emoticon { id, glyph } => match emoticons::resolve(id.as_deref(), glyph) {
+                Some(resolved) => {
+                    out.push(EMOJI_PADDING, style, link);
+                    out.push_part(glyph, style, link, Some(&resolved.still_image_url()));
+                    out.push(EMOJI_PADDING, style, link);
+                }
+                None => out.push(glyph, style, link),
+            },
         }
     }
 }
