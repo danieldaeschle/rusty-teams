@@ -121,6 +121,12 @@ pub mod ffi {
             label: String,
         ) -> SharedPtr<AudioTrack>;
 
+        fn create_device_audio_track_with_options(
+            self: &PeerConnectionFactory,
+            label: String,
+            noise_suppression: bool,
+        ) -> SharedPtr<AudioTrack>;
+
         fn rtp_sender_capabilities(
             self: &PeerConnectionFactory,
             kind: MediaType,

@@ -308,5 +308,29 @@ pub mod ffi {
             width: i32,
             height: i32,
         ) -> Result<()>;
+
+        unsafe fn yuy2_to_i420(
+            src_yuy2: *const u8,
+            src_stride_yuy2: i32,
+            dst_y: *mut u8,
+            dst_stride_y: i32,
+            dst_u: *mut u8,
+            dst_stride_u: i32,
+            dst_v: *mut u8,
+            dst_stride_v: i32,
+            width: i32,
+            height: i32,
+        ) -> Result<()>;
+
+        unsafe fn argb_scale(
+            src_argb: *const u8,
+            src_stride_argb: i32,
+            src_width: i32,
+            src_height: i32,
+            dst_argb: *mut u8,
+            dst_stride_argb: i32,
+            dst_width: i32,
+            dst_height: i32,
+        ) -> Result<()>;
     }
 }

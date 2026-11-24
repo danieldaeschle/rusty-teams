@@ -86,7 +86,8 @@ pub enum Flow {
     Render,
 }
 
-/// Endpoint id of the Windows default communications device, which the ADM reports as the device guid.
+/// Endpoint id of the Windows default audio device (preferring eConsole to match the Windows
+/// taskbar switcher and AdmProxy::SystemDefaultFor, with fallback to eCommunications).
 #[cfg(windows)]
 pub fn system_default_id(flow: Flow) -> Option<String> {
     use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
@@ -101,7 +102,7 @@ pub fn system_default_id(flow: Flow) -> Option<String> {
 #[cfg(windows)]
 fn default_endpoint_id(flow: Flow) -> Option<String> {
     use windows::Win32::Media::Audio::{
-        IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eCommunications, eRender,
+        IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eCommunications, eConsole, eRender,
     };
     use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
     let data_flow = match flow {
@@ -112,7 +113,8 @@ fn default_endpoint_id(flow: Flow) -> Option<String> {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
         let device = enumerator
-            .GetDefaultAudioEndpoint(data_flow, eCommunications)
+            .GetDefaultAudioEndpoint(data_flow, eConsole)
+            .or_else(|_| enumerator.GetDefaultAudioEndpoint(data_flow, eCommunications))
             .ok()?;
         let id = device.GetId().ok()?;
         let text = id.to_string().ok();
@@ -143,7 +145,7 @@ pub fn resolve_index(
             .map(|device| device.index),
         DeviceChoice::Device(key) => devices
             .iter()
-            .find(|device| device.key() == *key)
+            .find(|device| device.key().eq_ignore_ascii_case(key))
             .map(|device| device.index),
     }
 }
@@ -247,6 +249,21 @@ fn default_for(choice: &DeviceChoice, flow: Flow) -> Option<String> {
         .flatten()
 }
 
+pub fn device_switch_applied(selected: bool, started: bool) -> bool {
+    selected && started
+}
+
+pub fn input_label(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> Option<String> {
+    let DeviceChoice::Device(key) = choice else {
+        return None;
+    };
+    enumerate(factory)
+        .inputs
+        .into_iter()
+        .find(|device| device.key().eq_ignore_ascii_case(key))
+        .map(|device| device.name)
+}
+
 pub fn select_input(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
     let Some(index) = resolve_index(
         &enumerate(factory).inputs,
@@ -258,12 +275,37 @@ pub fn select_input(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> b
     select_input_index(factory, index)
 }
 
+#[cfg(windows)]
+fn pause_for_endpoint_retry() {
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(150));
+    if tokio::runtime::Handle::try_current().is_ok() {
+        tokio::task::block_in_place(pause);
+    } else {
+        pause();
+    }
+}
+
 pub fn select_input_index(factory: &PeerConnectionFactory, index: u16) -> bool {
     factory.stop_recording();
     let selected = factory.set_recording_device(index);
-    factory.init_recording();
-    factory.start_recording();
-    selected
+    let started = factory.init_recording() && factory.start_recording();
+    #[cfg(windows)]
+    let started = if selected && !started {
+        // Bluetooth headsets (HFP/A2DP profile switch) can momentarily reject Init/StartRecording.
+        pause_for_endpoint_retry();
+        factory.stop_recording();
+        let reselected = factory.set_recording_device(index);
+        reselected && factory.init_recording() && factory.start_recording()
+    } else {
+        started
+    };
+    #[cfg(windows)]
+    return device_switch_applied(selected, started);
+    #[cfg(not(windows))]
+    {
+        let _ = started;
+        selected
+    }
 }
 
 pub fn select_output(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> bool {
@@ -280,9 +322,24 @@ pub fn select_output(factory: &PeerConnectionFactory, choice: &DeviceChoice) -> 
 pub fn select_output_index(factory: &PeerConnectionFactory, index: u16) -> bool {
     factory.stop_playout();
     let selected = factory.set_playout_device(index);
-    factory.init_playout();
-    factory.start_playout();
-    selected
+    let started = factory.init_playout() && factory.start_playout();
+    #[cfg(windows)]
+    let started = if selected && !started {
+        // Retry once after Bluetooth A2DP/HFP endpoint renegotiation settles.
+        pause_for_endpoint_retry();
+        factory.stop_playout();
+        let reselected = factory.set_playout_device(index);
+        reselected && factory.init_playout() && factory.start_playout()
+    } else {
+        started
+    };
+    #[cfg(windows)]
+    return device_switch_applied(selected, started);
+    #[cfg(not(windows))]
+    {
+        let _ = started;
+        selected
+    }
 }
 
 #[cfg(test)]
@@ -397,6 +454,21 @@ mod tests {
             ),
             Some(0)
         );
+        assert_eq!(
+            resolve_index(
+                &devices,
+                &DeviceChoice::Device("{0.0.0.00000000}.{BBBB}".into()),
+                None
+            ),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_device_switch_counts_only_when_audio_starts() {
+        assert!(!device_switch_applied(true, false));
+        assert!(device_switch_applied(true, true));
+        assert!(!device_switch_applied(false, true));
     }
 
     fn headset_lists() -> (Vec<AudioDevice>, Vec<AudioDevice>) {

@@ -811,9 +811,6 @@ fn with_opus_send_quality(fmtp: &str) -> String {
 /// libwebrtc starts its bandwidth estimate at 300 kbit/s, which opens a 720p camera at 320x180.
 const H264_SEND_START: [(&str, &str); 1] = [("x-google-start-bitrate", "1500")];
 const H264_PROFILE_LEVEL_ID: &str = "profile-level-id=";
-const H264_LEVEL_4_0: u8 = 0x28;
-const FULL_HD_MAX_FS: u32 = 8160;
-const FULL_HD_MAX_MBPS: u32 = 244_800;
 
 /// Only touches H264 lines, the sole codec here that carries a `profile-level-id`.
 fn with_h264_send_quality(fmtp: &str) -> String {
@@ -823,30 +820,64 @@ fn with_h264_send_quality(fmtp: &str) -> String {
     with_fmtp_parameters(&with_full_hd_level(fmtp), &H264_SEND_START)
 }
 
-/// Teams answers level 3.1 even when its `max-fs` and `max-mbps` allow 1080p, and the encoder
-/// stalls at 1080p on that level. The explicit limits are what the peer can really receive.
+/// Teams answers a level below the frame size its own `max-fs` and `max-mbps` allow, and the
+/// encoder stalls on every layer larger than that level. The explicit limits are what the peer
+/// can really receive. The level is never lowered, and an answer without both limits stays as it is.
 fn with_full_hd_level(fmtp: &str) -> String {
     let limit = |name: &str| {
         fmtp.split([' ', ';'])
             .find_map(|parameter| parameter.strip_prefix(name)?.strip_prefix('='))
             .and_then(|value| value.parse::<u32>().ok())
     };
-    let allows_full_hd = limit("max-fs").is_some_and(|max_fs| max_fs >= FULL_HD_MAX_FS)
-        && limit("max-mbps").is_some_and(|max_mbps| max_mbps >= FULL_HD_MAX_MBPS);
-    let level = fmtp
+    let (Some(max_fs), Some(max_mbps)) = (limit("max-fs"), limit("max-mbps")) else {
+        return fmtp.to_owned();
+    };
+    let Some(needed) = h264_level_for(max_fs, max_mbps) else {
+        return fmtp.to_owned();
+    };
+    let range = fmtp
         .find(H264_PROFILE_LEVEL_ID)
         .map(|start| start + H264_PROFILE_LEVEL_ID.len() + 4)
         .map(|start| start..start + 2)
-        .filter(|range| {
-            fmtp.get(range.clone())
-                .and_then(|level| u8::from_str_radix(level, 16).ok())
-                .is_some_and(|level| level < H264_LEVEL_4_0)
-        });
-    let mut raised = fmtp.to_owned();
-    if let Some(range) = level.filter(|_| allows_full_hd) {
-        raised.replace_range(range, &format!("{H264_LEVEL_4_0:02x}"));
+        .filter(|range| range.end <= fmtp.len());
+    let Some(range) = range else {
+        return fmtp.to_owned();
+    };
+    let current = fmtp
+        .get(range.clone())
+        .and_then(|level| u8::from_str_radix(level, 16).ok());
+    if current.is_some_and(|level| level >= needed) {
+        return fmtp.to_owned();
     }
+    let mut raised = fmtp.to_owned();
+    raised.replace_range(range, &format!("{needed:02x}"));
     raised
+}
+
+/// H.264 Table A-1, lowest level whose MaxFS and MaxMBPS cover the peer limits.
+fn h264_level_for(max_fs: u32, max_mbps: u32) -> Option<u8> {
+    const LEVELS: [(u8, u32, u32); 16] = [
+        (0x0a, 99, 1_485),
+        (0x0b, 396, 3_000),
+        (0x0c, 396, 6_000),
+        (0x0d, 396, 11_880),
+        (0x14, 396, 11_880),
+        (0x15, 792, 19_800),
+        (0x16, 1_620, 20_250),
+        (0x1e, 1_620, 40_500),
+        (0x1f, 3_600, 108_000),
+        (0x20, 5_120, 216_000),
+        (0x28, 8_192, 245_760),
+        (0x29, 8_192, 245_760),
+        (0x2a, 8_704, 522_240),
+        (0x32, 22_080, 589_824),
+        (0x33, 36_864, 983_040),
+        (0x34, 36_864, 2_073_600),
+    ];
+    LEVELS
+        .into_iter()
+        .find(|(_, fs, mbps)| *fs >= max_fs && *mbps >= max_mbps)
+        .map(|(level, _, _)| level)
 }
 
 fn without_fmtp_parameter(fmtp: &str, name: &str) -> String {
@@ -1482,6 +1513,15 @@ mod tests {
         assert_eq!(
             with_h264_send_quality(hd),
             "98 profile-level-id=42e01f;max-fs=3600;max-mbps=108000;x-google-start-bitrate=1500"
+        );
+        let level_30 = "98 profile-level-id=42C01E;max-fs=3600;max-mbps=108000";
+        assert_eq!(
+            with_h264_send_quality(level_30),
+            "98 profile-level-id=42C01f;max-fs=3600;max-mbps=108000;x-google-start-bitrate=1500"
+        );
+        assert_eq!(
+            with_h264_send_quality("98 profile-level-id=42C01E"),
+            "98 profile-level-id=42C01E;x-google-start-bitrate=1500"
         );
         assert_eq!(with_h264_send_quality("99 apt=98"), "99 apt=98");
         assert_eq!(

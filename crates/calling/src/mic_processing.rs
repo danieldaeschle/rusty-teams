@@ -89,16 +89,12 @@ impl MicSettings {
         }
     }
 
+    /// Auto and Low use the native WebRTC platform ADM device track on every desktop OS
+    /// (WASAPI2/CoreAudio on Windows, Pulse/PipeWire on Linux, CoreAudio on macOS), matching
+    /// Web Teams and avoiding software-feeder jitter and unsynchronized AEC.
+    /// Music mode and Off run the software chain.
     pub fn uses_device_track(self) -> bool {
-        self.uses_device_track_on(cfg!(windows))
-    }
-
-    /// On Linux and macOS, Auto and Low keep the platform ADM device track
-    /// (Pulse / CoreAudio — same path Web Teams uses). Music mode and Off still
-    /// run the software chain; Windows always does.
-    pub fn uses_device_track_on(self, windows: bool) -> bool {
-        !windows
-            && !self.music_mode
+        !self.music_mode
             && matches!(
                 self.noise_suppression,
                 NoiseSuppression::Auto | NoiseSuppression::Low
@@ -115,11 +111,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn auto_uses_the_device_track_on_linux_and_macos_and_keeps_ml_for_the_windows_chain() {
+    fn auto_uses_the_device_track_on_all_platforms() {
         let settings = MicSettings::default();
-        // Non-Windows (Pulse on Linux, CoreAudio on macOS) keeps the ADM track.
-        assert!(settings.uses_device_track_on(false));
-        assert!(!settings.uses_device_track_on(true));
+        assert!(settings.uses_device_track());
         assert!(settings.ml_noise_suppression());
         assert_eq!(
             settings.apm_config(),
@@ -133,12 +127,12 @@ mod tests {
     }
 
     #[test]
-    fn low_keeps_the_coreaudio_or_pulse_device_track_with_the_apm_noise_suppression() {
+    fn low_keeps_the_platform_device_track_with_apm_noise_suppression() {
         let settings = MicSettings {
             noise_suppression: NoiseSuppression::Low,
             music_mode: false,
         };
-        assert!(settings.uses_device_track_on(false));
+        assert!(settings.uses_device_track());
         assert!(!settings.ml_noise_suppression());
         assert_eq!(
             settings.apm_config(),
@@ -168,25 +162,6 @@ mod tests {
             }
             .ml_noise_suppression()
         );
-    }
-
-    #[test]
-    fn windows_never_uses_the_device_track() {
-        for noise_suppression in NoiseSuppression::ALL {
-            for music_mode in [false, true] {
-                let settings = MicSettings {
-                    noise_suppression,
-                    music_mode,
-                };
-                assert!(!settings.uses_device_track_on(true));
-                let non_windows_device = !music_mode
-                    && matches!(
-                        noise_suppression,
-                        NoiseSuppression::Auto | NoiseSuppression::Low
-                    );
-                assert_eq!(settings.uses_device_track_on(false), non_windows_device);
-            }
-        }
     }
 
     #[test]

@@ -32,17 +32,37 @@ fn audio_error(what: &str, error: impl std::fmt::Display) -> Error {
     Error::Audio(format!("{what}: {error}"))
 }
 
-fn named_input(choice: &DeviceChoice) -> Option<Device> {
-    let DeviceChoice::Device(wanted) = choice else {
-        return None;
-    };
+pub fn capture_name_matches(device_name: &str, target: &str) -> bool {
+    if target.is_empty() {
+        return false;
+    }
+    if device_name.eq_ignore_ascii_case(target) {
+        return true;
+    }
+    // cpal on Linux and macOS uses ALSA or CoreAudio names, which differ from
+    // the Pulse or CoreAudio descriptions in the device list.
+    #[cfg(not(windows))]
+    {
+        let device = device_name.to_ascii_lowercase();
+        let wanted = target.to_ascii_lowercase();
+        return device.contains(&wanted) || wanted.contains(&device);
+    }
+    #[cfg(windows)]
+    false
+}
+
+fn named_input(wanted: &str, label: Option<&str>) -> Option<Device> {
+    #[cfg(windows)]
+    let resolved = crate::mic_windows::friendly_name_for_id(wanted);
+    #[cfg(not(windows))]
+    let resolved: Option<String> = None;
+    let target = resolved.as_deref().or(label).unwrap_or(wanted);
     let host = cpal::default_host();
     let mut devices = host.input_devices().ok()?;
     devices.find(|device| {
-        device.description().is_ok_and(|description| {
-            let name = description.name();
-            name == *wanted || name.contains(wanted) || wanted.contains(&name)
-        })
+        device
+            .description()
+            .is_ok_and(|description| capture_name_matches(&description.name(), target))
     })
 }
 
@@ -52,7 +72,11 @@ pub struct MicrophoneStart {
 }
 
 #[cfg(windows)]
-pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<MicrophoneStart> {
+pub fn start_microphone(
+    choice: &DeviceChoice,
+    label: Option<&str>,
+    queue: SampleQueue,
+) -> Result<MicrophoneStart> {
     match crate::mic_windows::start_communications_microphone(choice, queue.clone()) {
         Ok((capture, name, effects)) => {
             let active: Vec<String> = effects
@@ -69,7 +93,7 @@ pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<Mic
             })
         }
         Err(error) => {
-            let (capture, name) = start_cpal_microphone(choice, queue)?;
+            let (capture, name) = start_cpal_microphone(choice, label, queue)?;
             Ok(MicrophoneStart {
                 capture,
                 source: format!("cpal ({name}), wasapi communications failed: {error}"),
@@ -79,20 +103,28 @@ pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<Mic
 }
 
 #[cfg(not(windows))]
-pub fn start_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<MicrophoneStart> {
-    let (capture, name) = start_cpal_microphone(choice, queue)?;
+pub fn start_microphone(
+    choice: &DeviceChoice,
+    label: Option<&str>,
+    queue: SampleQueue,
+) -> Result<MicrophoneStart> {
+    let (capture, name) = start_cpal_microphone(choice, label, queue)?;
     Ok(MicrophoneStart {
         capture,
         source: format!("cpal ({name})"),
     })
 }
 
-fn start_cpal_microphone(choice: &DeviceChoice, queue: SampleQueue) -> Result<(Capture, String)> {
+fn start_cpal_microphone(
+    choice: &DeviceChoice,
+    label: Option<&str>,
+    queue: SampleQueue,
+) -> Result<(Capture, String)> {
     let device = match choice {
         DeviceChoice::SystemDefault => cpal::default_host()
             .default_input_device()
             .ok_or_else(|| Error::Audio("no microphone".into()))?,
-        DeviceChoice::Device(wanted) => named_input(choice).ok_or_else(|| {
+        DeviceChoice::Device(wanted) => named_input(wanted, label).ok_or_else(|| {
             Error::Audio(format!(
                 "microphone `{wanted}` not found for capture; pick Default device or another mic"
             ))
@@ -266,4 +298,36 @@ fn build_stream(
         other => return Err(Error::Audio(format!("unsupported sample format {other:?}"))),
     }
     .map_err(|error| audio_error("open input", error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::capture_name_matches;
+
+    #[test]
+    fn a_named_microphone_matches_the_listed_name() {
+        assert!(capture_name_matches(
+            "Headset Microphone",
+            "headset microphone"
+        ));
+        assert!(!capture_name_matches(
+            "Headset Microphone",
+            "{0.0.0.00000000}.{bbbb}"
+        ));
+        assert!(!capture_name_matches("Mic", ""));
+        #[cfg(windows)]
+        assert!(!capture_name_matches("Headset Microphone", "Microphone"));
+        #[cfg(not(windows))]
+        {
+            assert!(capture_name_matches("sysdefault:CARD=Jabra", "Jabra"));
+            assert!(capture_name_matches(
+                "Jabra Speak 750 Mono",
+                "Jabra Speak 750"
+            ));
+            assert!(capture_name_matches(
+                "Jabra Speak 750",
+                "Jabra Speak 750 Mono"
+            ));
+        }
+    }
 }

@@ -55,7 +55,7 @@ use crate::hold::{
 };
 use crate::meeting_options::{self, OptionWrite};
 use crate::mic_processing::MicSettings;
-use crate::mute::{MuteCommand, MuteEffect};
+use crate::mute::{MuteCommand, MuteEffect, sync_server_mute};
 use crate::notices::{
     ADMIT_ALL_FAILED_NOTICE, ADMIT_FAILED_NOTICE, ATTENDEE_SETTINGS_FAILED_NOTICE,
     BACKGROUND_IMAGE_FAILED_NOTICE, CALL_TRANSFERRED_NOTICE, CAMERA_RESTART_NOTICE,
@@ -171,6 +171,7 @@ pub struct CallOptions {
     pub data_channel: bool,
     pub concurrent: bool,
     pub start_camera: bool,
+    pub mic: MicSettings,
 }
 
 impl Default for CallOptions {
@@ -194,6 +195,7 @@ impl Default for CallOptions {
             data_channel: data_channel_from_env(),
             concurrent: false,
             start_camera: false,
+            mic: MicSettings::default(),
         }
     }
 }
@@ -599,7 +601,8 @@ async fn drive(
         input: input.clone(),
         output: output.clone(),
     });
-    let track = audio.track.clone();
+    let mut mic_settings = options.mic;
+    let mut track = audio.device_track(mic_settings).clone();
     live.audio = Some(audio);
     let mut local_video = LocalVideo::new(
         &factory,
@@ -871,6 +874,7 @@ async fn drive(
 
     let initial = MuteEffect::initial(is_meeting);
     let mut muted = initial.muted;
+    let mut server_mute_cleared = false;
     live.audio
         .as_ref()
         .expect("audio set above")
@@ -929,7 +933,6 @@ async fn drive(
     }
     let mut software_audio: Option<SoftwareAudio> = None;
     let mut share_sound_wanted = false;
-    let mut mic_settings = MicSettings::default();
     let mut audio_disabled = false;
     let mut remote_audio: Option<RtcAudioTrack> = None;
     sync_software_audio(
@@ -1615,6 +1618,18 @@ async fn drive(
                             let entries = roster.entries();
                             timeline.record("roster", format!("{} participant(s)", entries.len()));
                             control.send(CallUpdate::Roster(entries));
+                            let own_server_muted = roster
+                                .members()
+                                .iter()
+                                .any(|member| member.mri == own_mri && member.server_muted);
+                            let decision = sync_server_mute(own_server_muted, muted, server_mute_cleared);
+                            server_mute_cleared = decision.cleared;
+                            if decision.silence_without_signal
+                                && let Some(audio) = live.audio.as_ref()
+                            {
+                                silence_for_server_mute(audio, software_audio.as_ref(), control);
+                                muted = true;
+                            }
                             if is_echo && echo_watch.bot_left(roster.members().iter().map(|member| member.mri.as_str())) {
                                 timeline.record("echo bot left", "test call ends like in Teams");
                                 advance(state, CallSignal::RemoteEnd(EndKind::Normal), control);
@@ -2041,6 +2056,13 @@ async fn drive(
             },
             command = control.recv() => match command {
                 Some(CallCommand::Mute(mute)) => {
+                    let own_server_muted = roster
+                        .members()
+                        .iter()
+                        .any(|member| member.mri == own_mri && member.server_muted);
+                    if !mute.target(muted) && own_server_muted {
+                        server_mute_cleared = true;
+                    }
                     if consent_pending && !mute.target(muted) {
                         control.send(CallUpdate::Notice(CONSENT_FIRST_NOTICE.into()));
                     } else {
@@ -2073,8 +2095,13 @@ async fn drive(
                     }
                 }
                 Some(CallCommand::SetMicSettings(settings)) if !audio_disabled => {
+                    let device_ns_changed =
+                        mic_settings.ml_noise_suppression() != settings.ml_noise_suppression();
                     mic_settings = settings;
-                    sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), false, &mut software_audio, mic_settings, control, timeline);
+                    if let Some(audio) = live.audio.as_ref() {
+                        track = audio.device_track(mic_settings).clone();
+                    }
+                    sync_software_audio(&factory, options, &input, muted, remote_audio.clone(), &current.peer, &track, software_wanted(mic_settings, share_sound_wanted, &local_video, live.audio.as_ref()), device_ns_changed, &mut software_audio, mic_settings, control, timeline);
                 }
                 Some(CallCommand::SetMicSettings(settings)) => {
                     mic_settings = settings;
@@ -2871,18 +2898,37 @@ async fn drive(
                             local_video.camera_capture_summary().unwrap_or_default()
                         ),
                     );
+                    #[cfg(not(windows))]
+                    if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
+                        let listed = devices::list_devices(&factory);
+                        let previous_ids: Vec<String> = device_lists
+                            .inputs
+                            .iter()
+                            .chain(device_lists.outputs.iter())
+                            .map(|device| device.key())
+                            .collect();
+                        let current_ids: Vec<String> = listed
+                            .inputs
+                            .iter()
+                            .chain(listed.outputs.iter())
+                            .map(|device| device.key())
+                            .collect();
+                        for id in device_watch::endpoint_delta(&previous_ids, &current_ids) {
+                            device_debounce.signal_device(Instant::now(), Some(id));
+                        }
+                    }
                 }
             }
-            Some(()) = device_changes.recv() => {
-                device_debounce.signal(Instant::now());
+            Some(device_id) = device_changes.recv() => {
+                device_debounce.signal_device(Instant::now(), device_id);
             }
             _ = sleep_until(device_debounce.deadline().unwrap_or_else(far_future)), if device_debounce.deadline().is_some() => {
-                if device_debounce.take_due(Instant::now()) {
+                if let Some(touched_ids) = device_debounce.take_due_devices(Instant::now()) {
                     let previous = std::mem::replace(&mut device_lists, devices::list_devices(&factory));
                     control.send(CallUpdate::Devices(device_lists.clone()));
                     if live.audio.as_ref().is_some_and(AudioSetup::uses_devices) {
-                        let input_changed = follow_device_change(Flow::Capture, (&previous.inputs, &device_lists.inputs), &input, &mut applied_input, |index| devices::select_input_index(&factory, index), timeline, control);
-                        let output_changed = follow_device_change(Flow::Render, (&previous.outputs, &device_lists.outputs), &output, &mut applied_output, |index| devices::select_output_index(&factory, index), timeline, control);
+                        let input_changed = follow_device_change(Flow::Capture, (&previous.inputs, &device_lists.inputs), &input, &mut applied_input, &touched_ids, |index| devices::select_input_index(&factory, index), timeline, control);
+                        let output_changed = follow_device_change(Flow::Render, (&previous.outputs, &device_lists.outputs), &output, &mut applied_output, &touched_ids, |index| devices::select_output_index(&factory, index), timeline, control);
                         if input_changed || output_changed {
                             record_audio_devices(timeline, &device_lists, applied_input.as_ref(), applied_output.as_ref());
                         }

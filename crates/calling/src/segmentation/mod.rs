@@ -34,19 +34,22 @@ pub fn rungs(onnx_runtime: bool, gpu: bool, on_battery: bool) -> Vec<Rung> {
         spec: MEDIAPIPE,
         device: Device::Cpu { threads: 1 },
     }];
-    if on_battery || !onnx_runtime {
+    if !onnx_runtime {
         return rungs;
     }
     if gpu {
+        // DirectML iGPU runs MODNET_SMALL efficiently even on battery; only skip MODNET_LARGE on battery.
         rungs.push(Rung {
             spec: MODNET_SMALL,
             device: Device::Gpu,
         });
-        rungs.push(Rung {
-            spec: MODNET_LARGE,
-            device: Device::Gpu,
-        });
-    } else {
+        if !on_battery {
+            rungs.push(Rung {
+                spec: MODNET_LARGE,
+                device: Device::Gpu,
+            });
+        }
+    } else if !on_battery {
         rungs.push(Rung {
             spec: MODNET_SMALL,
             device: Device::Cpu {
@@ -344,7 +347,20 @@ mod tests {
 
     #[test]
     fn battery_missing_gpu_and_missing_onnx_runtime_shorten_the_ladder() {
-        assert_eq!(rungs(true, true, true).len(), 1);
+        assert_eq!(
+            rungs(true, true, true),
+            vec![
+                Rung {
+                    spec: MEDIAPIPE,
+                    device: Device::Cpu { threads: 1 },
+                },
+                Rung {
+                    spec: MODNET_SMALL,
+                    device: Device::Gpu,
+                },
+            ]
+        );
+        assert_eq!(rungs(true, false, true).len(), 1);
         assert_eq!(
             rungs(false, false, false).len(),
             1,
