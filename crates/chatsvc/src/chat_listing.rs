@@ -8,6 +8,7 @@ use crate::pins::{CSA_RESOURCE, CSA_SCOPE, CsaTransport, DEFAULT_REGION, Session
 const VIEW: &str = "view=msnp24Equivalent";
 const NEWEST_ANCHOR_SLACK_MS: i64 = 60_000;
 const MESSAGES_SEGMENT: &str = "messages";
+const SYNC_CURSOR_PREFIX: &str = "syncState:";
 const EPOCH_SEGMENT: &str = "epochTimeStamp";
 
 /// One page of the conversation list as the chat service sends it; `next_url` lists older conversations.
@@ -133,19 +134,37 @@ impl<T: MessageTransport> ChatListing<T> {
     /// The older page a previous page's `older_cursor` points to. Only the anchor and query come
     /// from Teams: the host and conversation stay ours. The notes chat answered 404
     /// `LocationLookupFailed` to the anchor [`ChatListing::messages`] builds by hand.
-    pub async fn messages_at(&self, conversation_id: &str, cursor: &str) -> Result<MessagePage> {
-        if !is_older_cursor(cursor) {
+    pub async fn messages_at(
+        &self,
+        conversation_id: &str,
+        cursor: &str,
+        before_ms: Option<i64>,
+        page_size: usize,
+    ) -> Result<MessagePage> {
+        let url = if let Some(sync_state) = cursor.strip_prefix(SYNC_CURSOR_PREFIX) {
+            if sync_state.is_empty() || sync_state.len() > 4_096 {
+                return Err(Error::UnexpectedAnswer("invalid syncState cursor".into()));
+            }
+            format!(
+                "{}/{}/{MESSAGES_SEGMENT}?{VIEW}&pageSize={page_size}&startTime={}&syncState={}",
+                self.conversations_url(),
+                encode(conversation_id),
+                before_ms.unwrap_or(0),
+                encode(sync_state)
+            )
+        } else if is_older_cursor(cursor) {
+            format!(
+                "{}/{}/{MESSAGES_SEGMENT}/{cursor}",
+                self.conversations_url(),
+                encode(conversation_id)
+            )
+        } else {
             return Err(Error::UnexpectedAnswer(format!(
                 "not an older page cursor: {cursor}"
             )));
-        }
-        let url = format!(
-            "{}/{}/{MESSAGES_SEGMENT}/{cursor}",
-            self.conversations_url(),
-            encode(conversation_id)
-        );
+        };
         let body = self.get(&url).await?;
-        message_page(&body, None)
+        message_page(&body, before_ms)
     }
 
     pub async fn message(&self, conversation_id: &str, message_id: &str) -> Result<Value> {
@@ -177,11 +196,23 @@ fn message_page(body: &Value, before_ms: Option<i64>) -> Result<MessagePage> {
     let backward_link = body
         .pointer("/_metadata/backwardLink")
         .and_then(Value::as_str)
-        .filter(|link| !link.is_empty() && !messages.is_empty());
+        .filter(|link| !link.is_empty());
+    let sync_link = body
+        .pointer("/_metadata/syncState")
+        .and_then(Value::as_str)
+        .filter(|link| !link.is_empty());
+    let has_older = !messages.is_empty() && (backward_link.is_some() || sync_link.is_some());
     let oldest_arrival_ms = messages.iter().filter_map(arrival_ms).min();
     Ok(MessagePage {
-        has_older: backward_link.is_some(),
-        older_cursor: backward_link.and_then(older_cursor),
+        older_cursor: if messages.is_empty() {
+            None
+        } else {
+            backward_link
+                .and_then(older_cursor)
+                .or_else(|| backward_link.and_then(sync_state_of))
+                .or_else(|| sync_link.and_then(sync_state_of))
+        },
+        has_older,
         messages,
         oldest_arrival_ms,
     })
@@ -201,6 +232,18 @@ fn older_cursor(link: &str) -> Option<String> {
         Some(query) => format!("{EPOCH_SEGMENT}/{anchor}?{query}"),
         None => format!("{EPOCH_SEGMENT}/{anchor}"),
     })
+}
+
+/// Consumer chats answer with `_metadata.syncState`, a `msgapi.teams.live.com` URL carrying the
+/// cursor in its `syncState` query parameter. Keep only the cursor and use our own host later.
+fn sync_state_of(link: &str) -> Option<String> {
+    let url = url::Url::parse(link).ok()?;
+    let state = url
+        .query_pairs()
+        .find(|(key, _)| key == "syncState")?
+        .1
+        .into_owned();
+    (!state.is_empty()).then(|| format!("{SYNC_CURSOR_PREFIX}{state}"))
 }
 
 fn is_older_cursor(cursor: &str) -> bool {
@@ -307,7 +350,12 @@ mod tests {
         let transport = canned(vec![json!({"messages": [{"id": "5"}], "_metadata": {}})]);
         let listing = ChatListing::with_transport(&transport, "emea");
         let page = listing
-            .messages_at("48:notes", &older_cursor(NOTES_BACKWARD_LINK).unwrap())
+            .messages_at(
+                "48:notes",
+                &older_cursor(NOTES_BACKWARD_LINK).unwrap(),
+                None,
+                20,
+            )
             .await
             .unwrap();
         assert_eq!(page.messages, vec![json!({"id": "5"})]);
@@ -345,11 +393,51 @@ mod tests {
         ] {
             assert!(
                 matches!(
-                    listing.messages_at("48:notes", cursor).await,
+                    listing.messages_at("48:notes", cursor, None, 20).await,
                     Err(Error::UnexpectedAnswer(_))
                 ),
                 "{cursor}"
             );
+        }
+        assert!(transport.requests.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_consumer_page_with_only_sync_state_keeps_the_cursor() {
+        let transport = canned(vec![json!({
+            "messages": [{"id": "1000"}],
+            "_metadata": {"syncState": "https://msgapi.teams.live.com/v1/users/ME/conversations/19%3Aa/messages?syncState=abc%2F123%3D"},
+        })]);
+        let listing = ChatListing::with_transport(&transport, "emea");
+        let page = listing.messages("19:a", None, 20).await.unwrap();
+        assert!(page.has_older);
+        assert_eq!(page.older_cursor.as_deref(), Some("syncState:abc/123="));
+    }
+
+    #[tokio::test]
+    async fn the_consumer_older_page_uses_the_cursor_on_our_host() {
+        let transport = canned(vec![json!({"messages": [{"id": "5"}], "_metadata": {}})]);
+        let listing = ChatListing::with_transport(&transport, "emea");
+        let page = listing
+            .messages_at("48:notes", "syncState:abc/123=", Some(1000), 20)
+            .await
+            .unwrap();
+        assert_eq!(page.messages, vec![json!({"id": "5"})]);
+        assert_eq!(
+            transport.requests.lock().unwrap()[0],
+            "https://teams.cloud.microsoft/api/chatsvc/emea/v1/users/ME/conversations/48%3Anotes/messages?view=msnp24Equivalent&pageSize=20&startTime=1000&syncState=abc%2F123%3D"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_malformed_sync_cursor_is_refused_without_a_request() {
+        let transport = canned(Vec::new());
+        let listing = ChatListing::with_transport(&transport, "emea");
+        for cursor in ["syncState:", &format!("syncState:{}", "x".repeat(5_000))] {
+            assert!(matches!(
+                listing.messages_at("48:notes", cursor, None, 20).await,
+                Err(Error::UnexpectedAnswer(_))
+            ));
         }
         assert!(transport.requests.lock().unwrap().is_empty());
     }

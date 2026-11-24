@@ -159,7 +159,16 @@ impl<'a> NativeChats<'a> {
     ) -> Result<RemotePage> {
         let listing = ChatListing::new(self.session);
         let page = match older_cursor.filter(|cursor| *cursor != OLDER_PAGE_MARKER) {
-            Some(cursor) => listing.messages_at(chat_id, cursor).await?,
+            Some(cursor) => {
+                listing
+                    .messages_at(
+                        chat_id,
+                        cursor,
+                        before.map(|time| time.timestamp_millis()),
+                        page_size,
+                    )
+                    .await?
+            }
             None => {
                 listing
                     .messages(
