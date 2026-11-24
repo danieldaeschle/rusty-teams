@@ -17,6 +17,7 @@ use mcp::{
 };
 use store::Store;
 
+use crate::app_state::AppHandle;
 use crate::backend::Engine;
 use crate::runtime;
 use pending::PendingProposal;
@@ -182,6 +183,11 @@ pub fn handle(cx: &App) -> Option<Entity<AgentApi>> {
         .map(|handle| handle.0.clone())
 }
 
+fn feature_enabled(cx: &App) -> bool {
+    cx.try_global::<AppHandle>()
+        .is_some_and(|handle| handle.0.read(cx).agents_mcp_enabled)
+}
+
 pub fn mcp_endpoint(cx: &App) -> Option<McpEndpoint> {
     let api = handle(cx)?.read(cx);
     match api.status {
@@ -223,6 +229,9 @@ pub fn chat_allowed(conversation_id: &str, cx: &App) -> bool {
 }
 
 pub fn allow_chat(conversation_id: &str, cx: &mut App) {
+    if !feature_enabled(cx) {
+        return;
+    }
     let Some(api) = handle(cx) else {
         return;
     };
@@ -475,7 +484,7 @@ pub fn note_caption(meeting_chat_id: &str, caption_id: &str, speaker: &str, text
     };
     let hub = &api.read(cx).hub;
     let policy = hub.policy();
-    if policy.can_read_transcripts() {
+    if feature_enabled(cx) && policy.can_read_transcripts() {
         hub.push_caption(meeting_chat_id, caption_id, speaker, text);
     }
 }
@@ -647,7 +656,7 @@ impl AgentApi {
 
     fn reconcile(&mut self, cx: &mut Context<Self>) {
         let policy = self.hub.policy();
-        let wanted = policy.enabled;
+        let wanted = policy.enabled && feature_enabled(cx);
         match (wanted, &self.status) {
             (false, ServerStatus::Off) => {}
             (false, _) => self.stop_server(cx),
@@ -723,7 +732,26 @@ impl AgentApi {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_label, demo_port};
+    use std::sync::Arc;
+
+    use gpui_kit::{AppContext as _, TestAppContext};
+    use store::Store;
+
+    use super::{agent_label, demo_port, feature_enabled};
+    use crate::app_state::{AppHandle, AppState, Mode};
+
+    #[gpui_kit::test]
+    fn the_feature_gate_follows_the_saved_setting(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store, Mode::default())));
+        cx.update(|cx| {
+            cx.set_global(AppHandle(app.clone()));
+            assert!(!feature_enabled(cx));
+            app.update(cx, |state, cx| state.set_agents_mcp_enabled(true, cx));
+            assert!(feature_enabled(cx));
+        });
+    }
 
     #[test]
     fn demo_port_is_free_unless_configured() {
