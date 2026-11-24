@@ -110,7 +110,9 @@ fn fixed_label(attachments: &[AttachmentInfo]) -> Option<&'static str> {
 fn collect(spans: &[Span], parts: &mut BodyParts) {
     for span in spans {
         match span {
-            Span::Text(value) | Span::Code(value) => parts.text.push_str(value),
+            Span::Text(value) | Span::Code(value) | Span::Emoticon { glyph: value, .. } => {
+                parts.text.push_str(value)
+            }
             Span::CodeBlock { code, .. } => {
                 parts.text.push(' ');
                 parts.text.push_str(code);

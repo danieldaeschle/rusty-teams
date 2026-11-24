@@ -11,6 +11,7 @@ pub use strip::{StripImages, StripLoader, StripSource, split_strip};
 const CATALOG: &str = include_str!("../../../app/assets/emoticons.tsv");
 const ASSET_BASE: &str = chatsvc::teams_cdn::EMOTICON_BASE_URL;
 const ASSET_SIZE: u32 = 100;
+const STILL_IMAGE_SIZE: u32 = 50;
 const FRAMES_PER_SECOND: u64 = 24;
 const VARIATION_SELECTOR: char = '\u{fe0f}';
 const SKIN_TONES: std::ops::RangeInclusive<char> = '\u{1f3fb}'..='\u{1f3ff}';
@@ -35,17 +36,30 @@ pub struct ResolvedEmoticon {
 
 impl ResolvedEmoticon {
     pub fn strip_source(&self) -> StripSource {
-        let tone = match self.tone {
-            Some(tone) if self.emoticon.diverse => format!("_s{}", tone + 1),
-            _ => String::new(),
-        };
         StripSource {
             url: format!(
-                "{ASSET_BASE}/{}/default/{ASSET_SIZE}_anim_f{tone}.png?v={}",
-                self.emoticon.id, self.emoticon.etag
+                "{ASSET_BASE}/{}/default/{ASSET_SIZE}_anim_f{}.png?v={}",
+                self.emoticon.id,
+                self.tone_suffix(),
+                self.emoticon.etag
             )
             .into(),
             frame_duration: Duration::from_millis(1000 / FRAMES_PER_SECOND),
+        }
+    }
+
+    pub fn still_image_url(&self) -> String {
+        format!(
+            "{ASSET_BASE}/{}/default/{STILL_IMAGE_SIZE}_f{}.png",
+            self.emoticon.id,
+            self.tone_suffix()
+        )
+    }
+
+    fn tone_suffix(&self) -> String {
+        match self.tone {
+            Some(tone) if self.emoticon.diverse => format!("_s{}", tone + 1),
+            _ => String::new(),
         }
     }
 
@@ -202,6 +216,22 @@ mod tests {
         assert!(thumb.image_url.ends_with("/yes/default/{size}_f_s3.png"));
         assert_eq!(send_tag("👍").unwrap().id, "yes");
         assert_eq!(resolve(Some("yes-tone2"), "👍🏼").unwrap().emoticon.id, "yes");
+    }
+
+    #[test]
+    fn still_images_follow_the_message_id_and_tone() {
+        let laugh = resolve(Some("laughdog"), "😄").unwrap();
+        assert!(
+            laugh
+                .still_image_url()
+                .ends_with("/laughdog/default/50_f.png")
+        );
+        let thumb = resolve(Some("yes-tone2"), "👍🏼").unwrap();
+        assert!(
+            thumb
+                .still_image_url()
+                .ends_with("/yes/default/50_f_s3.png")
+        );
     }
 
     #[test]

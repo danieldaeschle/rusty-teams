@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use app_base::emoticons;
 use teams_core::{FontSize, PROFILE_LINK_PREFIX, Span};
 
 pub const IMAGE_PLACEHOLDER: &str = "[image]";
@@ -133,8 +134,9 @@ impl Inline {
     pub fn plain_text(&self) -> String {
         self.segments
             .iter()
-            .filter(|segment| segment.emoji.is_none())
-            .map(|segment| self.text[segment.range.clone()].replace(CODE_PADDING, ""))
+            .map(|segment| &self.text[segment.range.clone()])
+            .filter(|text| *text != EMOJI_PLACEHOLDER)
+            .map(|text| text.replace(CODE_PADDING, ""))
             .collect()
     }
 
@@ -845,6 +847,11 @@ fn append_inline(spans: &[Span], style: StyleFlags, link: Option<&str>, out: &mu
             Span::CustomEmoji { url, .. } => {
                 out.push_part(EMOJI_PLACEHOLDER, style, link, Some(url))
             }
+            Span::Emoticon { id, glyph } => {
+                let image = emoticons::resolve(id.as_deref(), glyph)
+                    .map(|resolved| resolved.still_image_url());
+                out.push_part(glyph, style, link, image.as_deref())
+            }
         }
     }
 }
@@ -940,6 +947,27 @@ mod tests {
             panic!("paragraph expected");
         };
         assert_eq!(inline.emoji().len(), 1);
+    }
+
+    #[test]
+    fn teams_emoticons_keep_their_glyph_under_the_image() {
+        let smile = Span::Emoticon {
+            id: Some("smile".into()),
+            glyph: "🙂".into(),
+        };
+        let unknown = Span::Emoticon {
+            id: None,
+            glyph: "x".into(),
+        };
+        let blocks = layout_blocks(&[text("hi "), smile, text(" ok "), unknown]);
+        let Block::Paragraph(inline) = &blocks[0] else {
+            panic!("paragraph expected");
+        };
+        assert_eq!(inline.plain_text(), "hi 🙂 ok x");
+        let emoji = inline.emoji();
+        assert_eq!(emoji.len(), 1);
+        assert_eq!(&inline.text[emoji[0].0.clone()], "🙂");
+        assert!(emoji[0].1.ends_with("/smile/default/50_f.png"));
     }
 
     #[test]

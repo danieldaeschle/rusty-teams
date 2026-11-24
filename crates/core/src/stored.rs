@@ -576,7 +576,9 @@ fn base_reaction_emoji(reaction_type: &str) -> String {
 pub(crate) fn push_plain(text: &mut String, spans: &[Span]) {
     for span in spans {
         match span {
-            Span::Text(value) | Span::Code(value) => text.push_str(value),
+            Span::Text(value) | Span::Code(value) | Span::Emoticon { glyph: value, .. } => {
+                text.push_str(value)
+            }
             Span::CodeBlock { code, .. } => {
                 text.push_str(code);
                 text.push('\n');

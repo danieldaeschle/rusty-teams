@@ -62,6 +62,10 @@ pub enum Span {
         name: String,
         url: String,
     },
+    Emoticon {
+        id: Option<String>,
+        glyph: String,
+    },
     Quote {
         message_id: Option<String>,
         children: Vec<Span>,
@@ -430,7 +434,17 @@ fn push_emoji(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         .map(str::to_owned)
         .filter(|alt| !alt.is_empty())
         .unwrap_or_else(|| raw_text(element));
-    push_text(spans, &without_repeated_skin_tone(&glyph));
+    push_emoticon(spans, element.value().attr("id"), &glyph);
+}
+
+fn push_emoticon(spans: &mut Vec<Span>, id: Option<&str>, glyph: &str) {
+    if glyph.is_empty() {
+        return;
+    }
+    spans.push(Span::Emoticon {
+        id: id.filter(|id| !id.is_empty()).map(str::to_owned),
+        glyph: without_repeated_skin_tone(glyph),
+    });
 }
 
 fn push_custom_emoji(element: ElementRef<'_>, spans: &mut Vec<Span>) {
@@ -453,7 +467,7 @@ fn push_image(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         .is_some_and(|itemtype| itemtype.contains(EMOJI_ITEMTYPE));
     if is_emoji {
         if let Some(alt) = value.attr("alt") {
-            push_text(spans, &without_repeated_skin_tone(alt));
+            push_emoticon(spans, value.attr("itemid"), alt);
         }
         return;
     }

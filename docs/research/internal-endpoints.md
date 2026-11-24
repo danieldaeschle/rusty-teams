@@ -163,7 +163,7 @@ Teams on the web links (opened in a window, not requested by us): `crates/app-st
 |---|---|---|---|---|---|
 | `/evergreen-assets/audio/{file}.mp3` | GET | `crates/chatsvc/src/teams_cdn.rs` (URL), `crates/app-base/src/notify/sound_cache.rs` (download) | notification sounds | R | no - static asset |
 | `/evergreen-assets/stickerassets/{name}-250x250/{file}?v=5` | GET | `crates/chatsvc/src/teams_cdn.rs`, `crates/app-base/src/stickers.rs` | stickers | R | no |
-| `/evergreen-assets/personal-expressions/v2/assets/emoticons/{id}/default/{size}_anim_f{tone}.png` | GET | `crates/chatsvc/src/teams_cdn.rs`, `crates/app-base/src/emoticons/mod.rs` | emoticon images | R | no |
+| `/evergreen-assets/personal-expressions/v2/assets/emoticons/{id}/default/{size}_anim_f{tone}.png`, `{size}_f{tone}.png` | GET | `crates/chatsvc/src/teams_cdn.rs`, `crates/app-base/src/emoticons/mod.rs` | emoticon images: animated strip, still image inline and in reactions | R | no |
 | `/evergreen-assets/backgroundimages/config.json?v=7` + images from it | GET | `crates/chatsvc/src/teams_cdn.rs`, `crates/calling/src/background.rs` | call background catalog | R | no |
 
 ## Third-party and SharePoint

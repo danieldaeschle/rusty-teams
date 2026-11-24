@@ -2,7 +2,7 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::blocks::{Block, Inline, StyleFlags, TableCell};
+use super::blocks::{Block, EMOJI_PLACEHOLDER, Inline, StyleFlags, TableCell};
 use super::flow_text::{FlowSegment, FlowText};
 use super::hooks::jump_to_quoted;
 use super::selectable::{Pill, SelectableRichText};
@@ -462,12 +462,24 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
         .collect();
     font_overrides.sort_by_key(|(range, _)| range.start);
     let keycaps = keycap_ranges(&inline.text);
-    let emoji = inline.emoji();
+    let inline_images: Vec<_> = inline
+        .emoji()
+        .into_iter()
+        .filter_map(|(range, url)| Some((range, super::hooks::inline_image(&url, cx)?)))
+        .collect();
+    let hidden = inline
+        .emoji()
+        .into_iter()
+        .map(|(range, _)| range)
+        .filter(|range| {
+            inline.text[range.clone()] == *EMOJI_PLACEHOLDER
+                || inline_images.iter().any(|(drawn, _)| drawn == range)
+        });
     let highlights = highlights
         .into_iter()
-        .chain(emoji.iter().map(|(range, _)| {
+        .chain(hidden.map(|range| {
             (
-                range.clone(),
+                range,
                 HighlightStyle {
                     color: Some(transparent_black()),
                     ..Default::default()
@@ -475,10 +487,6 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
             )
         }))
         .collect::<Vec<_>>();
-    let inline_images = emoji
-        .into_iter()
-        .filter_map(|(range, url)| Some((range, super::hooks::inline_image(&url, cx)?)))
-        .collect();
     let pills = inline
         .segments
         .iter()
@@ -495,11 +503,13 @@ fn render_inline(inline: &Inline, id: String, own: bool, cx: &App) -> AnyElement
             .map(|segment| FlowSegment {
                 range: segment.range.clone(),
                 highlight: match segment.emoji {
-                    Some(_) => HighlightStyle {
-                        color: Some(transparent_black()),
-                        ..Default::default()
-                    },
-                    None => highlight_for(segment.style, own),
+                    Some(_) if inline.text[segment.range.clone()] == *EMOJI_PLACEHOLDER => {
+                        HighlightStyle {
+                            color: Some(transparent_black()),
+                            ..Default::default()
+                        }
+                    }
+                    _ => highlight_for(segment.style, own),
                 },
                 family: if segment.emoji.is_some() {
                     Some(SharedString::from(theme::EMOJI_FONT_FAMILY))

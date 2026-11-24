@@ -2398,7 +2398,9 @@ impl SpanLines {
                 )
             );
             match span {
-                Span::Text(text) => self.append(text, kind, marks),
+                Span::Text(text) | Span::Emoticon { glyph: text, .. } => {
+                    self.append(text, kind, marks)
+                }
                 Span::Bold(children) => self.walk(children, kind, &with(MarkKind::Bold)),
                 Span::Italic(children) => self.walk(children, kind, &with(MarkKind::Italic)),
                 Span::Strike(children) => self.walk(children, kind, &with(MarkKind::Strike)),

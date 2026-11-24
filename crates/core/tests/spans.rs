@@ -151,12 +151,23 @@ fn hosted_content_image() {
 }
 
 #[test]
-fn emoji_element_and_emoji_image_become_text() {
+fn emoji_element_and_emoji_image_keep_the_emoticon_id() {
     assert_eq!(
         html_to_spans(
-            r#"<p>hi <emoji id="smile" alt="😄" title="Smile"></emoji> and <img itemtype="http://schema.skype.com/Emoji" alt="👍" src="https://statics.example.test/e.png"></p>"#
+            r#"<p>hi <emoji id="smile" alt="😄" title="Smile"></emoji> and <img itemtype="http://schema.skype.com/Emoji" itemid="yes-tone2" alt="👍🏼🏼" src="https://statics.example.test/e.png"></p>"#
         ),
-        vec![text("hi 😄 and 👍")]
+        vec![
+            text("hi "),
+            Span::Emoticon {
+                id: Some("smile".into()),
+                glyph: "😄".into()
+            },
+            text(" and "),
+            Span::Emoticon {
+                id: Some("yes-tone2".into()),
+                glyph: "👍🏼".into()
+            }
+        ]
     );
 }
 
