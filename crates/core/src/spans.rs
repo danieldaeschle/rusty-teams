@@ -87,15 +87,18 @@ const INDENTED_ELEMENTS: [&str; 8] = ["p", "div", "h1", "h2", "h3", "h4", "h5", 
 const INDENT_STEP_PIXELS: f32 = 40.;
 const MAX_INDENT_LEVEL: u8 = 8;
 const PLAIN_LANGUAGE: &str = "plaintext";
+/// Server HTML may be arbitrarily nested; flatten beyond this depth instead of recursing until the
+/// stack is exhausted (a message with thousands of wrappers used to kill the app).
+const MAX_SPAN_DEPTH: u32 = 64;
 
 pub fn html_to_spans(html: &str) -> Vec<Span> {
     let fragment = Html::parse_fragment(html);
-    let mut spans = convert_children(fragment.root_element());
+    let mut spans = convert_children(fragment.root_element(), 0);
     tidy(&mut spans);
     spans
 }
 
-fn convert_children(element: ElementRef<'_>) -> Vec<Span> {
+fn convert_children(element: ElementRef<'_>, depth: u32) -> Vec<Span> {
     let mut spans = Vec::new();
     let mut break_pending = false;
     for child in element.children() {
@@ -119,7 +122,7 @@ fn convert_children(element: ElementRef<'_>) -> Vec<Span> {
                 if (is_block || break_pending) && !spans.is_empty() {
                     spans.push(Span::LineBreak);
                 }
-                convert_element(child_element, &mut spans);
+                convert_element(child_element, &mut spans, depth + 1);
                 break_pending = is_block;
             }
             _ => {}
@@ -128,18 +131,22 @@ fn convert_children(element: ElementRef<'_>) -> Vec<Span> {
     spans
 }
 
-fn convert_element(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+fn convert_element(element: ElementRef<'_>, spans: &mut Vec<Span>, depth: u32) {
     let name = element.value().name();
     if SKIPPED_ELEMENTS.contains(&name) {
+        return;
+    }
+    if depth > MAX_SPAN_DEPTH {
+        push_text(spans, &raw_text(element));
         return;
     }
     match block_indent(element) {
         Some(level) => {
             let mut children = Vec::new();
-            convert_unindented(element, &mut children);
+            convert_unindented(element, &mut children, depth);
             spans.push(Span::Indent { level, children });
         }
-        None => convert_unindented(element, spans),
+        None => convert_unindented(element, spans, depth),
     }
 }
 
@@ -154,28 +161,28 @@ fn block_indent(element: ElementRef<'_>) -> Option<u8> {
     (level >= 1.).then(|| level.min(f32::from(MAX_INDENT_LEVEL)) as u8)
 }
 
-fn convert_unindented(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+fn convert_unindented(element: ElementRef<'_>, spans: &mut Vec<Span>, depth: u32) {
     let name = element.value().name();
     match name {
-        "b" | "strong" => spans.push(Span::Bold(convert_children(element))),
+        "b" | "strong" => spans.push(Span::Bold(convert_children(element, depth))),
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => spans.push(Span::Heading {
             level: name[1..].parse::<u8>().unwrap_or(1).min(MAX_HEADING_LEVEL),
-            children: convert_children(element),
+            children: convert_children(element, depth),
         }),
-        "i" | "em" => spans.push(Span::Italic(convert_children(element))),
-        "s" | "strike" | "del" => spans.push(Span::Strike(convert_children(element))),
-        "sup" => spans.push(Span::Superscript(convert_children(element))),
-        "sub" => spans.push(Span::Subscript(convert_children(element))),
-        "u" | "ins" => spans.push(Span::Underline(convert_children(element))),
+        "i" | "em" => spans.push(Span::Italic(convert_children(element, depth))),
+        "s" | "strike" | "del" => spans.push(Span::Strike(convert_children(element, depth))),
+        "sup" => spans.push(Span::Superscript(convert_children(element, depth))),
+        "sub" => spans.push(Span::Subscript(convert_children(element, depth))),
+        "u" | "ins" => spans.push(Span::Underline(convert_children(element, depth))),
         "span" if element.value().attr("itemprop") == Some("time") => {
-            push_quote_time(element, spans)
+            push_quote_time(element, spans, depth)
         }
-        "span" | "font" | "mark" => push_colored(element, spans),
-        "ul" | "ol" => spans.push(list(element)),
-        "table" => spans.push(table(element)),
+        "span" | "font" | "mark" => push_colored(element, spans, depth),
+        "ul" | "ol" => spans.push(list(element, depth)),
+        "table" => spans.push(table(element, depth)),
         "code" => spans.push(Span::Code(raw_text(element))),
         "pre" | "codeblock" => spans.push(code_block(element)),
-        "a" => push_link(element, spans),
+        "a" => push_link(element, spans, depth),
         "at" => spans.push(Span::Mention {
             name: raw_text(element).trim().to_owned(),
             id: element.value().attr("id").map(str::to_owned),
@@ -185,18 +192,18 @@ fn convert_unindented(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         "li" => spans.push(Span::List {
             ordered: false,
             start: 1,
-            items: vec![convert_children(element)],
+            items: vec![convert_children(element, depth)],
         }),
         "blockquote" if is_reply(element) => spans.push(Span::Quote {
             message_id: element.value().attr("itemid").map(str::to_owned),
-            children: convert_children(element),
+            children: convert_children(element, depth),
         }),
-        "blockquote" => spans.push(Span::BlockQuote(convert_children(element))),
+        "blockquote" => spans.push(Span::BlockQuote(convert_children(element, depth))),
         "emoji" => push_emoji(element, spans),
         "customemoji" => push_custom_emoji(element, spans),
         "img" => push_image(element, spans),
-        "video" => push_video(element, spans),
-        _ => spans.extend(convert_children(element)),
+        "video" => push_video(element, spans, depth),
+        _ => spans.extend(convert_children(element, depth)),
     }
 }
 
@@ -207,14 +214,14 @@ fn is_reply(element: ElementRef<'_>) -> bool {
         .is_some_and(|itemtype| itemtype.contains(REPLY_ITEMTYPE))
 }
 
-fn list(element: ElementRef<'_>) -> Span {
+fn list(element: ElementRef<'_>, depth: u32) -> Span {
     let mut items: Vec<Vec<Span>> = Vec::new();
     for child in element.children().filter_map(ElementRef::wrap) {
         match child.value().name() {
-            "li" => items.push(convert_children(child)),
+            "li" => items.push(convert_children(child, depth)),
             "ul" | "ol" => match items.last_mut() {
-                Some(previous) => previous.push(list(child)),
-                None => items.push(vec![list(child)]),
+                Some(previous) => previous.push(list(child, depth + 1)),
+                None => items.push(vec![list(child, depth + 1)]),
             },
             _ => {}
         }
@@ -230,7 +237,7 @@ fn list(element: ElementRef<'_>) -> Span {
     }
 }
 
-fn table(element: ElementRef<'_>) -> Span {
+fn table(element: ElementRef<'_>, depth: u32) -> Span {
     let rows: Vec<ElementRef<'_>> = element
         .descendants()
         .filter_map(ElementRef::wrap)
@@ -248,7 +255,11 @@ fn table(element: ElementRef<'_>) -> Span {
         header,
         rows: rows
             .into_iter()
-            .map(|row| cells_of(row).map(convert_children).collect())
+            .map(|row| {
+                cells_of(row)
+                    .map(|cell| convert_children(cell, depth))
+                    .collect()
+            })
             .filter(|cells: &Vec<Vec<Span>>| !cells.is_empty())
             .collect(),
     }
@@ -267,7 +278,7 @@ fn cells_of<'a>(row: ElementRef<'a>) -> impl Iterator<Item = ElementRef<'a>> {
         .filter(|cell| matches!(cell.value().name(), "td" | "th"))
 }
 
-fn push_colored(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+fn push_colored(element: ElementRef<'_>, spans: &mut Vec<Span>, depth: u32) {
     let value = element.value();
     let style = value.attr("style").unwrap_or_default();
     let color = style_value(style, "color")
@@ -278,7 +289,7 @@ fn push_colored(element: ElementRef<'_>, spans: &mut Vec<Span>) {
         .and_then(parse_color)
         .or((value.name() == "mark").then_some(MARK_BACKGROUND));
     let size = style_value(style, "font-size").and_then(parse_font_size);
-    let mut children = convert_children(element);
+    let mut children = convert_children(element, depth);
     if color.is_some() || background.is_some() {
         children = vec![Span::Colored {
             color,
@@ -412,8 +423,8 @@ fn language_of(element: ElementRef<'_>) -> Option<String> {
         .map(str::to_owned)
 }
 
-fn push_link(element: ElementRef<'_>, spans: &mut Vec<Span>) {
-    let children = convert_children(element);
+fn push_link(element: ElementRef<'_>, spans: &mut Vec<Span>, depth: u32) {
+    let children = convert_children(element, depth);
     match element.value().attr("href") {
         Some(url) if !url.is_empty() => spans.push(Span::Link {
             url: url.to_owned(),
@@ -465,12 +476,12 @@ fn push_image(element: ElementRef<'_>, spans: &mut Vec<Span>) {
 }
 
 /// A Teams video clip draws as its thumbnail; other videos keep only their fallback content.
-fn push_video(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+fn push_video(element: ElementRef<'_>, spans: &mut Vec<Span>, depth: u32) {
     match element.value().attr("src").and_then(video_thumbnail_url) {
         Some(thumbnail) => spans.push(Span::Image {
             hosted_content_url: thumbnail,
         }),
-        None => spans.extend(convert_children(element)),
+        None => spans.extend(convert_children(element, depth)),
     }
 }
 
@@ -479,9 +490,9 @@ fn raw_text(element: ElementRef<'_>) -> String {
 }
 
 /// The service sends the reply time as an empty span that only carries the quoted message id.
-fn push_quote_time(element: ElementRef<'_>, spans: &mut Vec<Span>) {
+fn push_quote_time(element: ElementRef<'_>, spans: &mut Vec<Span>, depth: u32) {
     if !raw_text(element).trim().is_empty() {
-        push_colored(element, spans);
+        push_colored(element, spans, depth);
         return;
     }
     if let Some(time) = element.value().attr("itemid").and_then(quote_time) {
@@ -665,6 +676,35 @@ fn trim_breaks(spans: &mut Vec<Span>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn flattened(spans: &[Span], text: &mut String) {
+        for span in spans {
+            match span {
+                Span::Text(part) => text.push_str(part),
+                Span::Bold(children)
+                | Span::Italic(children)
+                | Span::Strike(children)
+                | Span::Superscript(children)
+                | Span::Subscript(children)
+                | Span::Underline(children) => flattened(children, text),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn deeply_nested_html_keeps_its_text_without_exhausting_the_stack() {
+        const WRAPPERS: usize = 20_000;
+        let html = format!(
+            "{}deep text{}",
+            "<b>".repeat(WRAPPERS),
+            "</b>".repeat(WRAPPERS)
+        );
+        let spans = html_to_spans(&html);
+        let mut text = String::new();
+        flattened(&spans, &mut text);
+        assert!(text.contains("deep text"));
+    }
 
     #[test]
     fn an_empty_reply_time_shows_the_time_of_the_quoted_message() {

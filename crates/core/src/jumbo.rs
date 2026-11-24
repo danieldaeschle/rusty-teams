@@ -6,6 +6,8 @@ pub const MAX_JUMBO_EMOJI: usize = 3;
 const EMOJI_ITEMTYPE: &str = "schema.skype.com/Emoji";
 const SKIN_TONES: std::ops::RangeInclusive<char> = '\u{1f3fb}'..='\u{1f3ff}';
 const BLOCKING_ELEMENTS: [&str; 4] = ["table", "attachment", "blockquote", "pre"];
+/// Insanely nested HTML is not a jumbo emoji: stop walking before the stack is exhausted.
+const MAX_EMOJI_DEPTH: u32 = 64;
 const IGNORED_CHARACTERS: [char; 5] = ['\u{a0}', '\u{200b}', '\u{200c}', '\u{200d}', '\u{feff}'];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +38,7 @@ impl Scan {
 pub fn jumbo_emoji(html: &str) -> Option<Vec<JumboEmoji>> {
     let fragment = Html::parse_fragment(html);
     let mut scan = Scan::default();
-    walk(fragment.root_element(), &mut scan);
+    walk(fragment.root_element(), &mut scan, 0);
     if scan.blocked || scan.break_before_content {
         return None;
     }
@@ -50,7 +52,7 @@ pub fn jumbo_emoji(html: &str) -> Option<Vec<JumboEmoji>> {
         .then_some(found)
 }
 
-fn walk(element: ElementRef<'_>, scan: &mut Scan) {
+fn walk(element: ElementRef<'_>, scan: &mut Scan, depth: u32) {
     for child in element.children() {
         if scan.blocked {
             return;
@@ -68,7 +70,7 @@ fn walk(element: ElementRef<'_>, scan: &mut Scan) {
             }
             Node::Element(_) => {
                 if let Some(child_element) = ElementRef::wrap(child) {
-                    visit_element(child_element, scan);
+                    visit_element(child_element, scan, depth + 1);
                 }
             }
             _ => {}
@@ -76,7 +78,11 @@ fn walk(element: ElementRef<'_>, scan: &mut Scan) {
     }
 }
 
-fn visit_element(element: ElementRef<'_>, scan: &mut Scan) {
+fn visit_element(element: ElementRef<'_>, scan: &mut Scan, depth: u32) {
+    if depth > MAX_EMOJI_DEPTH {
+        scan.blocked = true;
+        return;
+    }
     let value = element.value();
     let is_emoji_image = value.name() == "img"
         && value
@@ -100,7 +106,7 @@ fn visit_element(element: ElementRef<'_>, scan: &mut Scan) {
         "img" => scan.blocked = true,
         "br" => scan.break_pending = true,
         name if BLOCKING_ELEMENTS.contains(&name) => scan.blocked = true,
-        _ => walk(element, scan),
+        _ => walk(element, scan, depth),
     }
 }
 
@@ -186,6 +192,17 @@ fn is_pictographic(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deeply_nested_html_is_not_a_jumbo_emoji_and_does_not_exhaust_the_stack() {
+        const WRAPPERS: usize = 20_000;
+        let html = format!(
+            "{}<emoji id=\"smile\" alt=\"🙂\"></emoji>{}",
+            "<span>".repeat(WRAPPERS),
+            "</span>".repeat(WRAPPERS)
+        );
+        assert_eq!(jumbo_emoji(&html), None);
+    }
 
     #[test]
     fn repeated_skin_tones_from_graph_are_dropped() {
