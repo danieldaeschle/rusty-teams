@@ -8,21 +8,21 @@ See proposal.md for why. `NotificationCenter::sync_windows` in `crates/app/src/n
 
 **Goals:**
 
-- Open, place, and close only ring cards while the desktop notification service stays connected.
+- Open, place, and close ring cards while the desktop notification service stays connected.
 - Keep publishing the ring notification and handling its actions.
-- Leave chat toasts and meeting reminders on the desktop-notification path.
+- Leave chat toasts on the desktop-notification path. Meeting cards are the companion change in this pull request.
 
 **Non-Goals:**
 
 - Changing Hyprland or Quickshell config.
-- Opening in-app windows for chat or meeting toasts.
+- Opening in-app windows for chat toasts.
 - A new window kind or new chrome.
 
 ## Decisions
 
 1. After `sync_desktop`, sync ring cards and return. Do not fall through into the full window sync, because that also opens chat toast windows.
    - Alternative: delete the early return. Rejected. Chat toasts would become in-app windows as well, which the current Linux spec does not want.
-2. Reuse `place_call_toast` / `close_call_window`, filtered to `CallToast::Ring`. Meeting keys stay out of that filter.
+2. Reuse `place_call_toast` / `close_call_window`, filtered to `CallToast::Ring` and `CallToast::Meeting`. Chat toast keys stay out of that filter. The meeting card itself is specified in `linux-meeting-card`.
 3. Keep `popup_options` as they are. The card the user asked for is that popup.
 4. Card actions stay on `RingView`. The notification closes because the ring leaves `ringing()` and the next `sync_desktop` drops it. If a card action does not reach that sync in the same turn, queue the same desktop close the notification actions already queue before answering.
 

@@ -4,7 +4,7 @@
 
 ### Requirement: Incoming ring shows the in-app ring card
 
-When a desktop notification service is connected, an incoming ring MUST still open the in-app ring card. The card MUST show the caller and MUST offer decline and audio accept. When the ring is video, the card MUST also offer video accept. The desktop notification for that ring MUST still be published. The card MUST close when the ring ends. Chat toasts and meeting reminders MUST stay desktop notifications and MUST NOT open an in-app window.
+When a desktop notification service is connected, an incoming ring MUST still open the in-app ring card. The card MUST show the caller and MUST offer decline and audio accept. When the ring is video, the card MUST also offer video accept. The desktop notification for that ring MUST still be published. The card MUST close when the ring ends.
 
 #### Scenario: Ring while a notification service is connected
 
@@ -21,15 +21,14 @@ When a desktop notification service is connected, an incoming ring MUST still op
 - **WHEN** the ring is accepted, declined, or otherwise ends
 - **THEN** the ring card closes
 
+### Requirement: Chat toasts stay notifications
+
+Chat toasts MUST stay desktop notifications and MUST NOT open an in-app window. Meeting reminder cards are specified separately and MAY open while the service is connected.
+
 #### Scenario: Chat toast stays a notification
 
 - **WHEN** a chat message toast is due and a desktop notification service is connected
 - **THEN** the message is a desktop notification and no in-app toast window opens
-
-#### Scenario: Meeting reminder stays a notification
-
-- **WHEN** a meeting reminder is due and a desktop notification service is connected
-- **THEN** the reminder is a desktop notification and no in-app toast window opens
 
 ### Requirement: Ring card actions answer the same ring
 

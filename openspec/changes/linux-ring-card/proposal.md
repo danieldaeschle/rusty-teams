@@ -8,7 +8,7 @@ On Linux an incoming call only appears as a desktop notification whenever a noti
 
 - While a desktop notification service is connected, an incoming ring still opens the existing in-app ring card.
 - The desktop notification for that ring stays (Decline, audio accept, and video accept when the ring is video).
-- Chat toasts and meeting reminders stay desktop notifications only. They do not gain an in-app window.
+- Chat toasts stay desktop notifications only. They do not gain an in-app window. Meeting reminder cards are the companion change in this pull request.
 - Windows and macOS toast behaviour stays as it is.
 - Out of scope: camera device duplicates, the default outgoing call being video, and treating a click on the notification body as accept.
 
