@@ -36,6 +36,7 @@
 
 #include "modules/desktop_capture/desktop_frame.h"
 #include "modules/desktop_capture/desktop_geometry.h"
+#include "modules/desktop_capture/mac/sck_picker_handle.h"
 
 namespace {
 
@@ -82,7 +83,7 @@ API_AVAILABLE(macos(14.0))
 @interface LiveKitMacWindowSession
     : NSObject <SCStreamDelegate, SCStreamOutput, SCContentSharingPickerObserver>
 - (instancetype)initWithMaxFps:(uint32_t)maxFps includeCursor:(BOOL)includeCursor;
-- (void)startPicker;
+- (void)startPickerWithPicker:(SCContentSharingPicker*)picker;
 - (void)setMaxFps:(uint32_t)maxFps;
 - (BOOL)pollFrame:(std::unique_ptr<webrtc::DesktopFrame>*)outFrame
            status:(livekit_ffi::SckCaptureStatus*)outStatus;
@@ -107,6 +108,8 @@ API_AVAILABLE(macos(14.0))
   IOSurfaceRef _latestSurface;
   CGRect _latestCropRect;
   dispatch_queue_t _captureQueue;
+  // The picker this session observes. Only touched on the capturer thread.
+  SCContentSharingPicker* _picker;
 }
 
 - (instancetype)initWithMaxFps:(uint32_t)maxFps includeCursor:(BOOL)includeCursor {
@@ -144,13 +147,12 @@ API_AVAILABLE(macos(14.0))
   return config;
 }
 
-- (void)startPicker {
-  SCContentSharingPicker* picker = [SCContentSharingPicker sharedPicker];
-  if (picker.maximumStreamCount == nil || [picker.maximumStreamCount unsignedIntValue] == 0) {
-    picker.maximumStreamCount = @1;
-  }
+// `picker` comes from a webrtc::SckPickerHandle, which owns its `active` and
+// `maximumStreamCount` properties. They are shared with WebRTC's own SCK
+// capturer, so this session must not change them.
+- (void)startPickerWithPicker:(SCContentSharingPicker*)picker {
+  _picker = picker;
   [picker addObserver:self];
-  picker.active = YES;
   SCContentSharingPickerConfiguration* config = [[SCContentSharingPickerConfiguration alloc] init];
   config.allowedPickerModes = SCContentSharingPickerModeSingleWindow;
   config.allowsChangingSelectedContent = YES;
@@ -286,13 +288,13 @@ API_AVAILABLE(macos(14.0))
     _latestSurface = NULL;
   }
 
-  SCContentSharingPicker* picker = [SCContentSharingPicker sharedPicker];
+  SCContentSharingPicker* picker = _picker;
+  _picker = nil;
   [picker removeObserver:self];
   if (streamToStop != nil) {
     [streamToStop removeStreamOutput:self type:SCStreamOutputTypeScreen error:nil];
     [streamToStop stopCaptureWithCompletionHandler:nil];
   }
-  picker.active = NO;
 
   if (surfaceToRelease != NULL) {
     IOSurfaceDecrementUseCount(surfaceToRelease);
@@ -577,6 +579,9 @@ class API_AVAILABLE(macos(14.0)) SckWindowCapturerImpl final : public SckWindowC
         [session_ stop];
         session_ = nil;
       }
+      // After the session has stopped its stream and left the picker: the
+      // last handle released deactivates the shared picker.
+      picker_handle_.reset();
     }
   }
 
@@ -587,9 +592,19 @@ class API_AVAILABLE(macos(14.0)) SckWindowCapturerImpl final : public SckWindowC
         [session_ stop];
         session_ = nil;
       }
+      // Like WebRTC's ScreenCapturerSck, keep one handle for the capturer's
+      // lifetime; each session runs at most one stream at a time.
+      if (!picker_handle_) {
+        picker_handle_ = webrtc::CreateSckPickerHandle();
+      }
+      if (!picker_handle_) {
+        // The shared picker reached its stream limit. With no session,
+        // CaptureFrame() reports kStartFailed.
+        return;
+      }
       session_ = [[LiveKitMacWindowSession alloc] initWithMaxFps:max_fps_
                                                    includeCursor:include_cursor_ ? YES : NO];
-      [session_ startPicker];
+      [session_ startPickerWithPicker:picker_handle_->GetPicker()];
     }
   }
 
@@ -644,6 +659,8 @@ class API_AVAILABLE(macos(14.0)) SckWindowCapturerImpl final : public SckWindowC
   uint32_t max_fps_ = kDefaultMaxFps;
   Callback* callback_ = nullptr;
   SckCaptureStatus last_status_ = SckCaptureStatus::kActive;
+  // Created and released on the capturer thread, as SckPickerHandle requires.
+  std::unique_ptr<webrtc::SckPickerHandleInterface> picker_handle_;
   LiveKitMacWindowSession* session_ = nil;
 };
 
