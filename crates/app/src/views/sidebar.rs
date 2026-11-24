@@ -527,6 +527,9 @@ impl SidebarView {
         if tab == SidebarTab::Agents && !crate::agents::agents_enabled(cx) {
             return;
         }
+        if tab == SidebarTab::Calendar && !self.state.read(cx).calendar_available() {
+            return;
+        }
         let changed = self.tab != tab;
         self.tab = tab;
         if changed {

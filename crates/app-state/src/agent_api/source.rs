@@ -15,6 +15,7 @@ use super::image_scale::downscale;
 use crate::backend::Engine;
 
 const IMAGE_WAIT: Duration = Duration::from_secs(10);
+const GUEST_ORG_NO_CALENDAR: &str = "the calendar is not available while a guest org is open";
 
 pub struct AppSource {
     store: Arc<Store>,
@@ -35,6 +36,15 @@ impl AppSource {
 
     fn engine(&self) -> Result<&Arc<Engine>, SourceError> {
         self.engine.get().ok_or(SourceError::NotConnected)
+    }
+
+    /// The Outlook calendar of the open org. A guest has no mailbox there, so a guest org has none.
+    fn calendar_api(&self) -> Result<Calendar, SourceError> {
+        let session = self.engine()?.remote().session();
+        if session.tenant().is_some() {
+            return Err(SourceError::Failed(GUEST_ORG_NO_CALENDAR.to_owned()));
+        }
+        Ok(Calendar::new(session))
     }
 }
 
@@ -152,8 +162,8 @@ impl TeamsSource for AppSource {
 
     fn calendar(&self, start: DateTime<Utc>, end: DateTime<Utc>) -> SourceFuture<'_, Vec<Meeting>> {
         Box::pin(async move {
-            let engine = self.engine()?;
-            let events = Calendar::new(engine.remote().session())
+            let events = self
+                .calendar_api()?
                 .calendar_view(start, end)
                 .await
                 .map_err(|error| SourceError::Failed(error.to_string()))?;
@@ -180,8 +190,8 @@ impl TeamsSource for AppSource {
         end: DateTime<Utc>,
     ) -> SourceFuture<'_, Vec<PersonAvailability>> {
         Box::pin(async move {
-            let engine = self.engine()?;
-            let schedules = Calendar::new(engine.remote().session())
+            let schedules = self
+                .calendar_api()?
                 .schedules(&emails, start, end)
                 .await
                 .map_err(|error| SourceError::Failed(error.to_string()))?;
@@ -206,13 +216,14 @@ impl TeamsSource for AppSource {
 
     fn create_meeting(&self, draft: MeetingDraft) -> SourceFuture<'_, CreatedMeeting> {
         Box::pin(async move {
+            let calendar = self.calendar_api()?;
             let engine = self.engine()?;
             let mut names = Vec::with_capacity(draft.attendees.len());
             for address in &draft.attendees {
                 let users = engine.search_people(address).await.unwrap_or_default();
                 names.push(users.into_iter().find_map(|user| user.display_name));
             }
-            let created = Calendar::new(engine.remote().session())
+            let created = calendar
                 .create_event(&new_event(draft, names))
                 .await
                 .map_err(|error| SourceError::Failed(error.to_string()))?;
