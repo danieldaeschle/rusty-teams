@@ -168,6 +168,27 @@ fn overlay_options(role: Role, rect: ScreenRect, scale: f32) -> WindowOptions {
     }
 }
 
+/// Two screens can both render as "Entire screen", so a label match alone puts the red border on
+/// the primary monitor. Prefer the exact source reported by the call; fall back to the label for
+/// demo calls and older updates that only carried text.
+fn resolve_share_source(
+    sources: &[ShareSource],
+    label: &str,
+    exact: Option<&ShareSource>,
+) -> Option<ShareSource> {
+    if let Some(exact) = exact
+        && let Some(current) = sources
+            .iter()
+            .find(|source| source.kind == exact.kind && source.id == exact.id)
+    {
+        return Some(current.clone());
+    }
+    sources
+        .iter()
+        .find(|source| source.label() == label)
+        .cloned()
+}
+
 impl CallWindows {
     /// Points at a main window reopened from the tray.
     pub fn attach_main_window(&mut self, window: &Window) {
@@ -452,18 +473,17 @@ impl CallWindows {
     fn local_share(&self, cx: &App) -> Option<Option<ShareSource>> {
         let model = &self.app.read(cx).call.as_ref()?.model;
         let label = model.local_share.as_ref()?;
-        if let Some(source) = model
-            .share_sources
-            .iter()
-            .find(|source| &source.label() == label)
-            .cloned()
-        {
-            return Some(Some(source));
-        }
-        Some(model.share_kind.map(|kind| ShareSource {
-            id: 0,
-            kind,
-            title: label.clone(),
+        let resolved = resolve_share_source(
+            &model.share_sources,
+            label,
+            model.local_share_source.as_ref(),
+        );
+        Some(resolved.or_else(|| {
+            model.share_kind.map(|kind| ShareSource {
+                id: 0,
+                kind,
+                title: label.clone(),
+            })
         }))
     }
 
@@ -837,5 +857,35 @@ impl CallWindows {
                 }
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod share_source_tests {
+    use calling::{ShareKind, ShareSource};
+
+    use super::resolve_share_source;
+
+    fn screen(id: u64) -> ShareSource {
+        ShareSource {
+            id,
+            kind: ShareKind::Screen,
+            title: "Display".to_owned(),
+        }
+    }
+
+    #[test]
+    fn the_second_screen_wins_even_when_both_have_the_same_label() {
+        let sources = [screen(0), screen(1)];
+        let exact = sources[1].clone();
+        let picked = resolve_share_source(&sources, "Display", Some(&exact)).unwrap();
+        assert_eq!(picked.id, 1);
+    }
+
+    #[test]
+    fn the_label_is_only_a_fallback() {
+        let sources = [screen(0), screen(1)];
+        let picked = resolve_share_source(&sources, "Display", None).unwrap();
+        assert_eq!(picked.id, 0);
     }
 }

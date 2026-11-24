@@ -355,11 +355,13 @@ pub(super) const SHARE_THUMBNAIL_HEIGHT: u32 = 180;
 pub(super) fn announce_share(control: &CallControl, source: &ShareSource) {
     control.send(CallUpdate::ShareKind(Some(source.kind)));
     control.send(CallUpdate::LocalShare(Some(source.label())));
+    control.send(CallUpdate::LocalShareSource(Some(source.clone())));
 }
 
 pub(super) fn clear_share(control: &CallControl) {
     control.send(CallUpdate::ShareKind(None));
     control.send(CallUpdate::LocalShare(None));
+    control.send(CallUpdate::LocalShareSource(None));
 }
 
 pub(super) fn refresh_share_sources(

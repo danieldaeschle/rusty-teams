@@ -23,7 +23,7 @@ use super::push_to_talk::PushToTalk;
 use super::report::SharedRecorder;
 use super::share_view::ShareStage;
 use super::stage_layout::{
-    FILMSTRIP_MAX, RECENT_SPEAKER, SPEAKER_HOLD, VisibleRotation, first_page_size, split_overflow,
+    first_page_size, split_overflow, VisibleRotation, FILMSTRIP_MAX, RECENT_SPEAKER, SPEAKER_HOLD,
 };
 use super::transcript::{Transcript, TranscriptEntry};
 use super::view_settings::{CallLayout, ViewSettings};
@@ -299,6 +299,7 @@ pub struct CallModel {
     pub cameras: Vec<CameraDevice>,
     pub camera: DeviceChoice,
     pub local_share: Option<String>,
+    pub local_share_source: Option<ShareSource>,
     pub share_picker: SharePicker,
     pub share_kind: Option<ShareKind>,
     pub share_sources: Vec<ShareSource>,
@@ -371,6 +372,7 @@ impl CallModel {
             cameras: Vec::new(),
             camera: DeviceChoice::SystemDefault,
             local_share: None,
+            local_share_source: None,
             share_picker: SharePicker::List,
             share_kind: None,
             share_sources: Vec::new(),
@@ -512,6 +514,7 @@ impl CallModel {
                 }
                 self.local_share = label;
             }
+            CallUpdate::LocalShareSource(source) => self.local_share_source = source,
             CallUpdate::SharePicker(picker) => self.share_picker = picker,
             CallUpdate::ShareKind(kind) => self.share_kind = kind,
             CallUpdate::ShareSources(sources) => {
@@ -2186,11 +2189,9 @@ mod tests {
                 .len(),
             1
         );
-        assert!(
-            model
-                .visible_captions(start + Duration::from_secs(7))
-                .is_empty()
-        );
+        assert!(model
+            .visible_captions(start + Duration::from_secs(7))
+            .is_empty());
         model.apply(CallUpdate::Captions(CaptionState::Off));
         assert!(model.caption_lines.is_empty() && !model.captions_on());
     }
@@ -2213,16 +2214,14 @@ mod tests {
         assert!(!model.can_hold() && !model.can_transfer());
         let meeting = meeting_with_me();
         assert!(!meeting.can_hold() && !meeting.can_transfer());
-        assert!(
-            !CallModel::people(
-                "Group",
-                &[
-                    ("8:orgid:a".into(), "A".into()),
-                    ("8:orgid:b".into(), "B".into())
-                ]
-            )
-            .can_hold()
-        );
+        assert!(!CallModel::people(
+            "Group",
+            &[
+                ("8:orgid:a".into(), "A".into()),
+                ("8:orgid:b".into(), "B".into())
+            ]
+        )
+        .can_hold());
     }
 
     #[test]

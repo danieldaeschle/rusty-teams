@@ -162,6 +162,8 @@ pub enum CallUpdate {
     Camera(bool),
     Cameras(Vec<CameraDevice>),
     LocalShare(Option<String>),
+    /// The exact source, not just its label: two screens can share the same label.
+    LocalShareSource(Option<ShareSource>),
     SharePicker(SharePicker),
     ShareKind(Option<ShareKind>),
     ShareSources(Vec<ShareSource>),
