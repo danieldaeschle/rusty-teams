@@ -329,6 +329,8 @@ impl<T: MessageTransport> Messages<T> {
 fn edit_body(message_id: &str, html: &str) -> Value {
     json!({
         "id": message_id,
+        // Teams treats the edit as a fresh write and echoes it back under this id.
+        "clientmessageid": new_client_message_id(),
         "content": html,
         "messagetype": "RichText/Html",
         "contenttype": "text",
@@ -438,5 +440,23 @@ mod acl_check_tests {
             retry_after: None,
         };
         assert!(matches!(ensure_success(&other), Err(Error::Session(_))));
+    }
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+
+    #[test]
+    fn an_edit_carries_its_own_fresh_client_message_id() {
+        let first = edit_body("m1", "<p>a</p>");
+        let second = edit_body("m1", "<p>b</p>");
+        assert_eq!(first["id"], json!("m1"));
+        assert!(
+            first["clientmessageid"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty())
+        );
+        assert_ne!(first["clientmessageid"], second["clientmessageid"]);
     }
 }
