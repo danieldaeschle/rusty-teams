@@ -164,8 +164,10 @@ async fn ensure_access_token(
                 };
             }
             Err(error) => {
-                crate::diagnostics::record(format!("calls: google token refresh failed: {error}"));
-                return Ok(false);
+                let message = format!("google token refresh failed: {error}");
+                crate::diagnostics::record(format!("calls: {message}"));
+                // Surface to week load as CalendarLoadFailure — never Ok([]) for auth fail.
+                return Err(message);
             }
         }
     }
@@ -174,4 +176,23 @@ async fn ensure_access_token(
 
 fn missing_client_id() -> String {
     app_base::ui_locale::tr("settings.calendar.not_in_build")
+}
+
+/// True when another fetch cannot succeed until the user signs in to Google again.
+pub fn needs_sign_in(message: &str) -> bool {
+    message.starts_with("google token refresh failed:") || message == missing_client_id()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::needs_sign_in;
+
+    #[test]
+    fn google_sign_in_is_required_only_for_a_rejected_token() {
+        assert!(needs_sign_in(
+            "google token refresh failed: HTTP 400: invalid_grant"
+        ));
+        assert!(!needs_sign_in("HTTP 503"));
+        assert!(!needs_sign_in("client_secret is missing"));
+    }
 }
