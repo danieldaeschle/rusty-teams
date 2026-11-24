@@ -215,6 +215,18 @@ fn is_reply(element: ElementRef<'_>) -> bool {
 }
 
 fn list(element: ElementRef<'_>, depth: u32) -> Span {
+    if depth > MAX_SPAN_DEPTH {
+        // Keep only this element's own text: descending further could exhaust the stack again.
+        let text: String = element
+            .children()
+            .filter_map(|child| child.value().as_text().map(|text| text.to_string()))
+            .collect();
+        return Span::List {
+            ordered: false,
+            start: 1,
+            items: vec![vec![Span::Text(text)]],
+        };
+    }
     let mut items: Vec<Vec<Span>> = Vec::new();
     for child in element.children().filter_map(ElementRef::wrap) {
         match child.value().name() {
@@ -687,6 +699,11 @@ mod tests {
                 | Span::Superscript(children)
                 | Span::Subscript(children)
                 | Span::Underline(children) => flattened(children, text),
+                Span::List { items, .. } => {
+                    for item in items {
+                        flattened(item, text);
+                    }
+                }
                 _ => {}
             }
         }
@@ -704,6 +721,20 @@ mod tests {
         let mut text = String::new();
         flattened(&spans, &mut text);
         assert!(text.contains("deep text"));
+    }
+
+    #[test]
+    fn deeply_nested_lists_keep_their_text_without_exhausting_the_stack() {
+        const WRAPPERS: usize = 20_000;
+        let html = format!(
+            "{}<li>list text</li>{}",
+            "<ul><li>".repeat(WRAPPERS),
+            "</li></ul>".repeat(WRAPPERS)
+        );
+        let spans = html_to_spans(&html);
+        let mut text = String::new();
+        flattened(&spans, &mut text);
+        assert!(text.contains("list text"));
     }
 
     #[test]
