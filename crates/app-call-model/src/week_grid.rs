@@ -244,6 +244,62 @@ pub fn google_calendar_index(
         .map(|position| position + 1)
 }
 
+/// Colour index of a person's calendar: the picked palette colour, else its position after
+/// every Google, CalDAV and ICS calendar.
+pub fn person_calendar_index(accounts: &store::CalendarAccounts, mail: &str) -> Option<usize> {
+    let person = accounts
+        .people_calendars
+        .iter()
+        .find(|person| person.mail.eq_ignore_ascii_case(mail))?;
+    if let Some(color) = person.color {
+        return Some(color + 1);
+    }
+    let offset = 1
+        + accounts
+            .google_accounts
+            .iter()
+            .map(|account| account.calendars.len())
+            .sum::<usize>()
+        + accounts
+            .caldav_accounts
+            .iter()
+            .map(|account| account.calendars.len())
+            .sum::<usize>()
+        + accounts.ics_subscriptions.len();
+    accounts
+        .people_calendars
+        .iter()
+        .position(|person| person.mail.eq_ignore_ascii_case(mail))
+        .map(|position| position + offset)
+}
+
+/// First palette colour no calendar uses yet; with every colour taken, the least used one.
+pub fn free_palette_color(accounts: &store::CalendarAccounts, palette_len: usize) -> usize {
+    let google = accounts
+        .google_accounts
+        .iter()
+        .map(|account| account.calendars.len())
+        .sum::<usize>();
+    let caldav = accounts
+        .caldav_accounts
+        .iter()
+        .map(|account| account.calendars.len())
+        .sum::<usize>();
+    let fixed = google + caldav + accounts.ics_subscriptions.len();
+    let palette_len = palette_len.max(1);
+    let mut uses = vec![0usize; palette_len];
+    let people = accounts
+        .people_calendars
+        .iter()
+        .filter_map(|person| person_calendar_index(accounts, &person.mail));
+    for index in (1..=fixed).chain(people) {
+        uses[(index - 1) % palette_len] += 1;
+    }
+    (0..palette_len)
+        .min_by_key(|&color| uses[color])
+        .unwrap_or(0)
+}
+
 /// Calendar list position that colours an event (merged events keep Outlook's colour).
 pub fn calendar_index(event: &CalendarEvent, accounts: &store::CalendarAccounts) -> usize {
     match event.source {
@@ -305,6 +361,11 @@ pub fn calendar_index(event: &CalendarEvent, accounts: &store::CalendarAccounts)
                 })
                 .unwrap_or(offset)
         }
+        chatsvc::CalendarSource::Person => event
+            .account_id
+            .as_deref()
+            .and_then(|mail| person_calendar_index(accounts, mail))
+            .unwrap_or(0),
     }
 }
 
@@ -436,6 +497,25 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn a_new_person_gets_a_colour_nobody_uses() {
+        let mut accounts = store::CalendarAccounts::default();
+        assert_eq!(free_palette_color(&accounts, 4), 0);
+        accounts.add_person_calendar("a@example.com", "A");
+        accounts.set_person_color("a@example.com", 0);
+        accounts.add_person_calendar("b@example.com", "B");
+        accounts.set_person_color("b@example.com", 2);
+        assert_eq!(free_palette_color(&accounts, 4), 1);
+        accounts.ics_subscriptions.push(store::IcsSubscription {
+            id: "i".into(),
+            url: "https://example.com/a.ics".into(),
+            summary: "Holidays".into(),
+            selected: true,
+        });
+        accounts.set_person_color("b@example.com", 1);
+        assert_eq!(free_palette_color(&accounts, 4), 2);
+    }
 
     fn event(start_hour: u32, start_minute: u32, minutes: i64) -> CalendarEvent {
         let start = Utc

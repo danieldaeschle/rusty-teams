@@ -49,6 +49,8 @@ pub enum CalendarSource {
     CalDav,
     /// Read-only ICS subscription (holidays, shared links).
     Ics,
+    /// Read-only calendar of someone in the organization, through their free/busy schedule.
+    Person,
 }
 
 impl CalendarSource {
@@ -58,6 +60,7 @@ impl CalendarSource {
             CalendarSource::Google => "Google",
             CalendarSource::CalDav => "CalDAV",
             CalendarSource::Ics => "ICS",
+            CalendarSource::Person => "Person",
         }
     }
 

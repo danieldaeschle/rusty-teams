@@ -6,7 +6,7 @@ use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::caldav_form::{CalDavForm, IcsForm};
+use super::caldav_form::{CalDavForm, IcsForm, PeopleCalendarForm};
 use super::devices::DevicesView;
 use super::help::HelpView;
 use super::mcp::McpView;
@@ -71,6 +71,7 @@ pub struct SettingsDialog {
     agents: Option<Entity<AgentsSettings>>,
     caldav: Option<Entity<CalDavForm>>,
     ics: Option<Entity<IcsForm>>,
+    people: Option<Entity<PeopleCalendarForm>>,
     body_scroll: ScrollHandle,
     focus_handle: FocusHandle,
     search: Entity<InputState>,
@@ -113,6 +114,7 @@ impl SettingsDialog {
             agents: None,
             caldav: None,
             ics: None,
+            people: None,
             body_scroll: ScrollHandle::new(),
             focus_handle,
             search,
@@ -165,6 +167,10 @@ impl SettingsDialog {
             if self.ics.is_none() {
                 let app = self.app.clone();
                 self.ics = Some(cx.new(|cx| IcsForm::new(app, window, cx)));
+            }
+            if self.people.is_none() {
+                let app = self.app.clone();
+                self.people = Some(cx.new(|cx| PeopleCalendarForm::new(app, window, cx)));
             }
         }
         cx.notify();
@@ -219,10 +225,14 @@ impl SettingsDialog {
             SettingsSection::Chats => chats::render(&self.app, cx).into_any_element(),
             SettingsSection::Calls => calls::render(&self.center, cx).into_any_element(),
             SettingsSection::Calendar => calendar::render_view(&self.app, cx).into_any_element(),
-            SettingsSection::CalendarAccounts => {
-                calendar::render_accounts(&self.app, self.caldav.as_ref(), self.ics.as_ref(), cx)
-                    .into_any_element()
-            }
+            SettingsSection::CalendarAccounts => calendar::render_accounts(
+                &self.app,
+                self.caldav.as_ref(),
+                self.ics.as_ref(),
+                self.people.as_ref(),
+                cx,
+            )
+            .into_any_element(),
             SettingsSection::Devices => self
                 .devices
                 .clone()

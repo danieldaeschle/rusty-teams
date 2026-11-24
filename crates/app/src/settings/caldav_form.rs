@@ -5,6 +5,7 @@ use gpui_kit::*;
 use super::rows::{control_row, stacked_field, text_button};
 use crate::app_state::AppState;
 use crate::i18n::tr;
+use crate::views::new_chat::NewChatDraft;
 
 pub struct CalDavForm {
     app: Entity<AppState>,
@@ -243,5 +244,50 @@ impl Render for IcsForm {
                 ),
             )
         }
+    }
+}
+
+pub struct PeopleCalendarForm {
+    app: Entity<AppState>,
+    people: Entity<NewChatDraft>,
+}
+
+impl PeopleCalendarForm {
+    pub fn new(app: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let draft_app = app.clone();
+        PeopleCalendarForm {
+            app,
+            people: cx.new(|cx| NewChatDraft::new(draft_app, window, cx).compact()),
+        }
+    }
+
+    fn add(&mut self, cx: &mut Context<Self>) {
+        let picks = self.people.read(cx).chips().to_vec();
+        for pick in picks {
+            self.app.update(cx, |state, cx| {
+                state.add_person_calendar(pick.user_id, pick.mail, pick.name, cx)
+            });
+        }
+        self.people
+            .update(cx, |draft, cx| draft.set_chips(Vec::new(), cx));
+    }
+}
+
+impl Render for PeopleCalendarForm {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let form = cx.entity().clone();
+        stacked_field(
+            tr("settings.calendar.people_title"),
+            tr("settings.calendar.people_hint"),
+            h_flex()
+                .w_full()
+                .gap_2()
+                .items_center()
+                .child(div().flex_1().min_w_0().child(self.people.clone()))
+                .child(
+                    text_button("settings-people-add", tr("settings.calendar.people_add"))
+                        .on_click(move |_, _, cx| form.update(cx, |form, cx| form.add(cx))),
+                ),
+        )
     }
 }

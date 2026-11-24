@@ -34,6 +34,7 @@ pub fn render_accounts(
     app: &Entity<AppState>,
     caldav: Option<&Entity<super::caldav_form::CalDavForm>>,
     ics: Option<&Entity<super::caldav_form::IcsForm>>,
+    people: Option<&Entity<super::caldav_form::PeopleCalendarForm>>,
     cx: &App,
 ) -> Div {
     let accounts = app.read(cx).calendar_accounts();
@@ -57,6 +58,13 @@ pub fn render_accounts(
         body = body.child(ics_block(app, subscription));
     }
     if let Some(form) = ics {
+        body = body.child(form.clone());
+    }
+    body = body.child(caption(tr("settings.calendar.section_people")));
+    for person in &accounts.people_calendars {
+        body = body.child(person_block(app, person));
+    }
+    if let Some(form) = people {
         body = body.child(form.clone());
     }
     body = body
@@ -334,6 +342,22 @@ fn ics_block(app: &Entity<AppState>, subscription: &store::IcsSubscription) -> D
                 })
             }),
         )
+}
+
+fn person_block(app: &Entity<AppState>, person: &store::PersonCalendar) -> Div {
+    let remove = app.clone();
+    let mail = person.mail.clone();
+    control_row(
+        person.name.clone(),
+        person.mail.clone(),
+        text_button(
+            format!("settings-person-remove-{}", person.mail),
+            tr("settings.calendar.people_remove"),
+        )
+        .on_click(move |_, _, cx| {
+            remove.update(cx, |state, cx| state.remove_person_calendar(&mail, cx))
+        }),
+    )
 }
 
 fn home_choices(app: &Entity<AppState>, accounts: &store::CalendarAccounts) -> Div {

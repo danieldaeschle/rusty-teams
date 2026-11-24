@@ -7,6 +7,7 @@ use chrono::Local;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -16,7 +17,7 @@ use super::calendar_mini_month::mini_month_grid;
 use crate::app_state::AppState;
 use crate::call::calendar_list::{GroupCheck, group_check, listed_calendars, offers_show_all};
 use crate::call::calendar_prefs::OUTLOOK_GROUP;
-use crate::call::week_grid::google_calendar_index;
+use crate::call::week_grid::{google_calendar_index, person_calendar_index};
 use crate::i18n::tr;
 use crate::settings_section::SettingsSection;
 use crate::theme;
@@ -28,6 +29,7 @@ pub const MINI_MONTH_TAG: &str = "shell/islands/calendar/picker/mini-month";
 const ROW_HEIGHT: f32 = 28.;
 const MINI_CELL: f32 = 30.;
 const CHECK_SIZE: f32 = 14.;
+const PEOPLE_GROUP: &str = "people";
 
 pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
     let state = app.read(cx);
@@ -78,6 +80,13 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
     }
     for subscription in &accounts.ics_subscriptions {
         column = column.child(ics_row(app, subscription));
+    }
+    if accounts.has_people() {
+        column = column.child(people_group(
+            app,
+            &accounts,
+            prefs.group_collapsed(PEOPLE_GROUP),
+        ));
     }
     column
 }
@@ -357,6 +366,88 @@ fn ics_row(app: &Entity<AppState>, subscription: &IcsSubscription) -> Stateful<D
                 state.toggle_ics_subscription_selected(&id, cx)
             })
         },
+    )
+}
+
+fn people_group(app: &Entity<AppState>, accounts: &CalendarAccounts, collapsed: bool) -> Div {
+    let selected: Vec<bool> = accounts
+        .people_calendars
+        .iter()
+        .map(|person| person.selected)
+        .collect();
+    let check = group_check(&selected);
+    let (toggle_group, collapse) = (app.clone(), app.clone());
+    let mut body = group(
+        format!("calendar-group-{PEOPLE_GROUP}"),
+        tr("calendar.view.people_calendars"),
+        check,
+        collapsed,
+        move |cx| {
+            toggle_group.update(cx, |state, cx| {
+                state.set_people_calendars_selected(check != GroupCheck::All, cx)
+            })
+        },
+        move |cx| {
+            collapse.update(cx, |state, cx| {
+                state.update_calendar_prefs(|prefs| prefs.toggle_group(PEOPLE_GROUP), cx)
+            })
+        },
+    );
+    if collapsed {
+        return body;
+    }
+    for person in &accounts.people_calendars {
+        let (toggle, menu_app) = (app.clone(), app.clone());
+        let (mail, menu_mail) = (person.mail.clone(), person.mail.clone());
+        let index = person_calendar_index(accounts, &person.mail);
+        let color = index.map_or_else(theme::accent, theme::calendar_color);
+        body = body.child(
+            calendar_row(
+                format!("calendar-picker-person-{}", person.mail),
+                person.name.clone(),
+                person.selected,
+                color,
+                move |cx| {
+                    toggle.update(cx, |state, cx| {
+                        state.toggle_person_calendar_selected(&mail, cx)
+                    })
+                },
+            )
+            .context_menu(move |menu, _, _| person_menu(menu, &menu_app, &menu_mail, index)),
+        );
+    }
+    body
+}
+
+/// Right-click on a person: pick their colour or remove them, as in Teams.
+fn person_menu(
+    mut menu: PopupMenu,
+    app: &Entity<AppState>,
+    mail: &str,
+    current: Option<usize>,
+) -> PopupMenu {
+    for palette_index in 0..theme::avatar_palette_len() {
+        let (pick, mail) = (app.clone(), mail.to_owned());
+        let swatch = theme::calendar_color(palette_index + 1);
+        menu = menu.item(
+            PopupMenuItem::element(move |_, _| {
+                div().size(px(CHECK_SIZE)).rounded(px(3.)).bg(swatch)
+            })
+            .checked(current == Some(palette_index + 1))
+            .on_click(move |_, _, cx| {
+                pick.update(cx, |state, cx| {
+                    state.set_person_calendar_color(&mail, palette_index, cx)
+                })
+            }),
+        );
+    }
+    let (remove, mail) = (app.clone(), mail.to_owned());
+    menu.separator().item(
+        PopupMenuItem::new(tr("settings.calendar.people_remove"))
+            .icon(IconName::Delete)
+            .on_click(move |_, _, cx| {
+                remove.update(cx, |state, cx| state.remove_person_calendar(&mail, cx))
+            }),
     )
 }
 

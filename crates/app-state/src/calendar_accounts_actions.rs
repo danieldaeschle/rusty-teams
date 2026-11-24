@@ -148,6 +148,95 @@ impl AppState {
         .detach();
     }
 
+    /// Picks from recent chats carry no mail; free/busy needs it, so it is looked up by user id.
+    pub fn add_person_calendar(
+        &mut self,
+        user_id: String,
+        mail: Option<String>,
+        name: String,
+        cx: &mut Context<Self>,
+    ) {
+        let engine = self.engine.clone();
+        let resolving = runtime::spawn(async move {
+            match mail.filter(|mail| !mail.is_empty()) {
+                Some(mail) => Some(mail),
+                None => {
+                    let engine = engine?;
+                    graph::Graph::new(engine.remote().session().clone())
+                        .user_mail(&user_id)
+                        .await
+                        .ok()
+                        .flatten()
+                }
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let mail = resolving.await.ok().flatten();
+            this.update(cx, |state, cx| match mail {
+                Some(mail) => {
+                    let mut accounts = load_calendar_accounts(&state.store);
+                    let known = accounts
+                        .people_calendars
+                        .iter()
+                        .any(|person| person.mail.eq_ignore_ascii_case(&mail));
+                    let color = crate::call::week_grid::free_palette_color(
+                        &accounts,
+                        app_base::theme::avatar_palette_len(),
+                    );
+                    accounts.add_person_calendar(&mail, &name);
+                    if !known {
+                        accounts.set_person_color(&mail, color);
+                    }
+                    let _ = save_calendar_accounts(&state.store, &accounts);
+                    state.load_calendar_week(cx);
+                    cx.notify();
+                }
+                None => state.raise_notice(tr("settings.calendar.people_no_mail"), None, cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    pub fn set_person_calendar_color(&mut self, mail: &str, color: usize, cx: &mut Context<Self>) {
+        let mut accounts = load_calendar_accounts(&self.store);
+        accounts.set_person_color(mail, color);
+        let _ = save_calendar_accounts(&self.store, &accounts);
+        cx.notify();
+    }
+
+    pub fn remove_person_calendar(&mut self, mail: &str, cx: &mut Context<Self>) {
+        let mut accounts = load_calendar_accounts(&self.store);
+        accounts.remove_person_calendar(mail);
+        let _ = save_calendar_accounts(&self.store, &accounts);
+        self.load_calendar_week(cx);
+        cx.notify();
+    }
+
+    pub fn toggle_person_calendar_selected(&mut self, mail: &str, cx: &mut Context<Self>) {
+        let mut accounts = load_calendar_accounts(&self.store);
+        if let Some(person) = accounts
+            .people_calendars
+            .iter_mut()
+            .find(|person| person.mail.eq_ignore_ascii_case(mail))
+        {
+            person.selected = !person.selected;
+        }
+        let _ = save_calendar_accounts(&self.store, &accounts);
+        self.load_calendar_week(cx);
+        cx.notify();
+    }
+
+    pub fn set_people_calendars_selected(&mut self, selected: bool, cx: &mut Context<Self>) {
+        let mut accounts = load_calendar_accounts(&self.store);
+        for person in &mut accounts.people_calendars {
+            person.selected = selected;
+        }
+        let _ = save_calendar_accounts(&self.store, &accounts);
+        self.load_calendar_week(cx);
+        cx.notify();
+    }
+
     pub fn disconnect_ics_subscription(&mut self, subscription_id: &str, cx: &mut Context<Self>) {
         let mut accounts = load_calendar_accounts(&self.store);
         accounts.disconnect_ics(subscription_id);

@@ -220,6 +220,11 @@ impl AppState {
             let dates = self.calendar_dates();
             let anchor = dates.get(6).or(dates.last()).copied().unwrap_or(start);
             events.extend(demo_week(week_start(anchor, Weekday::Mon), offset));
+            events.extend(demo_people_week(
+                &store::load_calendar_accounts(&self.store),
+                week_start(anchor, Weekday::Mon),
+                offset,
+            ));
             events.extend(self.demo_meetings.iter().cloned());
             events.retain(|event| event.end > from && event.start < to);
             events.sort_by_key(|event| (event.start, event.end));
@@ -297,6 +302,28 @@ impl AppState {
                     }
                     Err(error) => failures.push(CalendarLoadFailure {
                         source: CalendarSource::CalDav,
+                        message: error,
+                    }),
+                }
+            }
+            if accounts.has_people() {
+                let calendar = Calendar::new(engine.remote().session());
+                match crate::people_calendar_sync::fetch_people_events(
+                    &calendar, &accounts, from, to,
+                )
+                .await
+                {
+                    Ok((events, partial)) => {
+                        combined.extend(events);
+                        for message in partial {
+                            failures.push(CalendarLoadFailure {
+                                source: CalendarSource::Person,
+                                message,
+                            });
+                        }
+                    }
+                    Err(error) => failures.push(CalendarLoadFailure {
+                        source: CalendarSource::Person,
                         message: error,
                     }),
                 }
@@ -475,6 +502,87 @@ fn demo_show_as(subject: &str, response: ResponseType) -> ShowAs {
         ResponseType::Tentative | ResponseType::NotResponded => ShowAs::Tentative,
         _ => ShowAs::Busy,
     }
+}
+
+/// Day, start minute, length, status and the title when the owner shares it.
+const DEMO_PEOPLE_SLOTS: [(&str, i64, i64, i64, &str, Option<&str>); 7] = [
+    (
+        "mara.lindqvist@example.com",
+        0,
+        13 * 60,
+        60,
+        "busy",
+        Some("Vendor call"),
+    ),
+    (
+        "mara.lindqvist@example.com",
+        1,
+        10 * 60,
+        90,
+        "busy",
+        Some("Roadmap workshop"),
+    ),
+    (
+        "mara.lindqvist@example.com",
+        2,
+        9 * 60,
+        30,
+        "tentative",
+        Some("Coffee with Priya"),
+    ),
+    (
+        "mara.lindqvist@example.com",
+        4,
+        8 * 60,
+        9 * 60,
+        "oof",
+        Some("Day off"),
+    ),
+    ("lea.schneider@example.com", 0, 15 * 60, 60, "busy", None),
+    ("lea.schneider@example.com", 2, 11 * 60, 120, "busy", None),
+    (
+        "lea.schneider@example.com",
+        3,
+        14 * 60,
+        60,
+        "workingElsewhere",
+        None,
+    ),
+];
+
+fn demo_people_week(
+    accounts: &store::CalendarAccounts,
+    monday: NaiveDate,
+    offset: FixedOffset,
+) -> Vec<CalendarEvent> {
+    accounts
+        .people_calendars
+        .iter()
+        .filter(|person| person.selected)
+        .flat_map(|person| {
+            let busy = DEMO_PEOPLE_SLOTS
+                .iter()
+                .filter(|slot| slot.0 == person.mail)
+                .map(|(_, day, minute, length, status, subject)| {
+                    let start = local_midnight(monday + Duration::days(*day), offset)
+                        + Duration::minutes(*minute);
+                    chatsvc::BusyTime {
+                        start,
+                        end: start + Duration::minutes(*length),
+                        status: (*status).to_owned(),
+                        subject: subject.map(str::to_owned),
+                        location: None,
+                    }
+                })
+                .collect();
+            let schedule = chatsvc::PersonSchedule {
+                email: person.mail.clone(),
+                busy,
+                error: None,
+            };
+            crate::people_calendar_sync::person_events(person, &schedule)
+        })
+        .collect()
 }
 
 fn demo_week(monday: NaiveDate, offset: FixedOffset) -> Vec<CalendarEvent> {
