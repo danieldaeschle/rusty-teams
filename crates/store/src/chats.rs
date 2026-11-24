@@ -194,6 +194,15 @@ impl Store {
         Ok(changed > 0)
     }
 
+    /// All chats we have cached; used to refetch messages after a realtime loss.
+    pub fn chat_ids(&self) -> Result<Vec<String>> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare_cached("SELECT id FROM chats ORDER BY id")?;
+        Ok(statement
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?)
+    }
+
     pub fn recent_chats(&self, limit: usize) -> Result<Vec<ChatRecord>> {
         let connection = self.lock()?;
         let mut statement = connection.prepare_cached(&format!(

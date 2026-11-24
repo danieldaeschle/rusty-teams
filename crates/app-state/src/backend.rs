@@ -401,6 +401,12 @@ async fn realtime_loop(
                             tokio::spawn(async move {
                                 receipt_engine.handle_receipt_status(&receipt_status).await
                             });
+                            if status.kind == StatusKind::MessageLoss {
+                                let resync_engine = engine.clone();
+                                tokio::spawn(async move {
+                                    resync_engine.resync_after_message_loss().await;
+                                });
+                            }
                         }
                         RealtimeEvent::Presence(updates) => {
                             engine.apply_presence(&updates);

@@ -278,6 +278,21 @@ impl<R: Remote> SyncEngine<R> {
         Ok(records)
     }
 
+    /// Refetches newer messages for every cached chat. A realtime message-loss signal means
+    /// pushes were dropped; receipts alone do not bring the missing messages back.
+    pub async fn resync_after_message_loss(&self) -> usize {
+        let Ok(chat_ids) = self.store.chat_ids() else {
+            return 0;
+        };
+        let mut recovered = 0;
+        for chat_id in chat_ids {
+            if let Ok(delta) = self.fetch_newer(&chat_id).await {
+                recovered += delta.added.len();
+            }
+        }
+        recovered
+    }
+
     /// Known after the first sidebar refresh.
     pub fn me(&self) -> Option<Me> {
         Some(Me {

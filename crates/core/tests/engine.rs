@@ -1692,6 +1692,21 @@ async fn catch_up_walks_several_pages_until_the_known_message() {
 }
 
 #[tokio::test]
+async fn message_loss_refetches_messages_of_cached_chats() {
+    let fake = Arc::new(Fake::default());
+    fake.set_chat_messages(numbered(5));
+    let engine = chat_engine(&fake, small_pages()).await;
+    engine.fetch_newer(CHAT).await.unwrap();
+    assert_eq!(engine.store().message_count(CHAT).unwrap(), 5);
+
+    // Messages pushed while the realtime link was down never arrived; the REST refetch finds them.
+    fake.set_chat_messages(numbered(8));
+    let added = engine.resync_after_message_loss().await;
+    assert_eq!(added, 3);
+    assert_eq!(engine.store().message_count(CHAT).unwrap(), 8);
+}
+
+#[tokio::test]
 async fn load_older_pages_back_to_the_start() {
     let fake = Arc::new(Fake::default());
     fake.set_chat_messages(numbered(25));
