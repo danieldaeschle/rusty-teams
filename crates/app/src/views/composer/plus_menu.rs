@@ -198,6 +198,7 @@ pub(crate) fn chat_invitees(state: &AppState, chat_id: &str) -> Vec<Pick> {
                 user_id,
                 name: member.display_name.clone(),
                 mail: None,
+                organization: None,
             })
         })
         .collect()

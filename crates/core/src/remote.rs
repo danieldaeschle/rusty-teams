@@ -1054,12 +1054,18 @@ impl Remote for Graph {
     }
 
     async fn search_people(&self, query: &str) -> Result<Vec<User>> {
-        let mut users = Graph::search_people(self, query).await?;
+        let mut users = match Graph::search_people(self, query).await {
+            Ok(users) => users,
+            Err(_) if crate::native::is_email_address(query) => Vec::new(),
+            Err(error) => return Err(error.into()),
+        };
         if crate::native::is_email_address(query)
             && !users.iter().any(|user| {
-                user.mail
-                    .as_deref()
-                    .is_some_and(|mail| mail.eq_ignore_ascii_case(query.trim()))
+                crate::native::user_has_address(
+                    user.mail.as_deref(),
+                    user.user_principal_name.as_deref(),
+                    query,
+                )
             })
             && let Ok(external) = chatsvc::UserProfiles::new(self.session())
                 .search_external(query)

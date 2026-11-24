@@ -7,6 +7,7 @@ pub use chat::{NativeMember, chat_type, graph_chat, graph_chat_from_aggregator};
 pub use message::graph_message;
 pub use source::{
     NativeChats, external_people, is_email_address, known_profile, remember_external,
+    user_has_address,
 };
 
 #[cfg(test)]

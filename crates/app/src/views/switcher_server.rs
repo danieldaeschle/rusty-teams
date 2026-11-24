@@ -24,12 +24,7 @@ pub fn people_results(
         .iter()
         .filter_map(|person| {
             let user_id = person.user_id.clone()?;
-            let subtitle = [person.job_title.as_deref(), person.department.as_deref()]
-                .into_iter()
-                .flatten()
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let subtitle = person_subtitle(person);
             Some(PersonResult {
                 user_id,
                 name: person.display_name.clone(),
@@ -40,6 +35,35 @@ pub fn people_results(
         .filter(|person| !shown_titles.contains(&person.name))
         .take(limit)
         .collect()
+}
+
+fn person_subtitle(person: &SearchPerson) -> String {
+    let primary = person
+        .job_title
+        .as_deref()
+        .filter(|title| !title.is_empty())
+        .or_else(|| person.email_addresses.first().map(String::as_str));
+    let extra = person
+        .company_name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            person
+                .job_title
+                .as_deref()
+                .filter(|title| !title.is_empty())
+                .and_then(|_| {
+                    person
+                        .department
+                        .as_deref()
+                        .filter(|department| !department.is_empty())
+                })
+        });
+    [primary, extra]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub fn server_message_results(
@@ -146,6 +170,17 @@ mod tests {
                 subtitle: "Engineer, AI".to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn an_external_person_shows_email_and_organization() {
+        let mut person = person("ada", "Ada Lovelace");
+        person.job_title = None;
+        person.department = None;
+        person.email_addresses = vec!["ada@other.example".into()];
+        person.company_name = Some("Other AG".into());
+        let results = people_results(&[person], &HashSet::new(), None, 5);
+        assert_eq!(results[0].subtitle, "ada@other.example, Other AG");
     }
 
     #[test]

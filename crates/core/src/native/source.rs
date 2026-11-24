@@ -315,6 +315,18 @@ pub fn remember_external(profiles: Vec<UserProfile>) -> Vec<graph::User> {
         .collect()
 }
 
+pub fn user_has_address(
+    mail: Option<&str>,
+    user_principal_name: Option<&str>,
+    query: &str,
+) -> bool {
+    let query = query.trim();
+    [mail, user_principal_name]
+        .into_iter()
+        .flatten()
+        .any(|address| address.eq_ignore_ascii_case(query))
+}
+
 pub fn is_email_address(query: &str) -> bool {
     let query = query.trim();
     query.split_once('@').is_some_and(|(local, domain)| {
@@ -392,5 +404,19 @@ mod tests {
         assert!(!super::is_email_address("ann@example"));
         assert!(!super::is_email_address("ann example@x.com"));
         assert!(!super::is_email_address("@example.com"));
+    }
+
+    #[test]
+    fn an_address_matches_mail_or_the_principal_name() {
+        assert!(super::user_has_address(
+            None,
+            Some("Ada@Other.Example"),
+            "ada@other.example"
+        ));
+        assert!(!super::user_has_address(
+            Some("other@example.com"),
+            Some("ada@other.example"),
+            "missing@example.com"
+        ));
     }
 }

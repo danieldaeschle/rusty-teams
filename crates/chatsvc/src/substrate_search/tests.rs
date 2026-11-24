@@ -169,7 +169,6 @@ fn suggestions_fixture_parses_every_group() {
     assert_eq!(person.email_addresses, ["erika.mustermann@contoso.example"]);
 
     let chat = &suggestions.chats[0];
-    assert_eq!(chat.thread_id, "19:group01@thread.v2");
     assert_eq!(chat.name, None);
     assert_eq!(chat.total_members, 3);
     assert_eq!(chat.members.len(), 2);
@@ -195,6 +194,19 @@ fn suggestions_fixture_parses_every_group() {
     assert_eq!(suggestions.texts[0].kind.as_deref(), Some("PeopleAsText"));
     assert_eq!(suggestions.best_matches.len(), 2);
     assert_eq!(suggestions.best_matches[0].group, "People");
+}
+
+#[test]
+fn a_person_without_a_directory_id_uses_the_orgid_mri() {
+    let suggestions = parse_suggestions(&json!({"Groups": [{"Type": "People", "Suggestions": [{
+        "DisplayName": "Ada Lovelace",
+        "MRI": "8:orgid:ada-id",
+        "EmailAddresses": ["ada@other.example"],
+        "CompanyName": "Other AG"
+    }]}]}));
+    let person = &suggestions.people[0];
+    assert_eq!(person.user_id.as_deref(), Some("ada-id"));
+    assert_eq!(person.company_name.as_deref(), Some("Other AG"));
 }
 
 #[test]

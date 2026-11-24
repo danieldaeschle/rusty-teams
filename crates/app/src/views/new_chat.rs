@@ -11,6 +11,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::ChatRecord;
 use teams_core::MentionCandidate;
+use teams_core::substrate_search::{SearchPerson, SearchSession};
 
 use super::avatar::person_avatar;
 use super::switcher::clamp_highlight;
@@ -39,6 +40,7 @@ pub struct Pick {
     pub user_id: String,
     pub name: String,
     pub mail: Option<String>,
+    pub organization: Option<String>,
 }
 
 pub enum NewChatEvent {
@@ -78,6 +80,7 @@ fn people_in(chats: &[ChatRecord], me: Option<&Person>, one_on_one_only: bool) -
                 user_id,
                 name,
                 mail: None,
+                organization: None,
             })
         })
         .collect()
@@ -143,14 +146,58 @@ pub fn composer_placeholder(chips: &[Pick], group_name: &str) -> String {
     }
 }
 
+fn pick_detail(pick: &Pick) -> String {
+    match (&pick.mail, pick.organization.as_deref()) {
+        (Some(mail), Some(organization)) if !organization.is_empty() => {
+            format!("{mail} · {organization}")
+        }
+        (Some(mail), _) => mail.clone(),
+        (None, Some(organization)) if !organization.is_empty() => organization.to_owned(),
+        _ => String::new(),
+    }
+}
+
 fn pick_from_user(user: graph::User) -> Option<Pick> {
     let mail = user.mail.or(user.user_principal_name);
     let name = user.display_name.or_else(|| mail.clone())?;
+    let organization =
+        teams_core::native::known_profile(&user.id).and_then(|profile| profile.tenant_name);
     Some(Pick {
         user_id: user.id,
         name,
         mail,
+        organization,
     })
+}
+
+fn pick_from_search_person(person: &SearchPerson) -> Option<Pick> {
+    let user_id = person.user_id.clone()?;
+    let mail = person
+        .email_addresses
+        .first()
+        .cloned()
+        .or_else(|| person.user_principal_name.clone());
+    let name = if person.display_name.is_empty() {
+        mail.clone()?
+    } else {
+        person.display_name.clone()
+    };
+    let organization = person.company_name.clone().filter(|name| !name.is_empty());
+    Some(Pick {
+        user_id,
+        name,
+        mail,
+        organization,
+    })
+}
+
+pub fn merge_remote(suggestions: Vec<Pick>, directory: Vec<Pick>) -> Vec<Pick> {
+    let mut seen = HashSet::new();
+    suggestions
+        .into_iter()
+        .chain(directory)
+        .filter(|pick| seen.insert(pick.user_id.clone()))
+        .collect()
 }
 
 fn pick_from_candidate(candidate: MentionCandidate) -> Option<Pick> {
@@ -159,6 +206,7 @@ fn pick_from_candidate(candidate: MentionCandidate) -> Option<Pick> {
             user_id: person.user_id,
             name: person.display_name,
             mail: person.mail,
+            organization: None,
         }),
         _ => None,
     }
@@ -176,6 +224,7 @@ pub struct NewChatDraft {
     popup_open: bool,
     searching: bool,
     search_failed: bool,
+    search_session: SearchSession,
     generation: u64,
     search: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -203,6 +252,7 @@ impl NewChatDraft {
             popup_open: true,
             searching: false,
             search_failed: false,
+            search_session: SearchSession::new(),
             generation: 0,
             search: None,
             _subscriptions: subscriptions,
@@ -353,10 +403,18 @@ impl NewChatDraft {
             } else if let Some(engine) = engine {
                 self.searching = true;
                 let generation = self.generation;
+                let search_session = self.search_session.clone();
                 self.search = Some(cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(SEARCH_DEBOUNCE).await;
-                    let receiver =
-                        runtime::spawn(async move { engine.search_people(&query).await });
+                    let receiver = runtime::spawn(async move {
+                        let directory = engine.search_people(&query).await;
+                        let suggestions = engine
+                            .server_suggestions(&search_session, &query)
+                            .await
+                            .map(|suggestions| suggestions.people)
+                            .unwrap_or_default();
+                        (directory, suggestions)
+                    });
                     let result = receiver.await;
                     this.update(cx, |this, cx| this.apply_search(generation, result, cx))
                         .ok();
@@ -370,7 +428,7 @@ impl NewChatDraft {
         &mut self,
         generation: u64,
         result: Result<
-            teams_core::Result<Vec<graph::User>>,
+            (teams_core::Result<Vec<graph::User>>, Vec<SearchPerson>),
             tokio::sync::oneshot::error::RecvError,
         >,
         cx: &mut Context<Self>,
@@ -385,7 +443,23 @@ impl NewChatDraft {
             .nth(self.highlighted)
             .map(|pick| pick.user_id);
         match result {
-            Ok(Ok(users)) => self.remote = users.into_iter().filter_map(pick_from_user).collect(),
+            Ok((Ok(users), suggestions)) => {
+                self.search_failed = false;
+                self.remote = merge_remote(
+                    suggestions
+                        .iter()
+                        .filter_map(pick_from_search_person)
+                        .collect(),
+                    users.into_iter().filter_map(pick_from_user).collect(),
+                );
+            }
+            Ok((Err(_), suggestions)) if !suggestions.is_empty() => {
+                self.search_failed = false;
+                self.remote = suggestions
+                    .iter()
+                    .filter_map(pick_from_search_person)
+                    .collect();
+            }
             _ => self.search_failed = true,
         }
         self.highlighted = held
@@ -512,7 +586,7 @@ impl NewChatDraft {
             "People"
         };
         let rows = results.into_iter().enumerate().map(|(index, pick)| {
-            let detail = pick.mail.clone().unwrap_or_default();
+            let detail = pick_detail(&pick);
             let chosen = pick.clone();
             h_flex()
                 .id(ElementId::Name(format!("new-chat-result-{index}").into()))
@@ -836,7 +910,8 @@ mod tests {
     use store::{ChatRecord, MemberRecord};
 
     use super::{
-        EnterAction, Pick, composer_placeholder, enter_action, search_results, suggested_people,
+        EnterAction, Pick, composer_placeholder, enter_action, merge_remote, pick_detail,
+        search_results, suggested_people,
     };
     use crate::data::{Person, existing_one_on_one};
 
@@ -852,6 +927,7 @@ mod tests {
             user_id: user_id.into(),
             name: name.into(),
             mail: mail.map(str::to_owned),
+            organization: None,
         }
     }
 
@@ -923,6 +999,19 @@ mod tests {
         let found = search_results(Vec::new(), remote, "user", None, &chosen, 8);
         assert_eq!(found.len(), 8);
         assert!(found.iter().all(|pick| pick.user_id != "u0"));
+    }
+
+    #[test]
+    fn suggestion_people_lead_and_keep_their_organization() {
+        let suggestions = vec![Pick {
+            organization: Some("Other AG".into()),
+            ..pick("ada", "Ada", Some("ada@other.example"))
+        }];
+        let directory = vec![pick("ada", "Ada Directory", Some("ada@other.example"))];
+        let merged = merge_remote(suggestions, directory);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].name, "Ada");
+        assert_eq!(pick_detail(&merged[0]), "ada@other.example · Other AG");
     }
 
     #[test]
