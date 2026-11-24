@@ -495,15 +495,9 @@ impl Signaling {
         url: &str,
         descriptions: &[MediaDescription],
         request_id: u32,
+        negotiation_tag: Option<&str>,
     ) -> Result<()> {
-        let body = json!({
-            "UpdateMediaDescriptions": {
-                "mediaDescriptions": {
-                    "descriptions": descriptions.iter().map(MediaDescription::wire).collect::<Vec<_>>(),
-                    "requestId": request_id,
-                },
-            },
-        });
+        let body = update_media_descriptions_body(descriptions, request_id, negotiation_tag);
         self.post_json("POST updateMediaDescriptions", url, body)
             .await
     }
@@ -1044,6 +1038,23 @@ fn media_content(sdp: &str, media_leg_id: &str, with_descriptions: bool) -> Valu
     content
 }
 
+fn update_media_descriptions_body(
+    descriptions: &[MediaDescription],
+    request_id: u32,
+    negotiation_tag: Option<&str>,
+) -> Value {
+    let mut media = json!({
+        "descriptions": descriptions.iter().map(MediaDescription::wire).collect::<Vec<_>>(),
+        "requestId": request_id,
+    });
+    if let Some(tag) = negotiation_tag {
+        // Teams uses the tag (participant id + ;v_2/;v_1/;ss_1) to match the roster's
+        // mdRequestId; without it the camera/share flip can be ignored.
+        media["negotiationTag"] = json!(tag);
+    }
+    json!({ "UpdateMediaDescriptions": { "mediaDescriptions": media } })
+}
+
 fn media_controller_links(callbacks: &CallbackLinks) -> Value {
     json!({
         "controlVideoStreaming": callbacks.call("controlVideoStreaming"),
@@ -1555,6 +1566,21 @@ pub async fn ensure_echo_bot_thread(session: &Session, self_object_id: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn media_flips_carry_the_negotiation_tag() {
+        let descriptions = [MediaDescription::share_line("11", true)];
+        let body = update_media_descriptions_body(&descriptions, 4, Some("p1;ss_1"));
+        let media = &body["UpdateMediaDescriptions"]["mediaDescriptions"];
+        assert_eq!(media["negotiationTag"], json!("p1;ss_1"));
+        assert_eq!(media["requestId"], json!(4));
+        assert_eq!(
+            media["descriptions"][0]["label"],
+            json!("applicationsharing-video")
+        );
+        assert!(update_media_descriptions_body(&descriptions, 4, None)["UpdateMediaDescriptions"]["mediaDescriptions"]
+            .get("negotiationTag")
+            .is_none());
+    }
 
     #[test]
     fn raising_publishes_a_raise_hands_state_and_lowering_names_the_state() {

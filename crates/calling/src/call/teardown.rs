@@ -28,6 +28,7 @@ pub(super) async fn stop_local_publish(
     local_video: &mut LocalVideo,
     remote: &RemoteCall,
     media_links: &BTreeMap<String, String>,
+    all_mids: &[String],
     request_id: &mut u32,
     control: &CallControl,
     timeline: &Timeline,
@@ -48,27 +49,30 @@ pub(super) async fn stop_local_publish(
     let Some(url) = media_links.get("updateMediaDescriptions").cloned() else {
         return;
     };
-    let mut descriptions = Vec::new();
-    if was_camera {
-        descriptions.push(MediaDescription::camera_line(
-            camera_mid.unwrap_or_else(|| CAMERA_MID.to_owned()),
-            false,
-        ));
-    }
-    if was_sharing {
-        descriptions.push(MediaDescription::share_line(
+    let changed = if was_sharing {
+        Some(MediaDescription::share_line(
             share_mid.unwrap_or_else(|| SHARE_MID.to_owned()),
             false,
-        ));
-    }
-    if descriptions.is_empty() {
+        ))
+    } else if was_camera {
+        Some(MediaDescription::camera_line(
+            camera_mid.unwrap_or_else(|| CAMERA_MID.to_owned()),
+            false,
+        ))
+    } else {
+        None
+    };
+    let Some(changed) = changed else {
         return;
-    }
+    };
+    let descriptions = super::media_descriptions(all_mids, changed);
+    let suffix = if was_sharing { ";ss_1" } else { ";v_1" };
+    let tag = super::negotiation_tag(&remote.participant.participant_id, suffix);
     *request_id += 1;
     let id = *request_id;
     match remote
         .signaling
-        .update_media_descriptions(&url, &descriptions, id)
+        .update_media_descriptions(&url, &descriptions, id, Some(&tag))
         .await
     {
         Ok(()) => timeline.record(

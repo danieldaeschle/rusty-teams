@@ -282,25 +282,31 @@ pub(super) fn tell_bound_camera(
     remote: &RemoteCall,
     links: &BTreeMap<String, String>,
     local_video: &LocalVideo,
+    all_mids: &[String],
     request_id: &mut u32,
     timeline: &Timeline,
 ) {
     let mid = local_video
         .camera_mid()
         .unwrap_or_else(|| CAMERA_MID.to_owned());
-    tell_media_descriptions(
-        remote,
-        links,
+    let suffix = if local_video.camera_on() {
+        ";v_2"
+    } else {
+        ";v_1"
+    };
+    let tag = negotiation_tag(&remote.participant.participant_id, suffix);
+    let descriptions = media_descriptions(
+        all_mids,
         MediaDescription::camera_line(mid, local_video.camera_on()),
-        request_id,
-        timeline,
     );
+    tell_media_descriptions(remote, links, descriptions, Some(tag), request_id, timeline);
 }
 
 pub(super) fn tell_bound_share(
     remote: &RemoteCall,
     links: &BTreeMap<String, String>,
     local_video: &LocalVideo,
+    all_mids: &[String],
     request_id: &mut u32,
     timeline: &Timeline,
 ) {
@@ -310,13 +316,9 @@ pub(super) fn tell_bound_share(
     let mid = local_video
         .share_mid()
         .unwrap_or_else(|| SHARE_MID.to_owned());
-    tell_media_descriptions(
-        remote,
-        links,
-        MediaDescription::share_line(mid, true),
-        request_id,
-        timeline,
-    );
+    let tag = negotiation_tag(&remote.participant.participant_id, ";ss_1");
+    let descriptions = media_descriptions(all_mids, MediaDescription::share_line(mid, true));
+    tell_media_descriptions(remote, links, descriptions, Some(tag), request_id, timeline);
 }
 
 pub(super) async fn camera_devices(mode: VideoMode) -> Vec<CameraDevice> {
@@ -444,10 +446,34 @@ pub(super) fn refresh_share_sources(
     });
 }
 
+/// The web client sends every line it knows: the changed one with its label and direction, all
+/// others `recvonly`. Sending only the changed line lets Teams reset the others.
+pub(super) fn media_descriptions(
+    all_mids: &[String],
+    changed: MediaDescription,
+) -> Vec<MediaDescription> {
+    let mut descriptions: Vec<MediaDescription> = all_mids
+        .iter()
+        .filter(|mid| **mid != changed.mid)
+        .map(|mid| MediaDescription {
+            mid: mid.clone(),
+            direction: "recvonly",
+            label: None,
+        })
+        .collect();
+    descriptions.push(changed);
+    descriptions
+}
+
+pub(super) fn negotiation_tag(participant_id: &str, suffix: &str) -> String {
+    format!("{participant_id}{suffix}")
+}
+
 pub(super) fn tell_media_descriptions(
     remote: &RemoteCall,
     links: &BTreeMap<String, String>,
-    description: MediaDescription,
+    descriptions: Vec<MediaDescription>,
+    negotiation_tag: Option<String>,
     request_id: &mut u32,
     timeline: &Timeline,
 ) {
@@ -460,12 +486,9 @@ pub(super) fn tell_media_descriptions(
     let signaling = remote.signaling.clone();
     let timeline = timeline.clone();
     tokio::spawn(async move {
-        let sent = format!(
-            "{} {} request {request_id}",
-            description.mid, description.direction
-        );
+        let sent = format!("{} line(s) request {request_id}", descriptions.len());
         if let Err(error) = signaling
-            .update_media_descriptions(&url, &[description], request_id)
+            .update_media_descriptions(&url, &descriptions, request_id, negotiation_tag.as_deref())
             .await
         {
             timeline.record("updateMediaDescriptions failed", format!("{sent}: {error}"));
@@ -610,5 +633,29 @@ pub(super) async fn apply_background(
 pub(super) fn send_receive_change(control: &CallControl, change: ReceiveChange) {
     if let Some(sharer) = change.screen_sharer {
         control.send(CallUpdate::ScreenShare(sharer));
+    }
+}
+
+#[cfg(test)]
+mod media_description_tests {
+    use super::*;
+
+    #[test]
+    fn a_flip_describes_every_line() {
+        let mids = ["0".to_owned(), "1".to_owned(), "11".to_owned()];
+        let all = media_descriptions(&mids, MediaDescription::share_line("11", true));
+        assert_eq!(all.len(), mids.len());
+        assert_eq!(all[0].mid, "0");
+        assert_eq!(all[0].direction, "recvonly");
+        assert_eq!(all[1].direction, "recvonly");
+        assert_eq!(all[2].mid, "11");
+        assert_eq!(all[2].direction, "sendrecv");
+        assert_eq!(all[2].label, Some("applicationsharing-video"));
+    }
+
+    #[test]
+    fn the_tag_is_the_participant_id_plus_the_change_suffix() {
+        assert_eq!(negotiation_tag("p1", ";ss_1"), "p1;ss_1");
+        assert_eq!(negotiation_tag("p1", ";v_2"), "p1;v_2");
     }
 }
