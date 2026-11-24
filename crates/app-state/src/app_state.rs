@@ -29,6 +29,7 @@ use calling::meeting::LiveMeeting;
 
 const COLLAPSED_META_KEY: &str = "ui.collapsed_sections";
 const RECENT_MESSAGES_FOR_TYPING: usize = 5;
+const AGENTS_MCP_META_KEY: &str = "features.agents_mcp";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuickView {
@@ -199,6 +200,7 @@ pub struct AppState {
     pub call_share_sound: bool,
     pub recording_policy: teams_core::RecordingPolicy,
     pub allow_priority_messages: bool,
+    pub agents_mcp_enabled: bool,
     pub account_sounds: Option<chatsvc::sound_settings::SoundSettings>,
     pub chat_settings: teams_core::ChatSettingsDocument,
     pub markdown_mode: bool,
@@ -378,6 +380,7 @@ impl AppState {
             call_share_sound: false,
             recording_policy: teams_core::RecordingPolicy::default(),
             allow_priority_messages: true,
+            agents_mcp_enabled: false,
             account_sounds: None,
             chat_settings,
             markdown_mode,
@@ -433,6 +436,7 @@ impl AppState {
         state.call_share_standout =
             crate::call::load_flag(&state.store, crate::call::SHARE_STANDOUT_META_KEY);
         state.call_report_enabled = crate::call::load_report_enabled(&state.store);
+        state.agents_mcp_enabled = crate::call::load_flag(&state.store, AGENTS_MCP_META_KEY);
         state.call_view = crate::call::ViewSettings::load(&state.store);
         state.call_background = crate::call::load_background(&state.store);
         state.call_camera = crate::call::load_camera(&state.store);
@@ -450,6 +454,19 @@ impl AppState {
             state.reload_directory();
         }
         state
+    }
+
+    /// Agents and MCP stay off unless the user enables them in Settings. The globals are installed
+    /// at startup; turning the feature off stops the MCP server and hides both settings sections.
+    pub fn set_agents_mcp_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.agents_mcp_enabled = on;
+        let _ = self
+            .store
+            .set_meta(AGENTS_MCP_META_KEY, if on { "1" } else { "0" });
+        if !on {
+            crate::agent_api::update_policy(cx, |policy| policy.enabled = false);
+        }
+        cx.notify();
     }
 
     fn load_collapsed(&self) -> HashSet<String> {
@@ -1333,7 +1350,7 @@ mod tests {
     };
     use teams_core::CoreEvent;
 
-    use super::{AppState, Mode, Selection, chat_title, selection_for, selection_title};
+    use super::{AppHandle, AppState, Mode, Selection, chat_title, selection_for, selection_title};
     use crate::backend::BackendEvent;
     use crate::data::Person;
     use store::Sidebar;
@@ -1426,6 +1443,30 @@ mod tests {
                 state.toggle_collapsed("pending-section:1", cx);
                 assert!(state.collapsed.is_empty());
             })
+        });
+    }
+
+    #[gpui_kit::test]
+    fn agents_and_mcp_are_off_until_the_user_enables_them(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        let app = cx.update(|cx| cx.new(|_| AppState::new(store.clone(), Mode::default())));
+        cx.update(|cx| {
+            cx.set_global(AppHandle(app.clone()));
+            assert!(!app.read(cx).agents_mcp_enabled);
+            assert!(!crate::agents::agents_mcp_enabled(cx));
+            app.update(cx, |state, cx| state.set_agents_mcp_enabled(true, cx));
+            assert!(crate::agents::agents_mcp_enabled(cx));
+            assert_eq!(
+                store.meta("features.agents_mcp").ok().flatten().as_deref(),
+                Some("1")
+            );
+            app.update(cx, |state, cx| state.set_agents_mcp_enabled(false, cx));
+            assert!(!crate::agents::agents_mcp_enabled(cx));
+            assert_eq!(
+                store.meta("features.agents_mcp").ok().flatten().as_deref(),
+                Some("0")
+            );
         });
     }
 

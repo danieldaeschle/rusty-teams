@@ -53,8 +53,14 @@ pub fn local_writer(cx: &App) -> Option<AgentProfile> {
         .cloned()
 }
 
+pub fn agents_mcp_enabled(cx: &App) -> bool {
+    cx.try_global::<AppHandle>()
+        .is_some_and(|handle| handle.0.read(cx).agents_mcp_enabled)
+}
+
 pub fn agents_enabled(cx: &App) -> bool {
-    runs_handle(cx).is_some_and(|runs| !runs.read(cx).settings().actions.is_empty())
+    agents_mcp_enabled(cx)
+        && runs_handle(cx).is_some_and(|runs| !runs.read(cx).settings().actions.is_empty())
 }
 
 pub fn raise_notice(text: String, cx: &mut App) {

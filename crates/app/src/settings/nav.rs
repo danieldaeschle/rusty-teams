@@ -132,12 +132,12 @@ pub fn matches(section: SettingsSection, query: &str) -> bool {
             .any(|text| text.to_lowercase().contains(&query))
 }
 
-pub fn first_match(query: &str, agents_available: bool) -> Option<SettingsSection> {
+pub fn first_match(query: &str, rusty_available: bool) -> Option<SettingsSection> {
     TEAMS_GROUP
         .into_iter()
         .chain(RUSTY_GROUP)
         .chain([SettingsSection::Help, SettingsSection::About])
-        .filter(|section| agents_available || *section != SettingsSection::Agents)
+        .filter(|_section| rusty_available)
         .find(|section| matches(*section, query))
 }
 
@@ -212,7 +212,7 @@ pub struct NavSearch<'a> {
 
 pub fn render_nav(
     active: SettingsSection,
-    agents_available: bool,
+    rusty_available: bool,
     layout: NavLayout,
     search: NavSearch<'_>,
     on_select: impl Fn(SettingsSection, &mut Window, &mut App) + Clone + 'static,
@@ -226,7 +226,7 @@ pub fn render_nav(
         .collect();
     let rusty: Vec<Stateful<Div>> = RUSTY_GROUP
         .into_iter()
-        .filter(|section| agents_available || *section != SettingsSection::Agents)
+        .filter(|_section| rusty_available)
         .filter(|section| matches(*section, query))
         .map(item)
         .collect();

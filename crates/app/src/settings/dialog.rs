@@ -53,8 +53,8 @@ pub fn metrics(window_width: f32, window_height: f32) -> DialogMetrics {
     }
 }
 
-pub fn available(section: SettingsSection, agents_available: bool) -> SettingsSection {
-    if section == SettingsSection::Agents && !agents_available {
+pub fn available(section: SettingsSection, rusty_available: bool) -> SettingsSection {
+    if !rusty_available && matches!(section, SettingsSection::Agents | SettingsSection::Mcp) {
         SettingsSection::General
     } else {
         section
@@ -123,7 +123,7 @@ impl SettingsDialog {
     }
 
     pub fn show(&mut self, section: SettingsSection, window: &mut Window, cx: &mut Context<Self>) {
-        let section = available(section, crate::agents::runs_handle(cx).is_some());
+        let section = available(section, crate::agents::agents_mcp_enabled(cx));
         if section != self.section {
             self.body_scroll = ScrollHandle::new();
         }
@@ -173,7 +173,7 @@ impl SettingsDialog {
     fn follow_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let query = self.search.read(cx).value().to_string();
         if !matches(self.section, &query) {
-            let agents_available = crate::agents::runs_handle(cx).is_some();
+            let agents_available = crate::agents::agents_mcp_enabled(cx);
             if let Some(section) = first_match(&query, agents_available) {
                 self.show(section, window, cx);
             }
@@ -290,7 +290,7 @@ impl Render for SettingsDialog {
         let query = self.search.read(cx).value().to_string();
         let nav = render_nav(
             self.section,
-            crate::agents::runs_handle(cx).is_some(),
+            crate::agents::agents_mcp_enabled(cx),
             NavLayout {
                 width: metrics.nav_width,
                 padding_y: metrics.padding,
@@ -425,15 +425,10 @@ mod tests {
     }
 
     #[test]
-    fn agents_falls_back_to_general_without_agent_runs() {
-        assert_eq!(
-            available(SettingsSection::Agents, false),
-            SettingsSection::General
-        );
-        assert_eq!(
-            available(SettingsSection::Agents, true),
-            SettingsSection::Agents
-        );
-        assert_eq!(available(SettingsSection::Mcp, false), SettingsSection::Mcp);
+    fn agents_and_mcp_fall_back_to_general_when_disabled() {
+        for section in [SettingsSection::Agents, SettingsSection::Mcp] {
+            assert_eq!(available(section, false), SettingsSection::General);
+            assert_eq!(available(section, true), section);
+        }
     }
 }

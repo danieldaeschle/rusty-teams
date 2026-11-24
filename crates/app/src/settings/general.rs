@@ -58,10 +58,25 @@ fn startup_rows(center: &Entity<NotificationCenter>, cx: &App) -> [Stateful<Div>
 
 pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &App) -> Div {
     let settings = center.read(cx).settings();
+    let agents_app = app.clone();
+    let agents_enabled = app.read(cx).agents_mcp_enabled;
+    let agents_row = toggle_row(
+        "settings-agents-mcp",
+        tr("settings.general.agents_mcp"),
+        tr("settings.general.agents_mcp_detail"),
+        theme::text_muted(),
+        agents_enabled,
+    )
+    .on_click(move |_, _, cx| {
+        agents_app.update(cx, |state, cx| {
+            state.set_agents_mcp_enabled(!agents_enabled, cx)
+        })
+    });
     v_flex()
         .w_full()
         .child(caption(tr("settings.caption.system")))
         .children(startup_rows(center, cx))
+        .child(agents_row)
         .child(settings_toggle(
             center,
             (

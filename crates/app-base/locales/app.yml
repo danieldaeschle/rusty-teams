@@ -461,6 +461,12 @@ settings:
     auto_start:
       en: Auto-start Teams
       de: Teams automatisch starten
+    agents_mcp:
+      en: Enable Agents and MCP
+      de: Agenten und MCP aktivieren
+    agents_mcp_detail:
+      en: Off by default. Turns on the Agents section and the local MCP server only when you ask for them
+      de: Standardmässig aus. Aktiviert den Bereich Agenten und den lokalen MCP-Server nur auf Anforderung
     open_in_background:
       en: Open application in background
       de: Anwendung im Hintergrund starten

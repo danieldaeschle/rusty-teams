@@ -749,17 +749,21 @@ mod frames {
             let store = Store::open_in_memory().expect("in-memory store");
             demo::seed(&store);
             let store = Arc::new(store);
-            if agent_api {
-                crate::agent_api::init(store.clone(), true, cx);
-            }
             let mode = Mode {
                 demo: true,
                 read_only: false,
                 demo_sync: None,
             };
-            let state = cx.new(|_| AppState::new(store, mode));
+            let state = cx.new(|_| {
+                let mut state = AppState::new(store.clone(), mode);
+                state.agents_mcp_enabled = agent_api;
+                state
+            });
             install_globals(&state, UserInput::new(), cx);
-            crate::agents::install(state.clone(), cx);
+            if agent_api {
+                crate::agent_api::init(store.clone(), true, cx);
+                crate::agents::install(state.clone(), cx);
+            }
             demo::start_session(&state, cx);
             let shared_state = state.clone();
             let startup = Startup {
@@ -857,7 +861,7 @@ mod frames {
         zoom: f32,
         known_violations: &[&str],
     ) {
-        let (handle, app) = mount(cx);
+        let (handle, app) = mount_with(cx, true);
         let platform_scale = cx
             .update_window(handle, |_, window, _| window.scale_factor())
             .expect("test window");
