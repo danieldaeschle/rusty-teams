@@ -1,7 +1,53 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::LazyLock;
 
 use serde_json::{Map, Value, json};
 use session::{ApiResponse, App, GRAPH, Method, Request, SPACES, Scope, Session};
+use tokio::sync::Mutex;
+use tokio::time::{Duration, sleep, timeout};
+
+static FLIP_ORDERS: LazyLock<Mutex<HashMap<String, u32>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[derive(Debug, PartialEq, Eq)]
+enum FlipTurn {
+    Ready,
+    Wait,
+    Stale,
+}
+
+fn flip_turn(next: u32, request_id: u32) -> FlipTurn {
+    if request_id < next {
+        FlipTurn::Stale
+    } else if request_id == next {
+        FlipTurn::Ready
+    } else {
+        FlipTurn::Wait
+    }
+}
+
+/// Teams applies the last `updateMediaDescriptions` it receives, so a later request must not pass
+/// an earlier one on the same link. Stale requests are dropped; a gap waits briefly for its turn.
+async fn wait_flip_turn(url: &str, request_id: u32) -> bool {
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let mut orders = FLIP_ORDERS.lock().await;
+            let next = orders.entry(url.to_owned()).or_insert(1);
+            match flip_turn(*next, request_id) {
+                FlipTurn::Ready => {
+                    *next = request_id + 1;
+                    return true;
+                }
+                FlipTurn::Stale => return false,
+                FlipTurn::Wait => {}
+            }
+            drop(orders);
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or(false)
+}
 
 use crate::captions::{self, BotAction};
 use crate::error::{Error, Result};
@@ -497,6 +543,9 @@ impl Signaling {
         request_id: u32,
         negotiation_tag: Option<&str>,
     ) -> Result<()> {
+        if !wait_flip_turn(url, request_id).await {
+            return Ok(());
+        }
         let body = update_media_descriptions_body(descriptions, request_id, negotiation_tag);
         self.post_json("POST updateMediaDescriptions", url, body)
             .await
@@ -1566,6 +1615,15 @@ pub async fn ensure_echo_bot_thread(session: &Session, self_object_id: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flip_requests_run_in_order_or_are_dropped_as_stale() {
+        assert_eq!(flip_turn(1, 1), FlipTurn::Ready);
+        assert_eq!(flip_turn(1, 3), FlipTurn::Wait);
+        assert_eq!(flip_turn(1, 2), FlipTurn::Wait);
+        assert_eq!(flip_turn(2, 2), FlipTurn::Ready);
+        assert_eq!(flip_turn(3, 2), FlipTurn::Stale);
+    }
     #[test]
     fn media_flips_carry_the_negotiation_tag() {
         let descriptions = [MediaDescription::share_line("11", true)];
