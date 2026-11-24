@@ -446,22 +446,29 @@ pub(super) fn refresh_share_sources(
     });
 }
 
-/// The web client sends every line it knows: the changed one with its label and direction, all
+/// The web client sends every line it knows: the changed ones with their labels and directions, all
 /// others `recvonly`. Sending only the changed line lets Teams reset the others.
 pub(super) fn media_descriptions(
     all_mids: &[String],
     changed: MediaDescription,
 ) -> Vec<MediaDescription> {
+    media_descriptions_many(all_mids, vec![changed])
+}
+
+pub(super) fn media_descriptions_many(
+    all_mids: &[String],
+    changed: Vec<MediaDescription>,
+) -> Vec<MediaDescription> {
     let mut descriptions: Vec<MediaDescription> = all_mids
         .iter()
-        .filter(|mid| **mid != changed.mid)
+        .filter(|mid| !changed.iter().any(|line| line.mid == **mid))
         .map(|mid| MediaDescription {
             mid: mid.clone(),
             direction: "recvonly",
             label: None,
         })
         .collect();
-    descriptions.push(changed);
+    descriptions.extend(changed);
     descriptions
 }
 
@@ -651,6 +658,22 @@ mod media_description_tests {
         assert_eq!(all[2].mid, "11");
         assert_eq!(all[2].direction, "sendrecv");
         assert_eq!(all[2].label, Some("applicationsharing-video"));
+    }
+
+    #[test]
+    fn a_publish_off_flip_can_stop_camera_and_share_together() {
+        let mids = ["0".to_owned(), "1".to_owned(), "11".to_owned()];
+        let changed = vec![
+            MediaDescription::camera_line("1", false),
+            MediaDescription::share_line("11", false),
+        ];
+        let all = media_descriptions_many(&mids, changed);
+        assert_eq!(all.len(), mids.len());
+        assert_eq!(all[0].direction, "recvonly");
+        assert_eq!(all[1].mid, "1");
+        assert_eq!(all[1].direction, "recvonly");
+        assert_eq!(all[2].mid, "11");
+        assert_eq!(all[2].direction, "recvonly");
     }
 
     #[test]

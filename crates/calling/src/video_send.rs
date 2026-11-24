@@ -897,6 +897,14 @@ impl LocalVideo {
         self.hub.forget(&VideoKey::LocalScreen);
         if let Some(share) = self.lines.as_ref().and_then(|lines| lines.share.as_ref()) {
             let _ = Self::set_active(&share.sender(), false);
+            // Without this the line keeps reporting SendRecv, so the next StartShare skips the
+            // updateMediaDescriptions flip and Teams never sees the share again.
+            if matches!(
+                share.current_direction(),
+                Some(RtpTransceiverDirection::SendRecv | RtpTransceiverDirection::SendOnly)
+            ) {
+                let _ = share.set_direction(RtpTransceiverDirection::RecvOnly);
+            }
         }
     }
 

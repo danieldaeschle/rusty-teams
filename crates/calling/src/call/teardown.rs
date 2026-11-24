@@ -49,23 +49,23 @@ pub(super) async fn stop_local_publish(
     let Some(url) = media_links.get("updateMediaDescriptions").cloned() else {
         return;
     };
-    let changed = if was_sharing {
-        Some(MediaDescription::share_line(
-            share_mid.unwrap_or_else(|| SHARE_MID.to_owned()),
-            false,
-        ))
-    } else if was_camera {
-        Some(MediaDescription::camera_line(
+    let mut changed = Vec::new();
+    if was_camera {
+        changed.push(MediaDescription::camera_line(
             camera_mid.unwrap_or_else(|| CAMERA_MID.to_owned()),
             false,
-        ))
-    } else {
-        None
-    };
-    let Some(changed) = changed else {
+        ));
+    }
+    if was_sharing {
+        changed.push(MediaDescription::share_line(
+            share_mid.unwrap_or_else(|| SHARE_MID.to_owned()),
+            false,
+        ));
+    }
+    if changed.is_empty() {
         return;
-    };
-    let descriptions = super::media_descriptions(all_mids, changed);
+    }
+    let descriptions = super::media_descriptions_many(all_mids, changed);
     let suffix = if was_sharing { ";ss_1" } else { ";v_1" };
     let tag = super::negotiation_tag(&remote.participant.participant_id, suffix);
     *request_id += 1;
