@@ -26,7 +26,7 @@ pub enum BannerKind {
 pub struct BannerText {
     pub text: String,
     pub detail: Option<String>,
-    pub retry: bool,
+    pub action: Option<String>,
 }
 
 /// What is wrong right now; `None` while live or while only missed messages are being synced.
@@ -63,7 +63,7 @@ pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> Banner
     let text = |key: &str| BannerText {
         text: app_base::ui_locale::tr(key),
         detail: None,
-        retry: false,
+        action: None,
     };
     match kind {
         BannerKind::Connecting => text("auth.banner.connecting"),
@@ -80,9 +80,12 @@ pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> Banner
             }),
             ..text("auth.banner.offline")
         },
-        BannerKind::SignIn => text("auth.banner.sign_in"),
+        BannerKind::SignIn => BannerText {
+            action: Some(app_base::ui_locale::tr("auth.sign_in")),
+            ..text("auth.banner.sign_in")
+        },
         BannerKind::LiveUnavailable => BannerText {
-            retry: true,
+            action: Some(app_base::ui_locale::tr("common.retry")),
             ..text("auth.banner.live_unavailable")
         },
     }
@@ -297,6 +300,12 @@ mod tests {
         let text = banner_text(BannerKind::Offline, Some(Utc::now()));
         assert!(text.detail.is_some());
         assert!(banner_text(BannerKind::Offline, None).detail.is_none());
-        assert!(banner_text(BannerKind::LiveUnavailable, None).retry);
+        assert!(
+            banner_text(BannerKind::LiveUnavailable, None)
+                .action
+                .is_some()
+        );
+        assert!(banner_text(BannerKind::SignIn, None).action.is_some());
+        assert!(banner_text(BannerKind::Offline, None).action.is_none());
     }
 }

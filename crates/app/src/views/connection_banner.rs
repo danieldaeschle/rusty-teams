@@ -42,20 +42,20 @@ pub fn render_connection_banner(
                 .text_color(theme::text_muted())
                 .child(detail)
         }))
-        .when(banner.retry, |row| {
+        .when_some(banner.action, |row, label| {
             row.child(
                 div()
-                    .id("connection-banner-retry")
+                    .id("connection-banner-action")
                     .flex_none()
                     .ml_auto()
                     .px(px(8.))
                     .py(px(2.))
-                    .rounded(px(4.))
+                    .rounded(px(6.))
                     .cursor_pointer()
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::accent_text())
                     .hover(|button| button.bg(theme::row_hover()))
-                    .child("Retry")
+                    .child(label)
                     .on_click(on_retry),
             )
         })

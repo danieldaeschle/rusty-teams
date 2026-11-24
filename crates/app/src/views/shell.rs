@@ -1113,7 +1113,22 @@ impl Render for AppShell {
                 render_connection_banner(
                     banner,
                     cx.listener(|this, _, _, cx| {
-                        this.state.update(cx, |state, _| state.retry_live())
+                        this.state.update(cx, |state, _| {
+                            #[cfg(any(target_os = "linux", target_os = "macos"))]
+                            {
+                                let signing_in = matches!(
+                                    state.connection,
+                                    crate::backend::ConnectionState::LoginRequired
+                                ) || matches!(
+                                    state.browser_sign_in,
+                                    crate::browser_sign_in::BrowserSignInState::AwaitingSignIn
+                                );
+                                if signing_in {
+                                    crate::linux_browser::request_login_window(true);
+                                }
+                            }
+                            state.retry_live();
+                        })
                     }),
                 )
             });
