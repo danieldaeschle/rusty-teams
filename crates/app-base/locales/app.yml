@@ -840,8 +840,8 @@ install:
     en: Checking for updates...
     de: Suche nach Updates...
   auto_updates:
-    en: Automatic updates
-    de: Automatische Updates
+    en: Release notices
+    de: Release-Hinweise
   auto_updates_detail:
     en: Look for new releases and tell me
     de: Nach neuen Releases suchen und Bescheid sagen

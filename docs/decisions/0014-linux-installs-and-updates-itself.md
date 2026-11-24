@@ -3,7 +3,9 @@ status: accepted
 date: 2026-11-14
 ---
 
-# ADR 0014: The Linux binary installs and updates itself
+# ADR 0014: The Linux binary installs itself
+
+Revised 2026-11-24: a newer release is a notice that opens the release page. The app does not replace its binary. The install half below is unchanged.
 
 ## Context
 
@@ -11,12 +13,10 @@ The Linux release is a bare binary in a tarball. Users had to copy a `.desktop` 
 
 ## Decision
 
-On start the binary offers to install itself into `~/.local/share/rusty-teams/teams` and writes `~/.local/share/applications/rusty-teams.desktop` (`StartupWMClass=rusty-teams`, matching the window's app id). Build output from a cargo `target/` folder is copied, anything else is moved. "Don't ask again" can be undone in Settings > General, which also has Install, Replace and Remove. The installed copy updates itself from the same GitHub releases as Windows (`release_feed.rs`, `updater.rs`), but always with consent (`linux_update.rs`): when Settings > General > Automatic updates is on (the default), a newer release is offered in a dialog; Update downloads the `rusty-teams-<tag>-linux-amd64` asset with progress and checks size, ELF header and the SHA-256 digest GitHub reports; Restart now swaps the file and relaunches. Not now holds for the running session; the next start asks again. There is no idle restart and no install on quit on Linux: a download left for later is offered again on the next start (Restart now, no second download). Settings > General > Check now runs the same flow on demand. A build compares releases against its release tag, or against the workspace version (kept equal to the latest release) when built locally. Binaries outside the install folder never replace themselves; Settings > General still shows the switch and Check now and explains that the app has to be installed first.
+On start the binary offers to install itself into `~/.local/share/rusty-teams/teams` and writes `~/.local/share/applications/rusty-teams.desktop` (`StartupWMClass=rusty-teams`, matching the window's app id). Build output from a cargo `target/` folder is copied, anything else is moved. "Don't ask again" can be undone in Settings > General, which also has Install, Replace and Remove. That install is not an update. No platform downloads a release or replaces the running binary. A release-tagged build checks GitHub for a newer tag (`release_feed.rs`). Settings > General > Release notices is on by default (`updates.enabled`, the same key on every OS). A newer release opens a dialog; Open release opens that tag's page in the browser (`linux_update.rs`). Not now holds for this run. Check now runs the same check on demand. A build without a release tag does not check. When `FLATPAK_ID` is set there is no check and no release-notice row.
 
 ## Consequences
 
 - One binary, no root, no FUSE; menu entry and dock matching work after one click.
-- Releases must keep publishing the bare `-linux-amd64` binary next to the tarball.
-- Windows keeps its quiet download and idle restart; the two platforms differ on purpose.
-- A self-built binary that is installed is offered releases newer than its workspace version; starting a newer build offers to replace the installed one.
-- System packages (deb, rpm, Flatpak) stay possible and should simply not offer the install.
+- A newer release is a page in the browser. The app does not need a platform asset to notice it, and it does not swap its own binary.
+- System packages (deb, rpm, Flatpak) stay possible and should simply not offer the install. Flatpak (`FLATPAK_ID`) also hides the release notice.
