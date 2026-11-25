@@ -189,12 +189,18 @@ async fn supervise(
     };
     tokio::spawn(org_list(home.clone(), guest_tenant.clone(), events.clone()));
     // Calls stay on the home tenant's registration, like rings for the home org while a guest org is open.
-    let session = match &guest_tenant {
-        Some(tenant) => home.in_tenant(tenant),
-        None => home.clone(),
+    // Chat files of a guest org go to the home OneDrive: the guest tenant has none.
+    let (session, home_drive) = match &guest_tenant {
+        Some(tenant) => (home.in_tenant(tenant), Some(home.clone())),
+        None => (home.clone(), None),
     };
     let build = || {
-        SyncEngine::new(Graph::new(session.clone()), store.clone())
+        let graph = Graph::new(session.clone());
+        let graph = match &home_drive {
+            Some(home) => graph.with_home_drive(home.clone()),
+            None => graph,
+        };
+        SyncEngine::new(graph, store.clone())
             .with_folder_source(Arc::new(ChatsvcFolderSource::new(&session)))
     };
     let engine = image_directory()
@@ -569,10 +575,16 @@ async fn calendar_loop(session: Session, store: Arc<Store>, events: EventSender)
         match crate::google_calendar_sync::fetch_google_events(&mut fetched_accounts, start, end)
             .await
         {
-            Ok(google_events) => {
+            Ok((google_events, account_errors)) => {
                 // Only refreshed tokens: a calendar toggle made during the fetch stays.
                 let _ = store::merge_google_tokens(&store, &fetched_accounts);
                 combined.extend(google_events);
+                for message in account_errors {
+                    crate::diagnostics::record(format!(
+                        "calls: google account not loaded: {}",
+                        shorten(&message)
+                    ));
+                }
             }
             Err(error) => crate::diagnostics::record(format!(
                 "calls: google calendar not loaded: {}",

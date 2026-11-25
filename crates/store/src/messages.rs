@@ -80,7 +80,7 @@ impl Store {
         after: Option<DateTime<Utc>>,
         not_from_user_id: &str,
     ) -> Result<usize> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let count: i64 = connection.query_row(
             "SELECT COUNT(*) FROM messages
              WHERE conversation_id = ?1 AND deleted = 0 AND created_at > ?2
@@ -103,7 +103,7 @@ impl Store {
         after: Option<DateTime<Utc>>,
         not_from_user_id: &str,
     ) -> Result<MessageImportance> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let last: Option<(Option<String>, Option<String>, i64)> = connection
             .query_row(
                 "SELECT importance, sender_id, created_at FROM messages
@@ -131,7 +131,7 @@ impl Store {
         after: Option<DateTime<Utc>>,
         not_from_user_id: &str,
     ) -> Result<Option<String>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         Ok(connection
             .query_row(
                 "SELECT message_id FROM messages
@@ -156,7 +156,7 @@ impl Store {
         before: Option<DateTime<Utc>>,
         limit: usize,
     ) -> Result<Vec<MessageRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages
              WHERE conversation_id = ?1 AND (?2 IS NULL OR created_at < ?2)
@@ -178,7 +178,7 @@ impl Store {
         from: DateTime<Utc>,
         to: DateTime<Utc>,
     ) -> Result<Vec<MessageRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages
              WHERE conversation_id = ?1 AND created_at >= ?2 AND created_at <= ?3
@@ -200,7 +200,7 @@ impl Store {
         after: DateTime<Utc>,
         limit: usize,
     ) -> Result<Vec<MessageRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages
              WHERE conversation_id = ?1 AND created_at > ?2
@@ -221,7 +221,7 @@ impl Store {
         conversation_id: &str,
         root_id: &str,
     ) -> Result<Vec<MessageRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages
              WHERE conversation_id = ?1 AND (message_id = ?2 OR reply_to_id = ?2)
@@ -259,7 +259,7 @@ impl Store {
             ),
             None => (None, None, None),
         };
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages
              JOIN json_each(?1) AS scope
@@ -288,7 +288,7 @@ impl Store {
         conversation_id: &str,
         content_type: &str,
     ) -> Result<Vec<MessageRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages
              WHERE conversation_id = ?1 AND instr(attachments_json, ?2) > 0"
@@ -302,7 +302,7 @@ impl Store {
 
     /// Chats, newest first, holding an attachment of `content_type` without content that is not marked unavailable.
     pub fn conversations_with_stale_attachments(&self, content_type: &str) -> Result<Vec<String>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(
             "SELECT chats.id FROM chats
              WHERE EXISTS (
@@ -327,7 +327,7 @@ impl Store {
         conversation_id: &str,
         message_ids: &[String],
     ) -> Result<HashMap<String, MessageRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {MESSAGE_COLUMNS} FROM messages
              WHERE conversation_id = ?1 AND message_id IN (SELECT value FROM json_each(?2))"
@@ -352,7 +352,7 @@ impl Store {
         sender_id: &str,
         limit: usize,
     ) -> Result<Vec<(String, String)>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(
             "SELECT message_id, reactions_json FROM messages
              WHERE conversation_id = ?1 AND sender_id = ?2 AND deleted = 0
@@ -372,7 +372,7 @@ impl Store {
         conversation_id: &str,
         scan: usize,
     ) -> Result<Vec<(String, String)>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(
             "WITH recent AS (
                 SELECT sender_id, sender_name, mentions_json FROM messages
@@ -397,7 +397,7 @@ impl Store {
         if user_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(
             "SELECT value, COALESCE(
                  (SELECT display_name FROM chat_members
@@ -426,7 +426,7 @@ impl Store {
         root_id: &str,
         user_id: &str,
     ) -> Result<bool> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         Ok(connection.query_row(
             "SELECT EXISTS (
                 SELECT 1 FROM messages
@@ -438,7 +438,7 @@ impl Store {
     }
 
     pub fn message_count(&self, conversation_id: &str) -> Result<usize> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let count: i64 = connection.query_row(
             "SELECT COUNT(*) FROM messages WHERE conversation_id = ?1",
             [conversation_id],

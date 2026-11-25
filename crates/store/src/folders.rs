@@ -48,7 +48,7 @@ impl Store {
     }
 
     pub fn folders(&self) -> Result<Vec<FolderRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection
             .prepare_cached("SELECT id, name, kind, expanded FROM folders ORDER BY position")?;
         let mut folders = statement
@@ -83,7 +83,7 @@ impl Store {
     }
 
     pub fn pinned_channel_ids(&self) -> Result<Vec<String>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection
             .prepare_cached("SELECT channel_id FROM pinned_channels ORDER BY position")?;
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;

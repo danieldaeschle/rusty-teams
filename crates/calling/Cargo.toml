@@ -28,6 +28,9 @@ tract-onnx = "0.23"
 tokio.workspace = true
 uuid.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(not(windows))'.dependencies]
 ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "ndarray", "load-dynamic", "api-31"] }
 

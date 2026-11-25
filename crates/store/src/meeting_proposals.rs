@@ -39,7 +39,7 @@ impl Store {
 
     /// Oldest first.
     pub fn agent_meetings(&self) -> Result<Vec<AgentMeetingRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {MEETING_COLUMNS} FROM agent_meeting_proposals ORDER BY created_at ASC, id ASC"
         ))?;

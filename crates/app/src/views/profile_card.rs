@@ -275,6 +275,7 @@ impl ProfileCard {
             user_id: user_id.clone(),
             name: name.clone(),
             mail: email,
+            organization: None,
         };
         let chat_id = user_id.clone();
         let (video_id, audio_id) = (user_id.clone(), user_id.clone());

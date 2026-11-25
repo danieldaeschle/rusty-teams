@@ -110,7 +110,7 @@ impl Store {
     }
 
     pub fn team(&self, team_id: &str) -> Result<Option<TeamRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         Ok(connection
             .query_row(
                 "SELECT id, name FROM teams WHERE id = ?1",
@@ -126,7 +126,7 @@ impl Store {
     }
 
     pub fn channel_read_until(&self, channel_id: &str) -> Result<Option<DateTime<Utc>>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let read_until: Option<Option<i64>> = connection
             .query_row(
                 "SELECT read_until FROM channels WHERE id = ?1",
@@ -138,7 +138,7 @@ impl Store {
     }
 
     pub fn channel(&self, channel_id: &str) -> Result<Option<ChannelRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {CHANNEL_COLUMNS} FROM channels WHERE id = ?1"
         ))?;

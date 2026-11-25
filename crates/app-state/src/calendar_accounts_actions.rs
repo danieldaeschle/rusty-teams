@@ -507,7 +507,7 @@ async fn finish_google_connect(
         },
     };
     let mut accounts = load_calendar_accounts(&store);
-    accounts.google_accounts.push(account);
+    accounts.connect_google(account);
     save_calendar_accounts(&store, &accounts).map_err(|error| error.to_string())?;
     Ok(email)
 }

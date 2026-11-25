@@ -24,7 +24,7 @@ use chatsvc::{
 use chrono::{DateTime, Utc};
 use graph::{
     Channel, Chat, CloudFile, DriveEntry, DriveFolder, Graph, Member, Message, MessageExtras,
-    MessageTarget, OutgoingMention, Photo, Presence, QuickSite, SharedFile, Tag, Team,
+    MessageTarget, OutgoingMention, Photo, Presence, QuickSite, Recipient, SharedFile, Tag, Team,
     UploadDestination, UploadedFile, User,
 };
 
@@ -245,7 +245,11 @@ pub trait Remote {
         Err(Error::Unsupported("a file upload"))
     }
 
-    async fn share_file(&self, _file: &UploadedFile, _user_ids: &[String]) -> Result<()> {
+    async fn share_file(
+        &self,
+        _file: &UploadedFile,
+        _recipients: &[Recipient],
+    ) -> Result<Option<String>> {
         Err(Error::Unsupported("sharing a file"))
     }
 
@@ -972,10 +976,13 @@ impl Remote for Graph {
                     .edit_message(&conversation, target.message_id(), &html)
                     .await?)
             }
-            Some(conversation @ ConversationRef::Chat { .. }) => {
-                let entries = crate::teams_quote::mention_entries(mentions).ok_or(
-                    Error::Unsupported("editing in a team, channel or tag mention"),
-                )?;
+            Some(conversation) => {
+                let Some(entries) = crate::teams_quote::mention_entries(mentions) else {
+                    if matches!(conversation, ConversationRef::Chat { .. }) {
+                        return Err(Error::Unsupported("editing in a team or tag mention"));
+                    }
+                    return Ok(Graph::edit_message(self, target, html, mentions, extras).await?);
+                };
                 let html = format!(
                     "{}{}{}",
                     extras.kept_html(),
@@ -991,7 +998,7 @@ impl Remote for Graph {
                     )
                     .await?)
             }
-            Some(_) | None => Ok(Graph::edit_message(self, target, html, mentions, extras).await?),
+            None => Ok(Graph::edit_message(self, target, html, mentions, extras).await?),
         }
     }
 
@@ -1054,18 +1061,53 @@ impl Remote for Graph {
     }
 
     async fn search_people(&self, query: &str) -> Result<Vec<User>> {
-        let mut users = Graph::search_people(self, query).await?;
-        if crate::native::is_email_address(query)
-            && !users.iter().any(|user| {
-                user.mail
-                    .as_deref()
-                    .is_some_and(|mail| mail.eq_ignore_ascii_case(query.trim()))
-            })
-            && let Ok(external) = chatsvc::UserProfiles::new(self.session())
+        let email = crate::native::is_email_address(query);
+        let directory = Graph::search_people(self, query).await;
+        let (mut users, directory_error) = match directory {
+            Ok(users) => (users, None),
+            Err(error) if email && directory_address_unknown(&error) => (Vec::new(), None),
+            Err(error) if email => (Vec::new(), Some(error)),
+            Err(error) => return Err(error.into()),
+        };
+        let known = users.iter().any(|user| {
+            crate::native::user_has_address(
+                user.mail.as_deref(),
+                user.user_principal_name.as_deref(),
+                query,
+            )
+        });
+        if email && !known {
+            match chatsvc::UserProfiles::new(self.session())
                 .search_external(query)
                 .await
-        {
-            users.extend(crate::native::remember_external(external));
+            {
+                Ok(external) => {
+                    let found = crate::native::remember_external(external);
+                    if let Some(error) = directory_error {
+                        let matched: Vec<User> = found
+                            .into_iter()
+                            .filter(|user| {
+                                crate::native::user_has_address(
+                                    user.mail.as_deref(),
+                                    user.user_principal_name.as_deref(),
+                                    query,
+                                )
+                            })
+                            .collect();
+                        if matched.is_empty() {
+                            return Err(error.into());
+                        }
+                        users.extend(matched);
+                    } else {
+                        users.extend(found);
+                    }
+                }
+                Err(_) => {
+                    if let Some(error) = directory_error {
+                        return Err(error.into());
+                    }
+                }
+            }
         }
         Ok(users)
     }
@@ -1121,8 +1163,12 @@ impl Remote for Graph {
         Ok(Graph::upload_file(self, destination, file_name, bytes, progress).await?)
     }
 
-    async fn share_file(&self, file: &UploadedFile, user_ids: &[String]) -> Result<()> {
-        Ok(Graph::share_item(self, file, user_ids).await?)
+    async fn share_file(
+        &self,
+        file: &UploadedFile,
+        recipients: &[Recipient],
+    ) -> Result<Option<String>> {
+        Ok(Graph::share_item(self, file, recipients).await?)
     }
 
     async fn recent_files(&self, top: usize) -> Result<Vec<CloudFile>> {
@@ -1153,7 +1199,7 @@ impl Remote for Graph {
     }
 
     async fn delete_file(&self, file: &UploadedFile) -> Result<()> {
-        Ok(Graph::delete_drive_item(self, &file.drive_id, &file.item_id).await?)
+        Ok(Graph::delete_uploaded(self, file).await?)
     }
 
     async fn resolve_share(&self, open_url: &str) -> Result<SharedFile> {
@@ -1707,9 +1753,44 @@ impl From<graph::Page<Chat>> for ChatsPage {
     }
 }
 
+/// HTTP 400 and 404 on a mail lookup mean the address is not in the directory.
+/// A 401, a 5xx, or a transport failure is a real search error.
+fn directory_address_unknown(error: &graph::Error) -> bool {
+    matches!(
+        error,
+        graph::Error::Session(session::Error::Api {
+            status: 400 | 404,
+            ..
+        })
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_missing_address_is_an_unknown_directory() {
+        let missing = graph::Error::Session(session::Error::api(
+            404,
+            "https://graph.test/users",
+            serde_json::json!({}),
+        ));
+        let invalid = graph::Error::Session(session::Error::api(
+            400,
+            "https://graph.test/users",
+            serde_json::json!({}),
+        ));
+        let denied = graph::Error::Session(session::Error::api(
+            401,
+            "https://graph.test/users",
+            serde_json::json!({}),
+        ));
+        assert!(directory_address_unknown(&missing));
+        assert!(directory_address_unknown(&invalid));
+        assert!(!directory_address_unknown(&denied));
+        assert!(!directory_address_unknown(&graph::Error::NotAMember));
+    }
 
     #[test]
     fn channel_targets_route_to_chatsvc() {

@@ -127,7 +127,12 @@ fn system_idle() -> Option<Duration> {
     })
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn system_idle() -> Option<Duration> {
+    crate::linux_idle::system_idle()
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn system_idle() -> Option<Duration> {
     None
 }

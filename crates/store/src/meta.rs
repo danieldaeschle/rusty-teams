@@ -7,7 +7,7 @@ use crate::time::{from_millis, to_millis};
 
 impl Store {
     pub fn meta(&self, key: &str) -> Result<Option<String>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         Ok(connection
             .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| {
                 row.get(0)

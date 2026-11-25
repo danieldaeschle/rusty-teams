@@ -19,6 +19,8 @@ pub const CALENDAR_LOAD_FAILURE: &str = "We couldn't load your calendar.";
 pub struct CalendarLoadFailure {
     pub source: CalendarSource,
     pub message: String,
+    /// The user must sign in again. Retry would use the same rejected token.
+    pub sign_in: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -261,6 +263,7 @@ impl AppState {
                     Err(error) => failures.push(CalendarLoadFailure {
                         source: CalendarSource::Outlook,
                         message: error.to_string(),
+                        sign_in: false,
                     }),
                 }
             }
@@ -273,14 +276,22 @@ impl AppState {
                 )
                 .await
                 {
-                    Ok(events) => {
+                    Ok((events, account_errors)) => {
                         // Keep only refreshed tokens: a toggle made meanwhile must survive.
                         let _ = store::merge_google_tokens(&store, &fetched_accounts);
                         google_count = Some(events.len());
                         combined.extend(events);
+                        for message in account_errors {
+                            failures.push(CalendarLoadFailure {
+                                source: CalendarSource::Google,
+                                sign_in: crate::google_calendar_sync::needs_sign_in(&message),
+                                message,
+                            });
+                        }
                     }
                     Err(error) => failures.push(CalendarLoadFailure {
                         source: CalendarSource::Google,
+                        sign_in: crate::google_calendar_sync::needs_sign_in(&error),
                         message: error,
                     }),
                 }
@@ -297,12 +308,14 @@ impl AppState {
                             failures.push(CalendarLoadFailure {
                                 source: CalendarSource::CalDav,
                                 message,
+                                sign_in: false,
                             });
                         }
                     }
                     Err(error) => failures.push(CalendarLoadFailure {
                         source: CalendarSource::CalDav,
                         message: error,
+                        sign_in: false,
                     }),
                 }
             }
@@ -336,12 +349,14 @@ impl AppState {
                             failures.push(CalendarLoadFailure {
                                 source: CalendarSource::Ics,
                                 message,
+                                sign_in: false,
                             });
                         }
                     }
                     Err(error) => failures.push(CalendarLoadFailure {
                         source: CalendarSource::Ics,
                         message: error,
+                        sign_in: false,
                     }),
                 }
             }
@@ -364,6 +379,7 @@ impl AppState {
                     vec![CalendarLoadFailure {
                         source: CalendarSource::Outlook,
                         message: CALENDAR_LOAD_FAILURE.to_owned(),
+                        sign_in: false,
                     }],
                 )
             });
@@ -817,6 +833,7 @@ mod tests {
         let failures = [CalendarLoadFailure {
             source: CalendarSource::Outlook,
             message: "HTTP 503".into(),
+            sign_in: false,
         }];
         let ids: Vec<_> = keep_failed_sources(&previous, fresh.clone(), &failures)
             .into_iter()
@@ -840,6 +857,7 @@ mod tests {
         let failures = [CalendarLoadFailure {
             source: CalendarSource::CalDav,
             message: "CalDAV Work: timeout".into(),
+            sign_in: false,
         }];
         let ids: Vec<_> = keep_failed_sources(&previous, fresh, &failures)
             .into_iter()
@@ -855,6 +873,7 @@ mod tests {
         let failures = [CalendarLoadFailure {
             source: CalendarSource::Google,
             message: "client_secret is missing".into(),
+            sign_in: false,
         }];
         assert_eq!(
             load_summary(from, to, Some(3), None, None, 412, &failures),

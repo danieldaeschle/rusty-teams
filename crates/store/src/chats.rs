@@ -84,7 +84,7 @@ impl Store {
         &self,
         chat_ids: &[String],
     ) -> Result<HashMap<String, Option<DateTime<Utc>>>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(
             "SELECT id, last_message_at FROM chats WHERE id IN (SELECT value FROM json_each(?1))",
         )?;
@@ -95,7 +95,7 @@ impl Store {
     }
 
     pub fn chat_count(&self) -> Result<usize> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let count: i64 =
             connection.query_row("SELECT COUNT(*) FROM chats", [], |row| row.get(0))?;
         Ok(count as usize)
@@ -195,7 +195,7 @@ impl Store {
     }
 
     pub fn recent_chats(&self, limit: usize) -> Result<Vec<ChatRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {CHAT_COLUMNS} FROM chats ORDER BY last_message_at IS NULL, last_message_at DESC, id LIMIT ?1"
         ))?;
@@ -207,7 +207,7 @@ impl Store {
     }
 
     pub fn chat(&self, chat_id: &str) -> Result<Option<ChatRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection
             .prepare_cached(&format!("SELECT {CHAT_COLUMNS} FROM chats WHERE id = ?1"))?;
         let mut chats = statement

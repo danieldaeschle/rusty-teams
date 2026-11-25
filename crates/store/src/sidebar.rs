@@ -30,7 +30,7 @@ struct ChannelRow {
 impl Store {
     pub fn sidebar(&self) -> Result<Sidebar> {
         let chats = self.recent_chats(usize::MAX >> 1)?;
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut team_rows: Vec<TeamRow> = connection
             .prepare_cached(
                 "SELECT teams.id, teams.name, team_layout.position, COALESCE(team_layout.hidden, 0),
@@ -228,7 +228,7 @@ impl Store {
     }
 
     pub fn channel_substrate_group_id(&self, channel_id: &str) -> Result<Option<String>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         Ok(connection
             .prepare_cached("SELECT substrate_group_id FROM channel_layout WHERE channel_id = ?1")?
             .query_map([channel_id], |row| row.get::<_, Option<String>>(0))?
@@ -253,7 +253,7 @@ impl Store {
 
     /// The team's own thread id, which Teams' CSA routes take: the id of its General channel.
     pub fn team_thread_id(&self, team_id: &str) -> Result<Option<String>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         Ok(connection
             .prepare_cached(
                 "SELECT channels.id FROM channels
@@ -311,7 +311,7 @@ impl Store {
 
 impl Store {
     pub fn channel_tabs(&self, channel_id: &str) -> Result<Vec<ChannelTabRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let tabs = connection
             .prepare_cached(
                 "SELECT tab_id, name, definition_id, open_url FROM channel_tabs

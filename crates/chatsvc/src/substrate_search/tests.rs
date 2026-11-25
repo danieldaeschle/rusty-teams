@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use session::{ApiResponse, Method, Request};
 
 use super::*;
@@ -195,6 +195,19 @@ fn suggestions_fixture_parses_every_group() {
     assert_eq!(suggestions.texts[0].kind.as_deref(), Some("PeopleAsText"));
     assert_eq!(suggestions.best_matches.len(), 2);
     assert_eq!(suggestions.best_matches[0].group, "People");
+}
+
+#[test]
+fn a_person_without_a_directory_id_uses_the_orgid_mri() {
+    let suggestions = parse_suggestions(&json!({"Groups": [{"Type": "People", "Suggestions": [{
+        "DisplayName": "Ada Lovelace",
+        "MRI": "8:orgid:ada-id",
+        "EmailAddresses": ["ada@other.example"],
+        "CompanyName": "Other AG"
+    }]}]}));
+    let person = &suggestions.people[0];
+    assert_eq!(person.user_id.as_deref(), Some("ada-id"));
+    assert_eq!(person.company_name.as_deref(), Some("Other AG"));
 }
 
 #[test]

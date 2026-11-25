@@ -8,7 +8,7 @@ use crate::time::{from_millis, to_millis};
 
 impl Store {
     pub fn avatar(&self, user_id: &str) -> Result<Option<AvatarRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         Ok(connection
             .query_row(
                 "SELECT user_id, bytes, content_type, fetched_at FROM avatars WHERE user_id = ?1",
@@ -47,7 +47,7 @@ impl Store {
         user_ids: &[String],
         cutoff: DateTime<Utc>,
     ) -> Result<Vec<String>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(
             "SELECT value FROM json_each(?1)
              WHERE value NOT IN (SELECT user_id FROM avatars WHERE fetched_at >= ?2)",

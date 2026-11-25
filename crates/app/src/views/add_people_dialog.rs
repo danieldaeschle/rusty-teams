@@ -314,6 +314,7 @@ mod tests {
             user_id: "bob".to_owned(),
             name: "Bob".to_owned(),
             mail: None,
+            organization: None,
         }];
         let people = group_chat_people(&members, Some("me"), &picks);
         assert_eq!(people, [member("ann", "Ann"), member("bob", "Bob")]);

@@ -1,8 +1,8 @@
 use chatsvc::{ConversationRef, read_horizon};
 use chrono::{DateTime, Duration, Utc};
 use graph::{
-    FileReference, MessageExtras, MessageTarget, OutgoingMention, UploadDestination, UploadedFile,
-    hosted_image_order,
+    FileReference, MessageExtras, MessageTarget, OutgoingMention, Recipient, UploadDestination,
+    UploadedFile, hosted_image_order,
 };
 use store::MessageRecord;
 
@@ -264,8 +264,12 @@ impl<R: Remote> SyncEngine<R> {
         let uploaded = self
             .upload_attachment_file(conversation_id, file_name, bytes, progress)
             .await?;
-        self.share_attachment(conversation_id, &uploaded).await?;
-        uploaded.reference().ok_or_else(missing_attachment_id)
+        let link = self.share_attachment(conversation_id, &uploaded).await?;
+        let mut reference = uploaded.reference().ok_or_else(missing_attachment_id)?;
+        if let Some(link) = link.filter(|link| !link.is_empty()) {
+            reference.content_url = link;
+        }
+        Ok(reference)
     }
 
     /// Chat files go to the sender's "Microsoft Teams Chat Files", channel files to the channel's folder.
@@ -294,16 +298,47 @@ impl<R: Remote> SyncEngine<R> {
     }
 
     /// Read-only for the other chat members; channels need nothing.
+    /// `Some` is a sharing link that the chat message should carry instead of the item URL.
     pub async fn share_attachment(
         &self,
         conversation_id: &str,
         uploaded: &UploadedFile,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         if !matches!(self.resolve(conversation_id).await?, Conversation::Chat) {
-            return Ok(());
+            return Ok(None);
         }
         let other_members = self.other_member_ids(conversation_id).await?;
-        self.remote.share_file(uploaded, &other_members).await
+        let recipients = if uploaded.home_drive {
+            let emails = self.member_emails(conversation_id, &other_members).await?;
+            // Bots and members Graph lists without an email cannot be invited in the home
+            // tenant. Sending then would post a file nobody can open, with no notice.
+            if emails.is_empty() && !other_members.is_empty() {
+                return Err(graph::Error::SharingDenied(
+                    "no chat member has an email the home tenant can invite".into(),
+                )
+                .into());
+            }
+            emails
+        } else {
+            other_members.into_iter().map(Recipient::ObjectId).collect()
+        };
+        self.remote.share_file(uploaded, &recipients).await
+    }
+
+    /// The home tenant does not know the guest org's user ids, so a file there is shared by email.
+    /// Members without an email, such as bots, cannot be invited and are left out.
+    async fn member_emails(&self, chat_id: &str, user_ids: &[String]) -> Result<Vec<Recipient>> {
+        let members = self.remote.chat_members(chat_id).await?;
+        Ok(members
+            .into_iter()
+            .filter(|member| {
+                member
+                    .user_id
+                    .as_ref()
+                    .is_some_and(|user_id| user_ids.contains(user_id))
+            })
+            .filter_map(|member| member.email.map(Recipient::Email))
+            .collect())
     }
 
     pub async fn discard_attachment(&self, uploaded: &UploadedFile) -> Result<()> {

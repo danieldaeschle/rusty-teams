@@ -7,7 +7,7 @@ use crate::time::to_millis;
 
 impl Store {
     pub fn presences(&self) -> Result<Vec<(String, String)>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement =
             connection.prepare_cached("SELECT user_id, availability FROM presence")?;
         let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;

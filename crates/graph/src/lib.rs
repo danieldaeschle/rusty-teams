@@ -19,9 +19,9 @@ pub use client::{BATCH_SIZE, CHAT_PAGE_SIZE, Graph, MESSAGE_PAGE_SIZE};
 pub use cloud_files::{CloudFile, QuickSite};
 pub use error::{Error, Result};
 pub use files::{
-    DOWNLOAD_CHUNK_BYTES, DriveFolder, SharedFile, UPLOAD_CHUNK_BYTES, UploadDestination,
-    UploadedFile, chunk_range_at, chunk_ranges, download_ranges, etag_guid, next_expected_start,
-    percent_done, share_id,
+    DOWNLOAD_CHUNK_BYTES, DriveFolder, Recipient, SharedFile, UPLOAD_CHUNK_BYTES,
+    UploadDestination, UploadedFile, chunk_range_at, chunk_ranges, download_ranges, etag_guid,
+    next_expected_start, percent_done, share_id,
 };
 pub use library::DriveEntry;
 pub use mailbox::{MailboxWorkingHours, parse_working_hours, working_hours_body};

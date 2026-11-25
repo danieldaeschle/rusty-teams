@@ -61,7 +61,7 @@ impl Store {
 
     /// Oldest first.
     pub fn pending_agent_proposals(&self) -> Result<Vec<AgentProposalRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {PROPOSAL_COLUMNS} FROM agent_proposals WHERE state = ?1
              ORDER BY created_at ASC, id ASC"
@@ -86,7 +86,7 @@ impl Store {
     }
 
     pub fn agent_proposal_image_count(&self, proposal_id: &str) -> Result<usize> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let count: i64 = connection.query_row(
             "SELECT COUNT(*) FROM attachment_images WHERE owner_kind = ?1 AND owner_id = ?2",
             params![PROPOSAL_OWNER, proposal_id],
@@ -132,7 +132,7 @@ impl Store {
 
     /// Oldest first.
     pub fn pending_agent_reactions(&self) -> Result<Vec<AgentReactionRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {REACTION_COLUMNS} FROM agent_reaction_proposals WHERE state = ?1
              ORDER BY created_at ASC, id ASC"

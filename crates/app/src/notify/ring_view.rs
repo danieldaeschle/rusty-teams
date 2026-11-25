@@ -17,7 +17,7 @@ use crate::views::widgets::icon;
 pub const RING_AVATAR: f32 = 56.;
 const RING_WIDTH: f32 = 3.;
 const RING_GAP: f32 = 3.;
-const TOAST_RADIUS: f32 = 12.;
+const TOAST_RADIUS: f32 = 10.;
 const BUTTON_HEIGHT: f32 = 32.;
 pub const ENDS_CURRENT_CALL: &str = "Accept ends current call";
 
@@ -101,7 +101,7 @@ impl Render for RingView {
         let ends_current = state.call.is_some();
         let avatar = caller_avatar(state, &entry);
         let ring_id = self.ring_id;
-        let decline_app = self.app.clone();
+        let decline_center = self.center.clone();
         let accept_center = self.center.clone();
         let decline = answer_button(
             "ring-decline",
@@ -112,7 +112,7 @@ impl Render for RingView {
         )
         .on_click(move |_, _, cx| {
             cx.stop_propagation();
-            decline_app.update(cx, |state, cx| state.decline_ring(ring_id, cx));
+            decline_center.update(cx, |center, cx| center.decline_ring(ring_id, cx));
         });
         let accept = answer_button(
             "ring-accept",

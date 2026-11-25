@@ -228,6 +228,20 @@ impl CalendarAccounts {
             .find(|account| account.id == id)
     }
 
+    /// Adds the account, or replaces the one with the same email and keeps its id.
+    pub fn connect_google(&mut self, mut account: GoogleAccount) {
+        if let Some(existing) = self
+            .google_accounts
+            .iter_mut()
+            .find(|item| item.email.eq_ignore_ascii_case(&account.email))
+        {
+            account.id = existing.id.clone();
+            *existing = account;
+            return;
+        }
+        self.google_accounts.push(account);
+    }
+
     pub fn disconnect_google(&mut self, account_id: &str) {
         self.google_accounts
             .retain(|account| account.id != account_id);
@@ -475,6 +489,31 @@ mod tests {
         assert!(!accounts.has_google());
         assert_eq!(accounts.home.provider, CalendarProvider::Outlook);
         assert!(accounts.write_targets.is_empty());
+    }
+
+    #[test]
+    fn connect_google_replaces_the_same_email_and_keeps_the_id() {
+        let mut accounts = CalendarAccounts {
+            google_accounts: vec![GoogleAccount {
+                id: "g1".into(),
+                email: "A@B.C".into(),
+                calendars: Vec::new(),
+                tokens: GoogleTokenSet::default(),
+            }],
+            ..CalendarAccounts::default()
+        };
+        accounts.connect_google(GoogleAccount {
+            id: "fresh".into(),
+            email: "a@b.c".into(),
+            calendars: Vec::new(),
+            tokens: GoogleTokenSet {
+                access_token: "new".into(),
+                ..GoogleTokenSet::default()
+            },
+        });
+        assert_eq!(accounts.google_accounts.len(), 1);
+        assert_eq!(accounts.google_accounts[0].id, "g1");
+        assert_eq!(accounts.google_accounts[0].tokens.access_token, "new");
     }
 
     #[test]

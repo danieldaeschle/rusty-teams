@@ -1226,6 +1226,7 @@ impl ConversationView {
                         user_id: person.user_id?,
                         name: person.display_name,
                         mail: None,
+                        organization: None,
                     })
                 })
                 .collect();

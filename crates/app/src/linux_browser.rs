@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -19,6 +20,15 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 static LINUX_BROWSER: OnceLock<browser::Browser> = OnceLock::new();
 static LIVE_RETRY: OnceLock<Mutex<Option<Arc<Notify>>>> = OnceLock::new();
 static UI_EVENTS: OnceLock<mpsc::UnboundedSender<BackendEvent>> = OnceLock::new();
+static LOGIN_LAUNCH: AtomicU8 = AtomicU8::new(LoginLaunch::Idle as u8);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum LoginLaunch {
+    Idle = 0,
+    Opening = 1,
+    Shown = 2,
+}
 
 fn live_retry_slot() -> &'static Mutex<Option<Arc<Notify>>> {
     LIVE_RETRY.get_or_init(|| Mutex::new(None))
@@ -36,14 +46,96 @@ fn publish_sign_in(state: BrowserSignInState) {
     }
 }
 
+/// A finished launch that is not showing a login window must not leave the
+/// splash on "opening the browser". A visible window still waits for sign-in.
+fn sign_in_after_browser_ready(visible_login: bool) -> BrowserSignInState {
+    if visible_login {
+        BrowserSignInState::AwaitingSignIn
+    } else {
+        BrowserSignInState::Idle
+    }
+}
+
 pub fn note_backend_event(event: &BackendEvent) {
     if let BackendEvent::LiveRetry(retry) = event
         && let Ok(mut slot) = live_retry_slot().lock()
     {
         *slot = Some(retry.clone());
     }
-    if let BackendEvent::Connection(crate::backend::ConnectionState::Online) = event {
-        publish_sign_in(BrowserSignInState::Idle);
+    match event {
+        BackendEvent::Connection(crate::backend::ConnectionState::Online) => {
+            LOGIN_LAUNCH.store(LoginLaunch::Idle as u8, Ordering::SeqCst);
+            publish_sign_in(BrowserSignInState::Idle);
+        }
+        BackendEvent::Connection(crate::backend::ConnectionState::LoginRequired) => {
+            request_login_window(false);
+        }
+        _ => {}
+    }
+}
+
+/// Opens the managed browser for Microsoft sign-in when it is hidden.
+/// `force` is the banner action: it may open the window again after the user closed it.
+/// An automatic request opens it once and does not reopen a closed window.
+pub fn request_login_window(force: bool) {
+    let Some(browser) = LINUX_BROWSER.get().cloned() else {
+        return;
+    };
+    let visible = browser.is_visible_managed();
+    let busy = browser.is_busy();
+    let current = login_launch();
+    let Some(next) = login_launch_decision(current, visible, busy, force) else {
+        return;
+    };
+    if LOGIN_LAUNCH
+        .compare_exchange(
+            current as u8,
+            next as u8,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        )
+        .is_err()
+    {
+        return;
+    }
+    publish_sign_in(BrowserSignInState::Opening);
+    app_base::runtime::handle().spawn(async move {
+        match browser.login_window().await {
+            Ok(()) => {
+                LOGIN_LAUNCH.store(LoginLaunch::Shown as u8, Ordering::SeqCst);
+                publish_sign_in(BrowserSignInState::AwaitingSignIn);
+            }
+            Err(error) => {
+                log::warn!("browser login window failed: {error}");
+                LOGIN_LAUNCH.store(LoginLaunch::Idle as u8, Ordering::SeqCst);
+                publish_sign_in(BrowserSignInState::Failed(error.to_string()));
+            }
+        }
+    });
+}
+
+fn login_launch() -> LoginLaunch {
+    match LOGIN_LAUNCH.load(Ordering::SeqCst) {
+        value if value == LoginLaunch::Opening as u8 => LoginLaunch::Opening,
+        value if value == LoginLaunch::Shown as u8 => LoginLaunch::Shown,
+        _ => LoginLaunch::Idle,
+    }
+}
+
+/// `Some(Opening)` means start the visible window. `None` means leave it alone.
+fn login_launch_decision(
+    current: LoginLaunch,
+    visible: bool,
+    busy: bool,
+    force: bool,
+) -> Option<LoginLaunch> {
+    if visible || busy {
+        return None;
+    }
+    match current {
+        LoginLaunch::Opening => None,
+        LoginLaunch::Shown if !force => None,
+        LoginLaunch::Idle | LoginLaunch::Shown => Some(LoginLaunch::Opening),
     }
 }
 
@@ -148,6 +240,7 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
     let headless_notify = Arc::new(Notify::new());
     let supervisor_browser = browser.clone();
     let supervisor_notify = headless_notify.clone();
+    publish_sign_in(BrowserSignInState::Opening);
     app_base::runtime::handle().spawn(async move {
         let first_run = !Path::new(&supervisor_browser.config().profile).exists();
         let outcome = if first_run {
@@ -157,10 +250,11 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
             supervisor_browser.ensure_running().await
         };
         match &outcome {
-            Ok(()) if supervisor_browser.is_visible_managed() => {
-                publish_sign_in(BrowserSignInState::AwaitingSignIn);
+            Ok(()) => {
+                publish_sign_in(sign_in_after_browser_ready(
+                    supervisor_browser.is_visible_managed(),
+                ));
             }
-            Ok(()) => {}
             Err(error) => {
                 log::warn!("browser launch failed: {error}");
                 publish_sign_in(BrowserSignInState::Failed(error.to_string()));
@@ -364,6 +458,43 @@ mod tests {
             tabs,
             login_state,
         }
+    }
+
+    #[test]
+    fn login_launch_decision_opens_once_and_the_action_can_reopen() {
+        assert_eq!(
+            login_launch_decision(LoginLaunch::Idle, false, false, false),
+            Some(LoginLaunch::Opening)
+        );
+        assert_eq!(
+            login_launch_decision(LoginLaunch::Opening, false, false, true),
+            None
+        );
+        assert_eq!(
+            login_launch_decision(LoginLaunch::Shown, true, false, true),
+            None
+        );
+        assert_eq!(
+            login_launch_decision(LoginLaunch::Shown, false, false, false),
+            None
+        );
+        assert_eq!(
+            login_launch_decision(LoginLaunch::Shown, false, false, true),
+            Some(LoginLaunch::Opening)
+        );
+        assert_eq!(
+            login_launch_decision(LoginLaunch::Idle, false, true, true),
+            None
+        );
+    }
+
+    #[test]
+    fn sign_in_after_browser_ready_is_idle_when_headless() {
+        assert_eq!(sign_in_after_browser_ready(false), BrowserSignInState::Idle);
+        assert_eq!(
+            sign_in_after_browser_ready(true),
+            BrowserSignInState::AwaitingSignIn
+        );
     }
 
     #[test]

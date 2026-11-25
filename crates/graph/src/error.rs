@@ -16,6 +16,10 @@ pub enum Error {
     EmptyUpload,
     #[error("upload failed: {0}")]
     Upload(String),
+    /// The file is in the drive, but the organization refused the share (`sharingFailed`)
+    /// or nobody in the chat could be invited.
+    #[error("sharing denied: {0}")]
+    SharingDenied(String),
     #[error("download failed: {0}")]
     Download(String),
 }

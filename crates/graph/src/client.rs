@@ -15,15 +15,43 @@ const PEOPLE_PAGE_SIZE: usize = 10;
 
 pub struct Graph {
     session: Session,
+    home_drive: Option<Session>,
 }
 
 impl Graph {
     pub fn new(session: Session) -> Self {
-        Graph { session }
+        Graph {
+            session,
+            home_drive: None,
+        }
+    }
+
+    /// Chat files go to the OneDrive of `home`, the account's home tenant.
+    /// For a guest org, where the account has no OneDrive.
+    pub fn with_home_drive(mut self, home: Session) -> Self {
+        self.home_drive = Some(home);
+        self
     }
 
     pub fn session(&self) -> &Session {
         &self.session
+    }
+
+    /// The session that owns the file. A home-drive file with no home session is an error:
+    /// falling back to the guest session would delete or share it in the wrong tenant.
+    pub(crate) fn drive_session(&self, home: bool) -> Result<&Session> {
+        if !home {
+            return Ok(&self.session);
+        }
+        self.home_drive.as_ref().ok_or_else(|| {
+            Error::Upload(
+                "the file is in the home drive, but this session has no home tenant".into(),
+            )
+        })
+    }
+
+    pub(crate) fn has_home_drive(&self) -> bool {
+        self.home_drive.is_some()
     }
 
     pub async fn me(&self) -> Result<User> {
