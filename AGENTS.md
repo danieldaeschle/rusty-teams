@@ -31,4 +31,5 @@ Code under `cfg(windows)` is not compiled by tests on Linux or macOS. CI builds 
 1. Commit, run `git fetch origin`, and get at least two independent reviews of `git diff origin/main...HEAD`.
 2. A reviewer must not have written the change. Use a fresh agent session, a subagent, or a review command such as `/code-review` or `/review`. On Copilot, a Copilot code review on the draft PR counts as one.
 3. Fix or answer every valid finding. In the PR's Review section, write one line per review (what ran it), then one line per finding: fixed, or not fixed and why.
-4. Commit and PR title: `type(scope): message`. Type is one of `feat fix perf refactor docs test chore ci build`, the scope is lowercase, no emoji. Write it from the user's view. It becomes the release note line.
+4. Check the PR against the table in CONTRIBUTING.md, "When a PR is ready for review". The PR gate check enforces it.
+5. Commit and PR title: `type(scope): message`. Type is one of `feat fix perf refactor docs test chore ci build`, the scope is lowercase, no emoji. Write it from the user's view. It becomes the release note line.

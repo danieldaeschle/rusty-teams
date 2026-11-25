@@ -21,6 +21,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  pr-gate:
+    name: PR gate rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Tests
+        run: cd .github/scripts && python3 -m unittest -v
+
   linux:
     name: Linux
     runs-on: ubuntu-latest
