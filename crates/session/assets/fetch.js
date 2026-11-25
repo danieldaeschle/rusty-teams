@@ -99,7 +99,7 @@
         const response = await fetch(`https://login.microsoftonline.com/${tenant || homeTenant(refreshToken) || 'organizations'}/oauth2/v2.0/token`,
           {method: 'POST', body: form});
         const answer = await response.json();
-        if (!response.ok) { refreshError = answer.error || `HTTP ${response.status}`; continue; }
+        if (!response.ok) { refreshError = [answer.error || `HTTP ${response.status}`, (answer.error_description || '').split(/\r?\n/)[0]].filter(Boolean).join(': '); continue; }
         const scopes = (answer.scope || '').split(' ');
         cache[cacheKey] = {token: answer.access_token, scopes, expires: Date.now() + answer.expires_in * 1000};
         if (grants(scopes)) { token = answer.access_token; break; }
