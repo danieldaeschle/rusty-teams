@@ -10,8 +10,8 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use store::ChatRecord;
-use teams_core::substrate_search::{SearchPerson, SearchSession};
 use teams_core::MentionCandidate;
+use teams_core::substrate_search::{SearchPerson, SearchSession};
 
 use super::avatar::person_avatar;
 use super::switcher::clamp_highlight;
@@ -912,10 +912,10 @@ mod tests {
     use store::{ChatRecord, MemberRecord};
 
     use super::{
-        composer_placeholder, enter_action, merge_remote, pick_detail, search_results,
-        suggested_people, EnterAction, Pick,
+        EnterAction, Pick, composer_placeholder, enter_action, merge_remote, pick_detail,
+        search_results, suggested_people,
     };
-    use crate::data::{existing_one_on_one, Person};
+    use crate::data::{Person, existing_one_on_one};
 
     fn me() -> Person {
         Person {

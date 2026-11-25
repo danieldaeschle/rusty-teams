@@ -1562,6 +1562,15 @@ impl SidebarView {
         if rows.hidden_count == 0 {
             return list;
         }
+        for channel in rows.revealed {
+            list = list.child(self.team_channel_row(
+                channel,
+                false,
+                channel_name_style(channel_shows_unread(entry, channel), false, false),
+                entry.channel_notifications(&channel.id),
+                channel_badge(entry, &channel.id),
+            ));
+        }
         let toggle_id = team_id.clone();
         list = list.child(self.see_all_channels_row(
             SharedString::from(format!("hidden-channels-{team_id}")),
@@ -1573,15 +1582,6 @@ impl SidebarView {
                 cx.notify();
             }),
         ));
-        for channel in rows.revealed {
-            list = list.child(self.team_channel_row(
-                channel,
-                false,
-                channel_name_style(channel_shows_unread(entry, channel), false, false),
-                entry.channel_notifications(&channel.id),
-                channel_badge(entry, &channel.id),
-            ));
-        }
         list
     }
 
