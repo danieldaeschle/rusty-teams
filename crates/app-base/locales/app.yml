@@ -843,14 +843,14 @@ install:
     en: Updates
     de: Updates
   updates_detail:
-    en: "%{version}, updates from GitHub releases"
-    de: "%{version}, Updates über GitHub-Releases"
-  updates_detail_not_installed:
-    en: "%{version}. Install Rusty Teams above to get updates"
-    de: "%{version}. Installiere Rusty Teams oben, um Updates zu erhalten"
-  updates_need_install:
-    en: Install Rusty Teams first (Application menu > Install), then it can update itself
-    de: Installiere Rusty Teams zuerst (Anwendungsmenü > Installieren), dann kann es sich selbst aktualisieren
+    en: "%{version}. An installed copy updates itself. Other copies open the release page"
+    de: "%{version}. Eine Installation aktualisiert sich. Sonst öffnet sich die Release-Seite"
+  updates_detail_dev:
+    en: "%{version}. This build does not look for releases"
+    de: "%{version}. Dieser Build sucht nicht nach Releases"
+  updates_dev_build:
+    en: This build does not look for releases
+    de: Dieser Build sucht nicht nach Releases
   check_now:
     en: Check now
     de: Jetzt prüfen
@@ -858,17 +858,17 @@ install:
     en: Checking for updates...
     de: Suche nach Updates...
   auto_updates:
-    en: Automatic updates
-    de: Automatische Updates
+    en: Updates
+    de: Updates
   auto_updates_detail:
-    en: Look for new releases and ask before installing
-    de: Nach neuen Releases suchen und vor der Installation fragen
+    en: Look for new releases. An installed copy updates itself; other copies open the release page
+    de: Nach neuen Releases suchen. Eine Installation aktualisiert sich, sonst öffnet sich die Release-Seite
   update_available_title:
     en: Update available
     de: Update verfügbar
   update_available_body:
-    en: "Rusty Teams %{version} is available. You have %{current}. Update now?"
-    de: "Rusty Teams %{version} ist verfügbar. Installiert ist %{current}. Jetzt aktualisieren?"
+    en: "Rusty Teams %{version} is available. You have %{current}."
+    de: "Rusty Teams %{version} ist verfügbar. Installiert ist %{current}."
   update_now:
     en: Update
     de: Aktualisieren
@@ -883,13 +883,16 @@ install:
     de: Update bereit
   update_ready_body:
     en: "%{version} is downloaded. Restart Rusty Teams to finish the update."
-    de: "%{version} ist heruntergeladen. Starte Rusty Teams neu, um das Update abzuschließen."
+    de: "%{version} ist heruntergeladen. Starte Rusty Teams neu, um das Update abzuschliessen."
   later:
     en: Later
     de: Später
   restart_now:
     en: Restart now
     de: Jetzt neu starten
+  open_release:
+    en: Open release
+    de: Release öffnen
   up_to_date:
     en: Rusty Teams is up to date
     de: Rusty Teams ist aktuell

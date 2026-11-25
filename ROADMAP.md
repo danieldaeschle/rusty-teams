@@ -32,9 +32,9 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|
 | Sign in on Windows through embedded WebView2, single sign-on | Done |  |
 | Start from the local cache, no spinner | Done |  |
-| Self-update | Done |  |
+| Updates | Done | Windows downloads quietly and restarts when idle and not in a call. Linux under `~/.local` asks first. Other installs open the release page. Flatpak does not check |
 | Tray icon, close to tray | Done | Linux: StatusNotifierItem (KDE, GNOME with AppIndicator). macOS: menu-bar via `tray-icon`, same close-to-tray path as Linux. Windows: `tray-icon` |
-| Linux install, menu entry and self-update | Done | Offers to install itself to `~/.local/share/rusty-teams` with a `.desktop` entry (Settings > General to install, replace, remove or ask again); the installed release build offers new GitHub releases in a dialog (download with progress, then Restart now); the Teams icon is downloaded from Microsoft, not shipped |
+| Linux install and menu entry | Done | Offers to install itself to `~/.local/share/rusty-teams` with a `.desktop` entry (Settings > General to install, replace, remove or ask again); the Teams icon is downloaded from Microsoft, not shipped. That copy updates itself after asking. Other Linux installs open the release page. Flatpak does not check |
 | Sign in on Linux without starting Chrome by hand | Done | The app starts Chrome or Chromium headless with its own profile, shows the window for the login and hides it again afterwards; a watchdog restarts a dead or hung Chrome |
 | Single instance, second start brings the window to front | Done |  |
 | Sign in on macOS without starting Chrome by hand | Done | Same managed browser as on Linux, profile in Application Support. Takes the first of Chrome, Chromium, Edge, Brave, Helium, Vivaldi; checked live with Helium |

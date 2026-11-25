@@ -30,4 +30,3 @@ The options were:
 - Changing work hours in the app changes them in Outlook and Teams too, and the other way round after the next read.
 - A first-day or time-scale change in Outlook web does not reach the app, and an app change does not reach Outlook. This deviation is named in the change's commit.
 - If the fork adopts the OWA options service later, first day and time scale move there, and this record is superseded.
-- OpenSpec `calendar-view-settings` owns the observable behaviour.

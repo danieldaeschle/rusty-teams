@@ -82,7 +82,7 @@
 
 **App**
 - Dark theme, opens instantly from the cache
-- Self-update from GitHub releases (Windows, and the installed Linux binary)
+- Windows downloads a newer release quietly and restarts when idle. Linux under `~/.local` asks first. Other installs open the release page. Flatpak does not check.
 - Single instance: a second start brings the window to the front
 - Guest orgs: the avatar menu lists every org of your account (home and guest tenants) with unread counts; picking one restarts on it with its own cache. Messages from the other orgs show as toasts
 
@@ -94,7 +94,7 @@
 | Sign-in | Embedded WebView2 | Your browser, headless | Your browser, headless |
 | Download | `.exe` | `.tar.gz`, self-installs to the app menu | Universal `.app` (arm64 + x86_64) |
 | Tray icon | Yes | StatusNotifierItem | Menu bar |
-| Auto-update | - | Yes | - |
+| Updates | Quiet download, idle restart | Asks when installed under `~/.local`; otherwise opens the release page | Opens the release page |
 
 <details>
 <summary><b>Sign-in on Linux and macOS</b></summary>
@@ -113,7 +113,7 @@
 <summary><b>Linux details</b></summary>
 
 - **Install:** on first start the app offers to install itself to `~/.local/share/rusty-teams/teams` and adds it to the application menu. Settings > General can install, replace or remove it.
-- **Updates:** the installed release build checks GitHub releases and asks before it downloads and restarts.
+- **Updates:** a release build installed under `~/.local` asks, then downloads and restarts. Other copies open the release page. Flatpak does not check.
 - **Tray:** KDE Plasma natively, GNOME with the AppIndicator extension. "Show icon in the tray" plus "On close, keep the application running" keeps the app in the tray.
 - **Window id:** `rusty-teams`, for window manager rules.
 - **Emoji:** a bundled Noto Color Emoji font, so they look the same on every distro.
