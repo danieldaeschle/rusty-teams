@@ -9,20 +9,16 @@ rustflags = ["-C", "target-feature=+crt-static"]
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
-# macOS: build each slice for the same minimum as its prebuilt libwebrtc, 10.15 on x86_64
-# (rustc and clang raise arm64 to 11.0, the arm64 prebuilt's minimum). Rust's x86_64 default,
-# 10.12, is below 10.14.4, where the macOS 27 SDK links CoreMedia as @rpath/libswiftCoreMedia.dylib.
-# Ignored by other targets; an exported MACOSX_DEPLOYMENT_TARGET still wins.
+# macOS 14 is the minimum: screen and window sharing use ScreenCaptureKit's
+# SCContentSharingPicker (macOS 14+). Ignored by other targets; an exported
+# MACOSX_DEPLOYMENT_TARGET still wins. scripts/build-macos.sh exports the same
+# default for release builds: keep both in sync.
 [env]
-MACOSX_DEPLOYMENT_TARGET = "10.15"
+MACOSX_DEPLOYMENT_TARGET = "14.0"
 
 # libwebrtc's ObjC categories (NSString+StdString, RTCVideoCodecInfo, ...) live in unlinked
 # objects of the prebuilt static lib; without -ObjC the app aborts in a C++ static initializer
 # (RTCH264ProfileLevelId.mm) before main. webrtc-sys already passes -ObjC, but a dependency's
-# link flags never reach the final binary. The x86_64 prebuilt also autolinks a Swift runtime
-# dylib (@rpath/libswiftCoreMedia.dylib) that lives in the dyld shared cache only.
+# link flags never reach the final binary.
 [target.aarch64-apple-darwin]
-rustflags = ["-C", "link-arg=-ObjC", "-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
-
-[target.x86_64-apple-darwin]
-rustflags = ["-C", "link-arg=-ObjC", "-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
+rustflags = ["-C", "link-arg=-ObjC"]
