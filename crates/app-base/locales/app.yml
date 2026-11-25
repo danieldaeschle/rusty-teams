@@ -1385,6 +1385,12 @@ calendar:
     not_saved:
       en: Work location not saved
       de: Arbeitsort nicht gespeichert
+    people_in_office:
+      en: People in the office
+      de: Personen im Büro
+    people_remote:
+      en: People working remotely
+      de: Personen im Homeoffice
   peek:
     all_day:
       en: All day

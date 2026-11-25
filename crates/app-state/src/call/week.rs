@@ -1,6 +1,8 @@
 use std::time::Instant;
 
-use chatsvc::{Calendar, CalendarEvent, CalendarSource, ResponseType, ShowAs, WorkPlanDay};
+use chatsvc::{
+    Calendar, CalendarEvent, CalendarSource, ColleagueLocation, ResponseType, ShowAs, WorkPlanDay,
+};
 use chrono::{Duration, FixedOffset, Local, NaiveDate, Offset, Weekday};
 use gpui_kit::Context;
 
@@ -35,6 +37,8 @@ pub struct CalendarWeek {
     pub visible: bool,
     /// Where the Outlook work plan puts the user on the shown days.
     pub work_plan: Vec<WorkPlanDay>,
+    /// Where the user's closest colleagues plan to work on the shown days.
+    pub colleague_plan: Vec<ColleagueLocation>,
     /// A load was asked for before the session existed; run it once it does.
     pending: bool,
     request: u64,

@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use app_base::format::{self, WeekdayWidth, clock_format, weekday_name};
-use chatsvc::{CalendarEvent, ResponseType, WorkPlanDay, WorkPlanLocation, join_info_text};
+use chatsvc::{
+    CalendarEvent, ColleagueLocation, ResponseType, WorkPlanDay, WorkPlanLocation, join_info_text,
+};
 use chrono::{DateTime, Datelike, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
@@ -385,6 +387,7 @@ impl CalendarView {
         days: &[WeekDay],
         today: NaiveDate,
         plan: &[WorkPlanDay],
+        colleagues: &[ColleagueLocation],
     ) -> impl IntoElement {
         h_flex()
             .debug_selector(|| CALENDAR_DAY_HEADERS_TAG.into())
@@ -439,7 +442,17 @@ impl CalendarView {
                         plan.iter()
                             .find(|planned| planned.date == day.date)
                             .map(|planned| {
-                                work_location_button(&self.state, planned, day.date == today)
+                                let around: Vec<(String, WorkPlanLocation)> = colleagues
+                                    .iter()
+                                    .filter(|colleague| colleague.date == day.date)
+                                    .map(|colleague| (colleague.name.clone(), colleague.location))
+                                    .collect();
+                                work_location_button(
+                                    &self.state,
+                                    planned,
+                                    day.date == today,
+                                    around,
+                                )
                             }),
                     )
             }))
@@ -970,6 +983,7 @@ impl Render for CalendarView {
         let send_response = state.rsvp_send_response;
         let failures = state.calendar_week.failures.clone();
         let work_plan = state.calendar_week.work_plan.clone();
+        let colleague_plan = state.calendar_week.colleague_plan.clone();
         let loading = state.calendar_week.loading && events.is_empty();
         let offset = Local::now().offset().fix();
         let span = state.calendar_week.span;
@@ -1029,7 +1043,7 @@ impl Render for CalendarView {
                             ))
                         } else {
                             calendar
-                                .child(self.day_headers(&days, today, &work_plan))
+                                .child(self.day_headers(&days, today, &work_plan, &colleague_plan))
                                 .children(self.all_day_row(&days, &events, &colors, send_response))
                                 .child(self.grid(
                                     &days,
@@ -1087,6 +1101,7 @@ fn work_location_button(
     state: &Entity<AppState>,
     planned: &WorkPlanDay,
     is_today: bool,
+    colleagues: Vec<(String, WorkPlanLocation)>,
 ) -> impl IntoElement {
     let (state, date, current) = (state.clone(), planned.date, planned.location);
     let hours = format!(
@@ -1125,7 +1140,7 @@ fn work_location_button(
                 WorkPlanLocation::Remote => Some(chatsvc::WorkLocationKind::Remote),
                 _ => None,
             };
-            match kind.filter(|_| is_today) {
+            let menu = match kind.filter(|_| is_today) {
                 Some(kind) => {
                     let state = state.clone();
                     menu.separator().item(
@@ -1139,7 +1154,49 @@ fn work_location_button(
                     )
                 }
                 None => menu,
-            }
+            };
+            colleagues_in_menu(menu, &colleagues)
         }),
     )
+}
+
+/// Names shown per location before the rest is summed up.
+const COLLEAGUES_SHOWN: usize = 6;
+
+fn colleagues_in_menu(menu: PopupMenu, colleagues: &[(String, WorkPlanLocation)]) -> PopupMenu {
+    [
+        (
+            WorkPlanLocation::Office,
+            "calendar.work_location.people_in_office",
+        ),
+        (
+            WorkPlanLocation::Remote,
+            "calendar.work_location.people_remote",
+        ),
+    ]
+    .into_iter()
+    .fold(menu, |menu, (location, title)| {
+        let names: Vec<&str> = colleagues
+            .iter()
+            .filter(|(_, at)| *at == location)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        if names.is_empty() {
+            return menu;
+        }
+        let menu = names
+            .iter()
+            .take(COLLEAGUES_SHOWN)
+            .fold(menu.separator().label(tr(title)), |menu, name| {
+                menu.item(PopupMenuItem::new(name.to_string()).disabled(true))
+            });
+        match names
+            .len()
+            .checked_sub(COLLEAGUES_SHOWN)
+            .filter(|&rest| rest > 0)
+        {
+            Some(rest) => menu.label(super::calendar_month::more_label(rest)),
+            None => menu,
+        }
+    })
 }

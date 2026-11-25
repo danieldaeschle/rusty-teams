@@ -30,7 +30,7 @@ fn day_events(day: &WeekDay) -> Vec<usize> {
         .collect()
 }
 
-fn more_label(hidden: usize) -> String {
+pub(crate) fn more_label(hidden: usize) -> String {
     let mut args = std::collections::HashMap::new();
     args.insert("count".to_owned(), hidden.to_string());
     app_base::ui_locale::tr_args("calendar.view.more", &args)

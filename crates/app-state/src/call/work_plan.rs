@@ -1,4 +1,4 @@
-use chatsvc::{Calendar, WorkPlanDay, WorkPlanLocation};
+use chatsvc::{Calendar, ColleagueLocation, WorkPlanDay, WorkPlanLocation};
 use chrono::{Datelike, Duration, NaiveDate, NaiveTime, Weekday};
 use gpui_kit::Context;
 
@@ -29,6 +29,35 @@ pub fn demo_work_plan(dates: &[NaiveDate]) -> Vec<WorkPlanDay> {
         .collect()
 }
 
+/// The demo colleagues: two in the office mid-week, one at home all week.
+pub fn demo_colleague_plan(dates: &[NaiveDate]) -> Vec<ColleagueLocation> {
+    let mut plan = Vec::new();
+    for &date in dates {
+        let weekday = date.weekday();
+        if matches!(weekday, Weekday::Sat | Weekday::Sun) {
+            continue;
+        }
+        let mid_week = matches!(weekday, Weekday::Tue | Weekday::Wed | Weekday::Thu);
+        for (name, office) in [
+            ("Megan Bowen", mid_week),
+            ("Alex Wilber", weekday == Weekday::Wed),
+            ("Isaiah Langer", false),
+        ] {
+            let location = if office {
+                WorkPlanLocation::Office
+            } else {
+                WorkPlanLocation::Remote
+            };
+            plan.push(ColleagueLocation {
+                name: name.to_owned(),
+                date,
+                location,
+            });
+        }
+    }
+    plan
+}
+
 impl AppState {
     pub(crate) fn load_work_plan(&mut self, cx: &mut Context<Self>) {
         let dates = self.calendar_dates();
@@ -37,12 +66,14 @@ impl AppState {
         };
         if self.mode.demo {
             self.calendar_week.work_plan = demo_work_plan(&dates);
+            self.calendar_week.colleague_plan = demo_colleague_plan(&dates);
             return;
         }
         let Some(engine) = self.engine.clone() else {
             return;
         };
         let to = last + Duration::days(1);
+        self.load_colleague_plan(from, to, cx);
         let receiver = crate::runtime::spawn(async move {
             Calendar::new(engine.remote().session())
                 .work_plan(from, to)
@@ -54,6 +85,33 @@ impl AppState {
                 this.update(cx, |state, cx| {
                     if state.calendar_dates().first() == Some(&from) {
                         state.calendar_week.work_plan = plan;
+                        cx.notify();
+                    }
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    fn load_colleague_plan(&mut self, from: NaiveDate, to: NaiveDate, cx: &mut Context<Self>) {
+        let (Some(engine), own_mail) = (self.engine.clone(), self.own_email.clone()) else {
+            return;
+        };
+        if own_mail.is_empty() {
+            return;
+        }
+        let receiver = crate::runtime::spawn(async move {
+            Calendar::new(engine.remote().session())
+                .colleague_locations(&own_mail, from, to)
+                .await
+        });
+        cx.spawn(async move |this, cx| {
+            // Without the colleagues' plans the menu just lists nobody.
+            if let Ok(Ok(plan)) = receiver.await {
+                this.update(cx, |state, cx| {
+                    if state.calendar_dates().first() == Some(&from) {
+                        state.calendar_week.colleague_plan = plan;
                         cx.notify();
                     }
                 })
