@@ -332,12 +332,14 @@ impl AppState {
                             failures.push(CalendarLoadFailure {
                                 source: CalendarSource::Person,
                                 message,
+                                sign_in: false,
                             });
                         }
                     }
                     Err(error) => failures.push(CalendarLoadFailure {
                         source: CalendarSource::Person,
                         message: error,
+                        sign_in: false,
                     }),
                 }
             }
