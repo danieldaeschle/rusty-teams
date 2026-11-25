@@ -11,18 +11,25 @@ pub async fn fetch_google_events(
     accounts: &mut CalendarAccounts,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
-) -> Result<Vec<CalendarEvent>, String> {
+) -> Result<(Vec<CalendarEvent>, Vec<String>), String> {
     let Some(oauth) = client_id_from_env() else {
         // Connected accounts but no client id compiled in: say so instead of an empty week.
         if accounts.has_google() {
             return Err(missing_client_id());
         }
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     };
     let mut all = Vec::new();
+    // One rejected token must not hide calendars that still refresh.
+    let mut account_errors = Vec::new();
     for index in 0..accounts.google_accounts.len() {
-        if !ensure_access_token(accounts, index, &oauth).await? {
-            continue;
+        match ensure_access_token(accounts, index, &oauth).await {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(error) => {
+                remember_account_error(&mut account_errors, error);
+                continue;
+            }
         }
         let account = &accounts.google_accounts[index];
         let access = account.tokens.access_token.clone();
@@ -62,7 +69,20 @@ pub async fn fetch_google_events(
             }
         }
     }
-    Ok(all)
+    Ok((all, account_errors))
+}
+
+/// Keeps a sign-in failure ahead of any other account error. One notice is enough.
+fn remember_account_error(errors: &mut Vec<String>, error: String) {
+    if errors.iter().any(|existing| needs_sign_in(existing)) && !needs_sign_in(&error) {
+        return;
+    }
+    if needs_sign_in(&error) {
+        errors.clear();
+    }
+    if errors.is_empty() {
+        errors.push(error);
+    }
 }
 
 pub async fn insert_google_event(
@@ -164,8 +184,10 @@ async fn ensure_access_token(
                 };
             }
             Err(error) => {
-                crate::diagnostics::record(format!("calls: google token refresh failed: {error}"));
-                return Ok(false);
+                let message = format!("google token refresh failed: {error}");
+                crate::diagnostics::record(format!("calls: {message}"));
+                // Surface to week load as CalendarLoadFailure — never Ok([]) for auth fail.
+                return Err(message);
             }
         }
     }
@@ -174,4 +196,36 @@ async fn ensure_access_token(
 
 fn missing_client_id() -> String {
     app_base::ui_locale::tr("settings.calendar.not_in_build")
+}
+
+/// True when another fetch cannot succeed until the user signs in to Google again.
+pub fn needs_sign_in(message: &str) -> bool {
+    message.starts_with("google token refresh failed:") || message == missing_client_id()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{needs_sign_in, remember_account_error};
+
+    #[test]
+    fn a_rejected_token_does_not_hide_another_accounts_error_notice() {
+        let mut errors = Vec::new();
+        remember_account_error(&mut errors, "HTTP 503".into());
+        remember_account_error(
+            &mut errors,
+            "google token refresh failed: HTTP 400: invalid_grant".into(),
+        );
+        remember_account_error(&mut errors, "HTTP 500".into());
+        assert_eq!(errors.len(), 1);
+        assert!(needs_sign_in(&errors[0]));
+    }
+
+    #[test]
+    fn google_sign_in_is_required_only_for_a_rejected_token() {
+        assert!(needs_sign_in(
+            "google token refresh failed: HTTP 400: invalid_grant"
+        ));
+        assert!(!needs_sign_in("HTTP 503"));
+        assert!(!needs_sign_in("client_secret is missing"));
+    }
 }

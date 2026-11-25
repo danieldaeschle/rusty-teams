@@ -766,9 +766,15 @@ fn load_notices(
         );
     }
     for failure in failures {
-        let retry = state.clone();
+        let action = state.clone();
+        let sign_in = failure.sign_in;
         let mut args = std::collections::HashMap::new();
         args.insert("source".to_owned(), failure.source.label().to_owned());
+        let label = if sign_in {
+            tr("auth.sign_in")
+        } else {
+            tr("common.retry")
+        };
         rows.push(
             h_flex()
                 .flex_none()
@@ -796,10 +802,16 @@ fn load_notices(
                     )))
                     .xsmall()
                     .outline()
-                    .label(tr("common.retry"))
+                    .label(label)
                     .tooltip(failure.message.clone())
                     .on_click(move |_, _, cx| {
-                        retry.update(cx, |state, cx| state.retry_calendar_week(cx))
+                        action.update(cx, |state, cx| {
+                            if sign_in {
+                                state.connect_google_calendar(cx);
+                            } else {
+                                state.retry_calendar_week(cx);
+                            }
+                        })
                     }),
                 ),
         );
