@@ -1363,6 +1363,28 @@ calls:
       en: Teams meeting link is added
       de: Teams-Besprechungslink wird hinzugefügt
 calendar:
+  work_location:
+    office:
+      en: Office
+      de: Büro
+    remote:
+      en: Remote
+      de: Remote
+    time_off:
+      en: Time off
+      de: Abwesend
+    unspecified:
+      en: Work location not set
+      de: Arbeitsort nicht festgelegt
+    planned:
+      en: Planned
+      de: Geplant
+    check_in:
+      en: Check in for today
+      de: Für heute einchecken
+    not_saved:
+      en: Work location not saved
+      de: Arbeitsort nicht gespeichert
   peek:
     all_day:
       en: All day

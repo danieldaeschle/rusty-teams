@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use app_base::format::{self, WeekdayWidth, clock_format, weekday_name};
-use chatsvc::{CalendarEvent, ResponseType, join_info_text};
+use chatsvc::{CalendarEvent, ResponseType, WorkPlanDay, WorkPlanLocation, join_info_text};
 use chrono::{DateTime, Datelike, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
@@ -380,7 +380,12 @@ impl CalendarView {
     }
 
     /// Day number above the full weekday name; today in the accent colour with its bar.
-    fn day_headers(&self, days: &[WeekDay], today: NaiveDate) -> impl IntoElement {
+    fn day_headers(
+        &self,
+        days: &[WeekDay],
+        today: NaiveDate,
+        plan: &[WorkPlanDay],
+    ) -> impl IntoElement {
         h_flex()
             .debug_selector(|| CALENDAR_DAY_HEADERS_TAG.into())
             .h(px(DAY_HEADER_HEIGHT))
@@ -429,6 +434,13 @@ impl CalendarView {
                             .text_color(name_color)
                             .truncate()
                             .child(weekday_name(day.date.weekday(), WeekdayWidth::Full)),
+                    )
+                    .children(
+                        plan.iter()
+                            .find(|planned| planned.date == day.date)
+                            .map(|planned| {
+                                work_location_button(&self.state, planned, day.date == today)
+                            }),
                     )
             }))
     }
@@ -957,6 +969,7 @@ impl Render for CalendarView {
         let events = state.calendar_week.events.clone();
         let send_response = state.rsvp_send_response;
         let failures = state.calendar_week.failures.clone();
+        let work_plan = state.calendar_week.work_plan.clone();
         let loading = state.calendar_week.loading && events.is_empty();
         let offset = Local::now().offset().fix();
         let span = state.calendar_week.span;
@@ -1016,7 +1029,7 @@ impl Render for CalendarView {
                             ))
                         } else {
                             calendar
-                                .child(self.day_headers(&days, today))
+                                .child(self.day_headers(&days, today, &work_plan))
                                 .children(self.all_day_row(&days, &events, &colors, send_response))
                                 .child(self.grid(
                                     &days,
@@ -1048,4 +1061,85 @@ mod tests {
         let narrow = header_labels(600.);
         assert!(!narrow.primary && !narrow.secondary);
     }
+}
+
+fn work_location_glyph(location: WorkPlanLocation) -> IconName {
+    match location {
+        WorkPlanLocation::Office => IconName::Building2,
+        WorkPlanLocation::Remote => IconName::House,
+        WorkPlanLocation::TimeOff => IconName::CalendarClock,
+        WorkPlanLocation::Unspecified => IconName::MapPin,
+    }
+}
+
+fn work_location_label(location: WorkPlanLocation) -> String {
+    tr(match location {
+        WorkPlanLocation::Office => "calendar.work_location.office",
+        WorkPlanLocation::Remote => "calendar.work_location.remote",
+        WorkPlanLocation::TimeOff => "calendar.work_location.time_off",
+        WorkPlanLocation::Unspecified => "calendar.work_location.unspecified",
+    })
+}
+
+/// The planned work location in a day's header; its menu changes the plan for that day, and on
+/// today also checks in, so the status shows the location too.
+fn work_location_button(
+    state: &Entity<AppState>,
+    planned: &WorkPlanDay,
+    is_today: bool,
+) -> impl IntoElement {
+    let (state, date, current) = (state.clone(), planned.date, planned.location);
+    let hours = format!(
+        "{} {} \u{2013} {}",
+        tr("calendar.work_location.planned"),
+        planned.start.format("%H:%M"),
+        planned.end.format("%H:%M")
+    );
+    div().absolute().top(px(6.)).right(px(6.)).child(
+        Button::new(ElementId::NamedInteger(
+            "calendar-work-location".into(),
+            u64::from(date.num_days_from_ce().unsigned_abs()),
+        ))
+        .xsmall()
+        .ghost()
+        .icon(work_location_glyph(current))
+        .tooltip(work_location_label(current))
+        .dropdown_menu(move |menu, _, _| {
+            let menu = menu.label(hours.clone());
+            let menu = [WorkPlanLocation::Office, WorkPlanLocation::Remote]
+                .into_iter()
+                .fold(menu, |menu, choice| {
+                    let state = state.clone();
+                    menu.item(
+                        PopupMenuItem::new(work_location_label(choice))
+                            .checked(choice == current)
+                            .on_click(move |_, _, cx| {
+                                state.update(cx, |state, cx| {
+                                    state.set_work_plan_location(date, choice, cx)
+                                })
+                            }),
+                    )
+                });
+            let kind = match current {
+                WorkPlanLocation::Office => Some(chatsvc::WorkLocationKind::Office),
+                WorkPlanLocation::Remote => Some(chatsvc::WorkLocationKind::Remote),
+                _ => None,
+            };
+            match kind.filter(|_| is_today) {
+                Some(kind) => {
+                    let state = state.clone();
+                    menu.separator().item(
+                        PopupMenuItem::new(tr("calendar.work_location.check_in")).on_click(
+                            move |_, _, cx| {
+                                state.update(cx, |state, cx| {
+                                    state.set_own_work_location(Some(kind), cx)
+                                })
+                            },
+                        ),
+                    )
+                }
+                None => menu,
+            }
+        }),
+    )
 }

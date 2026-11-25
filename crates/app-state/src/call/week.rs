@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use chatsvc::{Calendar, CalendarEvent, CalendarSource, ResponseType, ShowAs};
+use chatsvc::{Calendar, CalendarEvent, CalendarSource, ResponseType, ShowAs, WorkPlanDay};
 use chrono::{Duration, FixedOffset, Local, NaiveDate, Offset, Weekday};
 use gpui_kit::Context;
 
@@ -33,6 +33,8 @@ pub struct CalendarWeek {
     pub failures: Vec<CalendarLoadFailure>,
     /// The calendar section is on screen (drives refresh on the poll interval).
     pub visible: bool,
+    /// Where the Outlook work plan puts the user on the shown days.
+    pub work_plan: Vec<WorkPlanDay>,
     /// A load was asked for before the session existed; run it once it does.
     pending: bool,
     request: u64,
@@ -212,6 +214,7 @@ impl AppState {
         if !self.calendar_available() {
             return;
         }
+        self.load_work_plan(cx);
         let start = self.calendar_start();
         let offset = Local::now().offset().fix();
         let (from, to) = dates_range(&self.calendar_dates(), offset);
