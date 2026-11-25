@@ -932,9 +932,7 @@ async fn drive(
     }
     if let Some(mid) = &initial_share_mid {
         video.router().set(mid, Some(VideoKey::Screen));
-        if let Some(sharer) = roster.screen_share(&own_mri).map(|(mri, _)| mri) {
-            control.send(CallUpdate::ScreenShare(Some(sharer)));
-        }
+        control.send(CallUpdate::ScreenShare(peer_mri.clone()));
     }
     if sending_camera {
         control.send(CallUpdate::Camera(true));

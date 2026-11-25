@@ -315,7 +315,7 @@ impl SlotTable {
             .iter()
             .filter(|stream| stream.role == LineRole::ScreenShare)
             .filter_map(slot)
-            .last();
+            .next_back();
         SlotTable { people, screen }
     }
 

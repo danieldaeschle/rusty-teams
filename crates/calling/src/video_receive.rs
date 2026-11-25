@@ -333,4 +333,56 @@ mod tests {
         assert_eq!(change.screen_sharer, Some(Some("8:orgid:b".into())));
         assert_eq!(receive.router().key_for("11"), Some(VideoKey::Screen));
     }
+
+    #[tokio::test]
+    async fn replacement_requester_sends_one_screen_request() {
+        let mut roster = Roster::default();
+        roster.apply(&json!({
+            "type": "Delta",
+            "sequenceNumber": 1,
+            "participants": {
+                "8:orgid:b": {
+                    "version": 1,
+                    "state": "active",
+                    "details": {"displayName": "Bo"},
+                    "endpoints": {"ep": {
+                        "call": {"mediaStreams": [{
+                            "type": "applicationsharing-video",
+                            "direction": "sendonly",
+                            "sourceId": 207
+                        }]},
+                        "endpointState": {"state": {"isMuted": false}}
+                    }}
+                }
+            }
+        }));
+        let table = SlotTable {
+            people: Vec::new(),
+            screen: Some(ReceiveSlot {
+                mid: "11".into(),
+                stream_id: 207,
+            }),
+        };
+        let (queue, mut requests) = mpsc::unbounded_channel::<QueuedRequest>();
+        let requester = SourceRequester {
+            queue,
+            task: tokio::spawn(async {}),
+        };
+        let mut receive = VideoReceive::new("8:orgid:a".into(), VideoRouter::default());
+        receive.negotiated(table, None);
+        receive.reselect(&roster);
+        receive.replace_requester(requester);
+        receive.reselect(&roster);
+
+        let mut total_requests = 0;
+        let mut screen_requests = 0;
+        while let Ok(queued) = requests.try_recv() {
+            total_requests += 1;
+            if queued.request.screen {
+                screen_requests += 1;
+            }
+        }
+        assert_eq!(total_requests, 1);
+        assert_eq!(screen_requests, 1);
+    }
 }
