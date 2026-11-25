@@ -40,10 +40,10 @@ A bot check (`PR gate`) runs on every PR that is not a draft. Until it passes, t
 | Template | Summary, AI model, Tests and Review filled in, not just the hints |
 | Problem | No `Closes #123`: a Problem section says what is wrong or missing, when a user hits it (steps or when/then) and what should happen instead |
 | Issue first | A `feat` PR or more than 400 changed lines (lockfiles do not count) links an issue labelled `status: accepted` |
-| Screenshot | A change to UI code (`crates/app/src/views/`, `settings/`, locales) shows the changed area with demo data, or ticks "No visible change" with a reason |
+| Screenshot | A change to UI code (`crates/app/src/views/`, `settings/`, `components/`, `widgets/`, `*_view.rs`, `locales/`) shows the changed area with demo data, or ticks "No visible change" with a reason |
 | Tests | What ran and what did not. A change to Windows-only code says whether it was built on Windows |
 | Review | At least two independent reviews, each finding fixed or answered |
-| Scope | No planning folders (`openspec/` and the like). A change to `vendor/` says why in the description |
+| Scope | No planning folders (`openspec/`, `.specify/`, `.kiro/`). A change to `vendor/` says why in the description |
 | Open PRs | At most 5 open PRs, drafts included |
 
 A PR that passes gets `status: needs review` and goes into the review queue. `gate: no visual` and `gate: skip` are for maintainers only.

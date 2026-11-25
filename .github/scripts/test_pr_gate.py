@@ -1,5 +1,7 @@
 import unittest
+from pathlib import Path
 
+import pr_gate
 from pr_gate import LABEL_ACCEPTED, LABEL_NO_VISUAL, ChangedFile, PullRequest, check, linked_issue_numbers, parse_sections
 
 GOOD_BODY = """## Summary
@@ -110,6 +112,38 @@ class GateTests(unittest.TestCase):
     def test_planning_folder_and_vendor(self):
         files = [BACKEND_FILE, ChangedFile("openspec/changes/x.md", 10, 0), ChangedFile("vendor/gpui/src/a.rs", 1, 1)]
         self.assertEqual(missing_keys(make(files=files)), ["Scope", "Scope"])
+
+
+class DocumentationTests(unittest.TestCase):
+    """AGENTS.md and CONTRIBUTING.md repeat the gate's rules; they must name the same values."""
+
+    repository_root = Path(__file__).resolve().parents[2]
+
+    def assert_mentions(self, file_name, *expected):
+        text = (self.repository_root / file_name).read_text()
+        for value in expected:
+            self.assertIn(value, text, f"{file_name} does not mention {value!r}")
+
+    def shared_values(self):
+        return (
+            f"more than {pr_gate.MAX_CHANGED_LINES} changed lines",
+            pr_gate.LABEL_ACCEPTED,
+            pr_gate.LABEL_NO_VISUAL,
+            pr_gate.LABEL_SKIP,
+            *(f"`{folder}/`" for folder in pr_gate.PLANNING_FOLDERS),
+        )
+
+    def test_agents_matches_gate(self):
+        self.assert_mentions(
+            "AGENTS.md",
+            *self.shared_values(),
+            f"at least {pr_gate.MIN_PROBLEM_CHARACTERS} characters",
+            *(f"{directory}/`" for directory in pr_gate.UI_DIRECTORIES),
+            *(f"`## {name}`" for name in pr_gate.REQUIRED_SECTIONS),
+        )
+
+    def test_contributing_matches_gate(self):
+        self.assert_mentions("CONTRIBUTING.md", *self.shared_values())
 
 
 if __name__ == "__main__":

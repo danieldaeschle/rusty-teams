@@ -2,6 +2,9 @@
 
 Run by .github/workflows/pr-gate.yml under pull_request_target: it reads the PR as data
 through the API and never checks out or runs code from the PR.
+
+Locally, before a PR leaves draft: `python3 .github/scripts/pr_gate.py --dry-run <number>`.
+It prints what is missing and changes nothing on GitHub.
 """
 
 import json
@@ -16,16 +19,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 TITLE_PATTERN = re.compile(r"^(feat|fix|perf|refactor|docs|test|chore|ci|build)(\([a-z0-9-]+\))?!?: \S")
-UI_PATH_PATTERN = re.compile(r"^crates/app/src/(views|settings|components|widgets)/|^crates/app/src/[^/]+_view\.rs$|/locales/")
+UI_DIRECTORIES = ("views", "settings", "components", "widgets")
+UI_PATH_PATTERN = re.compile(rf"^crates/app/src/({'|'.join(UI_DIRECTORIES)})/|^crates/app/src/[^/]+_view\.rs$|/locales/")
 IMAGE_PATTERN = re.compile(r"!\[[^\]]*\]\(|<img\s|<video\s|github\.com/user-attachments/|\.(png|jpe?g|gif|webp|mp4|webm)\b", re.IGNORECASE)
 ISSUE_REFERENCE_PATTERN = re.compile(
     r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:https://github\.com/danieldaeschle/rusty-teams/issues/|#)(\d+)", re.IGNORECASE
 )
 NO_VISUAL_CHECKBOX_PATTERN = re.compile(r"^\s*[-*]\s*\[[xX]\]\s*no visible change", re.IGNORECASE | re.MULTILINE)
-FORBIDDEN_PATH_PATTERN = re.compile(r"^(openspec|\.specify|\.kiro)/")
+PLANNING_FOLDERS = ("openspec", ".specify", ".kiro")
+FORBIDDEN_PATH_PATTERN = re.compile(rf"^({'|'.join(re.escape(folder) for folder in PLANNING_FOLDERS)})/")
 WINDOWS_CODE_PATTERN = re.compile(r"^\+.*(cfg\((all\()?windows|target_os\s*=\s*\"windows\")", re.MULTILINE)
 WINDOWS_PATH_PATTERN = re.compile(r"(^|/)(win32|windows)(/|_[a-z]+\.rs$)|_win(dows)?\.rs$")
-LOCKFILE_NAMES =("Cargo.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock")
+LOCKFILE_NAMES = ("Cargo.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock")
 
 MAX_CHANGED_LINES = 400
 MIN_PROBLEM_CHARACTERS = 80
@@ -42,6 +47,7 @@ LABEL_NO_VISUAL = "gate: no visual"
 LABEL_SKIP = "gate: skip"
 
 COMMENT_MARKER = "<!-- pr-gate -->"
+DEFAULT_REPOSITORY = "danieldaeschle/rusty-teams"
 
 
 @dataclass
@@ -189,7 +195,8 @@ class GitHub:
         full_url = url if url.startswith("https://") else self.base_url + url
         data = json.dumps(payload).encode() if payload is not None else None
         request = urllib.request.Request(full_url, data=data, method=method)
-        request.add_header("Authorization", f"Bearer {self.token}")
+        if self.token:
+            request.add_header("Authorization", f"Bearer {self.token}")
         request.add_header("Accept", "application/vnd.github+json")
         request.add_header("X-GitHub-Api-Version", "2022-11-28")
         for attempt in range(3):
@@ -299,8 +306,30 @@ def run_gate(github: GitHub, number: int, enforce: bool) -> bool:
     return is_draft or not missing
 
 
+def dry_run(github: GitHub, number: int) -> int:
+    _, pull_request = load_pull_request(github, number)
+    missing = check(pull_request)
+    if not missing:
+        print(f"#{number}: ready for review")
+        return 0
+    print(f"#{number}: not ready, missing:")
+    for item in missing:
+        print(f"- {item.replace('**', '')}")
+    return 1
+
+
 def main() -> int:
-    github = GitHub(os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_TOKEN"])
+    repository = os.environ.get("GITHUB_REPOSITORY") or DEFAULT_REPOSITORY
+    github = GitHub(repository, os.environ.get("GITHUB_TOKEN", ""))
+    if len(sys.argv) > 1:
+        number_argument = re.search(r"(\d+)$", sys.argv[2]) if len(sys.argv) == 3 and sys.argv[1] == "--dry-run" else None
+        if not number_argument:
+            print("usage: python3 .github/scripts/pr_gate.py --dry-run <PR number or URL>", file=sys.stderr)
+            return 2
+        return dry_run(github, int(number_argument.group(1)))
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        print("Writes to GitHub only run in CI. Locally use --dry-run <PR number>.", file=sys.stderr)
+        return 2
     number = os.environ.get("PR_NUMBER", "").strip()
     if number:
         return 0 if run_gate(github, int(number), enforce=True) else 1
