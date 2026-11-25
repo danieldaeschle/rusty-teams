@@ -3,20 +3,32 @@ status: accepted
 date: 2026-11-14
 ---
 
-# ADR 0014: The Linux binary installs and updates itself
+# ADR 0014: The Linux binary installs itself
+
+Revised 2026-11-25: a newer release updates the copy that owns its install, and opens the release page everywhere else.
 
 ## Context
 
 The Linux release is a bare binary in a tarball. Users had to copy a `.desktop` file and an icon by hand, and only Windows updated itself from GitHub releases. The options were: an AppImage (FUSE mount on every start, its own update tooling), distro packages (one per distro, repositories to run), or letting the binary install itself into the user's data folder and reuse the Windows updater.
 
+What decides an update is how the app was installed, not the operating system. A package manager already owns deb, rpm, Flatpak, and Snap. Swapping a Mach-O inside a signed macOS `.app` breaks the signature. An AppImage has its own update tool. A tarball copied into `~/.local` and the Windows per-user install can replace their own binary.
+
 ## Decision
 
-On start the binary offers to install itself into `~/.local/share/rusty-teams/teams` and writes `~/.local/share/applications/rusty-teams.desktop` (`StartupWMClass=rusty-teams`, matching the window's app id). Build output from a cargo `target/` folder is copied, anything else is moved. "Don't ask again" can be undone in Settings > General, which also has Install, Replace and Remove. The installed copy updates itself from the same GitHub releases as Windows (`release_feed.rs`, `updater.rs`), but always with consent (`linux_update.rs`): when Settings > General > Automatic updates is on (the default), a newer release is offered in a dialog; Update downloads the `rusty-teams-<version>-linux-amd64` asset (the tag without a leading `v`) with progress and checks size, ELF header and the SHA-256 digest GitHub reports; Restart now swaps the file and relaunches. Not now holds for the running session; the next start asks again. There is no idle restart and no install on quit on Linux: a download left for later is offered again on the next start (Restart now, no second download). Settings > General > Check now runs the same flow on demand. A build compares releases against its release tag, or against the workspace version (kept equal to the latest release) when built locally. Binaries outside the install folder never replace themselves; Settings > General still shows the switch and Check now and explains that the app has to be installed first.
+On start the binary offers to install itself into `~/.local/share/rusty-teams/teams` and writes `~/.local/share/applications/rusty-teams.desktop` (`StartupWMClass=rusty-teams`, matching the window's app id). Build output from a cargo `target/` folder is copied, anything else is moved. "Don't ask again" can be undone in Settings > General, which also has Install, Replace and Remove. That install is not an update.
+
+A release-tagged build looks for a newer GitHub tag when Settings > General > Updates is on (`updates.enabled`, one key on every OS, on by default). The old Linux key is not read.
+
+- Windows downloads quietly and restarts when the app is idle and not in a call. The Windows deploy still swaps the binary from `update\`.
+- Linux installed under `~/.local` asks first, downloads the platform asset, checks size, header, and the SHA-256 digest GitHub reports, then restarts only when the user asks.
+- macOS, Linux deb/rpm/AppImage, and a binary that is not the `~/.local` install open the release page. Nothing is downloaded.
+- Flatpak (`FLATPAK_ID`) does not check and hides the settings row.
+- A build without a release tag does not check.
+
+Not now holds for this run. Check now runs the same path on demand.
 
 ## Consequences
 
 - One binary, no root, no FUSE; menu entry and dock matching work after one click.
-- Releases must keep publishing the bare `-linux-amd64` binary next to the tarball.
-- Windows keeps its quiet download and idle restart; the two platforms differ on purpose.
-- A self-built binary that is installed is offered releases newer than its workspace version; starting a newer build offers to replace the installed one.
-- System packages (deb, rpm, Flatpak) stay possible and should simply not offer the install.
+- Package-managed installs stay on the package manager. The dialog does not replace them.
+- The Windows ARM64 asset name stays `-windows-arm64.exe`.

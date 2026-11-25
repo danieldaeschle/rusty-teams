@@ -86,6 +86,7 @@ pub fn render(center: &Entity<NotificationCenter>, app: &Entity<AppState>, cx: &
         })
         .children(external_browser_rows(app, cx))
         .children(install_rows(cx))
+        .children(update_rows(cx))
         .child(caption(tr("settings.caption.compose_box")))
         .child(account_select(
             app,
@@ -114,7 +115,7 @@ fn settings_toggle(
     })
 }
 
-/// Linux only: the application menu install, the install question and updates.
+/// Linux only: the application menu install and the install question.
 fn install_rows(cx: &App) -> Vec<AnyElement> {
     #[cfg(not(target_os = "linux"))]
     {
@@ -174,35 +175,49 @@ fn install_rows(cx: &App) -> Vec<AnyElement> {
                 .into_any_element(),
             );
         }
-        let automatic = crate::linux_update::enabled(cx);
-        rows.push(
-            toggle_row(
-                "settings-auto-updates",
-                tr("install.auto_updates"),
-                tr("install.auto_updates_detail"),
-                theme::text_muted(),
-                automatic,
-            )
-            .on_click(move |_, _, cx| crate::linux_update::set_enabled(!automatic, cx))
-            .into_any_element(),
-        );
-        let version = linux_install::running_release().to_owned();
-        let updates_detail = if linux_install::updatable_release().is_some() {
-            with("install.updates_detail", "version", version)
-        } else {
-            with("install.updates_detail_not_installed", "version", version)
-        };
-        rows.push(
-            control_row(
-                tr("install.updates_title"),
-                updates_detail,
-                text_button("settings-check-updates", tr("install.check_now"))
-                    .on_click(|_, _, cx| crate::linux_update::check(true, cx)),
-            )
-            .into_any_element(),
-        );
         rows
     }
+}
+
+/// Same release check on every OS. Flatpak hides it; the package owns updates.
+fn update_rows(cx: &App) -> Vec<AnyElement> {
+    if !crate::linux_update::checks_releases() {
+        return Vec::new();
+    }
+    use std::collections::HashMap;
+
+    use super::rows::{control_row, text_button};
+    use crate::i18n::tr_args;
+
+    let version = app_base::version::release_tag()
+        .unwrap_or(concat!("v", env!("CARGO_PKG_VERSION")))
+        .to_owned();
+    let mut version_args = HashMap::new();
+    version_args.insert("version".to_owned(), version);
+    let detail_key = if app_base::version::release_tag().is_some() {
+        "install.updates_detail"
+    } else {
+        "install.updates_detail_dev"
+    };
+    let automatic = crate::linux_update::enabled(cx);
+    vec![
+        toggle_row(
+            "settings-auto-updates",
+            tr("install.auto_updates"),
+            tr("install.auto_updates_detail"),
+            theme::text_muted(),
+            automatic,
+        )
+        .on_click(move |_, _, cx| crate::linux_update::set_enabled(!automatic, cx))
+        .into_any_element(),
+        control_row(
+            tr("install.updates_title"),
+            tr_args(detail_key, &version_args),
+            text_button("settings-check-updates", tr("install.check_now"))
+                .on_click(|_, _, cx| crate::linux_update::check(true, cx)),
+        )
+        .into_any_element(),
+    ]
 }
 
 fn external_browser_rows(app: &Entity<AppState>, cx: &App) -> Vec<AnyElement> {
