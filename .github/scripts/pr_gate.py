@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -191,9 +192,15 @@ class GitHub:
         request.add_header("Authorization", f"Bearer {self.token}")
         request.add_header("Accept", "application/vnd.github+json")
         request.add_header("X-GitHub-Api-Version", "2022-11-28")
-        with urllib.request.urlopen(request) as response:
-            content = response.read()
-            return json.loads(content) if content else None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request) as response:
+                    content = response.read()
+                    return json.loads(content) if content else None
+            except urllib.error.HTTPError as error:
+                if error.code < 500 or attempt == 2:
+                    raise
+            time.sleep(2 * (attempt + 1))
 
     def paged(self, url: str) -> list:
         results, page = [], 1
@@ -297,9 +304,14 @@ def main() -> int:
     number = os.environ.get("PR_NUMBER", "").strip()
     if number:
         return 0 if run_gate(github, int(number), enforce=True) else 1
+    failed = []
     for raw in github.paged("/pulls?state=open"):
-        run_gate(github, raw["number"], enforce=False)
-    return 0
+        try:
+            run_gate(github, raw["number"], enforce=False)
+        except urllib.error.HTTPError as error:
+            print(f"::warning::#{raw['number']}: {error}")
+            failed.append(raw["number"])
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
