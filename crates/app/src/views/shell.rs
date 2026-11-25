@@ -150,6 +150,13 @@ fn watch_releases(running_tag: &'static str, cx: &mut App) {
             .timer(release_feed::FIRST_CHECK_DELAY)
             .await;
         loop {
+            let allowed = cx.update(|cx| crate::linux_update::enabled(cx));
+            if !allowed {
+                cx.background_executor()
+                    .timer(release_feed::CHECK_INTERVAL)
+                    .await;
+                continue;
+            }
             let Some(paths) = updater::current_paths() else {
                 return;
             };
