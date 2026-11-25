@@ -384,10 +384,20 @@ fn members(value: &Value, key: &str) -> Vec<ChatMember> {
         .unwrap_or_default()
 }
 
+fn person_id(value: &Value) -> Option<String> {
+    string(value, "ExternalDirectoryObjectId").or_else(|| {
+        string(value, "MRI")
+            .as_deref()
+            .and_then(|mri| mri.strip_prefix("8:orgid:"))
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+    })
+}
+
 fn person(value: &Value) -> Option<SearchPerson> {
     Some(SearchPerson {
         reference_id: string(value, "ReferenceId"),
-        user_id: string(value, "ExternalDirectoryObjectId"),
+        user_id: person_id(value),
         mri: string(value, "MRI"),
         display_name: string(value, "DisplayName")?,
         given_name: string(value, "GivenName"),

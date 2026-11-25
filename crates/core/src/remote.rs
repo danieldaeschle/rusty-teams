@@ -7,9 +7,9 @@ use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
 };
 use chatsvc::{
-    ActivityFeed, ActivitySnapshot, AppConsumptionHorizon, ChatNotificationMode,
-    ChatNotificationWrite, ChatSettingChange, ChatSettingsClient, ChatSettingsDocument,
-    DesktopNotifications, UserSettings, parse_app_consumption_horizon,
+    parse_app_consumption_horizon, ActivityFeed, ActivitySnapshot, AppConsumptionHorizon,
+    ChatNotificationMode, ChatNotificationWrite, ChatSettingChange, ChatSettingsClient,
+    ChatSettingsDocument, DesktopNotifications, UserSettings,
 };
 use chatsvc::{
     BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
@@ -1058,18 +1058,53 @@ impl Remote for Graph {
     }
 
     async fn search_people(&self, query: &str) -> Result<Vec<User>> {
-        let mut users = Graph::search_people(self, query).await?;
-        if crate::native::is_email_address(query)
-            && !users.iter().any(|user| {
-                user.mail
-                    .as_deref()
-                    .is_some_and(|mail| mail.eq_ignore_ascii_case(query.trim()))
-            })
-            && let Ok(external) = chatsvc::UserProfiles::new(self.session())
+        let email = crate::native::is_email_address(query);
+        let directory = Graph::search_people(self, query).await;
+        let (mut users, directory_error) = match directory {
+            Ok(users) => (users, None),
+            Err(error) if email && directory_address_unknown(&error) => (Vec::new(), None),
+            Err(error) if email => (Vec::new(), Some(error)),
+            Err(error) => return Err(error.into()),
+        };
+        let known = users.iter().any(|user| {
+            crate::native::user_has_address(
+                user.mail.as_deref(),
+                user.user_principal_name.as_deref(),
+                query,
+            )
+        });
+        if email && !known {
+            match chatsvc::UserProfiles::new(self.session())
                 .search_external(query)
                 .await
-        {
-            users.extend(crate::native::remember_external(external));
+            {
+                Ok(external) => {
+                    let found = crate::native::remember_external(external);
+                    if let Some(error) = directory_error {
+                        let matched: Vec<User> = found
+                            .into_iter()
+                            .filter(|user| {
+                                crate::native::user_has_address(
+                                    user.mail.as_deref(),
+                                    user.user_principal_name.as_deref(),
+                                    query,
+                                )
+                            })
+                            .collect();
+                        if matched.is_empty() {
+                            return Err(error.into());
+                        }
+                        users.extend(matched);
+                    } else {
+                        users.extend(found);
+                    }
+                }
+                Err(_) => {
+                    if let Some(error) = directory_error {
+                        return Err(error.into());
+                    }
+                }
+            }
         }
         Ok(users)
     }
@@ -1715,9 +1750,44 @@ impl From<graph::Page<Chat>> for ChatsPage {
     }
 }
 
+/// HTTP 400 and 404 on a mail lookup mean the address is not in the directory.
+/// A 401, a 5xx, or a transport failure is a real search error.
+fn directory_address_unknown(error: &graph::Error) -> bool {
+    matches!(
+        error,
+        graph::Error::Session(session::Error::Api {
+            status: 400 | 404,
+            ..
+        })
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_missing_address_is_an_unknown_directory() {
+        let missing = graph::Error::Session(session::Error::api(
+            404,
+            "https://graph.test/users",
+            serde_json::json!({}),
+        ));
+        let invalid = graph::Error::Session(session::Error::api(
+            400,
+            "https://graph.test/users",
+            serde_json::json!({}),
+        ));
+        let denied = graph::Error::Session(session::Error::api(
+            401,
+            "https://graph.test/users",
+            serde_json::json!({}),
+        ));
+        assert!(directory_address_unknown(&missing));
+        assert!(directory_address_unknown(&invalid));
+        assert!(!directory_address_unknown(&denied));
+        assert!(!directory_address_unknown(&graph::Error::NotAMember));
+    }
 
     #[test]
     fn channel_targets_route_to_chatsvc() {

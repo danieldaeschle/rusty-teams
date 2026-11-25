@@ -265,7 +265,17 @@ fn people_filter() -> Value {
         any_term("PeopleType", &["Person", "Other"]),
         any_term(
             "PeopleSubtype",
-            &["OrganizationUser", "MTOUser", "PersonalContact", "Guest"],
+            &[
+                "OrganizationUser",
+                "MTOUser",
+                "PersonalContact",
+                "Guest",
+                "ImplicitContact",
+                "ChatImplicitContact",
+                "OrganizationContact",
+                "EDUser",
+                "Unknown",
+            ],
         ),
         any_term("Flags", &["NonHidden"]),
     ]})
@@ -297,6 +307,18 @@ mod tests {
             body["EntityRequests"][0]["Provenances"],
             json!(["Mailbox", "Directory"])
         );
+        let subtypes = body["EntityRequests"][0]["Filter"]["And"][1]["Or"]
+            .as_array()
+            .unwrap();
+        let names: Vec<&str> = subtypes
+            .iter()
+            .map(|term| term["Term"]["PeopleSubtype"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"EDUser"));
+        assert!(names.contains(&"ChatImplicitContact"));
+        assert!(names.contains(&"ImplicitContact"));
+        assert!(names.contains(&"OrganizationContact"));
+        assert!(names.contains(&"Unknown"));
     }
 
     #[test]

@@ -8,6 +8,7 @@ use crate::pins::{CsaTransport, DEFAULT_REGION, SessionTransport};
 
 const SKYPE_SCOPE: &str = "user_impersonation";
 const ORGID_PREFIX: &str = "8:orgid:";
+const LIVE_PREFIX: &str = "8:live:";
 const PROFILE_QUERY: &str =
     "isMailAddress=false&enableGuest=true&includeIBBarredUsers=true&skypeTeamsInfo=true";
 const PROFILES_PER_REQUEST: usize = 100;
@@ -62,13 +63,13 @@ impl<T: CsaTransport> UserProfiles<T> {
         let answer = self
             .transport
             .send(with_headers(Request::get(format!(
-                "{}/{}/externalsearchv3?includeTFLUsers=true",
+                "{}/{}/externalsearchv3?includeTFLUsers=true&includeEDUsers=true",
                 self.users_url,
                 encode(email.trim())
             ))))
             .await?;
         ensure_success(&answer)?;
-        Ok(parse_user_profiles(&json!({"value": answer.body})))
+        Ok(parse_user_profiles(&answer.body))
     }
 
     async fn post_mris(&self, url: &str, user_ids: &[String]) -> Result<Vec<UserProfile>> {
@@ -93,28 +94,37 @@ impl<T: CsaTransport> UserProfiles<T> {
     }
 }
 
+fn profile_items(body: &Value) -> Vec<&Value> {
+    match body {
+        Value::Array(items) => items.iter().collect(),
+        Value::Object(_) => {
+            if let Some(items) = body.get("value").and_then(Value::as_array) {
+                return items.iter().collect();
+            }
+            if let Some(profile) = body.get("value").filter(|value| value.is_object()) {
+                return vec![profile];
+            }
+            if body.get("mri").is_some() || body.get("objectId").is_some() {
+                return vec![body];
+            }
+            Vec::new()
+        }
+        _ => Vec::new(),
+    }
+}
+
 pub fn parse_user_profiles(body: &Value) -> Vec<UserProfile> {
-    body.get("value")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-        .iter()
+    profile_items(body)
+        .into_iter()
         .filter_map(|profile| {
-            let user_id = profile
-                .get("objectId")
-                .and_then(Value::as_str)
-                .filter(|id| !id.is_empty())
-                .or_else(|| {
-                    profile
-                        .get("mri")
-                        .and_then(Value::as_str)?
-                        .strip_prefix(ORGID_PREFIX)
-                })?
-                .to_owned();
+            let user_id = profile_user_id(profile)?;
             Some(UserProfile {
                 user_id,
                 display_name: text(profile, "displayName"),
-                email: text(profile, "email"),
+                email: text(profile, "email")
+                    .or_else(|| text(profile, "mail"))
+                    .or_else(|| email_from_info(profile))
+                    .or_else(|| text(profile, "userPrincipalName")),
                 user_principal_name: text(profile, "userPrincipalName"),
                 job_title: text(profile, "jobTitle"),
                 department: text(profile, "department"),
@@ -122,6 +132,40 @@ pub fn parse_user_profiles(body: &Value) -> Vec<UserProfile> {
             })
         })
         .collect()
+}
+
+fn profile_user_id(profile: &Value) -> Option<String> {
+    if let Some(id) = text(profile, "objectId") {
+        return Some(id);
+    }
+    let mri = profile.get("mri").and_then(Value::as_str)?;
+    if let Some(id) = mri.strip_prefix(ORGID_PREFIX).filter(|id| !id.is_empty()) {
+        return Some(id.to_owned());
+    }
+    mri.starts_with(LIVE_PREFIX)
+        .then(|| mri.to_owned())
+        .filter(|id| id.len() > LIVE_PREFIX.len())
+}
+
+fn email_from_info(profile: &Value) -> Option<String> {
+    match profile.get("emailsInfo")? {
+        Value::String(value) => text_value(value),
+        Value::Array(items) => items.iter().find_map(email_info_item),
+        Value::Object(_) => email_info_item(profile.get("emailsInfo")?),
+        _ => None,
+    }
+}
+
+fn email_info_item(item: &Value) -> Option<String> {
+    text(item, "address")
+        .or_else(|| text(item, "email"))
+        .or_else(|| text(item, "smtp"))
+        .or_else(|| item.as_str().and_then(text_value))
+}
+
+fn text_value(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_owned())
 }
 
 fn text(profile: &Value, key: &str) -> Option<String> {
@@ -192,6 +236,55 @@ mod tests {
         let requests = canned.requests.lock().unwrap();
         assert!(requests[0].url.ends_with("/emea/beta/users/fetchFederated"));
         assert_eq!(requests[0].body, Some(json!(["8:orgid:ann"])));
+    }
+
+    #[tokio::test]
+    async fn external_search_includes_federated_work_accounts() {
+        let canned = Canned {
+            requests: Mutex::new(Vec::new()),
+        };
+        UserProfiles::with_transport(&canned, "emea")
+            .search_external("ada@other.example")
+            .await
+            .unwrap();
+        let requests = canned.requests.lock().unwrap();
+        assert!(requests[0].url.contains("includeTFLUsers=true"));
+        assert!(requests[0].url.contains("includeEDUsers=true"));
+        assert!(
+            requests[0].url.contains("ada%40other.example")
+                || requests[0].url.contains("ada@other.example")
+        );
+    }
+
+    #[test]
+    fn an_external_profile_reads_mail_or_the_principal_name() {
+        let from_mail = parse_user_profiles(&json!(
+            {"mri": "8:orgid:ada", "displayName": "Ada", "mail": "ada@other.example"}
+        ));
+        assert_eq!(from_mail[0].email.as_deref(), Some("ada@other.example"));
+        let from_upn = parse_user_profiles(&json!({"value": {
+            "objectId": "bea",
+            "displayName": "Bea",
+            "userPrincipalName": "bea@other.example"
+        }}));
+        assert_eq!(from_upn[0].user_id, "bea");
+        assert_eq!(from_upn[0].email.as_deref(), Some("bea@other.example"));
+    }
+
+    #[test]
+    fn a_personal_account_keeps_its_live_mri_and_email() {
+        let profiles = parse_user_profiles(&json!([{
+            "mri": "8:live:cid",
+            "displayName": "Joe",
+            "userPrincipalName": "live.cid",
+            "emailsInfo": [{"address": "joe@example.net"}],
+            "skypeId": "x",
+            "type": "TflUser"
+        }]));
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].user_id, "8:live:cid");
+        assert_eq!(profiles[0].email.as_deref(), Some("joe@example.net"));
+        assert_eq!(profiles[0].display_name.as_deref(), Some("Joe"));
     }
 
     #[test]
