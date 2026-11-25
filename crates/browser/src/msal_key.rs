@@ -20,7 +20,7 @@ const MSAL_KEY_COOKIE: &str = "msal.cache.encryption";
 /// and the long-lived session comes from the ESTS cookie, which enables silent token renewal.
 const KEY_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 /// `Network.Cookie` fields that `Network.CookieParam` takes unchanged (CDP browser_protocol.json).
-const CARRIED_FIELDS: [&str; 8] = [
+const CARRIED_FIELDS: [&str; 10] = [
     "name",
     "value",
     "path",
@@ -29,6 +29,8 @@ const CARRIED_FIELDS: [&str; 8] = [
     "sameSite",
     "priority",
     "partitionKey",
+    "sourceScheme",
+    "sourcePort",
 ];
 
 /// `Storage.setCookies` parameters that give every MSAL key cookie in a `Storage.getCookies`
@@ -104,12 +106,8 @@ mod tests {
                 "{read_only} is not a CookieParam field"
             );
         }
-        for not_carried in ["sourceScheme", "sourcePort"] {
-            assert!(
-                cookie.get(not_carried).is_none(),
-                "{not_carried} is not carried by cookie_param"
-            );
-        }
+        assert_eq!(cookie["sourceScheme"], "Secure");
+        assert_eq!(cookie["sourcePort"], 443);
     }
 
     #[test]
