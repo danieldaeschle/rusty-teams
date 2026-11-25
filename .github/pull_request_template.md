@@ -6,6 +6,10 @@
 
 <!-- Which tool and model wrote the change, e.g. "Claude Code, Opus 4.5" or "Copilot, GPT-5". "None" if written by hand. -->
 
+## Review
+
+<!-- At least two independent reviews of the diff (see AGENTS.md). One line per review (what ran it), then one line per finding: fixed, or not fixed and why. -->
+
 ## Screenshot
 
 <!-- For every change that is visible in the UI: one shot of the changed area. Delete the section otherwise.

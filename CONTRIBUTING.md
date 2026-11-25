@@ -16,6 +16,7 @@ Most of this code is written with AI agents, and that is welcome here. Just say 
 | Rule | Detail |
 |---|---|
 | Name the model | Every pull request names the tool and model that wrote the change. It tells the reviewer how closely to look. "None" is a valid answer. |
+| Review before the PR | At least two independent reviews of the local diff, each by a reviewer that did not write the change (a fresh agent session or subagent, or a review command). Fix or answer every valid finding and list them in the PR. Details in [AGENTS.md](AGENTS.md#before-the-pr-leaves-draft). |
 | Report only what ran | Say what you tested and what you could not run. No "works" without a run. |
 | Keep it short | A summary of a few sentences. Long generated descriptions get sent back. |
 | No real data | Nothing from a real Teams account in code, tests, logs or screenshots: no names, chats, ids or tokens. Use `--demo`. |
@@ -23,7 +24,7 @@ Most of this code is written with AI agents, and that is welcome here. Just say 
 ## Pull requests
 
 - One topic per pull request. No unrelated refactors, no formatting of files you did not change.
-- The template asks for three things: a summary, the AI model, and a screenshot for UI changes (taken with demo data).
+- The template asks for four things: a summary, the AI model, the reviews that ran, and a screenshot for UI changes (taken with demo data).
 - CI runs the tests on Linux and Windows for every pull request.
 - Commit and PR title format: `type(scope): message`, with `type` one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `chore`, `ci`, `build`, a lowercase scope and no emoji. CI checks the PR title.
 - The PR title becomes the squash commit and a line in the release notes (`feat` under New, `fix` under Fixes). Write it as a user would read it: `fix(chat): a sent image no longer blinks`, not `fix(chat): handle download race`.
@@ -31,15 +32,7 @@ Most of this code is written with AI agents, and that is welcome here. Just say 
 
 ## Build and test
 
-Build setup and all commands are in the [README](README.md#quick-start), the Windows cross build in [docs/build-windows.md](docs/build-windows.md).
-
-| Task | Command |
-|---|---|
-| Run with demo data | `cargo run -p app -- --demo` |
-| Format | `cargo fmt` (not `--all`, it rewrites `vendor/`) |
-| Tests of the changed module | `cargo test -p <crate> <module>` |
-| Layout guard for UI changes | `cargo test -p app layout_guard` |
-| Screenshot without a display | `cargo build -p app && scripts/headless-shot.sh shot.png` |
+Build setup is in the [README](README.md#quick-start), the Windows cross build in [docs/build-windows.md](docs/build-windows.md). The everyday commands (demo run, format, tests, UI check) are in [AGENTS.md](AGENTS.md#commands).
 
 ## Code
 

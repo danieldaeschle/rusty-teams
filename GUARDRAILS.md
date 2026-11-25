@@ -51,6 +51,6 @@ Clean up after every test: delete test messages and recordings, hide test meetin
 ## Before building
 
 1. Find how Teams does it: `docs/research/*.md`, then the JS bundle of the Teams web client.
-2. Write findings back to `docs/research/<topic>.md`.
+2. Write findings back to `docs/research/<topic>.md`. That folder stays local and untracked; only `internal-endpoints.md` is committed.
 3. If a change has to break a "must match" rule, name the deviation in the commit body.
 4. If the change picks one reasonable path over another, and that choice is not already a rule here, add a short note under `docs/decisions/` (see `docs/decisions/README.md`).
