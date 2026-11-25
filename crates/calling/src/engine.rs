@@ -17,6 +17,7 @@ use crate::control::{CallControl, CallHandle, call_channel};
 use crate::devices::DeviceChoice;
 use crate::end::EndKind;
 use crate::error::{Error, Result};
+use crate::mic_processing::MicSettings;
 use crate::push::{CallNotification, Caller, PushEvent, decode_push};
 use crate::relay::{DEFAULT_RELAY_HOST, RelayCache};
 use crate::signaling::{
@@ -152,6 +153,7 @@ pub(crate) struct Inner {
     seen: Mutex<HashMap<(String, String), Instant>>,
     next_ring_id: AtomicU64,
     default_camera: Mutex<DeviceChoice>,
+    default_mic: Mutex<MicSettings>,
     runtime: tokio::runtime::Handle,
     events: mpsc::UnboundedSender<EngineEvent>,
     stop: Mutex<Option<oneshot::Sender<()>>>,
@@ -220,6 +222,7 @@ impl Inner {
                 .lock()
                 .expect("default camera lock")
                 .clone(),
+            mic: *self.default_mic.lock().expect("default mic lock"),
             ..CallOptions::default()
         }
     }
@@ -332,6 +335,7 @@ impl CallEngine {
             next_ring_id: AtomicU64::new(RING_ID_START),
             relay: RelayCache::default(),
             default_camera: Mutex::new(DeviceChoice::SystemDefault),
+            default_mic: Mutex::new(MicSettings::default()),
             runtime: tokio::runtime::Handle::current(),
             events,
             stop: Mutex::new(Some(stop)),
@@ -411,6 +415,10 @@ impl CallEngine {
             .default_camera
             .lock()
             .expect("default camera lock") = camera;
+    }
+
+    pub fn set_default_mic(&self, mic: MicSettings) {
+        *self.inner.default_mic.lock().expect("default mic lock") = mic;
     }
 
     pub fn decline_ring(&self, ring_id: u64) {

@@ -6,12 +6,13 @@ use libwebrtc::desktop_capturer::{
     CaptureError, CaptureSource, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
     PortalPickerEvent,
 };
-use libwebrtc::native::yuv_helper::argb_to_i420;
+use libwebrtc::native::yuv_helper::{argb_scale, argb_to_i420};
 use libwebrtc::video_frame::I420Buffer;
 
 use crate::capture::Capture;
 use crate::error::{Error, Result};
 use crate::video_frame::VideoPicture;
+use crate::win_timer::HighResSleep;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShareKind {
@@ -176,6 +177,81 @@ fn scaled_bgra(
     })
 }
 
+const SHARE_SEND_MAX_FS: u32 = 8160;
+const MACROBLOCK: u32 = 16;
+
+fn macroblocks(width: u32, height: u32) -> u32 {
+    width.div_ceil(MACROBLOCK) * height.div_ceil(MACROBLOCK)
+}
+
+fn even(value: u32) -> u32 {
+    value & !1
+}
+
+fn buffer_covers(bytes: &[u8], width: u32, height: u32, stride: u32) -> bool {
+    width >= 2
+        && height >= 2
+        && stride as usize >= width as usize * 4
+        && bytes.len() >= stride as usize * height as usize
+}
+
+pub(crate) fn fit_share_size(width: u32, height: u32, max_fs: u32) -> (u32, u32) {
+    let (width, height) = (even(width), even(height));
+    if width < 2 || height < 2 || max_fs == 0 || macroblocks(width, height) <= max_fs {
+        return (width, height);
+    }
+    let mut scale = (f64::from(macroblocks(width, height)) / f64::from(max_fs)).sqrt();
+    let mut target_width = even((f64::from(width) / scale) as u32).max(2);
+    let mut target_height = even((f64::from(height) / scale) as u32).max(2);
+    while macroblocks(target_width, target_height) > max_fs && target_width > 2 && target_height > 2
+    {
+        scale *= 1.05;
+        target_width = even((f64::from(width) / scale) as u32).max(2);
+        target_height = even((f64::from(height) / scale) as u32).max(2);
+    }
+    (target_width, target_height)
+}
+
+fn scale_bgra_to(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    stride: u32,
+    target_width: u32,
+    target_height: u32,
+) -> Vec<u8> {
+    let mut scaled = vec![0u8; target_width as usize * target_height as usize * 4];
+    argb_scale(
+        bytes,
+        stride,
+        width as i32,
+        height as i32,
+        &mut scaled,
+        target_width * 4,
+        target_width as i32,
+        target_height as i32,
+    );
+    scaled
+}
+
+fn share_frame(bytes: &[u8], width: u32, height: u32, stride: u32) -> Option<I420Buffer> {
+    let (width, height) = (even(width), even(height));
+    if !buffer_covers(bytes, width, height, stride) {
+        return None;
+    }
+    let (target_width, target_height) = fit_share_size(width, height, SHARE_SEND_MAX_FS);
+    if target_width == width && target_height == height {
+        return Some(i420_from_bgra(bytes, width, height, stride));
+    }
+    let scaled = scale_bgra_to(bytes, width, height, stride, target_width, target_height);
+    Some(i420_from_bgra(
+        &scaled,
+        target_width,
+        target_height,
+        target_width * 4,
+    ))
+}
+
 fn i420_from_bgra(bytes: &[u8], width: u32, height: u32, stride: u32) -> I420Buffer {
     let mut buffer = I420Buffer::new(width, height);
     let (stride_y, stride_u, stride_v) = buffer.strides();
@@ -237,11 +313,13 @@ pub fn start_screen_capture(
                 *since = None;
             }
             let (width, height) = (frame.width() as u32 & !1, frame.height() as u32 & !1);
-            if width >= 2 && height >= 2 {
-                deliver(i420_from_bgra(frame.data(), width, height, frame.stride()));
+            if let Some(picture) = share_frame(frame.data(), width, height, frame.stride()) {
+                deliver(picture);
             }
         });
+        let sleeper = HighResSleep::new();
         while !stop.load(Ordering::SeqCst) {
+            let started = Instant::now();
             let gone = gone_since
                 .lock()
                 .is_ok_and(|since| since.is_some_and(|since| since.elapsed() >= SOURCE_GONE_AFTER));
@@ -250,7 +328,8 @@ pub fn start_screen_capture(
             }
             pump_messages();
             capturer.capture_frame();
-            std::thread::sleep(Duration::from_secs(1) / fps.load(Ordering::Relaxed).max(1));
+            let period = Duration::from_secs(1) / fps.load(Ordering::Relaxed).max(1);
+            sleeper.sleep_until(started + period);
         }
     })
     .map_err(|error| Error::Webrtc(format!("screen thread: {error}")))
@@ -360,8 +439,8 @@ pub(crate) fn start_portal_capture(
             }
             let Ok(frame) = result else { return };
             let (width, height) = (frame.width() as u32 & !1, frame.height() as u32 & !1);
-            if width >= 2 && height >= 2 {
-                deliver(i420_from_bgra(frame.data(), width, height, frame.stride()));
+            if let Some(picture) = share_frame(frame.data(), width, height, frame.stride()) {
+                deliver(picture);
             }
         });
         if delegated {
@@ -420,6 +499,17 @@ pub(crate) fn start_portal_capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wide_share_fits_the_send_budget_and_a_short_buffer_does_not() {
+        use libwebrtc::video_frame::VideoBuffer;
+        let (width, height) = fit_share_size(2560, 1440, SHARE_SEND_MAX_FS);
+        assert!(macroblocks(width, height) <= SHARE_SEND_MAX_FS);
+        let bytes = vec![0u8; 2560 * 1440 * 4];
+        let frame = share_frame(&bytes, 2560, 1440, 2560 * 4).expect("scaled");
+        assert!(macroblocks(frame.width(), frame.height()) <= SHARE_SEND_MAX_FS);
+        assert!(share_frame(&[0u8; 8], 4, 2, 16).is_none());
+    }
 
     #[test]
     fn sources_get_readable_labels() {

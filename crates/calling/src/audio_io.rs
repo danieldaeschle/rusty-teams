@@ -10,6 +10,7 @@ use tokio::time::interval;
 
 use crate::audio::{ClipGenerator, FRAME_SAMPLES, SAMPLE_RATE, SineGenerator};
 use crate::devices::{self, DeviceChoice};
+use crate::mic_processing::{MicSettings, NoiseSuppression};
 
 const TONE_AMPLITUDE: f32 = 0.3;
 const SOURCE_QUEUE_MS: u32 = 100;
@@ -44,6 +45,7 @@ impl AudioMode {
 pub struct AudioSetup {
     factory: PeerConnectionFactory,
     pub track: RtcAudioTrack,
+    pub track_with_ns: Option<RtcAudioTrack>,
     pub listen_only: bool,
     platform_acquired: bool,
     pub adm_state: String,
@@ -90,9 +92,17 @@ impl AudioSetup {
             }
         }
         if has_input {
+            // Windows Auto disables built-in WebRTC NS so DeepFilterNet runs alone on 48 kHz mics
+            // (with single-stage WebRTC NS fallback inside the capture hook for 16 kHz / warm-up).
+            // Linux and macOS keep WebRTC NS on that track, then DeepFilterNet, as before.
+            // Low mode switches to `track_with_ns` with built-in WebRTC NS enabled and hook off.
+            let track =
+                factory.create_device_audio_track_with_options("microphone", !cfg!(windows));
+            let track_with_ns = Some(factory.create_device_audio_track("microphone-ns"));
             return AudioSetup {
                 factory: factory.clone(),
-                track: factory.create_device_audio_track("microphone"),
+                track,
+                track_with_ns,
                 listen_only: false,
                 platform_acquired,
                 adm_state,
@@ -124,10 +134,27 @@ impl AudioSetup {
         AudioSetup {
             factory: factory.clone(),
             track,
+            track_with_ns: None,
             listen_only: mode == AudioMode::Platform,
             platform_acquired,
             adm_state,
             feeder: Some((task, running)),
+        }
+    }
+
+    pub fn device_track(&self, settings: MicSettings) -> &RtcAudioTrack {
+        if classical_noise_track(settings)
+            && let Some(track) = &self.track_with_ns
+        {
+            return track;
+        }
+        &self.track
+    }
+
+    pub fn set_device_tracks_enabled(&self, enabled: bool) {
+        self.track.set_enabled(enabled);
+        if let Some(track) = &self.track_with_ns {
+            track.set_enabled(enabled);
         }
     }
 
@@ -151,6 +178,10 @@ impl AudioSetup {
 enum FrameGenerator {
     Sine(SineGenerator),
     Clip(ClipGenerator),
+}
+
+pub(crate) fn classical_noise_track(settings: MicSettings) -> bool {
+    settings.noise_suppression == NoiseSuppression::Low && !settings.music_mode
 }
 
 impl FrameGenerator {
@@ -193,5 +224,19 @@ mod tests {
         assert_eq!(AudioMode::parse(Some("SILENCE")), AudioMode::Silence);
         assert_eq!(AudioMode::parse(Some("file")), AudioMode::File);
         assert_eq!(AudioMode::parse(Some("whatever")), AudioMode::Platform);
+    }
+
+    #[test]
+    fn only_low_uses_the_classical_noise_track() {
+        use crate::mic_processing::{MicSettings, NoiseSuppression};
+        let mut settings = MicSettings::default();
+        assert!(!classical_noise_track(settings));
+        settings.noise_suppression = NoiseSuppression::Low;
+        assert!(classical_noise_track(settings));
+        settings.noise_suppression = NoiseSuppression::Off;
+        assert!(!classical_noise_track(settings));
+        settings.noise_suppression = NoiseSuppression::Low;
+        settings.music_mode = true;
+        assert!(!classical_noise_track(settings));
     }
 }

@@ -103,8 +103,8 @@ pub use language_settings::{
     parse_language_settings, target_patch,
 };
 pub use links::{
-    LinkImage, LinkInfo, MessageLinks, hosted_content_image_url, is_ams_image_url,
-    is_link_image_url,
+    LinkImage, LinkInfo, MessageLinks, ams_full_size_url, hosted_content_image_url,
+    is_ams_image_url, is_link_image_url,
 };
 pub use mask::mask_conversation_id;
 pub use members::{

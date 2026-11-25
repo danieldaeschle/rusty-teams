@@ -204,6 +204,7 @@ mod probe {
         let queue = SampleQueue::default();
         let started = calling::sound_capture::start_microphone(
             &calling::DeviceChoice::SystemDefault,
+            None,
             queue.clone(),
         )
         .map_err(|error| failed("microphone", error))?;

@@ -31,6 +31,15 @@
 #include "rtc_base/synchronization/mutex.h"
 
 #ifdef WEBRTC_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <dshow.h>
+#include <ks.h>
+#include <ksmedia.h>
+#include <wrl/client.h>
+
 #include "rtc_base/win32.h"
 #endif
 
@@ -179,6 +188,142 @@ std::unique_ptr<LogSink> new_log_sink(
 
 rust::String create_random_uuid() {
   return webrtc::CreateRandomUuid();
+}
+
+void tune_windows_camera(rust::Str target) {
+#ifdef WEBRTC_WIN
+  if (target.empty()) {
+    return;
+  }
+  using Microsoft::WRL::ComPtr;
+
+  static const GUID kPropSetVidCapVideoProcAmp = {
+      0xC6E13360,
+      0x30AC,
+      0x11d0,
+      {0xA1, 0x8C, 0x00, 0xA0, 0xC9, 0x11, 0x89, 0x56}};
+  static const GUID kPropSetVidCapCameraControl = {
+      0xC6E13370,
+      0x30AC,
+      0x11d0,
+      {0xA1, 0x8C, 0x00, 0xA0, 0xC9, 0x11, 0x89, 0x56}};
+
+  std::wstring wanted;
+  if (!target.empty()) {
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, target.data(),
+                                       static_cast<int>(target.size()), nullptr,
+                                       0);
+    if (wide_len > 0) {
+      wanted.resize(wide_len);
+      MultiByteToWideChar(CP_UTF8, 0, target.data(),
+                          static_cast<int>(target.size()), wanted.data(),
+                          wide_len);
+    }
+  }
+  auto to_lower = [](std::wstring text) {
+    for (wchar_t& ch : text) {
+      if (ch >= L'A' && ch <= L'Z') {
+        ch = static_cast<wchar_t>(ch - L'A' + L'a');
+      }
+    }
+    return text;
+  };
+  const std::wstring wanted_lower = to_lower(wanted);
+  if (wanted_lower.empty()) {
+    return;
+  }
+
+  HRESULT hr_com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  const bool com_owned = SUCCEEDED(hr_com);
+
+  ComPtr<ICreateDevEnum> dev_enum;
+  if (SUCCEEDED(CoCreateInstance(CLSID_SystemDeviceEnum, nullptr,
+                                 CLSCTX_INPROC_SERVER,
+                                 IID_PPV_ARGS(&dev_enum))) &&
+      dev_enum) {
+    ComPtr<IEnumMoniker> enum_moniker;
+    if (SUCCEEDED(dev_enum->CreateClassEnumerator(
+            CLSID_VideoInputDeviceCategory, &enum_moniker, 0)) &&
+        enum_moniker) {
+      ComPtr<IMoniker> moniker;
+      ULONG fetched = 0;
+      while (enum_moniker->Next(1, &moniker, &fetched) == S_OK && moniker) {
+        bool matches = false;
+        if (!matches) {
+          ComPtr<IPropertyBag> bag;
+          if (SUCCEEDED(moniker->BindToStorage(nullptr, nullptr,
+                                               IID_PPV_ARGS(&bag))) &&
+              bag) {
+            for (const wchar_t* prop : {L"DevicePath", L"FriendlyName"}) {
+              VARIANT var;
+              VariantInit(&var);
+              if (SUCCEEDED(bag->Read(prop, &var, nullptr)) &&
+                  var.vt == VT_BSTR && var.bstrVal) {
+                std::wstring value_lower = to_lower(var.bstrVal);
+                if (value_lower == wanted_lower ||
+                    value_lower.find(wanted_lower) != std::wstring::npos ||
+                    wanted_lower.find(value_lower) != std::wstring::npos) {
+                  matches = true;
+                }
+              }
+              VariantClear(&var);
+              if (matches) {
+                break;
+              }
+            }
+          }
+        }
+
+        if (matches) {
+          ComPtr<IBaseFilter> filter;
+          if (SUCCEEDED(moniker->BindToObject(nullptr, nullptr,
+                                              IID_PPV_ARGS(&filter))) &&
+              filter) {
+            ComPtr<IKsPropertySet> ks;
+            if (SUCCEEDED(filter.As(&ks)) && ks) {
+              // 50 Hz anti-flicker (power line frequency = 1)
+              KSPROPERTY_VIDEOPROCAMP_S powerline = {};
+              powerline.Property.Set = kPropSetVidCapVideoProcAmp;
+              powerline.Property.Id =
+                  KSPROPERTY_VIDEOPROCAMP_POWERLINE_FREQUENCY;
+              powerline.Property.Flags = KSPROPERTY_TYPE_SET;
+              powerline.Value = 1;
+              powerline.Flags = KSPROPERTY_VIDEOPROCAMP_FLAGS_MANUAL;
+              ks->Set(kPropSetVidCapVideoProcAmp,
+                      KSPROPERTY_VIDEOPROCAMP_POWERLINE_FREQUENCY,
+                      &powerline.Value,
+                      sizeof(powerline) - sizeof(KSPROPERTY), &powerline,
+                      sizeof(powerline));
+
+              // Disable low-light auto-exposure frame-rate drop
+              KSPROPERTY_CAMERACONTROL_S priority = {};
+              priority.Property.Set = kPropSetVidCapCameraControl;
+              priority.Property.Id =
+                  KSPROPERTY_CAMERACONTROL_AUTO_EXPOSURE_PRIORITY;
+              priority.Property.Flags = KSPROPERTY_TYPE_SET;
+              priority.Value = 0;
+              priority.Flags = KSPROPERTY_CAMERACONTROL_FLAGS_MANUAL;
+              ks->Set(kPropSetVidCapCameraControl,
+                      KSPROPERTY_CAMERACONTROL_AUTO_EXPOSURE_PRIORITY,
+                      &priority.Value,
+                      sizeof(priority) - sizeof(KSPROPERTY), &priority,
+                      sizeof(priority));
+            }
+          }
+          moniker.Reset();
+          break;
+        }
+        moniker.Reset();
+      }
+    }
+  }
+
+  if (com_owned) {
+    CoUninitialize();
+  }
+#else
+  (void)target;
+#endif
 }
 
 }  // namespace livekit_ffi

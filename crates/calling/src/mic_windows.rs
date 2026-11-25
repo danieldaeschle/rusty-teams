@@ -6,11 +6,11 @@ use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY,
-    AUDCLNT_STREAMOPTIONS_NONE, AUDIO_EFFECT, AUDIO_EFFECT_STATE_OFF, AUDIO_EFFECT_STATE_ON,
-    AudioCategory_Communications, AudioClientProperties, DEVICE_STATE_ACTIVE, IAudioCaptureClient,
-    IAudioClient, IAudioClient2, IAudioEffectsManager, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator, WAVEFORMATEX, eCapture, eCommunications,
+    AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMOPTIONS_NONE, AUDIO_EFFECT,
+    AUDIO_EFFECT_STATE_OFF, AUDIO_EFFECT_STATE_ON, AudioCategory_Communications,
+    AudioClientProperties, DEVICE_STATE_ACTIVE, IAudioCaptureClient, IAudioClient, IAudioClient2,
+    IAudioEffectsManager, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX,
+    eCapture, eCommunications, eConsole,
 };
 use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PropVariantClear};
 use windows::Win32::System::Com::{
@@ -53,10 +53,33 @@ fn open_device(choice: &DeviceChoice) -> Result<IMMDevice> {
         };
         match chosen {
             Some(device) => Ok(device),
-            None => enumerator
-                .GetDefaultAudioEndpoint(eCapture, eCommunications)
-                .map_err(|error| audio_error("default communications microphone", error)),
+            None => match choice {
+                DeviceChoice::Device(key) => Err(audio_error(
+                    "microphone",
+                    format!("`{key}` is not an active capture device"),
+                )),
+                DeviceChoice::SystemDefault => enumerator
+                    .GetDefaultAudioEndpoint(eCapture, eConsole)
+                    .or_else(|_| enumerator.GetDefaultAudioEndpoint(eCapture, eCommunications))
+                    .map_err(|error| audio_error("default microphone", error)),
+            },
         }
+    }
+}
+
+pub fn friendly_name_for_id(id: &str) -> Option<String> {
+    unsafe {
+        let initialized = CoInitializeEx(None, COINIT_MULTITHREADED).is_ok();
+        let name =
+            CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .ok()
+                .and_then(|enumerator| enumerator.GetDevice(&HSTRING::from(id)).ok())
+                .map(|device| friendly_name(&device))
+                .filter(|name| !name.is_empty());
+        if initialized {
+            CoUninitialize();
+        }
+        name
     }
 }
 
@@ -93,9 +116,8 @@ fn initialise(
         wBitsPerSample: BITS,
         cbSize: 0,
     };
-    let flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK
-        | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
-        | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+    // Omit AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY so WASAPI uses Windows' higher-quality resampler.
+    let flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM;
     unsafe {
         let client: IAudioClient = device
             .Activate(CLSCTX_ALL, None)

@@ -113,6 +113,18 @@ impl ImageRef {
         &self.url
     }
 
+    /// The same picture at full resolution, for the image viewer; `None` when the message already carries the only view there is.
+    pub fn full_size(&self) -> Option<ImageRef> {
+        let url = chatsvc::ams_full_size_url(&self.url)?;
+        Some(ImageRef {
+            id: format!("{}:full", self.id),
+            url,
+            width: None,
+            height: None,
+            alt: self.alt.clone(),
+        })
+    }
+
     /// The Teams video clip this image is the thumbnail of.
     pub fn video_url(&self) -> Option<String> {
         thumbnail_video_url(&self.url)
@@ -947,6 +959,30 @@ mod tests {
         let parsed = reactions(&stored);
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].created_at, None);
+    }
+
+    #[test]
+    fn an_ams_picture_has_a_full_size_view_kept_apart_from_the_inline_one() {
+        let inline = ImageRef {
+            id: "0-weu-d1-abc".into(),
+            url: "https://eu-api.asm.skype.com/v1/objects/0-weu-d1-abc/views/imgo".into(),
+            width: Some(640),
+            height: Some(360),
+            alt: Some("image".into()),
+        };
+        let full = inline.full_size().unwrap();
+        assert_eq!(
+            full.key(),
+            "https://eu-api.asm.skype.com/v1/objects/0-weu-d1-abc/views/imgpsh_fullsize_anim"
+        );
+        assert_ne!(full.key(), inline.key());
+        assert_eq!((full.width, full.height), (None, None));
+        assert_eq!(full.full_size(), None);
+        let external = ImageRef {
+            url: "https://example.com/a.png".into(),
+            ..inline
+        };
+        assert_eq!(external.full_size(), None);
     }
 
     #[test]

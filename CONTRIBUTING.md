@@ -25,7 +25,8 @@ Most of this code is written with AI agents, and that is welcome here. Just say 
 - One topic per pull request. No unrelated refactors, no formatting of files you did not change.
 - The template asks for three things: a summary, the AI model, and a screenshot for UI changes (taken with demo data).
 - CI runs the tests on Linux and Windows for every pull request.
-- Commit and title format: `feat|fix|chore|docs(scope): message`.
+- Commit and PR title format: `type(scope): message`, with `type` one of `feat`, `fix`, `perf`, `refactor`, `docs`, `test`, `chore`, `ci`, `build`, a lowercase scope and no emoji. CI checks the PR title.
+- The PR title becomes the squash commit and a line in the release notes (`feat` under New, `fix` under Fixes). Write it as a user would read it: `fix(chat): a sent image no longer blinks`, not `fix(chat): handle download race`.
 - Rebase on `main` instead of merging it in. Answer actionable review comments or say that you will not.
 
 ## Build and test
