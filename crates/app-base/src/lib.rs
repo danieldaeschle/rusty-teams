@@ -26,6 +26,8 @@ pub mod inline_image;
 pub mod linux_desktop;
 #[cfg(target_os = "linux")]
 pub mod linux_fonts;
+#[cfg(target_os = "linux")]
+mod linux_idle;
 pub mod native_dumps;
 pub mod notify;
 pub mod orgs;
