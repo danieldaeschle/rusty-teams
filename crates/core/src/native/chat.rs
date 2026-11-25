@@ -103,7 +103,18 @@ pub fn graph_chat(conversation: &Value, members: Vec<Value>) -> Option<Chat> {
 }
 
 /// One chat from the chat service aggregator (`teams/users/me/chats/{id}`), which also has the meeting link.
+/// The aggregator also answers for a channel (`topic`) or a team (`space`) thread.
+pub fn is_team_thread(aggregator_chat: &Value) -> bool {
+    matches!(
+        aggregator_chat["threadType"].as_str(),
+        Some("topic" | "space")
+    )
+}
+
 pub fn graph_chat_from_aggregator(chat: &Value, members: Vec<Value>) -> Option<Chat> {
+    if is_team_thread(chat) {
+        return None;
+    }
     let id = chat["id"].as_str()?;
     let kind = if chat["isOneOnOne"].as_bool() == Some(true) || id.ends_with(ONE_ON_ONE_SUFFIX) {
         "oneOnOne"
@@ -196,6 +207,16 @@ fn rfc3339(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_channel_thread_from_the_aggregator_is_no_chat() {
+        let channel = json!({"id": "19:c@thread.skype", "threadType": "topic", "chatType": "chat", "isOneOnOne": false});
+        assert!(is_team_thread(&channel));
+        assert!(graph_chat_from_aggregator(&channel, Vec::new()).is_none());
+        let group = json!({"id": "19:g@thread.v2", "threadType": "chat", "chatType": "chat", "isOneOnOne": false});
+        assert!(!is_team_thread(&group));
+        assert!(graph_chat_from_aggregator(&group, Vec::new()).is_some());
+    }
+
     use serde_json::json;
 
     use super::*;

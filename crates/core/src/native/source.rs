@@ -10,7 +10,7 @@ use session::Session;
 
 use super::chat::{
     NativeMember, ORGID_PREFIX, aggregator_members, chat_type, graph_chat,
-    graph_chat_from_aggregator, graph_member, one_on_one_ids, thread_members,
+    graph_chat_from_aggregator, graph_member, is_team_thread, one_on_one_ids, thread_members,
 };
 use super::message::graph_message;
 use crate::error::{Error, Result};
@@ -86,6 +86,9 @@ impl<'a> NativeChats<'a> {
 
     pub async fn chat(&self, chat_id: &str) -> Result<Chat> {
         let chat = chatsvc::aggregator_chat(self.session, chat_id).await?;
+        if is_team_thread(&chat) {
+            return Err(Error::UnknownConversation(chat_id.to_owned()));
+        }
         let mut members = aggregator_members(&chat);
         let user_ids: Vec<String> = members
             .iter()

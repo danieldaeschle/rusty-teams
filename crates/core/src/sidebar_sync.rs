@@ -16,6 +16,8 @@ use crate::remote::{ChatsPage, Remote};
 
 const META_CHATS_FULL_AT: &str = "chats_full_refreshed_at";
 const META_TEAMS_AT: &str = "teams_refreshed_at";
+const META_NEW_CHANNEL_AT: &str = "teams_new_channel_refreshed_at";
+const NEW_CHANNEL_REFRESH_GAP: Duration = Duration::minutes(1);
 const META_CHATS_NEXT_LINK: &str = "chats_next_link";
 const KEPT_PREVIEW_MESSAGES: usize = 5;
 const META_CHATS_EXHAUSTED: &str = "chats_exhausted";
@@ -417,6 +419,25 @@ impl<R: Remote> SyncEngine<R> {
         refresh
     }
 
+    /// A message from a channel the store does not know yet: the channel is new, so list the teams again.
+    pub(crate) async fn refresh_teams_for_new_channel(&self) {
+        let recent = self
+            .store
+            .meta_time(META_NEW_CHANNEL_AT)
+            .is_ok_and(|last| !is_due(last, NEW_CHANNEL_REFRESH_GAP));
+        if recent
+            || self
+                .store
+                .set_meta_time(META_NEW_CHANNEL_AT, Utc::now())
+                .is_err()
+        {
+            return;
+        }
+        if self.refresh_teams(true).await.refreshed {
+            let _ = self.events.send(CoreEvent::SidebarChanged);
+        }
+    }
+
     async fn refresh_teams_now(&self, refresh: &mut TeamsRefresh) -> Result<()> {
         let teams = self.remote.joined_teams().await?;
         let records: Vec<_> = teams.iter().map(team_record).collect();
@@ -440,6 +461,7 @@ impl<R: Remote> SyncEngine<R> {
                         .map(|channel| channel.id.clone())
                         .collect();
                     self.store.remove_channels_except(team_id, &kept)?;
+                    self.store.remove_chats(&kept)?;
                     refresh.channels += channel_records.len();
                 }
                 Err(error) => {

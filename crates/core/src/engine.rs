@@ -412,6 +412,10 @@ impl<R: Remote> SyncEngine<R> {
     async fn fetch_unknown_chat(&self, conversation_id: &str) -> Result<Conversation> {
         let chat = match self.remote.chat(conversation_id).await {
             Ok(chat) => chat,
+            Err(Error::UnknownConversation(_)) => {
+                self.refresh_teams_for_new_channel().await;
+                return self.resolve_stored(conversation_id);
+            }
             Err(Error::Graph(graph::Error::Session(session::Error::Api {
                 status: 403 | 404,
                 ..

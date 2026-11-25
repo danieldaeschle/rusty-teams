@@ -97,6 +97,7 @@ struct Fake {
     chat_calls: Mutex<usize>,
     chat_page_calls: Mutex<usize>,
     team_calls: Mutex<usize>,
+    team_threads: Mutex<Vec<String>>,
     calls: Mutex<Vec<String>>,
     delta_items: Mutex<Vec<Message>>,
     thread_replies: Mutex<Vec<Message>>,
@@ -242,6 +243,15 @@ impl Remote for Handle {
 
     async fn chat(&self, chat_id: &str) -> Result<Chat> {
         *self.single_chat_calls.lock().unwrap() += 1;
+        if self
+            .team_threads
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|id| id == chat_id)
+        {
+            return Err(Error::UnknownConversation(chat_id.to_owned()));
+        }
         if chat_id == NOTES_CHAT_ID {
             return Err(Error::Graph(graph::Error::Session(session::Error::api(
                 400,
@@ -2013,6 +2023,47 @@ async fn channel_engine(fake: &Arc<Fake>) -> SyncEngine<Handle> {
     let engine = engine_with(fake, small_pages());
     engine.refresh_sidebar().await.unwrap();
     engine
+}
+
+#[tokio::test]
+async fn a_message_in_a_channel_not_yet_listed_lists_the_teams_again() {
+    let fake = Arc::new(Fake::default());
+    *fake.team_threads.lock().unwrap() = vec![CHANNEL.to_owned()];
+    *fake.channel_pages.lock().unwrap() = vec![vec![thread(30, 30, 1)]];
+    let engine = engine_with(&fake, small_pages());
+    *fake.teams.lock().unwrap() =
+        vec![serde_json::from_value(json!({"id": "team-1", "displayName": "Squad"})).unwrap()];
+
+    engine.fetch_newer(CHANNEL).await.unwrap();
+
+    assert_eq!(*fake.team_calls.lock().unwrap(), 1);
+    let sidebar = engine.sidebar().unwrap();
+    assert!(sidebar.chats.iter().all(|chat| chat.id != CHANNEL));
+    assert_eq!(sidebar.teams[0].channels[0].id, CHANNEL);
+}
+
+#[tokio::test]
+async fn a_channel_stored_as_a_chat_leaves_the_chats_when_the_teams_list_it() {
+    let fake = Arc::new(Fake::default());
+    let engine = channel_engine(&fake).await;
+    engine
+        .store()
+        .upsert_chats(&[store::ChatRecord {
+            id: CHANNEL.into(),
+            ..Default::default()
+        }])
+        .unwrap();
+
+    engine.refresh_sidebar_full().await.unwrap();
+
+    assert!(
+        engine
+            .sidebar()
+            .unwrap()
+            .chats
+            .iter()
+            .all(|chat| chat.id != CHANNEL)
+    );
 }
 
 #[tokio::test]
