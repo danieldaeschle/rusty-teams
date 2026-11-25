@@ -5,13 +5,19 @@
 //! hand-over, login window, hung renderer, app exit) made MSAL create a new key, drop the cache
 //! and ask for sign-in again. Before Chromium stops, the cookie gets an expiry instead; the key
 //! then sits in the profile next to the cache it protects, which the profile already holds.
+//!
+//! Trade-off: the key moves from a session cookie into the profile's cookie store, encrypted by
+//! the OS keyring (or Chromium's fixed key where no keyring is available). The profile already
+//! holds the equally powerful ESTS cookies that keep the session alive, so this is a conscious
+//! choice, not a new credential at rest.
 
 use serde_json::{Map, Value, json};
 
 /// The cookie MSAL.js reads its cache encryption key from; only its name and value matter to it.
 const MSAL_KEY_COOKIE: &str = "msal.cache.encryption";
-/// How long the key outlives the last stop: the refresh token it unlocks lasts up to 90 days of
-/// inactivity, and every stop renews the expiry.
+/// How long the key outlives the last stop; every stop renews the expiry. 90 days is the chosen
+/// value, not a refresh-token lifetime: Entra gives SPA clients refresh tokens valid for 24 hours,
+/// and the long-lived session comes from the ESTS cookie, which enables silent token renewal.
 const KEY_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 /// `Network.Cookie` fields that `Network.CookieParam` takes unchanged (CDP browser_protocol.json).
 const CARRIED_FIELDS: [&str; 8] = [

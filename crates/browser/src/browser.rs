@@ -502,11 +502,16 @@ impl Browser {
             let port = self.inner.config.port;
             let _ = tokio::task::spawn_blocking(move || launcher.terminate_listener(port)).await;
         } else if let Some(info) = self.version().await {
-            let _ = tokio::time::timeout(
+            if let Err(error) = tokio::time::timeout(
                 MSAL_KEY_STOP_BUDGET,
                 keep_msal_cache_key(&info.websocket_url),
             )
-            .await;
+            .await
+            {
+                log::warn!(
+                    "MSAL cache key not kept within the {MSAL_KEY_STOP_BUDGET:?} stop budget: {error}"
+                );
+            }
             close_over_cdp(&info.websocket_url).await;
         }
     }
