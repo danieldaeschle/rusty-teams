@@ -131,8 +131,9 @@ def check(pull_request: PullRequest) -> list[str]:
         problem = find_section(sections, "Problem") or ""
         if len(problem) < MIN_PROBLEM_CHARACTERS:
             missing.append(
-                "**Problem**: no linked issue (`Closes #123`), so a `## Problem` section must describe it: "
-                "what is wrong or missing, when a user hits it (steps or when/then) and what should happen instead."
+                "**Problem**: add a `## Problem` section: what is wrong or missing, when a user hits it "
+                "(steps or when/then) and what should happen instead. A fix needs no issue; "
+                "a linked issue (`Closes #123`) replaces this section."
             )
 
     size = changed_lines(pull_request.files)
