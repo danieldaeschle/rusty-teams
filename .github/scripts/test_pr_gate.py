@@ -146,5 +146,38 @@ class DocumentationTests(unittest.TestCase):
         self.assert_mentions("CONTRIBUTING.md", *self.shared_values())
 
 
+
+class FakeGitHub:
+    def __init__(self):
+        self.calls = []
+
+    def request(self, method, path, payload=None):
+        self.calls.append((method, path, payload))
+
+
+class LabelTests(unittest.TestCase):
+    def test_a_failing_gate_replaces_needs_review_with_needs_info(self):
+        github = FakeGitHub()
+        pr_gate.update_labels(github, 5, [pr_gate.LABEL_NEEDS_REVIEW], ready=False)
+        self.assertEqual(
+            github.calls,
+            [
+                ("DELETE", "/issues/5/labels/status%3A%20needs%20review", None),
+                ("POST", "/issues/5/labels", {"labels": [pr_gate.LABEL_NEEDS_INFO]}),
+            ],
+        )
+
+    def test_a_passing_gate_replaces_needs_info_with_needs_review(self):
+        github = FakeGitHub()
+        pr_gate.update_labels(github, 5, [pr_gate.LABEL_NEEDS_INFO], ready=True)
+        self.assertEqual(
+            github.calls,
+            [
+                ("DELETE", "/issues/5/labels/status%3A%20needs%20info", None),
+                ("POST", "/issues/5/labels", {"labels": [pr_gate.LABEL_NEEDS_REVIEW]}),
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

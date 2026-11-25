@@ -268,8 +268,9 @@ def remove_label(github: GitHub, number: int, labels: list[str], name: str) -> N
 
 
 def update_labels(github: GitHub, number: int, labels: list[str], ready: bool) -> None:
-    """Sets only the gate's own labels; the maintainers' status labels stay as they are."""
+    """Sets only the gate's own labels (needs info, needs review); the maintainers' status labels stay as they are."""
     if not ready:
+        remove_label(github, number, labels, LABEL_NEEDS_REVIEW)
         add_label(github, number, labels, LABEL_NEEDS_INFO)
         return
     remove_label(github, number, labels, LABEL_NEEDS_INFO)
