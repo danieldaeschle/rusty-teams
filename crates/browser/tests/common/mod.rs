@@ -341,6 +341,7 @@ pub async fn harness() -> Harness {
         probe: Duration::from_millis(200),
         poll: Duration::from_millis(20),
         profile_release: Duration::from_millis(10),
+        msal_key: Duration::from_millis(20),
         jitter_min: Duration::from_millis(5),
         jitter_max: Duration::from_millis(20),
     };

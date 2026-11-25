@@ -18,7 +18,6 @@ use crate::targets::{self, APPS, App, LoginState, Mode, Tab, VersionInfo};
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 const OPEN_TAB_TIMEOUT: Duration = Duration::from_secs(10);
 const CDP_TIMEOUT: Duration = Duration::from_secs(5);
-const MSAL_KEY_STOP_BUDGET: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
@@ -52,6 +51,7 @@ pub struct Timeouts {
     pub probe: Duration,
     pub poll: Duration,
     pub profile_release: Duration,
+    pub msal_key: Duration,
     pub jitter_min: Duration,
     pub jitter_max: Duration,
 }
@@ -63,6 +63,7 @@ impl Default for Timeouts {
             stop: Duration::from_secs(15),
             probe: Duration::from_secs(5),
             poll: Duration::from_millis(250),
+            msal_key: Duration::from_millis(500),
             profile_release: Duration::from_secs(2),
             jitter_min: Duration::ZERO,
             jitter_max: Duration::ZERO,
@@ -502,15 +503,11 @@ impl Browser {
             let port = self.inner.config.port;
             let _ = tokio::task::spawn_blocking(move || launcher.terminate_listener(port)).await;
         } else if let Some(info) = self.version().await {
-            if let Err(error) = tokio::time::timeout(
-                MSAL_KEY_STOP_BUDGET,
-                keep_msal_cache_key(&info.websocket_url),
-            )
-            .await
+            let budget = self.inner.timeouts.msal_key;
+            if let Err(error) =
+                tokio::time::timeout(budget, keep_msal_cache_key(&info.websocket_url)).await
             {
-                log::warn!(
-                    "MSAL cache key not kept within the {MSAL_KEY_STOP_BUDGET:?} stop budget: {error}"
-                );
+                log::warn!("MSAL cache key not kept within the {budget:?} stop budget: {error}");
             }
             close_over_cdp(&info.websocket_url).await;
         }
