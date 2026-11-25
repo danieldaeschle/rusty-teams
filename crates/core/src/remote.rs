@@ -7,9 +7,9 @@ use chatsvc::substrate_search::{
     QueryRequest, QueryResults, SearchIdentity, SearchSession, SubstrateSearch, Suggestions,
 };
 use chatsvc::{
-    parse_app_consumption_horizon, ActivityFeed, ActivitySnapshot, AppConsumptionHorizon,
-    ChatNotificationMode, ChatNotificationWrite, ChatSettingChange, ChatSettingsClient,
-    ChatSettingsDocument, DesktopNotifications, UserSettings,
+    ActivityFeed, ActivitySnapshot, AppConsumptionHorizon, ChatNotificationMode,
+    ChatNotificationWrite, ChatSettingChange, ChatSettingsClient, ChatSettingsDocument,
+    DesktopNotifications, UserSettings, parse_app_consumption_horizon,
 };
 use chatsvc::{
     BotProfile, BotProfiles, CallLogEntry, CardActions, ChatApp, ConversationRef,
@@ -976,10 +976,13 @@ impl Remote for Graph {
                     .edit_message(&conversation, target.message_id(), &html)
                     .await?)
             }
-            Some(conversation @ ConversationRef::Chat { .. }) => {
-                let entries = crate::teams_quote::mention_entries(mentions).ok_or(
-                    Error::Unsupported("editing in a team, channel or tag mention"),
-                )?;
+            Some(conversation) => {
+                let Some(entries) = crate::teams_quote::mention_entries(mentions) else {
+                    if matches!(conversation, ConversationRef::Chat { .. }) {
+                        return Err(Error::Unsupported("editing in a team or tag mention"));
+                    }
+                    return Ok(Graph::edit_message(self, target, html, mentions, extras).await?);
+                };
                 let html = format!(
                     "{}{}{}",
                     extras.kept_html(),
@@ -995,7 +998,7 @@ impl Remote for Graph {
                     )
                     .await?)
             }
-            Some(_) | None => Ok(Graph::edit_message(self, target, html, mentions, extras).await?),
+            None => Ok(Graph::edit_message(self, target, html, mentions, extras).await?),
         }
     }
 

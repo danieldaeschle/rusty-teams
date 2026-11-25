@@ -67,7 +67,7 @@ pub(crate) fn message_properties(
     }))
 }
 
-/// The chatsvc `mentions` entries; `None` when a mention is not a person.
+/// The chatsvc `mentions` entries; `None` for a team or tag mention (their chatsvc ids are not at hand).
 pub(crate) fn mention_entries(mentions: &[OutgoingMention]) -> Option<Vec<Value>> {
     mentions.iter().map(mention_entry).collect()
 }
@@ -76,7 +76,8 @@ fn mention_entry(mention: &OutgoingMention) -> Option<Value> {
     let (mri, mention_type) = match &mention.target {
         MentionTarget::User { user_id } => (user_mri(user_id), "person"),
         MentionTarget::Everyone { chat_id } => (chat_id.clone(), "everyone"),
-        _ => return None,
+        MentionTarget::Channel { channel_id } => (channel_id.clone(), "channel"),
+        MentionTarget::Team { .. } | MentionTarget::Tag { .. } => return None,
     };
     Some(json!({
         "@type": MENTION_ITEMTYPE,
@@ -201,11 +202,22 @@ mod tests {
     }
 
     #[test]
-    fn group_mentions_have_no_chatsvc_shape() {
-        for target in [
+    fn a_channel_mention_names_the_channel_thread() {
+        let channel = mention(
+            1,
             MentionTarget::Channel {
                 channel_id: "19:c@thread.tacv2".into(),
             },
+        );
+        let entries = mention_entries(&[channel]).unwrap();
+        assert_eq!(entries[0]["mri"], "19:c@thread.tacv2");
+        assert_eq!(entries[0]["mentionType"], "channel");
+        assert_eq!(entries[0]["itemid"], "1");
+    }
+
+    #[test]
+    fn team_and_tag_mentions_have_no_chatsvc_shape() {
+        for target in [
             MentionTarget::Team {
                 team_id: "team-1".into(),
             },
