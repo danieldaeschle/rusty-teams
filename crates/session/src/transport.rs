@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use serde_json::json;
 
@@ -7,6 +8,7 @@ use crate::app::{App, find_app_tab, has_login_tab};
 use crate::error::Result;
 use crate::events::{TabControl, TabEvents, open};
 use crate::http::list_targets;
+use crate::native_auth::NativeAuth;
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type OpenedTab = (TabControl, Option<TabEvents>);
@@ -31,6 +33,15 @@ pub trait Transport: Send + Sync {
 
     /// While held the host must not navigate the app on its own (no parking).
     fn hold(&self, _app: App, _held: bool) {}
+
+    /// A token provider for transports which do not host a Teams web page.
+    fn native_auth(&self) -> Option<Arc<NativeAuth>> {
+        None
+    }
+
+    fn supports_tabs(&self) -> bool {
+        true
+    }
 }
 
 pub struct CdpTransport {

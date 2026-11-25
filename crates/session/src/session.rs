@@ -11,6 +11,7 @@ use crate::app::App;
 use crate::error::{Error, Result};
 use crate::events::TabControl;
 use crate::native::NativeHttp;
+use crate::native_auth::NativeAuth;
 use crate::request::{ApiResponse, Method, Outcome, Request, WireRequest, WireResult};
 use crate::scope::Scope;
 use crate::transport::{CdpTransport, Transport};
@@ -74,6 +75,7 @@ pub struct Session {
     tabs: Arc<HashMap<App, Mutex<Option<TabControl>>>>,
     force_refresh: Arc<AtomicBool>,
     native: Option<Arc<NativeHttp>>,
+    pub(crate) native_auth: Option<Arc<NativeAuth>>,
     tenant: Option<Arc<str>>,
 }
 
@@ -91,8 +93,10 @@ impl Session {
         config: SessionConfig,
     ) -> Result<Self> {
         transport.check().await?;
+        let native_auth = transport.native_auth();
         Ok(Session {
-            native: native_http(&config),
+            native: native_http(&config, native_auth.is_some()),
+            native_auth,
             tenant: None,
             transport,
             config,
@@ -110,7 +114,7 @@ impl Session {
     /// Tokens are held apart from the home tenant's, so both can run side by side.
     pub fn in_tenant(&self, tenant_id: &str) -> Session {
         Session {
-            native: native_http(&self.config),
+            native: native_http(&self.config, self.native_auth.is_some()),
             force_refresh: Arc::new(AtomicBool::new(false)),
             tenant: Some(tenant_id.to_ascii_lowercase().into()),
             ..self.clone()
@@ -229,9 +233,12 @@ impl Session {
                     scope,
                     self.force_refresh.load(Ordering::SeqCst),
                 )
-                .await
+                .await?
         {
             return Ok(results);
+        }
+        if !self.transport.supports_tabs() {
+            return Err(Error::NativePageRequired);
         }
         let mut search = TokenSearch::default();
         if let Some(results) = self.run_in_any_tab(requests, scope, &mut search).await? {
@@ -378,9 +385,8 @@ impl Drop for TabHold {
     }
 }
 
-fn native_http(config: &SessionConfig) -> Option<Arc<NativeHttp>> {
-    config
-        .native_http
+fn native_http(config: &SessionConfig, required: bool) -> Option<Arc<NativeHttp>> {
+    (config.native_http || required)
         .then(|| NativeHttp::new(config.evaluate_timeout, MAX_DOWNLOAD_BYTES))
         .flatten()
         .map(Arc::new)

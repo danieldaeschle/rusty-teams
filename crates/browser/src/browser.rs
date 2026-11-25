@@ -18,6 +18,7 @@ use crate::targets::{self, APPS, App, LoginState, Mode, Tab, VersionInfo};
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 const OPEN_TAB_TIMEOUT: Duration = Duration::from_secs(10);
 const CDP_TIMEOUT: Duration = Duration::from_secs(5);
+const MSAL_REFRESH_TOKEN: &str = include_str!("../assets/msal_refresh_token.js");
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
@@ -274,7 +275,7 @@ impl Browser {
         if tab.parked {
             return false;
         }
-        let expression = "(() => { let access = false, refresh = false; for (let i = 0; i < localStorage.length; i++) { const key = localStorage.key(i) || ''; if (key.includes('accesstoken')) access = true; if (key.includes('refreshtoken')) refresh = true; } return access && refresh; })()";
+        let expression = "(() => { let access = false, refresh = false; for (let i = 0; i < localStorage.length; i++) { const key = (localStorage.key(i) || '').toLowerCase(); if (key.includes('accesstoken')) access = true; if (key.includes('refreshtoken')) refresh = true; } return access && refresh; })()";
         if let Some(bidi) = &self.inner.bidi {
             let evaluate = tokio::time::timeout(
                 self.inner.timeouts.probe,
@@ -292,6 +293,59 @@ impl Browser {
             .ok()
             .and_then(|value| value.pointer("/result/value")?.as_bool())
             .unwrap_or(false)
+    }
+
+    /// Reads the Teams Web refresh credential after the existing browser sign-in has completed.
+    /// The value crosses the debugging protocol once and is never logged by this layer.
+    pub async fn teams_refresh_token(&self, client_id: &str) -> Result<String, BrowserError> {
+        let tabs = self.tabs().await?;
+        let tab = targets::app_tab(&tabs, App::Teams)
+            .filter(|tab| !tab.parked)
+            .ok_or_else(|| BrowserError::Parse("no live Teams tab".into()))?;
+        let client_id = serde_json::to_string(client_id)
+            .map_err(|error| BrowserError::Parse(error.to_string()))?;
+        let expression = format!("({MSAL_REFRESH_TOKEN})({client_id})");
+        let value = if let Some(bidi) = &self.inner.bidi {
+            tokio::time::timeout(
+                self.inner.timeouts.probe,
+                bidi.evaluate(&tab.id, &expression),
+            )
+            .await
+            .map_err(|_| BrowserError::Cdp("reading the MSAL credential timed out".into()))??
+        } else {
+            let url = format!(
+                "ws://127.0.0.1:{}/devtools/page/{}",
+                self.inner.config.port, tab.id
+            );
+            let params = json!({
+                "expression": expression,
+                "awaitPromise": true,
+                "returnByValue": true,
+            });
+            let mut result = cdp_call(
+                &url,
+                "Runtime.evaluate",
+                params,
+                self.inner.timeouts.probe,
+            )
+            .await?;
+            if let Some(exception) = result.get("exceptionDetails") {
+                return Err(BrowserError::Cdp(format!(
+                    "reading the MSAL credential failed: {}",
+                    exception["text"].as_str().unwrap_or("page exception")
+                )));
+            }
+            result
+                .pointer_mut("/result/value")
+                .map(Value::take)
+                .unwrap_or(Value::Null)
+        };
+        match value {
+            Value::String(token) if !token.is_empty() => Ok(token),
+            _ => Err(BrowserError::Parse(
+                "the signed-in Teams page has no reusable refresh credential".into(),
+            )),
+        }
     }
 
     pub async fn login_window(&self) -> Result<(), BrowserError> {
@@ -550,7 +604,7 @@ async fn cdp_call(
             else {
                 continue;
             };
-            let Ok(reply) = serde_json::from_str::<Value>(&text) else {
+            let Ok(mut reply) = serde_json::from_str::<Value>(&text) else {
                 continue;
             };
             if reply["id"] != 1 {
@@ -562,7 +616,10 @@ async fn cdp_call(
                     error["message"].as_str().unwrap_or("error")
                 )));
             }
-            return Ok(reply["result"].clone());
+            return Ok(reply
+                .get_mut("result")
+                .map(Value::take)
+                .unwrap_or(Value::Null));
         }
         Err(BrowserError::Cdp(format!("{method}: connection closed")))
     };

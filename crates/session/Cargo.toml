@@ -8,7 +8,7 @@ publish.workspace = true
 [dependencies]
 base64.workspace = true
 futures-util.workspace = true
-reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["form", "rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -16,6 +16,8 @@ thiserror.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 url.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tokio = { workspace = true }

@@ -12,6 +12,10 @@ pub enum Error {
     LoginRequired(String),
     #[error("no fresh token for {scope}{detail}")]
     NoFreshToken { scope: String, detail: String },
+    #[error("native Microsoft 365 authentication failed: {0}")]
+    NativeAuth(String),
+    #[error("this operation still needs a Teams web page and is unavailable in no-browser mode")]
+    NativePageRequired,
     #[error("HTTP {status}: {message} ({url})")]
     Api {
         status: u16,

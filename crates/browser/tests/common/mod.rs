@@ -21,6 +21,7 @@ pub struct MockState {
     pub opened: usize,
     pub hung: bool,
     pub ignore_close: bool,
+    pub evaluation: serde_json::Value,
 }
 
 fn numbered(urls: &[&str]) -> Vec<(String, String)> {
@@ -124,6 +125,10 @@ impl MockChrome {
         self.state.lock().unwrap().attached = ids.iter().map(|id| (*id).to_owned()).collect();
     }
 
+    pub fn set_evaluation(&self, value: serde_json::Value) {
+        self.state.lock().unwrap().evaluation = value;
+    }
+
     pub fn requests(&self) -> Vec<String> {
         self.state.lock().unwrap().requests.clone()
     }
@@ -171,7 +176,13 @@ async fn handle_connection(
                 if state.lock().unwrap().hung {
                     std::future::pending::<()>().await;
                 }
-                serde_json::json!({"result": {"type": "number", "value": 2}})
+                let value = state.lock().unwrap().evaluation.clone();
+                let value = if value.is_null() {
+                    serde_json::json!(2)
+                } else {
+                    value
+                };
+                serde_json::json!({"result": {"value": value}})
             }
             ("Target.getTargets", None) => {
                 let state = state.lock().unwrap();

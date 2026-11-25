@@ -91,7 +91,7 @@
 | | Windows | Linux | macOS |
 |---|---|---|---|
 | Support | Main target | Supported | Supported |
-| Sign-in | Embedded WebView2 | Your browser, headless | Your browser, headless |
+| Sign-in | Embedded WebView2 | Browser, or native SSO (experimental) | Browser, or native SSO (experimental) |
 | Download | `.exe` | `.tar.gz`, self-installs to the app menu | Universal `.app` (arm64 + x86_64) |
 | Tray icon | Yes | StatusNotifierItem | Menu bar |
 | Auto-update | - | Yes | - |
@@ -105,7 +105,7 @@
 - Settings > General > Teams session browser picks another one.
 - The browser runs headless with its own profile. It only shows a window when Teams asks you to sign in.
 - `--endpoint` connects to a Chrome you started yourself.
-- A built-in login without a browser is planned.
+- `--native-auth` reuses a saved native OAuth credential without starting or detecting a browser (experimental). Its first sign-in uses the same browser selection and login window as normal mode.
 
 </details>
 
@@ -136,6 +136,41 @@ Download the build for your platform from [Releases](https://github.com/danielda
 ```bash
 cargo run --release -p app
 ```
+
+### Experimental native sign-in
+
+On Linux and macOS, native mode normally starts directly from a saved OAuth
+refresh credential: it does not detect a browser or read a browser profile. On
+the first run, or when Microsoft requires an interactive renewal, it uses the
+application's existing browser sign-in flow and whichever supported browser is
+selected in Settings. As soon as Teams finishes signing in, Rusty Teams imports
+the Teams Web credential, closes the browser and continues with its Rust
+transport. Later launches no longer need a browser:
+
+```bash
+cargo run --release -p app -- --native-auth
+# Equivalent for an installed build:
+TEAMS_NATIVE_AUTH=1 teams
+```
+
+Outside the interactive sign-in window, this is a strict browserless mode. Rust
+uses OAuth refresh grants, keeps access tokens in memory, and sends the same
+Teams/Graph requests itself. It does not register another application in Entra;
+it uses the public Teams Web client which the normal Teams page already uses.
+
+The rotating refresh credential is deliberately stored without encryption in
+the platform data directory as `rusty-teams-native-refresh-token`. On Unix the
+file is forced to mode `0600`, so only the current OS user can read it, but any
+process running as that user can still access it. The credential is never
+printed or written to logs.
+
+The core chat sync, Graph requests, Teams chat service, presence and native
+Trouter connection can run this way. Features which still execute JavaScript in
+the Teams page (notably some call operations and Skype/AMS media operations)
+return an explicit "web page required" error. If the refresh credential is
+revoked, expires, or policy requires MFA/interaction, the normal selected-browser
+login window opens again and is closed automatically after the renewal succeeds.
+No browser cookie database is read by native mode.
 
 ### Google Calendar (optional)
 
@@ -191,10 +226,10 @@ It signs you in through a real Teams web page and lets that page make the API ca
 <details>
 <summary><b>Sign-in and tokens</b></summary>
 
-1. A hidden browser page loads Teams web with its own profile. On Windows this is WebView2, so single sign-on with the Windows account usually just works.
+1. Normally a hidden browser page loads Teams web with its own profile. On Windows this is WebView2, so single sign-on with the Windows account usually just works. Experimental `--native-auth` mode instead loads its saved native refresh credential. When none is available, it runs the same browser login once and imports the credential from Teams Web's MSAL cache.
 2. If Teams asks for a login, the login window shows itself. After that the page stays parked in the background.
-3. Every API call is sent to that page over CDP. A small script (`crates/session/assets/fetch.js`) picks the matching token from the page's MSAL cache, refreshes it when needed, and runs the `fetch`.
-4. The page only hands out access tokens. Rust sends the requests itself and keeps each token in memory until shortly before it expires, never stored or logged. Websocket exchanges and calls that need the app's cookies still run inside the page. `TEAMS_PAGE_FETCH=1` sends everything through the page again.
+3. In normal mode, a small script (`crates/session/assets/fetch.js`) picks the matching token from the page's MSAL cache. In `--native-auth` mode, the first login exports its refresh credential once, then `crates/session/src/native_auth.rs` obtains access tokens directly with OAuth refresh grants.
+4. Rust sends eligible requests itself and keeps access tokens in memory until shortly before they expire. Native mode stores only its refresh credential in the private plaintext file described above; no token is logged. Page-only exchanges remain unavailable in strict no-browser mode. `TEAMS_PAGE_FETCH=1` sends everything through the page again in normal mode.
 5. The Trouter socket is opened from Rust too, so the page can park even during a call.
 
 </details>

@@ -58,6 +58,7 @@ const DEMO_WEBVIEW_FOLDER: &str = "rusty-teams-demo-WebView2";
 #[derive(Default)]
 struct Arguments {
     demo: bool,
+    native_auth: bool,
     read_only: bool,
     database: Option<PathBuf>,
     endpoint: Option<String>,
@@ -77,6 +78,7 @@ fn parse_arguments() -> Arguments {
     while let Some(flag) = input.next() {
         match flag.as_str() {
             "--demo" => arguments.demo = true,
+            "--native-auth" => arguments.native_auth = true,
             "--read-only" => arguments.read_only = true,
             "--switcher" => {
                 arguments.switcher_query.get_or_insert_with(String::new);
@@ -134,8 +136,11 @@ fn data_path(name: &str) -> PathBuf {
 fn transport(
     endpoint: Option<&str>,
     database: Option<&std::path::Path>,
+    native_auth: bool,
     #[cfg(windows)] sign_in_title: String,
 ) -> Arc<dyn session::Transport> {
+    #[cfg(windows)]
+    let _ = native_auth;
     #[cfg(windows)]
     if endpoint.is_none() {
         let user_data_folder = match database.and_then(std::path::Path::parent) {
@@ -153,6 +158,10 @@ fn transport(
     }
     #[cfg(not(windows))]
     let _ = database;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if endpoint.is_none() && native_auth {
+        return linux_browser::start_native();
+    }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if endpoint.is_none() {
         return linux_browser::start(session::DEFAULT_ENDPOINT);
@@ -208,7 +217,8 @@ fn main() {
     store::report_slow_locks_to(|message| diagnostics::record(message));
     #[cfg(target_os = "linux")]
     app_base::linux_fonts::hide_system_color_emoji();
-    let arguments = parse_arguments();
+    let mut arguments = parse_arguments();
+    arguments.native_auth |= std::env::var_os("TEAMS_NATIVE_AUTH").is_some();
     if !arguments.demo && arguments.database.is_none() {
         let relaunch_value = std::env::var(updater::RELAUNCH_ENV).ok();
         if let Some(value) = &relaunch_value {
@@ -285,10 +295,15 @@ fn main() {
         let transport = transport(
             arguments.endpoint.as_deref(),
             arguments.database.as_deref(),
+            arguments.native_auth,
             sign_in_title.clone(),
         );
         #[cfg(not(windows))]
-        let transport = transport(arguments.endpoint.as_deref(), arguments.database.as_deref());
+        let transport = transport(
+            arguments.endpoint.as_deref(),
+            arguments.database.as_deref(),
+            arguments.native_auth,
+        );
         let activity = user_activity::track(user_input.clone());
         let guest_tenant = orgs.active_guest().map(|org| org.id.clone());
         let mut backend_events = backend::start(

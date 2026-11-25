@@ -8,6 +8,7 @@ use futures_util::future::join_all;
 use serde_json::{Value, json};
 
 use crate::app::App;
+use crate::error::{Error, Result};
 use crate::request::{ApiResponse, Method, Request};
 use crate::scope::Scope;
 use crate::session::Session;
@@ -76,14 +77,17 @@ impl NativeHttp {
         requests: &[&Request],
         scope: &Scope,
         force_refresh: bool,
-    ) -> Option<Vec<ApiResponse>> {
+    ) -> Result<Option<Vec<ApiResponse>>> {
         if !requests.iter().all(|request| eligible(request)) {
-            return None;
+            return Ok(None);
         }
         let credential = if requests.iter().all(|request| request.anonymous) {
             None
         } else {
-            Some(self.token(session, scope, force_refresh).await?)
+            let Some(token) = self.token(session, scope, force_refresh).await? else {
+                return Ok(None);
+            };
+            Some(token)
         };
         let mut answers = Vec::with_capacity(requests.len());
         for chunk in requests.chunks(CONCURRENCY) {
@@ -96,7 +100,7 @@ impl NativeHttp {
         if answers.iter().any(|answer| answer.status == 401) {
             self.forget(scope);
         }
-        Some(answers)
+        Ok(Some(answers))
     }
 
     async fn token(
@@ -104,9 +108,27 @@ impl NativeHttp {
         session: &Session,
         scope: &Scope,
         force_refresh: bool,
-    ) -> Option<(App, String)> {
+    ) -> Result<Option<(App, String)>> {
         if !force_refresh && let Some(held) = self.held(scope) {
-            return Some(held);
+            return Ok(Some(held));
+        }
+        if let Some(auth) = &session.native_auth {
+            let token = auth.token(scope, session.tenant(), force_refresh).await?;
+            let usable_until =
+                usable_until(&token, session.config.refresh_margin).ok_or_else(|| {
+                    Error::NativeAuth(
+                        "Microsoft returned an access token without a valid expiry".into(),
+                    )
+                })?;
+            self.tokens.lock().expect("token lock").insert(
+                TokenKey::of(scope),
+                HeldToken {
+                    app: App::Teams,
+                    token: token.clone(),
+                    usable_until,
+                },
+            );
+            return Ok(Some((App::Teams, token)));
         }
         for app in App::ALL {
             let Ok(Value::String(token)) = session
@@ -115,7 +137,9 @@ impl NativeHttp {
             else {
                 continue;
             };
-            let usable_until = usable_until(&token, session.config.refresh_margin)?;
+            let Some(usable_until) = usable_until(&token, session.config.refresh_margin) else {
+                continue;
+            };
             self.tokens.lock().expect("token lock").insert(
                 TokenKey::of(scope),
                 HeldToken {
@@ -124,9 +148,9 @@ impl NativeHttp {
                     usable_until,
                 },
             );
-            return Some((app, token));
+            return Ok(Some((app, token)));
         }
-        None
+        Ok(None)
     }
 
     async fn execute(&self, request: &Request, credential: Option<&(App, String)>) -> ApiResponse {

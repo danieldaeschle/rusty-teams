@@ -63,6 +63,29 @@ async fn status_reports_login_required() {
 }
 
 #[tokio::test]
+async fn reads_the_refresh_credential_from_the_signed_in_teams_page() {
+    let harness = harness().await;
+    harness.mock.start(&[TEAMS]).await;
+    harness
+        .mock
+        .set_evaluation(serde_json::json!("dummy-refresh-token"));
+
+    let token = harness
+        .browser
+        .teams_refresh_token("teams-client-id")
+        .await
+        .unwrap();
+
+    assert_eq!(token, "dummy-refresh-token");
+    assert!(
+        harness
+            .mock
+            .requests()
+            .contains(&"CDP Runtime.evaluate".to_owned())
+    );
+}
+
+#[tokio::test]
 async fn ensure_running_starts_headless_with_the_teams_tab_only() {
     let harness = harness().await;
     harness.browser.ensure_running().await.unwrap();

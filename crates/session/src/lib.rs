@@ -3,6 +3,7 @@ mod error;
 mod events;
 mod http;
 mod native;
+mod native_auth;
 mod page_script;
 mod request;
 mod scope;
@@ -13,6 +14,9 @@ pub use app::{App, Target, find_app_tab, has_login_tab, is_login_url};
 pub use error::{Error, Result};
 pub use events::{TabChannel, TabCommand, TabControl, TabEvent, TabEvents};
 pub use native::ensure_crypto_provider;
+pub use native_auth::{
+    NativeAuth, NativeAuthConfig, NativeTransport, TEAMS_WEB_CLIENT_ID,
+};
 pub use page_script::token_acquirer_script;
 pub use request::{
     ApiResponse, AugloopExchange, AugloopStage, BodyToken, Method, Request, SignalrExchange,

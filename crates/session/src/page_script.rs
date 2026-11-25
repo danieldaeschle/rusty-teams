@@ -25,6 +25,9 @@ pub fn token_acquirer_script() -> String {
 impl Session {
     /// Opens a dedicated CDP connection to the app tab. Events of the tab arrive on the stream.
     pub async fn subscribe(&self, app: App) -> Result<(TabControl, TabEvents)> {
+        if !self.transport.supports_tabs() {
+            return Err(Error::NativePageRequired);
+        }
         let (control, events) = self
             .transport
             .open(app, true)
@@ -43,6 +46,17 @@ impl Session {
         args: &Value,
         force_refresh: bool,
     ) -> Result<Value> {
+        if body.trim() == "return token;"
+            && let Some(auth) = &self.native_auth
+        {
+            return auth
+                .token(scope, self.tenant(), force_refresh)
+                .await
+                .map(Value::String);
+        }
+        if !self.transport.supports_tabs() {
+            return Err(Error::NativePageRequired);
+        }
         let marker_at = FETCH_SCRIPT
             .find(TOKEN_MARKER)
             .expect("fetch.js contains the token marker");
