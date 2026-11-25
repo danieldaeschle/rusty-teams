@@ -60,15 +60,16 @@ std::unique_ptr<DesktopCapturer> new_desktop_capturer(
   switch (options.source_type) {
     case SourceType::Window:
 #if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
-      if (options.allow_sck_system_picker && SckWindowCapturerAvailable()) {
+      {
         auto window_capturer = CreateSckWindowCapturer(webrtc_options);
         sck_window = window_capturer.get();
         capturer = std::move(window_capturer);
         break;
       }
-#endif
+#else
       capturer = webrtc::DesktopCapturer::CreateWindowCapturer(webrtc_options);
       break;
+#endif
     case SourceType::Screen:
       capturer = webrtc::DesktopCapturer::CreateScreenCapturer(webrtc_options);
       break;

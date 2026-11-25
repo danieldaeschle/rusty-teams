@@ -44,7 +44,6 @@ constexpr size_t kMinCaptureDimension = 2;
 constexpr size_t kMaxCaptureDimension = 16384;
 constexpr uint32_t kDefaultMaxFps = 30;
 
-API_AVAILABLE(macos(14.0))
 livekit_ffi::SckCaptureStatus status_for_stop_error(NSError* error) {
   if ([error.domain isEqualToString:SCStreamErrorDomain]) {
     if (error.code == SCStreamErrorUserStopped) {
@@ -79,7 +78,6 @@ double clamp_double(double value, double lo, double hi) {
 
 }  // namespace
 
-API_AVAILABLE(macos(14.0))
 @interface LiveKitMacWindowSession
     : NSObject <SCStreamDelegate, SCStreamOutput, SCContentSharingPickerObserver>
 - (instancetype)initWithMaxFps:(uint32_t)maxFps includeCursor:(BOOL)includeCursor;
@@ -90,7 +88,6 @@ API_AVAILABLE(macos(14.0))
 - (void)stop;
 @end
 
-API_AVAILABLE(macos(14.0))
 @implementation LiveKitMacWindowSession {
   BOOL _stopped;
   BOOL _pickerCancelled;
@@ -108,15 +105,20 @@ API_AVAILABLE(macos(14.0))
   IOSurfaceRef _latestSurface;
   CGRect _latestCropRect;
   dispatch_queue_t _captureQueue;
-  // The picker this session observes. Only touched on the capturer thread.
+  // Guarded by @synchronized(self): read on the main queue when presenting and
+  // cleared in stop.
   SCContentSharingPicker* _picker;
-  // A picked filter is being applied to the running stream. replayd checks each
-  // updateConfiguration against the picked content; one sent before the new
-  // filter is in place fails that check and falls back to the Screen Recording
-  // permission. Configuration updates wait for the filter update to complete.
-  BOOL _filterUpdatePending;
-  // Bumped for each filter update; only the latest completion applies its config.
-  uint64_t _filterGeneration;
+  SCContentSharingPickerConfiguration* _previousPickerConfig;
+  BOOL _savedPickerConfig;
+  // Serializes all updateContentFilter and updateConfiguration calls on _stream.
+  // replayd checks each updateConfiguration against the picked content; one sent
+  // before the picked filter is in place fails that check and falls back to the
+  // Screen Recording permission. At most one async update runs at a time, and a
+  // pending filter always runs before any configuration change (size or fps).
+  BOOL _streamOpInFlight;
+  BOOL _filterUpdateInFlight;
+  SCContentFilter* _pendingFilter;
+  BOOL _configDirty;
 }
 
 - (instancetype)initWithMaxFps:(uint32_t)maxFps includeCursor:(BOOL)includeCursor {
@@ -158,35 +160,141 @@ API_AVAILABLE(macos(14.0))
 // `maximumStreamCount` properties. They are shared with WebRTC's own SCK
 // capturer, so this session must not change them.
 - (void)startPickerWithPicker:(SCContentSharingPicker*)picker {
-  _picker = picker;
+  @synchronized(self) {
+    if (_stopped) {
+      return;
+    }
+    _picker = picker;
+    _previousPickerConfig = [picker.defaultConfiguration copy];
+    _savedPickerConfig = YES;
+  }
   [picker addObserver:self];
   SCContentSharingPickerConfiguration* config = [[SCContentSharingPickerConfiguration alloc] init];
   config.allowedPickerModes = SCContentSharingPickerModeSingleWindow;
   config.allowsChangingSelectedContent = YES;
   picker.defaultConfiguration = config;
-  [picker presentPickerUsingContentStyle:SCShareableContentStyleWindow];
+
+  // ScreenCaptureKit presents the picker on the main queue. Async avoids
+  // deadlocking if the main thread stops the capture and joins portal-share.
+  __weak LiveKitMacWindowSession* weakSelf = self;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    LiveKitMacWindowSession* strongSelf = weakSelf;
+    if (strongSelf == nil) {
+      return;
+    }
+    SCContentSharingPicker* activePicker = nil;
+    @synchronized(strongSelf) {
+      if (strongSelf->_stopped) {
+        return;
+      }
+      activePicker = strongSelf->_picker;
+    }
+    if (activePicker != nil) {
+      [activePicker presentPickerUsingContentStyle:SCShareableContentStyleWindow];
+    }
+  });
+}
+
+- (void)drainStreamUpdates {
+  [self runNextStreamUpdateCompletingOp:NO wasFilter:NO forStream:nil filterError:nil];
+}
+
+// Transitions directly from a completing async SCStream op to the next queued
+// update under one @synchronized(self) acquisition, so no resize frame can slip
+// in between a picked filter update and its matching configuration update.
+- (void)runNextStreamUpdateCompletingOp:(BOOL)completingOp
+                              wasFilter:(BOOL)wasFilter
+                              forStream:(nullable SCStream*)completedStream
+                            filterError:(nullable NSError*)filterError {
+  SCStream* stream = nil;
+  SCContentFilter* filterToApply = nil;
+  SCStreamConfiguration* configToApply = nil;
+
+  @synchronized(self) {
+    if (completingOp) {
+      _streamOpInFlight = NO;
+      if (wasFilter) {
+        _filterUpdateInFlight = NO;
+      }
+      if (_stopped || _pickerFailed || completedStream == nil || _stream != completedStream) {
+        return;
+      }
+      if (wasFilter && filterError != nil) {
+        _pickerFailed = YES;
+        _pendingFilter = nil;
+        _configDirty = NO;
+        return;
+      }
+    } else if (_stopped || _pickerFailed || _stream == nil || _streamOpInFlight) {
+      return;
+    }
+
+    stream = _stream;
+    if (_pendingFilter != nil) {
+      filterToApply = _pendingFilter;
+      _pendingFilter = nil;
+      _streamOpInFlight = YES;
+      _filterUpdateInFlight = YES;
+    } else if (_configDirty && _configuredWidth >= kMinCaptureDimension &&
+               _configuredHeight >= kMinCaptureDimension) {
+      _configDirty = NO;
+      configToApply = [self buildConfigWithWidth:_configuredWidth
+                                          height:_configuredHeight
+                                          maxFps:_maxFps
+                                   includeCursor:_includeCursor];
+      _streamOpInFlight = YES;
+    } else {
+      return;
+    }
+  }
+
+  // Weak: the stream keeps this handler until the update completes.
+  __weak LiveKitMacWindowSession* weakSelf = self;
+  __weak SCStream* weakStream = stream;
+  if (filterToApply != nil) {
+    [stream updateContentFilter:filterToApply
+              completionHandler:^(NSError* _Nullable error) {
+                LiveKitMacWindowSession* strongSelf = weakSelf;
+                if (strongSelf == nil) {
+                  return;
+                }
+                [strongSelf runNextStreamUpdateCompletingOp:YES
+                                                  wasFilter:YES
+                                                  forStream:weakStream
+                                                filterError:error];
+              }];
+    return;
+  }
+
+  [stream updateConfiguration:configToApply
+            completionHandler:^(NSError* _Nullable configError) {
+              (void)configError;
+              LiveKitMacWindowSession* strongSelf = weakSelf;
+              if (strongSelf == nil) {
+                return;
+              }
+              [strongSelf runNextStreamUpdateCompletingOp:YES
+                                                wasFilter:NO
+                                                forStream:weakStream
+                                              filterError:nil];
+            }];
 }
 
 - (void)setMaxFps:(uint32_t)maxFps {
-  SCStream* stream = nil;
-  SCStreamConfiguration* config = nil;
+  BOOL shouldDrain = NO;
   @synchronized(self) {
-    if (_stopped || _maxFps == maxFps) {
+    if (_stopped || _pickerFailed || _maxFps == maxFps) {
       return;
     }
     _maxFps = maxFps;
-    // A pending filter update applies the new rate when it completes.
-    if (_stream != nil && !_filterUpdatePending && _configuredWidth >= kMinCaptureDimension &&
+    if (_stream != nil && _configuredWidth >= kMinCaptureDimension &&
         _configuredHeight >= kMinCaptureDimension) {
-      stream = _stream;
-      config = [self buildConfigWithWidth:_configuredWidth
-                                   height:_configuredHeight
-                                   maxFps:_maxFps
-                            includeCursor:_includeCursor];
+      _configDirty = YES;
+      shouldDrain = !_streamOpInFlight;
     }
   }
-  if (stream != nil && config != nil) {
-    [stream updateConfiguration:config completionHandler:nil];
+  if (shouldDrain) {
+    [self drainStreamUpdates];
   }
 }
 
@@ -283,6 +391,9 @@ API_AVAILABLE(macos(14.0))
 
 - (void)stop {
   SCStream* streamToStop = nil;
+  SCContentSharingPicker* picker = nil;
+  SCContentSharingPickerConfiguration* previousConfig = nil;
+  BOOL restoreConfig = NO;
   IOSurfaceRef surfaceToRelease = NULL;
   @synchronized(self) {
     if (_stopped) {
@@ -292,13 +403,26 @@ API_AVAILABLE(macos(14.0))
     streamToStop = _stream;
     _stream = nil;
     _filter = nil;
+    _pendingFilter = nil;
+    _configDirty = NO;
+    picker = _picker;
+    _picker = nil;
+    previousConfig = _previousPickerConfig;
+    _previousPickerConfig = nil;
+    restoreConfig = _savedPickerConfig;
+    _savedPickerConfig = NO;
     surfaceToRelease = _latestSurface;
     _latestSurface = NULL;
   }
 
-  SCContentSharingPicker* picker = _picker;
-  _picker = nil;
-  [picker removeObserver:self];
+  if (picker != nil) {
+    [picker removeObserver:self];
+    if (restoreConfig) {
+      picker.defaultConfiguration = previousConfig != nil ?
+          previousConfig :
+          [[SCContentSharingPickerConfiguration alloc] init];
+    }
+  }
   if (streamToStop != nil) {
     [streamToStop removeStreamOutput:self type:SCStreamOutputTypeScreen error:nil];
     [streamToStop stopCaptureWithCompletionHandler:nil];
@@ -311,11 +435,13 @@ API_AVAILABLE(macos(14.0))
 }
 
 - (void)maybeReconfigureWidth:(size_t)desiredW height:(size_t)desiredH {
-  SCStream* stream = nil;
-  SCStreamConfiguration* config = nil;
+  BOOL shouldDrain = NO;
   @synchronized(self) {
-    // Retried on a later frame once the filter update completes.
-    if (_stopped || _stream == nil || _filterUpdatePending) {
+    // Do not overwrite dimensions or send a configuration update while a newly
+    // picked filter is waiting or in flight; its completion applies the new
+    // window's size and later frames resize from there.
+    if (_stopped || _pickerFailed || _stream == nil || _pendingFilter != nil ||
+        _filterUpdateInFlight) {
       return;
     }
     long dw = static_cast<long>(desiredW) - static_cast<long>(_configuredWidth);
@@ -325,14 +451,11 @@ API_AVAILABLE(macos(14.0))
     }
     _configuredWidth = desiredW;
     _configuredHeight = desiredH;
-    stream = _stream;
-    config = [self buildConfigWithWidth:desiredW
-                                 height:desiredH
-                                 maxFps:_maxFps
-                          includeCursor:_includeCursor];
+    _configDirty = YES;
+    shouldDrain = !_streamOpInFlight;
   }
-  if (stream != nil && config != nil) {
-    [stream updateConfiguration:config completionHandler:nil];
+  if (shouldDrain) {
+    [self drainStreamUpdates];
   }
 }
 
@@ -340,14 +463,13 @@ API_AVAILABLE(macos(14.0))
          didUpdateWithFilter:(SCContentFilter*)filter
                    forStream:(nullable SCStream*)stream {
   (void)picker;
-  SCStream* existingStream = nil;
+  BOOL updateExisting = NO;
   SCStream* newStream = nil;
   SCStreamConfiguration* config = nil;
   dispatch_queue_t queue = nil;
-  uint64_t generation = 0;
 
   @synchronized(self) {
-    if (_stopped) {
+    if (_stopped || _pickerFailed) {
       return;
     }
     if (stream != nil && stream != _stream) {
@@ -363,51 +485,24 @@ API_AVAILABLE(macos(14.0))
     _windowClosed = NO;
     _configuredWidth = width;
     _configuredHeight = height;
-    config = [self buildConfigWithWidth:width
-                                 height:height
-                                 maxFps:_maxFps
-                          includeCursor:_includeCursor];
 
     if (_stream != nil) {
-      existingStream = _stream;
-      _filterUpdatePending = YES;
-      generation = ++_filterGeneration;
+      _pendingFilter = filter;
+      _configDirty = YES;
+      updateExisting = YES;
     } else {
+      config = [self buildConfigWithWidth:width
+                                   height:height
+                                   maxFps:_maxFps
+                            includeCursor:_includeCursor];
       newStream = [[SCStream alloc] initWithFilter:filter configuration:config delegate:self];
       _stream = newStream;
       queue = _captureQueue;
     }
   }
 
-  if (existingStream != nil) {
-    // Weak: the stream keeps this handler until the update completes.
-    __weak LiveKitMacWindowSession* weakSelf = self;
-    __weak SCStream* weakStream = existingStream;
-    [existingStream updateContentFilter:filter
-                      completionHandler:^(NSError* _Nullable filterError) {
-                        LiveKitMacWindowSession* strongSelf = weakSelf;
-                        if (strongSelf == nil) {
-                          return;
-                        }
-                        SCStream* strongStream = weakStream;
-                        SCStreamConfiguration* latest = nil;
-                        @synchronized(strongSelf) {
-                          if (generation != strongSelf->_filterGeneration) {
-                            return;
-                          }
-                          strongSelf->_filterUpdatePending = NO;
-                          if (filterError != nil || strongSelf->_stopped || strongStream == nil ||
-                              strongSelf->_stream != strongStream) {
-                            return;
-                          }
-                          // Built now: the frame size or rate may have changed meanwhile.
-                          latest = [strongSelf buildConfigWithWidth:strongSelf->_configuredWidth
-                                                             height:strongSelf->_configuredHeight
-                                                             maxFps:strongSelf->_maxFps
-                                                      includeCursor:strongSelf->_includeCursor];
-                        }
-                        [strongStream updateConfiguration:latest completionHandler:nil];
-                      }];
+  if (updateExisting) {
+    [self drainStreamUpdates];
     return;
   }
 
@@ -457,7 +552,7 @@ API_AVAILABLE(macos(14.0))
           didCancelForStream:(nullable SCStream*)stream {
   (void)picker;
   @synchronized(self) {
-    if (_stopped) {
+    if (_stopped || _pickerFailed) {
       return;
     }
     // Only treat cancelling the initial picker as cancellation; cancelling a
@@ -557,7 +652,7 @@ API_AVAILABLE(macos(14.0))
 
   IOSurfaceRef oldSurface = NULL;
   @synchronized(self) {
-    if (_stopped) {
+    if (_stopped || _pickerFailed) {
       return;
     }
     CFRetain(ioSurface);
@@ -606,7 +701,7 @@ namespace livekit_ffi {
 
 namespace {
 
-class API_AVAILABLE(macos(14.0)) SckWindowCapturerImpl final : public SckWindowCapturer {
+class SckWindowCapturerImpl final : public SckWindowCapturer {
  public:
   explicit SckWindowCapturerImpl(const webrtc::DesktopCaptureOptions& options)
       : include_cursor_(options.prefer_cursor_embedded()) {}
@@ -704,19 +799,9 @@ class API_AVAILABLE(macos(14.0)) SckWindowCapturerImpl final : public SckWindowC
 
 }  // namespace
 
-bool SckWindowCapturerAvailable() {
-  if (@available(macOS 14.0, *)) {
-    return true;
-  }
-  return false;
-}
-
 std::unique_ptr<SckWindowCapturer> CreateSckWindowCapturer(
     const webrtc::DesktopCaptureOptions& options) {
-  if (@available(macOS 14.0, *)) {
-    return std::make_unique<SckWindowCapturerImpl>(options);
-  }
-  return nullptr;
+  return std::make_unique<SckWindowCapturerImpl>(options);
 }
 
 }  // namespace livekit_ffi

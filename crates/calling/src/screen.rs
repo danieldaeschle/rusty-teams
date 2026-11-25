@@ -388,7 +388,7 @@ pub fn share_sources_for_menu(picker: SharePicker, sources: Vec<ShareSource>) ->
     }
 }
 
-pub use crate::notices::PORTAL_UNAVAILABLE_NOTICE;
+pub use crate::notices::{PORTAL_UNAVAILABLE_NOTICE, SHARE_SOURCE_GONE_NOTICE};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PortalFollowUp {
@@ -408,19 +408,34 @@ pub fn portal_follow_up(event: PortalPickerEvent, source: Option<ShareSource>) -
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PickerOutcome {
+    Portal(PortalPickerEvent),
+    SourceGone,
+}
+
+fn picker_follow_up(outcome: PickerOutcome, source: Option<ShareSource>) -> PortalFollowUp {
+    match outcome {
+        PickerOutcome::Portal(event) => portal_follow_up(event, source),
+        PickerOutcome::SourceGone => PortalFollowUp::Notice(SHARE_SOURCE_GONE_NOTICE),
+    }
+}
+
 /// What a frame result says about a system picker without a delegated
 /// controller (macOS). Frames start once a source is picked. A cancel turns
-/// into `Cancelled`, while a capture that fails to start turns into `Failed`.
+/// into `Cancelled`, a disappearing source turns into `SourceGone`, and a
+/// capture that fails to start turns into `Failed`.
 fn picker_event_from_frame<T>(
     result: &std::result::Result<T, CaptureError>,
-) -> Option<PortalPickerEvent> {
+) -> Option<PickerOutcome> {
     match result {
-        Ok(_) => Some(PortalPickerEvent::Selected),
+        Ok(_) => Some(PickerOutcome::Portal(PortalPickerEvent::Selected)),
         Err(CaptureError::Permanent | CaptureError::StoppedByUser) => {
-            Some(PortalPickerEvent::Cancelled)
+            Some(PickerOutcome::Portal(PortalPickerEvent::Cancelled))
         }
-        Err(CaptureError::StartFailed | CaptureError::SourceGone | CaptureError::Interrupted) => {
-            Some(PortalPickerEvent::Failed)
+        Err(CaptureError::SourceGone) => Some(PickerOutcome::SourceGone),
+        Err(CaptureError::StartFailed | CaptureError::Interrupted) => {
+            Some(PickerOutcome::Portal(PortalPickerEvent::Failed))
         }
         Err(CaptureError::Temporary) => None,
     }
@@ -439,7 +454,8 @@ fn active_portal_error(error: CaptureError) -> Option<ActiveShareStop> {
         CaptureError::StartFailed | CaptureError::Interrupted => {
             Some(ActiveShareStop::Notice("macOS stopped the capture"))
         }
-        CaptureError::Temporary | CaptureError::Permanent | CaptureError::SourceGone => None,
+        CaptureError::Permanent => Some(ActiveShareStop::Notice("the system stopped the capture")),
+        CaptureError::Temporary | CaptureError::SourceGone => None,
     }
 }
 
@@ -483,7 +499,7 @@ pub(crate) fn start_portal_capture(
                     return;
                 };
                 let _ = events.send(event);
-                if event != PortalPickerEvent::Selected {
+                if event != PickerOutcome::Portal(PortalPickerEvent::Selected) {
                     return;
                 }
                 gate.store(true, Ordering::SeqCst);
@@ -520,7 +536,7 @@ pub(crate) fn start_portal_capture(
         });
         if delegated {
             capturer.watch_picker(move |event| {
-                let _ = sender.send(event);
+                let _ = sender.send(PickerOutcome::Portal(event));
             });
             capturer.ensure_picker_visible();
         }
@@ -546,7 +562,7 @@ pub(crate) fn start_portal_capture(
         // The portal already bound this stream. Looking the source up again, or
         // selecting that id, is what used to tear the stream down and report
         // "the shared source is gone".
-        let source = if event == PortalPickerEvent::Selected {
+        let source = if event == PickerOutcome::Portal(PortalPickerEvent::Selected) {
             selected.store(true, Ordering::SeqCst);
             Some(ShareSource {
                 id: 0,
@@ -556,7 +572,7 @@ pub(crate) fn start_portal_capture(
         } else {
             None
         };
-        let follow = portal_follow_up(event, source);
+        let follow = picker_follow_up(event, source);
         if !matches!(follow, PortalFollowUp::Share(_)) {
             outcome(follow);
             return;
@@ -631,27 +647,31 @@ mod tests {
     fn frames_report_the_macos_picker_outcome() {
         assert_eq!(
             picker_event_from_frame(&Ok(())),
-            Some(PortalPickerEvent::Selected)
+            Some(PickerOutcome::Portal(PortalPickerEvent::Selected))
         );
         assert_eq!(
             picker_event_from_frame::<()>(&Err(CaptureError::Permanent)),
-            Some(PortalPickerEvent::Cancelled)
+            Some(PickerOutcome::Portal(PortalPickerEvent::Cancelled))
         );
         assert_eq!(
             picker_event_from_frame::<()>(&Err(CaptureError::StoppedByUser)),
-            Some(PortalPickerEvent::Cancelled)
+            Some(PickerOutcome::Portal(PortalPickerEvent::Cancelled))
         );
         assert_eq!(
             picker_event_from_frame::<()>(&Err(CaptureError::StartFailed)),
-            Some(PortalPickerEvent::Failed)
+            Some(PickerOutcome::Portal(PortalPickerEvent::Failed))
         );
         assert_eq!(
             picker_event_from_frame::<()>(&Err(CaptureError::SourceGone)),
-            Some(PortalPickerEvent::Failed)
+            Some(PickerOutcome::SourceGone)
+        );
+        assert_eq!(
+            picker_follow_up(PickerOutcome::SourceGone, None),
+            PortalFollowUp::Notice(SHARE_SOURCE_GONE_NOTICE)
         );
         assert_eq!(
             picker_event_from_frame::<()>(&Err(CaptureError::Interrupted)),
-            Some(PortalPickerEvent::Failed)
+            Some(PickerOutcome::Portal(PortalPickerEvent::Failed))
         );
         assert_eq!(
             picker_event_from_frame::<()>(&Err(CaptureError::Temporary)),
@@ -673,9 +693,12 @@ mod tests {
             active_portal_error(CaptureError::StartFailed),
             Some(ActiveShareStop::Notice("macOS stopped the capture"))
         );
+        assert_eq!(
+            active_portal_error(CaptureError::Permanent),
+            Some(ActiveShareStop::Notice("the system stopped the capture"))
+        );
         assert_eq!(active_portal_error(CaptureError::SourceGone), None);
         assert_eq!(active_portal_error(CaptureError::Temporary), None);
-        assert_eq!(active_portal_error(CaptureError::Permanent), None);
     }
 }
 

@@ -43,8 +43,6 @@ class SckWindowCapturer : public webrtc::DesktopCapturer {
   virtual SckCaptureStatus last_status() const = 0;
 };
 
-bool SckWindowCapturerAvailable();
-
 std::unique_ptr<SckWindowCapturer> CreateSckWindowCapturer(
     const webrtc::DesktopCaptureOptions& options);
 

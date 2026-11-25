@@ -949,6 +949,9 @@ calls:
     portal_unavailable:
       en: Screen sharing needs a desktop portal on this system
       de: Bildschirmfreigabe benötigt auf diesem System ein Desktop-Portal
+    share_source_gone:
+      en: The shared source is no longer available
+      de: Die freigegebene Quelle ist nicht mehr verfügbar
     files_later:
       en: Files can be added once the chat exists.
       de: Dateien können hinzugefügt werden, sobald der Chat existiert.
