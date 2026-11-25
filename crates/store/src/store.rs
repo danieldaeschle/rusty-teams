@@ -5,7 +5,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use directories::ProjectDirs;
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 
 use crate::error::{Error, Result};
 use crate::migrations;
@@ -14,6 +14,7 @@ pub const DATA_DIR_NAME: &str = "ms-teams-linux";
 const DATABASE_FILE: &str = "cache.sqlite3";
 const SLOW_WAIT: Duration = Duration::from_millis(50);
 const SLOW_HOLD: Duration = Duration::from_millis(100);
+const READERS: usize = 3;
 
 static SLOW_LOCK_REPORTER: OnceLock<fn(String)> = OnceLock::new();
 
@@ -34,6 +35,8 @@ pub fn default_database_path() -> Result<PathBuf> {
 
 pub struct Store {
     connection: Mutex<Connection>,
+    /// WAL lets these read while the writer holds `connection`; empty for an in-memory store.
+    readers: Vec<Mutex<Connection>>,
 }
 
 impl Store {
@@ -53,7 +56,11 @@ impl Store {
         }
         let connection = Connection::open(path)?;
         connection.pragma_update(None, "journal_mode", "WAL")?;
-        Self::from_connection(connection)
+        let mut store = Self::from_connection(connection)?;
+        store.readers = (0..READERS)
+            .map(|_| open_reader(path).map(Mutex::new))
+            .collect::<Result<_>>()?;
+        Ok(store)
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -66,6 +73,7 @@ impl Store {
         migrations::migrate(&mut connection)?;
         Ok(Store {
             connection: Mutex::new(connection),
+            readers: Vec::new(),
         })
     }
 
@@ -80,20 +88,57 @@ impl Store {
         let location = Location::caller();
         let asked = Instant::now();
         let connection = self.connection.lock().map_err(|_| Error::Poisoned)?;
-        let waited = asked.elapsed();
-        if waited >= SLOW_WAIT {
-            report_slow_lock(format!(
-                "store lock waited {} ms at {location} on {}",
-                waited.as_millis(),
-                thread_label()
-            ));
-        }
-        Ok(StoreGuard {
-            connection,
-            location,
-            taken: Instant::now(),
-        })
+        guard(connection, location, asked)
     }
+
+    /// A read-only connection, so a long write elsewhere does not block the caller.
+    #[track_caller]
+    pub(crate) fn read(&self) -> Result<StoreGuard<'_>> {
+        let location = Location::caller();
+        let asked = Instant::now();
+        let Some(first) = self.readers.first() else {
+            let connection = self.connection.lock().map_err(|_| Error::Poisoned)?;
+            return guard(connection, location, asked);
+        };
+        let free = self
+            .readers
+            .iter()
+            .find_map(|reader| reader.try_lock().ok());
+        let connection = match free {
+            Some(connection) => connection,
+            None => first.lock().map_err(|_| Error::Poisoned)?,
+        };
+        guard(connection, location, asked)
+    }
+}
+
+fn open_reader(path: &Path) -> Result<Connection> {
+    let connection = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    connection.busy_timeout(Duration::from_secs(5))?;
+    Ok(connection)
+}
+
+fn guard<'a>(
+    connection: MutexGuard<'a, Connection>,
+    location: &'static Location<'static>,
+    asked: Instant,
+) -> Result<StoreGuard<'a>> {
+    let waited = asked.elapsed();
+    if waited >= SLOW_WAIT {
+        report_slow_lock(format!(
+            "store lock waited {} ms at {location} on {}",
+            waited.as_millis(),
+            thread_label()
+        ));
+    }
+    Ok(StoreGuard {
+        connection,
+        location,
+        taken: Instant::now(),
+    })
 }
 
 pub(crate) struct StoreGuard<'a> {
@@ -139,4 +184,24 @@ fn thread_label() -> String {
 
 pub(crate) fn json_ids(ids: &[String]) -> String {
     serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Store;
+
+    #[test]
+    fn a_read_does_not_wait_for_a_held_write_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Store::open(&directory.path().join("cache.sqlite3")).unwrap();
+        store.set_meta("key", "before").unwrap();
+        let writer = store.lock().unwrap();
+        writer
+            .execute_batch("BEGIN IMMEDIATE; UPDATE meta SET value = 'during' WHERE key = 'key';")
+            .unwrap();
+        assert_eq!(store.meta("key").unwrap().as_deref(), Some("before"));
+        writer.execute_batch("COMMIT;").unwrap();
+        drop(writer);
+        assert_eq!(store.meta("key").unwrap().as_deref(), Some("during"));
+    }
 }

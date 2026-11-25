@@ -6,7 +6,7 @@ use crate::store::Store;
 impl Store {
     /// People of other organizations, with their organization's name when Teams gave one.
     pub fn external_people(&self) -> Result<Vec<(String, Option<String>)>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement =
             connection.prepare_cached("SELECT user_id, tenant_name FROM external_people")?;
         let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;

@@ -43,7 +43,7 @@ impl Store {
 
     /// Newest first.
     pub fn activity(&self) -> Result<Vec<ActivityRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {ACTIVITY_COLUMNS} FROM activity ORDER BY updated_at DESC, id DESC"
         ))?;

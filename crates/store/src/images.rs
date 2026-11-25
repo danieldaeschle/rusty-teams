@@ -8,7 +8,7 @@ use crate::time::{from_millis, to_millis};
 
 impl Store {
     pub fn image(&self, key: &str) -> Result<Option<ImageRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         Ok(connection
             .query_row(
                 "SELECT key, bytes, content_type, fetched_at FROM images WHERE key = ?1",
@@ -26,7 +26,7 @@ impl Store {
     }
 
     pub fn has_image(&self, key: &str) -> Result<bool> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         Ok(connection
             .query_row("SELECT 1 FROM images WHERE key = ?1", [key], |_| Ok(()))
             .optional()?
@@ -75,7 +75,7 @@ impl Store {
     }
 
     pub fn image_cache_bytes(&self) -> Result<u64> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let total: i64 =
             connection.query_row("SELECT COALESCE(SUM(size), 0) FROM images", [], |row| {
                 row.get(0)

@@ -50,7 +50,7 @@ impl Store {
     }
 
     pub fn draft(&self, conversation_id: &str) -> Result<Option<DraftRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let found = connection
             .query_row(
                 "SELECT payload, preview, updated_at FROM drafts WHERE conversation_id = ?1",
@@ -86,7 +86,7 @@ impl Store {
     }
 
     pub fn draft_previews(&self) -> Result<HashMap<String, String>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement =
             connection.prepare_cached("SELECT conversation_id, preview FROM drafts")?;
         let previews = statement

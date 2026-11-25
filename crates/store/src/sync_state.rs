@@ -7,7 +7,7 @@ use crate::time::{optional_from_millis, optional_to_millis};
 
 impl Store {
     pub fn sync_state(&self, conversation_id: &str) -> Result<Option<SyncState>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let state = connection
             .query_row(
                 "SELECT newest_seen, oldest_loaded, has_more, older_cursor, delta_link FROM sync_state WHERE conversation_id = ?1",

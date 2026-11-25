@@ -38,7 +38,7 @@ impl Store {
     }
 
     pub fn outbox_for_conversation(&self, conversation_id: &str) -> Result<Vec<OutboxRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {OUTBOX_COLUMNS} FROM outbox WHERE conversation_id = ?1
              ORDER BY created_at ASC, id ASC"
@@ -50,7 +50,7 @@ impl Store {
     }
 
     pub fn sending_outbox(&self) -> Result<Vec<OutboxRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(&format!(
             "SELECT {OUTBOX_COLUMNS} FROM outbox WHERE state = ?1 ORDER BY created_at ASC, id ASC"
         ))?;
@@ -61,7 +61,7 @@ impl Store {
     }
 
     pub fn failed_outbox_conversations(&self) -> Result<Vec<String>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(
             "SELECT DISTINCT conversation_id FROM outbox WHERE state = ?1 ORDER BY conversation_id",
         )?;

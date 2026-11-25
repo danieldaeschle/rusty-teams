@@ -7,7 +7,7 @@ use crate::time::{from_millis, optional_from_millis, optional_to_millis, to_mill
 
 impl Store {
     pub fn read_horizons(&self, conversation_id: &str) -> Result<Vec<ReadHorizonRecord>> {
-        let connection = self.lock()?;
+        let connection = self.read()?;
         let mut statement = connection.prepare_cached(
             "SELECT member_id, read_until, read_at FROM read_horizons
              WHERE conversation_id = ?1 ORDER BY member_id",
