@@ -1337,7 +1337,11 @@ impl AppState {
             let _ = held.commands.send(CallCommand::Hangup);
         }
         self.signal_ring(ring_id, RingSignal::Accept, cx);
-        let conversation_id = entry.ring.thread_id.clone();
+        let conversation_id = entry.ring.thread_id.clone().or_else(|| {
+            (!entry.ring.is_group)
+                .then(|| self.one_on_one_chat_with_mri(&entry.ring.caller.mri))
+                .flatten()
+        });
         let title = conversation_id
             .as_deref()
             .and_then(|id| self.sidebar.chats.iter().find(|chat| chat.id == id))
@@ -1389,18 +1393,11 @@ impl AppState {
         {
             return Some(thread_id.clone());
         }
-        let user_id = missed.caller_mri.strip_prefix(ORGID_PREFIX)?;
-        self.sidebar
-            .chats
-            .iter()
-            .find(|chat| {
-                crate::data::is_one_on_one(chat)
-                    && chat
-                        .members
-                        .iter()
-                        .any(|member| member.user_id.as_deref() == Some(user_id))
-            })
-            .map(|chat| chat.id.clone())
+        self.one_on_one_chat_with_mri(&missed.caller_mri)
+    }
+
+    fn one_on_one_chat_with_mri(&self, mri: &str) -> Option<String> {
+        self.one_on_one_chat_with(mri.strip_prefix(ORGID_PREFIX)?)
     }
 }
 
@@ -2785,6 +2782,30 @@ mod tests {
                 };
                 assert_eq!(
                     state.conversation_of_missed_call(&direct).as_deref(),
+                    Some("19:dm@unq.gbl.spaces")
+                );
+            })
+        });
+    }
+
+    #[gpui_kit::test]
+    fn an_accepted_one_on_one_ring_gets_the_chat_with_the_caller(cx: &mut TestAppContext) {
+        let app = app_with_chats(cx);
+        cx.update(|cx| {
+            app.update(cx, |state, cx| {
+                let ring = calling::IncomingRing {
+                    caller: calling::Caller {
+                        mri: "8:orgid:bea-id".into(),
+                        display_name: "Bea".into(),
+                    },
+                    thread_id: None,
+                    ..demo_ring()
+                };
+                let ring_id = ring.ring_id;
+                state.push_ring(ring, true, cx);
+                state.accept_ring(ring_id, calling::AcceptMode::Audio, cx);
+                assert_eq!(
+                    state.call.as_ref().unwrap().chat_thread(),
                     Some("19:dm@unq.gbl.spaces")
                 );
             })
