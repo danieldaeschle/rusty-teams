@@ -37,12 +37,17 @@ impl Graph {
         &self.session
     }
 
-    /// The session for a file in the home drive when `home` is set and a home drive exists.
-    pub(crate) fn drive_session(&self, home: bool) -> &Session {
-        match &self.home_drive {
-            Some(drive) if home => drive,
-            _ => &self.session,
+    /// The session that owns the file. A home-drive file with no home session is an error:
+    /// falling back to the guest session would delete or share it in the wrong tenant.
+    pub(crate) fn drive_session(&self, home: bool) -> Result<&Session> {
+        if !home {
+            return Ok(&self.session);
         }
+        self.home_drive.as_ref().ok_or_else(|| {
+            Error::Upload(
+                "the file is in the home drive, but this session has no home tenant".into(),
+            )
+        })
     }
 
     pub(crate) fn has_home_drive(&self) -> bool {

@@ -138,6 +138,7 @@ struct Fake {
     window_requests: Mutex<Vec<(String, chatsvc::WindowDirection)>>,
     search_identities: Mutex<Vec<substrate_search::SearchIdentity>>,
     member_requests: Mutex<Vec<String>>,
+    omit_member_email: Mutex<bool>,
     activity_feed: Mutex<chatsvc::ActivitySnapshot>,
     app_channel_horizon_ms: Mutex<i64>,
 }
@@ -269,16 +270,20 @@ impl Remote for Handle {
             .lock()
             .unwrap()
             .push(chat_id.to_owned());
+        let ada = if *self.omit_member_email.lock().unwrap() {
+            json!({"userId": "user-ada", "tenantId": "tenant-1", "displayName": "Ada Example"})
+        } else {
+            json!({
+                "userId": "user-ada", "tenantId": "tenant-1", "displayName": "Ada Example",
+                "email": "ada@example.com"
+            })
+        };
         Ok(vec![
             serde_json::from_value(
                 json!({"userId": ME, "tenantId": "tenant-1", "displayName": "Me Myself"}),
             )
             .unwrap(),
-            serde_json::from_value(json!({
-                "userId": "user-ada", "tenantId": "tenant-1", "displayName": "Ada Example",
-                "email": "ada@example.com"
-            }))
-            .unwrap(),
+            serde_json::from_value(ada).unwrap(),
         ])
     }
 
@@ -820,7 +825,11 @@ impl Remote for Handle {
         Ok(vec![7; length as usize])
     }
 
-    async fn share_file(&self, file: &UploadedFile, recipients: &[Recipient]) -> Result<()> {
+    async fn share_file(
+        &self,
+        file: &UploadedFile,
+        recipients: &[Recipient],
+    ) -> Result<Option<String>> {
         let recipients: Vec<&str> = recipients
             .iter()
             .map(|recipient| match recipient {
@@ -828,7 +837,9 @@ impl Remote for Handle {
             })
             .collect();
         self.record(format!("share {} {}", file.item_id, recipients.join(",")));
-        Ok(())
+        Ok(file
+            .home_drive
+            .then(|| "https://files.example/share".to_owned()))
     }
 
     async fn external_image(&self, url: &str) -> Result<Photo> {
@@ -2290,11 +2301,30 @@ async fn a_file_in_the_home_drive_is_shared_by_email() {
         home_drive: true,
         ..uploaded()
     };
-    engine.share_attachment(CHAT, &file).await.unwrap();
+    let link = engine.share_attachment(CHAT, &file).await.unwrap();
+    assert_eq!(link.as_deref(), Some("https://files.example/share"));
     assert!(
         fake.calls()
             .contains(&"share item-1 ada@example.com".to_owned())
     );
+}
+
+#[tokio::test]
+async fn a_home_drive_file_is_not_sent_as_shared_when_nobody_has_an_email() {
+    let fake = Arc::new(Fake::default());
+    *fake.omit_member_email.lock().unwrap() = true;
+    let engine = chat_engine(&fake, small_pages()).await;
+    let file = UploadedFile {
+        home_drive: true,
+        ..uploaded()
+    };
+
+    let error = engine.share_attachment(CHAT, &file).await.unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Graph(graph::Error::SharingDenied(_))
+    ));
+    assert!(fake.calls().iter().all(|call| !call.starts_with("share")));
 }
 
 #[tokio::test]

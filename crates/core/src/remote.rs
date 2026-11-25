@@ -245,7 +245,11 @@ pub trait Remote {
         Err(Error::Unsupported("a file upload"))
     }
 
-    async fn share_file(&self, _file: &UploadedFile, _recipients: &[Recipient]) -> Result<()> {
+    async fn share_file(
+        &self,
+        _file: &UploadedFile,
+        _recipients: &[Recipient],
+    ) -> Result<Option<String>> {
         Err(Error::Unsupported("sharing a file"))
     }
 
@@ -1121,7 +1125,11 @@ impl Remote for Graph {
         Ok(Graph::upload_file(self, destination, file_name, bytes, progress).await?)
     }
 
-    async fn share_file(&self, file: &UploadedFile, recipients: &[Recipient]) -> Result<()> {
+    async fn share_file(
+        &self,
+        file: &UploadedFile,
+        recipients: &[Recipient],
+    ) -> Result<Option<String>> {
         Ok(Graph::share_item(self, file, recipients).await?)
     }
 

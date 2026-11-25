@@ -295,7 +295,7 @@ impl Graph {
         let scope = Scope::graph(FILES_SCOPE);
         let home_drive =
             matches!(destination, UploadDestination::ChatFiles) && self.has_home_drive();
-        let session = self.drive_session(home_drive);
+        let session = self.drive_session(home_drive)?;
         let shown_name = file_name;
         let file_name = self.free_name(session, destination, file_name).await?;
         let file_name = file_name.as_str();
@@ -367,27 +367,29 @@ impl Graph {
     }
 
     pub async fn resolve_share(&self, open_url: &str) -> Result<SharedFile> {
-        let answer = self
-            .session()
-            .request(
-                Method::Get,
-                &urls::shared_drive_item(&share_id(open_url)),
-                &Scope::graph(FILES_SCOPE),
-                None,
-            )
-            .await?;
-        shared_file(answer.body)
+        let url = urls::shared_drive_item(&share_id(open_url));
+        self.drive_item_request(&url).await
     }
 
     pub async fn resolve_drive_item(&self, drive_id: &str, item_id: &str) -> Result<SharedFile> {
-        let answer = self
-            .session()
-            .request(
-                Method::Get,
-                &urls::drive_item(drive_id, item_id),
-                &Scope::graph(FILES_SCOPE),
-                None,
-            )
+        let url = urls::drive_item(drive_id, item_id);
+        self.drive_item_request(&url).await
+    }
+
+    /// A guest-org session cannot see a file that lives in the home OneDrive.
+    /// A 401 there is retried with the home session.
+    async fn drive_item_request(&self, url: &str) -> Result<SharedFile> {
+        match self.item_request(self.session(), url).await {
+            Err(error) if unauthorized(&error) && self.has_home_drive() => {
+                self.item_request(self.drive_session(true)?, url).await
+            }
+            other => other,
+        }
+    }
+
+    async fn item_request(&self, session: &Session, url: &str) -> Result<SharedFile> {
+        let answer = session
+            .request(Method::Get, url, &Scope::graph(FILES_SCOPE), None)
             .await?;
         shared_file(answer.body)
     }
@@ -416,7 +418,7 @@ impl Graph {
     }
 
     pub async fn delete_uploaded(&self, file: &UploadedFile) -> Result<()> {
-        self.drive_session(file.home_drive)
+        self.drive_session(file.home_drive)?
             .request(
                 Method::Delete,
                 &urls::drive_item(&file.drive_id, &file.item_id),
@@ -427,26 +429,54 @@ impl Graph {
         Ok(())
     }
 
-    pub async fn share_item(&self, file: &UploadedFile, recipients: &[Recipient]) -> Result<()> {
+    /// `Some` is the sharing-link URL when Graph returned one. The chat message should
+    /// carry that link: a specific-people grant is redeemed through it, not the item URL.
+    pub async fn share_item(
+        &self,
+        file: &UploadedFile,
+        recipients: &[Recipient],
+    ) -> Result<Option<String>> {
         if recipients.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         let (url, body) = share_request(file, recipients);
-        self.drive_session(file.home_drive)
+        let answer = self
+            .drive_session(file.home_drive)?
             .request(Method::Post, &url, &Scope::graph(FILES_SCOPE), Some(body))
             .await
             .map_err(share_error)?;
-        Ok(())
+        Ok(answer
+            .body
+            .pointer("/link/webUrl")
+            .and_then(Value::as_str)
+            .map(str::to_owned))
     }
+}
+
+fn unauthorized(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Session(session::Error::Api { status: 401, .. })
+    )
 }
 
 /// Sharing errors carry a generic message; the code and inner error in the body name the cause.
 fn share_error(error: session::Error) -> Error {
     match error {
-        session::Error::Api { status, body, .. } => Error::Upload(format!(
-            "sharing answered HTTP {status}: {}",
-            body.pointer("/error").unwrap_or(&body)
-        )),
+        session::Error::Api { status, body, .. } => {
+            let code = body
+                .pointer("/error/code")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let detail = format!("HTTP {status}: {}", body.pointer("/error").unwrap_or(&body));
+            // Only the organization's sharing policy. A 401 or a network error stays a failure
+            // the user can retry, instead of the "does not allow sharing" notice.
+            if code.eq_ignore_ascii_case("sharingFailed") {
+                Error::SharingDenied(detail)
+            } else {
+                Error::Upload(format!("sharing answered {detail}"))
+            }
+        }
         other => other.into(),
     }
 }
@@ -663,6 +693,22 @@ mod tests {
         assert_eq!(percent_done(50, 200), 25);
         assert_eq!(percent_done(200, 200), 100);
         assert_eq!(percent_done(5, 0), 100);
+    }
+
+    #[test]
+    fn only_sharing_failed_is_a_denied_share() {
+        let denied = share_error(session::Error::api(
+            403,
+            "https://graph.microsoft.com/createLink",
+            json!({"error": {"code": "sharingFailed", "message": "blocked"}}),
+        ));
+        assert!(matches!(denied, Error::SharingDenied(_)));
+        let unauthorized = share_error(session::Error::api(
+            401,
+            "https://graph.microsoft.com/createLink",
+            json!({"error": {"code": "InvalidAuthenticationToken", "message": "no"}}),
+        ));
+        assert!(matches!(unauthorized, Error::Upload(_)));
     }
 
     #[test]

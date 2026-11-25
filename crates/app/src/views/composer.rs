@@ -2309,25 +2309,23 @@ impl Composer {
                 let Some(reference) = uploaded.reference() else {
                     return UploadResult::Failed;
                 };
-                match engine.share_attachment(&conversation_id, &uploaded).await {
-                    Ok(()) => UploadResult::Done(DoneFile {
-                        reference,
-                        uploaded: Some(uploaded),
-                    }),
+                let end = match engine.share_attachment(&conversation_id, &uploaded).await {
+                    Ok(link) => super::attachment_tray::ShareEnd::Linked(link),
                     Err(error) => {
                         app_base::diagnostics::record(format!(
                             "attachments: share failed: {error}"
                         ));
-                        if uploaded.home_drive {
-                            UploadResult::NotShared(DoneFile {
-                                reference,
-                                uploaded: Some(uploaded),
-                            })
+                        if matches!(
+                            error,
+                            teams_core::Error::Graph(graph::Error::SharingDenied(_))
+                        ) {
+                            super::attachment_tray::ShareEnd::Denied
                         } else {
-                            UploadResult::ShareFailed(uploaded)
+                            super::attachment_tray::ShareEnd::Failed
                         }
                     }
-                }
+                };
+                super::attachment_tray::result_of_share(uploaded, reference, end)
             }
             .await;
             let _ = finished_sender.send(UploadEvent::Finished(result));

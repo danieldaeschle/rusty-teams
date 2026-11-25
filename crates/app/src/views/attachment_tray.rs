@@ -103,6 +103,36 @@ pub enum UploadResult {
     Failed,
 }
 
+/// How a share ended, separate from the Graph error so the tray can be tested without a session.
+pub(crate) enum ShareEnd {
+    Linked(Option<String>),
+    Denied,
+    Failed,
+}
+
+pub(crate) fn result_of_share(
+    uploaded: UploadedFile,
+    mut reference: FileReference,
+    end: ShareEnd,
+) -> UploadResult {
+    match end {
+        ShareEnd::Linked(link) => {
+            if let Some(link) = link.filter(|link| !link.is_empty()) {
+                reference.content_url = link;
+            }
+            UploadResult::Done(DoneFile {
+                reference,
+                uploaded: Some(uploaded),
+            })
+        }
+        ShareEnd::Denied => UploadResult::NotShared(DoneFile {
+            reference,
+            uploaded: Some(uploaded),
+        }),
+        ShareEnd::Failed => UploadResult::ShareFailed(uploaded),
+    }
+}
+
 impl UploadState {
     fn uploaded(&self) -> Option<UploadedFile> {
         match self {
@@ -960,9 +990,9 @@ mod tests {
     use super::{
         AttachmentTray, Classification, DoneFile, FILES_LATER_NOTICE, INLINE_IMAGE_MAX_BYTES,
         INLINE_TOTAL_MAX_BYTES, InlineFormat, ItemKind, LoadedFile, MAX_ATTACHMENTS,
-        NOT_SHARED_NOTICE, OutgoingImage, PasteAction, PreviewImage, RemoteImage, Tone,
+        NOT_SHARED_NOTICE, OutgoingImage, PasteAction, PreviewImage, RemoteImage, ShareEnd, Tone,
         UploadResult, chip_state, classify, limit_notice, paste_action, pasted_image_name,
-        prepare_pasted_image, preview_size, read_attachment, sniff_inline_format,
+        prepare_pasted_image, preview_size, read_attachment, result_of_share, sniff_inline_format,
     };
     use crate::remote_image::RemoteKind;
 
@@ -1320,6 +1350,24 @@ mod tests {
         tray.set_progress(id, 10);
         tray.finish_upload(id, UploadResult::Failed);
         assert!(!tray.blocks_send());
+    }
+
+    #[test]
+    fn only_a_denied_share_sends_the_file_with_the_notice() {
+        let uploaded = sample_upload();
+        let reference = reference("plan.pdf");
+        let denied = result_of_share(uploaded.clone(), reference.clone(), ShareEnd::Denied);
+        assert!(matches!(denied, UploadResult::NotShared(_)));
+        let failed = result_of_share(uploaded.clone(), reference.clone(), ShareEnd::Failed);
+        assert!(matches!(failed, UploadResult::ShareFailed(_)));
+        let UploadResult::Done(done) = result_of_share(
+            uploaded,
+            reference,
+            ShareEnd::Linked(Some("https://files.example/share".into())),
+        ) else {
+            panic!("a sharing link finishes the upload");
+        };
+        assert_eq!(done.reference.content_url, "https://files.example/share");
     }
 
     #[test]
