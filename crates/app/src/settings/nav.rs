@@ -52,6 +52,8 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
     match section {
         SettingsSection::General => vec![
             tr("settings.general.auto_start"),
+            tr("settings.general.agents_mcp"),
+            tr("settings.general.agents_mcp_detail"),
             tr("settings.general.open_in_background"),
             tr("settings.general.show_in_tray"),
             tr("settings.general.close_to_tray"),
@@ -135,10 +137,18 @@ pub fn matches(section: SettingsSection, query: &str) -> bool {
 pub fn first_match(query: &str, rusty_available: bool) -> Option<SettingsSection> {
     TEAMS_GROUP
         .into_iter()
-        .chain(RUSTY_GROUP)
-        .chain([SettingsSection::Help, SettingsSection::About])
-        .filter(|_section| rusty_available)
-        .find(|section| matches(*section, query))
+        .filter(|section| matches(*section, query))
+        .chain(
+            RUSTY_GROUP
+                .into_iter()
+                .filter(|section| rusty_available && matches(*section, query)),
+        )
+        .chain(
+            [SettingsSection::Help, SettingsSection::About]
+                .into_iter()
+                .filter(|section| matches(*section, query)),
+        )
+        .next()
 }
 
 pub fn label(section: SettingsSection) -> String {
@@ -398,6 +408,10 @@ mod tests {
         assert!(!matches(SettingsSection::Appearance, "receipts"));
         assert!(matches(SettingsSection::Appearance, "  "));
         assert_eq!(first_match("noise", true), Some(SettingsSection::Devices));
+        assert_eq!(
+            first_match("devices", false),
+            Some(SettingsSection::Devices)
+        );
         assert_eq!(first_match("claude", false), None);
         assert_eq!(first_match("xyz", true), None);
     }
@@ -406,6 +420,8 @@ mod tests {
         match section {
             SettingsSection::General => &[
                 "settings.general.auto_start",
+                "settings.general.agents_mcp",
+                "settings.general.agents_mcp_detail",
                 "settings.general.open_in_background",
                 "settings.general.show_in_tray",
                 "settings.general.close_to_tray",
