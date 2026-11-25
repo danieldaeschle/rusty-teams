@@ -1470,7 +1470,7 @@ pub fn render_call_view(
         .children(lobby_banner(app, model, call.lobby_list_open))
         .children(lock_banner(app, model))
         .children(health_banner(app, model))
-        .children(sharing_banner(app, model, state.call_share_sound))
+        .children(sharing_banner(app, model, model.share_sound))
         .children(consult_banner(app, state));
 
     let chrome_visible = call

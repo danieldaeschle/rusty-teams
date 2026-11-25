@@ -142,7 +142,7 @@ impl Render for ShareBarView {
                 BUTTON_SIZE,
             ))
             .child(camera_button(&self.app, &call.model).size(px(BUTTON_SIZE)))
-            .child(sound_button(&self.app, state.call_share_sound))
+            .child(sound_button(&self.app, call.model.share_sound))
             .child(stop_button(&self.app))
             .child(pin_button(&self.windows, pinned))
             .into_any_element()
