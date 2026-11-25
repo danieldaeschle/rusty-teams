@@ -1,0 +1,26 @@
+# Closes pull requests that stayed "status: needs info" (set by pr-gate.yml) for 14 days.
+name: Stale PRs
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v11
+        with:
+          only-pr-labels: "status: needs info"
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-stale: 10
+          days-before-pr-close: 4
+          stale-pr-label: stale
+          stale-pr-message: "This PR is still missing what the PR gate comment lists. It closes in 4 days unless it is updated."
+          close-pr-message: "Closed because the PR gate items stayed open for 14 days. Reopen it any time once they are added."
