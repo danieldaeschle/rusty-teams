@@ -162,7 +162,7 @@ pub use forwarded::{
 };
 pub use graph::{
     CloudFile, DriveEntry, DriveFolder, FileReference, HostedImage, KeptAttachment, MentionTarget,
-    MessageExtras, QuickSite, SharedFile, UploadedFile,
+    MessageExtras, QuickSite, Recipient, SharedFile, UploadedFile,
 };
 pub use images::StoredImage;
 pub use jumbo::{JumboEmoji, MAX_JUMBO_EMOJI, jumbo_emoji};

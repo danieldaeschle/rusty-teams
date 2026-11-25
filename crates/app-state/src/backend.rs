@@ -189,12 +189,18 @@ async fn supervise(
     };
     tokio::spawn(org_list(home.clone(), guest_tenant.clone(), events.clone()));
     // Calls stay on the home tenant's registration, like rings for the home org while a guest org is open.
-    let session = match &guest_tenant {
-        Some(tenant) => home.in_tenant(tenant),
-        None => home.clone(),
+    // Chat files of a guest org go to the home OneDrive: the guest tenant has none.
+    let (session, home_drive) = match &guest_tenant {
+        Some(tenant) => (home.in_tenant(tenant), Some(home.clone())),
+        None => (home.clone(), None),
     };
     let build = || {
-        SyncEngine::new(Graph::new(session.clone()), store.clone())
+        let graph = Graph::new(session.clone());
+        let graph = match &home_drive {
+            Some(home) => graph.with_home_drive(home.clone()),
+            None => graph,
+        };
+        SyncEngine::new(graph, store.clone())
             .with_folder_source(Arc::new(ChatsvcFolderSource::new(&session)))
     };
     let engine = image_directory()
