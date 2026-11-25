@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use app_base::format::{self, WeekdayWidth, clock_format, weekday_name};
 use chatsvc::{CalendarEvent, ResponseType, join_info_text};
-use chrono::{DateTime, Datelike, Local, NaiveDate, Offset, Timelike, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -240,10 +240,17 @@ impl CalendarView {
     fn on_grid_scroll_wheel(
         &mut self,
         _event: &ScrollWheelEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.follow_now.note_manual_scroll();
+        if self.slot_drag.is_some() {
+            // A wheel turn moves the grid under a still pointer; follow it once the
+            // new offset is in.
+            cx.on_next_frame(window, |view, window, cx| {
+                view.drag_slot_to(window.mouse_position(), cx)
+            });
+        }
         cx.notify();
     }
 
@@ -269,7 +276,7 @@ impl CalendarView {
     }
 
     /// Left press on an empty slot: start picking a block, or a double click opens
-    /// New meeting for that slot.
+    /// New meeting for the picked block it lands in, else for that slot.
     fn press_slot(
         &mut self,
         date: NaiveDate,
@@ -277,14 +284,14 @@ impl CalendarView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        window.focus(&self.grid_focus, cx);
         let slot = self.one_slot(date, event.position);
         if event.click_count >= 2 {
-            self.slot_drag = None;
-            self.slot_selection = None;
-            cx.notify();
-            let (start, end) = slot.window();
-            open_new_meeting_at(self.state.clone(), start, end, window, cx);
+            let picked = self
+                .slot_selection
+                .filter(|picked| picked.contains(date, slot.start_minute))
+                .unwrap_or(slot);
+            self.clear_slot_selection(cx);
+            open_meeting_for(self.state.clone(), picked, window, cx);
             return;
         }
         self.slot_drag = Some(SlotDrag {
@@ -340,7 +347,8 @@ impl CalendarView {
     }
 
     /// While a block is being picked, follow the pointer outside the grid and over
-    /// meetings too, and end on release wherever it happens.
+    /// meetings too. Releases are caught on the grid itself (see `grid`), whose
+    /// listeners already exist when the press lands.
     fn slot_drag_listener(&self, cx: &Context<Self>) -> impl IntoElement {
         let view = cx.entity().downgrade();
         canvas(
@@ -362,12 +370,6 @@ impl CalendarView {
                         })
                         .ok();
                 });
-                let released = view.clone();
-                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
-                    if phase.bubble() && event.button == MouseButton::Left {
-                        released.update(cx, |view, cx| view.end_slot_drag(cx)).ok();
-                    }
-                });
             },
         )
         .absolute()
@@ -383,6 +385,11 @@ impl CalendarView {
             .top_0()
             .left_0()
             .size_full()
+            // Capture runs before the context menu notes which element to give focus
+            // back to, so Escape reaches the grid after the menu closes.
+            .capture_any_mouse_down(cx.listener(|view, _: &MouseDownEvent, window, cx| {
+                window.focus(&view.grid_focus, cx)
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |view, event: &MouseDownEvent, window, cx| {
@@ -409,9 +416,9 @@ impl CalendarView {
                                 })
                                 .ok()
                                 .flatten();
-                            if let Some(selection) = picked {
-                                let (start, end) = selection.window();
-                                open_new_meeting_at(state.clone(), start, end, window, cx);
+                            match picked {
+                                Some(picked) => open_meeting_for(state.clone(), picked, window, cx),
+                                None => open_new_meeting(state.clone(), window, cx),
                             }
                         }),
                 )
@@ -423,18 +430,10 @@ impl CalendarView {
         let row = self.hour_height;
         let top = selection.start_minute as f32 / 60. * row;
         let height = (selection.end_minute - selection.start_minute) as f32 / 60. * row;
-        let clock = |minute: i64| {
-            let minute = minute.rem_euclid(24 * 60);
-            chrono::NaiveTime::from_hms_opt((minute / 60) as u32, (minute % 60) as u32, 0)
-                .unwrap_or_default()
-                .format(clock_format())
-                .to_string()
-        };
-        let label = format!(
-            "{} – {}",
-            clock(selection.start_minute),
-            clock(selection.end_minute)
-        );
+        // The times New meeting will open with, so the label and the form agree.
+        let label = selection
+            .form_times(grid_offset(), &Local)
+            .label(clock_format());
         div()
             .absolute()
             .top(px(top))
@@ -892,6 +891,16 @@ impl CalendarView {
                 }
             }))
             .on_scroll_wheel(cx.listener(Self::on_grid_scroll_wheel))
+            // Inside the grid, or outside it and over meetings (whose hitboxes block
+            // the grid's): either way a left release ends the drag.
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|view, _: &MouseUpEvent, _, cx| view.end_slot_drag(cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|view, _: &MouseUpEvent, _, cx| view.end_slot_drag(cx)),
+            )
             .when(dragging, |grid| grid.child(self.slot_drag_listener(cx)))
             .child(
                 h_flex()
@@ -1009,6 +1018,22 @@ impl CalendarView {
 }
 
 /// Loading line and one notice per failed source, under the calendar header.
+/// The one UTC offset the hour grid lays every shown day out with.
+fn grid_offset() -> FixedOffset {
+    Local::now().offset().fix()
+}
+
+/// New meeting for a block picked on the grid.
+fn open_meeting_for(
+    state: Entity<AppState>,
+    picked: SlotSelection,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let form = picked.form_times(grid_offset(), &Local);
+    open_new_meeting_at(state, form.date, form.start, form.end, window, cx);
+}
+
 fn load_notices(
     state: &Entity<AppState>,
     failures: &[CalendarLoadFailure],
@@ -1207,16 +1232,15 @@ impl Render for CalendarView {
         let send_response = state.rsvp_send_response;
         let failures = state.calendar_week.failures.clone();
         let loading = state.calendar_week.loading && events.is_empty();
-        let offset = Local::now().offset().fix();
+        let offset = grid_offset();
         let span = state.calendar_week.span;
         let layout = state.calendar_layout();
         let dates = state.calendar_dates();
         let days = week_days(&events, &dates, offset);
         // A picked block goes away once its day scrolls out of view or Month shows.
-        if self
-            .slot_selection
-            .is_some_and(|picked| span == CalendarSpan::Month || !dates.contains(&picked.date))
-        {
+        if self.slot_selection.is_some_and(|picked| {
+            span == CalendarSpan::Month || !picked.fits(&dates, self.step_minutes())
+        }) {
             self.slot_selection = None;
             self.slot_drag = None;
         }

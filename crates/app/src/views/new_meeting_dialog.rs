@@ -1,5 +1,5 @@
 use chatsvc::Repeat;
-use chrono::{Local, NaiveDateTime, Utc};
+use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::date_picker::DatePicker;
@@ -252,12 +252,14 @@ pub fn open_new_meeting(state: Entity<AppState>, window: &mut Window, cx: &mut A
 /// New meeting with the date and times already set, e.g. from a block picked on the grid.
 pub fn open_new_meeting_at(
     state: Entity<AppState>,
-    start: NaiveDateTime,
-    end: NaiveDateTime,
+    date: NaiveDate,
+    start: NaiveTime,
+    end: NaiveTime,
     window: &mut Window,
     cx: &mut App,
 ) {
-    open_meeting_form(state, Vec::new(), Some((start, end)), window, cx);
+    let when = (date.and_time(start), date.and_time(end));
+    open_meeting_form(state, Vec::new(), Some(when), window, cx);
 }
 
 pub fn open_new_meeting_with(
