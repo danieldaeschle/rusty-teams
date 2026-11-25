@@ -21,6 +21,10 @@ sourcePdb="${sourceExe%.exe}.pdb"
 if [ -f "$sourcePdb" ]; then
   cp "$sourcePdb" "$updateDirectory/teams.pdb.partial"
   mv -f "$updateDirectory/teams.pdb.partial" "$updateDirectory/teams.pdb"
+  symbolsRoot="${TEAMS_SYMBOLS_DIR:-$HOME/.cache/teams-symbols}"
+  mkdir -p "$symbolsRoot/$version"
+  cp "$sourcePdb" "$symbolsRoot/$version/teams.pdb"
+  ls -1dt "$symbolsRoot"/*/ | tail -n +11 | xargs -r rm -rf
 fi
 printf '%s\n' "$version" > "$updateDirectory/version.txt.partial"
 mv -f "$updateDirectory/version.txt.partial" "$updateDirectory/version.txt"
