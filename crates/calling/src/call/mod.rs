@@ -679,6 +679,7 @@ async fn drive(
     };
     let mut layout_plan: OfferPlan;
     let mut direct_video_mid: Option<String> = None;
+    let mut initial_share_mid: Option<String> = None;
     let mut sending_camera = false;
     let mut media_links: BTreeMap<String, String> = BTreeMap::new();
 
@@ -792,6 +793,7 @@ async fn drive(
             .await?;
             layout_plan = answered.remote.plan();
             direct_video_mid = answered.camera_mid.clone();
+            initial_share_mid = answered.receiving_share_mid.clone();
             timeline.record(
                 "setRemoteDescription",
                 format!(
@@ -927,6 +929,12 @@ async fn drive(
     let mut video = VideoReceive::new(own_mri.clone(), VideoRouter::default());
     if let (Some(mid), Some(mri)) = (&direct_video_mid, &peer_mri) {
         video.router().set(mid, Some(VideoKey::Person(mri.clone())));
+    }
+    if let Some(mid) = &initial_share_mid {
+        video.router().set(mid, Some(VideoKey::Screen));
+        if let Some(sharer) = roster.screen_share(&own_mri).map(|(mri, _)| mri) {
+            control.send(CallUpdate::ScreenShare(Some(sharer)));
+        }
     }
     if sending_camera {
         control.send(CallUpdate::Camera(true));
