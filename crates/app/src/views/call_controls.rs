@@ -19,7 +19,7 @@ const GLYPH_SIZE: f32 = 16.;
 const JOIN_HEIGHT: f32 = 30.;
 const CHEVRON_WIDTH: f32 = 18.;
 const CHEVRON_GLYPH: f32 = 12.;
-pub const HEADER_VIDEO_CALL_TAG: &str = "header-video-call";
+pub const HEADER_CALL_TAG: &str = "header-call";
 pub const HEADER_CALL_OPTIONS_TAG: &str = "header-call-options";
 const GROUP_KIND: &str = "group";
 const MEETING_KIND: &str = "meeting";
@@ -76,7 +76,7 @@ pub fn header_call_controls(
     });
     if let Some(chat) = chat.filter(|_| callable) {
         let meet_now = chat.kind == GROUP_KIND && !is_echo_chat(chat);
-        controls.push(video_split_button(app, meet_now, compact));
+        controls.push(call_split_button(app, meet_now, compact));
     }
     controls
 }
@@ -93,15 +93,19 @@ fn start_call(app: &Entity<AppState>, with_video: bool, cx: &mut App) {
     });
 }
 
-fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> AnyElement {
-    let video_app = app.clone();
+fn call_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> AnyElement {
+    let primary_app = app.clone();
     let menu_app = app.clone();
     let labelled = meet_now && !compact;
+    let (icon_name, tooltip_key) = match meet_now {
+        true => (IconName::Video, "calls.chrome.meet_now"),
+        false => (IconName::Phone, "calls.chrome.audio_call"),
+    };
     h_flex()
         .flex_none()
         .items_center()
         .child(
-            Button::new(HEADER_VIDEO_CALL_TAG)
+            Button::new(HEADER_CALL_TAG)
                 .ghost()
                 .h(px(BUTTON_SIZE))
                 .map(|button| {
@@ -111,17 +115,13 @@ fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> 
                         button.p_0().w(px(BUTTON_SIZE))
                     }
                 })
-                .tooltip(tr(primary_call_tooltip_key(meet_now)))
-                .debug_selector(|| HEADER_VIDEO_CALL_TAG.into())
+                .tooltip(tr(tooltip_key))
+                .debug_selector(|| HEADER_CALL_TAG.into())
                 .child(
                     h_flex()
                         .gap(px(6.))
                         .items_center()
-                        .child(icon(
-                            primary_call_icon(meet_now),
-                            GLYPH_SIZE,
-                            theme::text_soft(),
-                        ))
+                        .child(icon(icon_name, GLYPH_SIZE, theme::text_soft()))
                         .when(labelled, |row| {
                             row.child(
                                 div()
@@ -132,9 +132,7 @@ fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> 
                             )
                         }),
                 )
-                .on_click(move |_, _, cx| {
-                    start_call(&video_app, primary_starts_with_video(meet_now), cx)
-                }),
+                .on_click(move |_, _, cx| start_call(&primary_app, meet_now, cx)),
         )
         .child(
             Button::new(HEADER_CALL_OPTIONS_TAG)
@@ -150,60 +148,25 @@ fn video_split_button(app: &Entity<AppState>, meet_now: bool, compact: bool) -> 
                     theme::text_soft(),
                 ))
                 .dropdown_menu(move |popup, _, _| {
-                    let (video, audio) = (menu_app.clone(), menu_app.clone());
-                    let popup = popup.item(
-                        PopupMenuItem::new(tr("calls.chrome.audio_call"))
-                            .icon(menu_icon(IconName::Phone))
-                            .action(Box::new(StartAudioCall))
-                            .on_click(move |_, _, cx| start_call(&audio, false, cx)),
-                    );
+                    let video = menu_app.clone();
+                    let audio = menu_app.clone();
+                    let audio_item = PopupMenuItem::new(tr("calls.chrome.audio_call"))
+                        .icon(menu_icon(IconName::Phone))
+                        .action(Box::new(StartAudioCall))
+                        .on_click(move |_, _, cx| start_call(&audio, false, cx));
                     if meet_now {
-                        popup
+                        popup.item(audio_item)
                     } else {
-                        popup.item(
-                            PopupMenuItem::new(tr("calls.chrome.video_call"))
-                                .icon(menu_icon(IconName::Video))
-                                .action(Box::new(StartVideoCall))
-                                .on_click(move |_, _, cx| start_call(&video, true, cx)),
-                        )
+                        popup
+                            .item(
+                                PopupMenuItem::new(tr("calls.chrome.video_call"))
+                                    .icon(menu_icon(IconName::Video))
+                                    .action(Box::new(StartVideoCall))
+                                    .on_click(move |_, _, cx| start_call(&video, true, cx)),
+                            )
+                            .item(audio_item)
                     }
                 }),
         )
         .into_any_element()
-}
-
-fn primary_starts_with_video(meet_now: bool) -> bool {
-    meet_now
-}
-
-fn primary_call_icon(meet_now: bool) -> IconName {
-    if meet_now {
-        IconName::Video
-    } else {
-        IconName::Phone
-    }
-}
-
-fn primary_call_tooltip_key(meet_now: bool) -> &'static str {
-    if meet_now {
-        "calls.chrome.meet_now"
-    } else {
-        "calls.chrome.audio_call"
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{primary_call_icon, primary_call_tooltip_key, primary_starts_with_video};
-    use gpui_kit::assets::IconName;
-
-    #[test]
-    fn one_to_one_primary_is_audio_and_meet_now_stays_video() {
-        assert!(!primary_starts_with_video(false));
-        assert!(primary_starts_with_video(true));
-        assert_eq!(primary_call_icon(false), IconName::Phone);
-        assert_eq!(primary_call_icon(true), IconName::Video);
-        assert_eq!(primary_call_tooltip_key(false), "calls.chrome.audio_call");
-        assert_eq!(primary_call_tooltip_key(true), "calls.chrome.meet_now");
-    }
 }
