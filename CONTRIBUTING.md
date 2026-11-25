@@ -44,7 +44,7 @@ A bot check (`PR gate`) runs on every PR that is not a draft. Until it passes, t
 | Tests | What ran and what did not. A change to Windows-only code says whether it was built on Windows |
 | Review | At least two independent reviews, each finding fixed or answered |
 | Scope | No planning folders (`openspec/` and the like). A change to `vendor/` says why in the description |
-| Open PRs | At most 3 open PRs, drafts included, until 3 of yours are merged |
+| Open PRs | At most 5 open PRs, drafts included |
 
 A PR that passes gets `status: needs review` and goes into the review queue. `gate: no visual` and `gate: skip` are for maintainers only.
 
