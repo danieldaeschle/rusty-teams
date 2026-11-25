@@ -999,7 +999,7 @@ async fn drive(
     let mut portal_pending: Option<ShareKind> = None;
     let mut glare_resend: Option<GlareResend> = None;
     let mut deferred_changes: Vec<Change> = Vec::new();
-    let mut remote_direct_share: Option<String> = None;
+    let mut remote_direct_share: Option<String> = initial_share_mid.clone();
     let mut sent_replacement: Option<Replacement> = None;
     let (echo_add_tx, mut echo_add_rx) = mpsc::unbounded_channel::<Result<()>>();
     let mut echo_add_pending = false;
