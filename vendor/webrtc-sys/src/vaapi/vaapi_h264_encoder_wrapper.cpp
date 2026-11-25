@@ -184,7 +184,9 @@ static void bitstream_put_ui(bitstream* bs, uint32_t val, int size_in_bits) {
     bs->buffer[pos] = (bs->buffer[pos] << size_in_bits | val);
   } else {
     size_in_bits -= bit_left;
-    bs->buffer[pos] = (bs->buffer[pos] << bit_left) | (val >> size_in_bits);
+    // A word with no bits yet has bit_left == 32, and shifting a uint32_t by 32 is undefined.
+    uint32_t kept = bit_left == 32 ? 0 : bs->buffer[pos] << bit_left;
+    bs->buffer[pos] = kept | (val >> size_in_bits);
     bs->buffer[pos] = va_swap32(bs->buffer[pos]);
 
     if (pos + 1 == bs->max_size_in_dword) {
