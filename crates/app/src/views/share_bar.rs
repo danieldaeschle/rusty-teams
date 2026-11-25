@@ -81,7 +81,7 @@ fn sound_button(app: &Entity<AppState>, active: bool, wanted: bool) -> Stateful<
         .rounded_full()
         .bg(background)
         .text_color(foreground)
-        .text_size(theme::text_caption())
+        .text_size(px(12.))
         .font_weight(FontWeight::SEMIBOLD)
         .cursor_pointer()
         .hover(|chip| chip.opacity(0.85))
