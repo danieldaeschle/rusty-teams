@@ -18,6 +18,7 @@ use crate::targets::{self, APPS, App, LoginState, Mode, Tab, VersionInfo};
 const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
 const OPEN_TAB_TIMEOUT: Duration = Duration::from_secs(10);
 const CDP_TIMEOUT: Duration = Duration::from_secs(5);
+const MSAL_KEY_STOP_BUDGET: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
@@ -501,7 +502,11 @@ impl Browser {
             let port = self.inner.config.port;
             let _ = tokio::task::spawn_blocking(move || launcher.terminate_listener(port)).await;
         } else if let Some(info) = self.version().await {
-            keep_msal_cache_key(&info.websocket_url).await;
+            let _ = tokio::time::timeout(
+                MSAL_KEY_STOP_BUDGET,
+                keep_msal_cache_key(&info.websocket_url),
+            )
+            .await;
             close_over_cdp(&info.websocket_url).await;
         }
     }

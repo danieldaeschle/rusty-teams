@@ -92,10 +92,16 @@ mod tests {
             cookie.get("domain").is_none(),
             "host-only stays host-only: {cookie}"
         );
-        for read_only in ["size", "session", "sourcePort"] {
+        for read_only in ["size", "session"] {
             assert!(
                 cookie.get(read_only).is_none(),
                 "{read_only} is not a CookieParam field"
+            );
+        }
+        for not_carried in ["sourceScheme", "sourcePort"] {
+            assert!(
+                cookie.get(not_carried).is_none(),
+                "{not_carried} is not carried by cookie_param"
             );
         }
     }
