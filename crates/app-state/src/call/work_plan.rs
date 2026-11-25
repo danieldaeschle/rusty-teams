@@ -23,6 +23,7 @@ pub fn demo_work_plan(dates: &[NaiveDate]) -> Vec<WorkPlanDay> {
                 location,
                 start,
                 end,
+                occurrence: serde_json::Value::Null,
             })
         })
         .collect()
@@ -79,8 +80,8 @@ impl AppState {
         if day.location == location {
             return;
         }
+        let previous = day.clone();
         day.location = location;
-        let id = day.id.clone();
         cx.notify();
         if self.mode.demo {
             return;
@@ -90,7 +91,7 @@ impl AppState {
         };
         let receiver = crate::runtime::spawn(async move {
             Calendar::new(engine.remote().session())
-                .set_work_plan_location(&id, location)
+                .set_work_plan_location(&previous, location)
                 .await
         });
         cx.spawn(async move |this, cx| {

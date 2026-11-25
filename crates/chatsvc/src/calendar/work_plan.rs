@@ -46,6 +46,8 @@ pub struct WorkPlanDay {
     pub location: WorkPlanLocation,
     pub start: NaiveTime,
     pub end: NaiveTime,
+    /// The occurrence as Graph sent it; a change is written back as the whole object.
+    pub occurrence: Value,
 }
 
 fn settings_url() -> String {
@@ -67,6 +69,20 @@ fn occurrence_url(id: &str) -> String {
     )
 }
 
+/// Graph updates an occurrence with PUT only, and rejects one without its recurrenceId.
+pub fn occurrence_body(day: &WorkPlanDay, location: WorkPlanLocation) -> Value {
+    let mut body = json!({
+        "recurrenceId": day.occurrence["recurrenceId"],
+        "start": day.occurrence["start"],
+        "end": day.occurrence["end"],
+        "workLocationType": location.as_graph(),
+    });
+    if location == WorkPlanLocation::Office && !day.occurrence["placeId"].is_null() {
+        body["placeId"] = day.occurrence["placeId"].clone();
+    }
+    body
+}
+
 fn local(value: &Value) -> Option<NaiveDateTime> {
     NaiveDateTime::parse_from_str(value["dateTime"].as_str()?, READ_FORMAT).ok()
 }
@@ -86,6 +102,7 @@ pub fn parse_work_plan(body: &Value) -> Vec<WorkPlanDay> {
                 ),
                 start: start.time(),
                 end: end.time(),
+                occurrence: item.clone(),
             })
         })
         .collect()
@@ -112,15 +129,11 @@ impl<T: CardTransport> Calendar<T> {
     /// Changes where the user works on one day of the plan.
     pub async fn set_work_plan_location(
         &self,
-        occurrence_id: &str,
+        day: &WorkPlanDay,
         location: WorkPlanLocation,
     ) -> Result<()> {
-        let url = occurrence_url(occurrence_id);
-        let request = Request::with_body(
-            Method::Patch,
-            &url,
-            json!({"workLocationType": location.as_graph()}),
-        );
+        let url = occurrence_url(&day.id);
+        let request = Request::with_body(Method::Put, &url, occurrence_body(day, location));
         let answer = self
             .transport
             .send(request, Scope::graph(CALENDARS_SCOPE))
@@ -141,7 +154,7 @@ mod tests {
     use chrono::{NaiveDate, NaiveTime};
     use serde_json::json;
 
-    use super::{WorkPlanLocation, parse_work_plan, work_plan_url};
+    use super::{WorkPlanLocation, occurrence_body, parse_work_plan, work_plan_url};
 
     #[test]
     fn work_plan_days_keep_their_location_and_hours() {
@@ -165,6 +178,28 @@ mod tests {
         assert_eq!(days[1].start, NaiveTime::from_hms_opt(7, 0, 0).unwrap());
         assert_eq!(days[1].end, NaiveTime::from_hms_opt(16, 30, 0).unwrap());
         assert_eq!(days[2].location, WorkPlanLocation::Unspecified);
+    }
+
+    #[test]
+    fn a_change_is_the_whole_occurrence_with_its_recurrence() {
+        let day = &parse_work_plan(&json!({"value": [
+            {"id": "a", "recurrenceId": "r", "workLocationType": "office", "placeId": "desk",
+             "start": {"dateTime": "2026-11-30T08:00:00.0000000", "timeZone": "W. Europe Standard Time"},
+             "end": {"dateTime": "2026-11-30T17:00:00.0000000", "timeZone": "W. Europe Standard Time"}}
+        ]}))[0];
+        assert_eq!(
+            occurrence_body(day, WorkPlanLocation::Remote),
+            json!({
+                "recurrenceId": "r",
+                "start": {"dateTime": "2026-11-30T08:00:00.0000000", "timeZone": "W. Europe Standard Time"},
+                "end": {"dateTime": "2026-11-30T17:00:00.0000000", "timeZone": "W. Europe Standard Time"},
+                "workLocationType": "remote"
+            })
+        );
+        assert_eq!(
+            occurrence_body(day, WorkPlanLocation::Office)["placeId"],
+            "desk"
+        );
     }
 
     #[test]
