@@ -15,7 +15,8 @@ const POLL_STEP: Duration = Duration::from_millis(100);
 const CHECK_WAIT: Duration = Duration::from_millis(250);
 const HIDE_POLL: Duration = Duration::from_millis(500);
 const HIDE_STABLE_CHECKS: u32 = 4;
-const STOP_TIMEOUT: Duration = Duration::from_secs(2);
+// MSAL key budget (500 ms) + CDP close (up to 3 s) + profile release (2 s) must fit.
+const STOP_TIMEOUT: Duration = Duration::from_secs(6);
 
 static LINUX_BROWSER: OnceLock<browser::Browser> = OnceLock::new();
 static LIVE_RETRY: OnceLock<Mutex<Option<Arc<Notify>>>> = OnceLock::new();
@@ -539,5 +540,12 @@ mod tests {
         for _ in 0..HIDE_STABLE_CHECKS + 2 {
             assert!(!tracker.step(Some(&stuck_login), true));
         }
+    }
+
+    #[test]
+    fn stop_timeout_covers_browser_shutdown() {
+        let timeouts = browser::Timeouts::default();
+        let worst_case = timeouts.msal_key + timeouts.profile_release + Duration::from_secs(3);
+        assert!(STOP_TIMEOUT >= worst_case);
     }
 }

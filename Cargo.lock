@@ -1103,6 +1103,7 @@ version = "0.6.1"
 dependencies = [
  "directories",
  "futures-util",
+ "log",
  "serde",
  "serde_json",
  "session",

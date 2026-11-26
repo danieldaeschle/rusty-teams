@@ -9,6 +9,7 @@ publish.workspace = true
 directories.workspace = true
 futures-util.workspace = true
 serde.workspace = true
+log = "0.4"
 serde_json.workspace = true
 session.workspace = true
 thiserror.workspace = true
