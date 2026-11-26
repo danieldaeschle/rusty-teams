@@ -14,6 +14,23 @@ const MAX_WIDTH: f32 = 480.;
 struct LinkTooltipState {
     active: Rc<RefCell<Option<ActiveTooltip>>>,
     long_press: Rc<Cell<bool>>,
+    shown_url: Rc<RefCell<Option<String>>>,
+    pressed: Rc<Cell<bool>>,
+}
+
+impl LinkTooltipState {
+    /// A shown tooltip belongs to one link: moving onto another link hides it, so it can show
+    /// again with the new URL. No tooltip while a button is held, as during a text selection.
+    fn hovers(&self, url: Option<String>) -> bool {
+        let Some(url) = url.filter(|_| !self.pressed.get()) else {
+            return false;
+        };
+        let showing = matches!(
+            self.active.borrow().as_ref(),
+            Some(ActiveTooltip::Visible { .. } | ActiveTooltip::WaitingForHide { .. })
+        );
+        !showing || self.shown_url.borrow().as_deref() == Some(url.as_str())
+    }
 }
 
 /// One frame of a text element's link tooltip: made in prepaint, wired up in paint.
@@ -51,26 +68,43 @@ impl LinkTooltip {
     ) {
         let url_at = Rc::new(move |position| url_at(position).filter(|url| is_openable_link(url)));
         let build = Rc::new({
-            let url_at = url_at.clone();
+            let (url_at, shown_url) = (url_at.clone(), self.state.shown_url.clone());
             move |window: &mut Window, cx: &mut App| {
                 let url = url_at(window.mouse_position())?;
+                *shown_url.borrow_mut() = Some(url.clone());
                 let tooltip =
                     Tooltip::element(move |_, _| div().max_w(px(MAX_WIDTH)).child(url.clone()));
                 Some((tooltip.build(window, cx), false))
             }
         });
         let hovered = Rc::new({
-            let (hitbox, url_at) = (hitbox.clone(), url_at.clone());
+            let (hitbox, url_at, state) = (hitbox.clone(), url_at.clone(), self.state.clone());
             move |window: &Window| {
-                hitbox.is_hovered(window) && url_at(window.mouse_position()).is_some()
+                hitbox.is_hovered(window) && state.hovers(url_at(window.mouse_position()))
             }
         });
         // Prepaint has no hover state yet, so it tests the bounds instead.
         let hovered_in_prepaint = Rc::new({
-            let bounds = hitbox.bounds;
+            let (bounds, state) = (hitbox.bounds, self.state.clone());
             move |window: &Window| {
                 let position = window.mouse_position();
-                bounds.contains(&position) && url_at(position).is_some()
+                bounds.contains(&position) && state.hovers(url_at(position))
+            }
+        });
+        let pressed = self.state.pressed.clone();
+        let press_hitbox = hitbox.clone();
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _| {
+            if phase.bubble()
+                && event.button == MouseButton::Left
+                && press_hitbox.is_hovered(window)
+            {
+                pressed.set(true);
+            }
+        });
+        let pressed = self.state.pressed.clone();
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, _| {
+            if phase.capture() && event.button == MouseButton::Left {
+                pressed.set(false);
             }
         });
         register_tooltip_mouse_handlers(
