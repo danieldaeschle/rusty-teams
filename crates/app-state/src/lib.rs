@@ -49,6 +49,7 @@ pub mod outgoing;
 pub mod own_status;
 pub mod pending_rows;
 pub mod people;
+pub mod people_calendar_sync;
 pub mod post_follow;
 pub mod presence_follow;
 pub mod profile_model;

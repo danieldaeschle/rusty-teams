@@ -875,6 +875,12 @@ impl EventPeek {
                 peek.clone(),
             ));
         }
+        if matches!(
+            self.event.source,
+            CalendarSource::Person | CalendarSource::Ics
+        ) {
+            return buttons;
+        }
         let delete_state = self.state.clone();
         let delete_key = self.event.object_id.clone();
         buttons.push(

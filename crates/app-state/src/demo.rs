@@ -847,6 +847,7 @@ pub fn activity_snapshot() -> ActivitySnapshot {
 }
 
 pub fn seed(store: &Store) {
+    seed_people_calendars(store);
     let chats: Vec<ChatRecord> = demo_chats()
         .into_iter()
         .map(|demo| ChatRecord {
@@ -995,6 +996,19 @@ fn seed_agent_access(store: &Store) {
 
 fn photo(palette: &Palette) -> AvatarState {
     crate::data::avatar_state_from("image/png", encode_png(palette), false)
+}
+
+/// Two colleagues under People's calendars: one shares titles, one only free/busy.
+fn seed_people_calendars(store: &Store) {
+    let mut accounts = store::load_calendar_accounts(store);
+    for (color, mail, name) in [
+        (3, "mara.lindqvist@example.com", "Mara Lindqvist"),
+        (5, "lea.schneider@example.com", "Lea Schneider"),
+    ] {
+        accounts.add_person_calendar(mail, name);
+        accounts.set_person_color(mail, color);
+    }
+    let _ = store::save_calendar_accounts(store, &accounts);
 }
 
 pub fn seed_directory(state: &mut AppState) {

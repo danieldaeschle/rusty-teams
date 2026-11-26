@@ -336,6 +336,9 @@ impl AppState {
                     chatsvc::CalendarSource::Ics => {
                         Err("Read-only ICS subscriptions cannot delete events".into())
                     }
+                    chatsvc::CalendarSource::Person => {
+                        Err("Other people's calendars are read-only".into())
+                    }
                 }
             }
         });
@@ -582,6 +585,9 @@ impl AppState {
                     }
                     chatsvc::CalendarSource::Ics => {
                         Err("Read-only ICS subscriptions cannot RSVP".into())
+                    }
+                    chatsvc::CalendarSource::Person => {
+                        Err("Other people's calendars are read-only".into())
                     }
                 }
             }

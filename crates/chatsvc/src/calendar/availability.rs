@@ -2,8 +2,8 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::{Value, json};
 use session::{GRAPH, Method, Request, Scope};
 
-use super::Calendar;
 use super::schedule::CALENDARS_SCOPE;
+use super::{Calendar, ShowAs};
 use crate::cards::CardTransport;
 use crate::error::{Error, Result};
 
@@ -18,6 +18,20 @@ pub struct BusyTime {
     pub start: DateTime<Utc>,
     pub end: DateTime<Utc>,
     pub status: String,
+    /// Only when the owner shares titles; free/busy-only calendars leave it out.
+    pub subject: Option<String>,
+    pub location: Option<String>,
+}
+
+impl BusyTime {
+    pub fn show_as(&self) -> ShowAs {
+        match self.status.to_ascii_lowercase().as_str() {
+            "tentative" => ShowAs::Tentative,
+            "oof" => ShowAs::OutOfOffice,
+            "workingelsewhere" => ShowAs::WorkingElsewhere,
+            _ => ShowAs::Busy,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,10 +67,18 @@ fn busy_time(item: &Value) -> Option<BusyTime> {
     if status.eq_ignore_ascii_case(FREE) {
         return None;
     }
+    let filled = |key: &str| {
+        item.get(key)
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
     Some(BusyTime {
         start: utc_time(item.get("start")?)?,
         end: utc_time(item.get("end")?)?,
         status,
+        subject: filled("subject"),
+        location: filled("location"),
     })
 }
 
@@ -121,7 +143,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use serde_json::json;
 
-    use super::{parse_schedules, schedule_request_body};
+    use super::{ShowAs, parse_schedules, schedule_request_body};
 
     #[test]
     fn the_request_asks_in_utc() {
@@ -152,5 +174,21 @@ mod tests {
             Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap()
         );
         assert_eq!(schedules[1].error.as_deref(), Some("not found"));
+    }
+
+    #[test]
+    fn shared_titles_and_status_are_kept() {
+        let body = json!({"value": [
+            {"scheduleId": "mara@example.com", "scheduleItems": [
+                {"status": "oof", "subject": "Holiday", "location": "", "start": {"dateTime": "2026-11-20T09:00:00.0000000", "timeZone": "UTC"}, "end": {"dateTime": "2026-11-20T10:00:00.0000000", "timeZone": "UTC"}},
+                {"status": "busy", "start": {"dateTime": "2026-11-20T11:00:00.0000000", "timeZone": "UTC"}, "end": {"dateTime": "2026-11-20T12:00:00.0000000", "timeZone": "UTC"}}
+            ]}
+        ]});
+        let busy = &parse_schedules(&body)[0].busy;
+        assert_eq!(busy[0].subject.as_deref(), Some("Holiday"));
+        assert_eq!(busy[0].location, None);
+        assert_eq!(busy[0].show_as(), ShowAs::OutOfOffice);
+        assert_eq!(busy[1].subject, None);
+        assert_eq!(busy[1].show_as(), ShowAs::Busy);
     }
 }

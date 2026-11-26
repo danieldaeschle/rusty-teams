@@ -276,6 +276,9 @@ impl MeetingToasts {
 fn reminder_source_events(state: &AppState) -> Vec<CalendarEvent> {
     let mut events = state.calendar_events.clone();
     for event in &state.calendar_week.events {
+        if event.source == chatsvc::CalendarSource::Person {
+            continue;
+        }
         if !events
             .iter()
             .any(|existing| existing.object_id == event.object_id)
