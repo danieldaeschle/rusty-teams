@@ -148,11 +148,13 @@ class DocumentationTests(unittest.TestCase):
 
 
 class FakeGitHub:
-    def __init__(self):
+    def __init__(self, responses=None):
         self.calls = []
+        self.responses = responses or {}
 
     def request(self, method, path, payload=None):
         self.calls.append((method, path, payload))
+        return self.responses.get(path)
 
 
 class LabelTests(unittest.TestCase):
@@ -177,6 +179,30 @@ class LabelTests(unittest.TestCase):
                 ("POST", "/issues/5/labels", {"labels": [pr_gate.LABEL_NEEDS_REVIEW]}),
             ],
         )
+
+
+class RerunTests(unittest.TestCase):
+    RUNS_PATH = "/actions/workflows/pr-gate.yml/runs?head_sha=abc&event=pull_request_target&per_page=20"
+    PULL = {"number": 5, "head": {"sha": "abc"}}
+
+    def runs(self, *runs):
+        return FakeGitHub({self.RUNS_PATH: {"workflow_runs": list(runs)}})
+
+    def test_the_latest_failed_run_is_run_again(self):
+        github = self.runs(
+            {"id": 1, "created_at": "2026-11-25T10:04:38Z", "conclusion": "failure"},
+            {"id": 2, "created_at": "2026-11-25T10:05:01Z", "conclusion": "failure"},
+        )
+        pr_gate.rerun_failed_gate(github, self.PULL)
+        self.assertEqual(github.calls[-1], ("POST", "/actions/runs/2/rerun", None))
+
+    def test_a_passing_latest_run_is_left_alone(self):
+        github = self.runs(
+            {"id": 1, "created_at": "2026-11-25T10:04:38Z", "conclusion": "failure"},
+            {"id": 2, "created_at": "2026-11-25T10:05:01Z", "conclusion": "success"},
+        )
+        pr_gate.rerun_failed_gate(github, self.PULL)
+        self.assertEqual(len(github.calls), 1)
 
 
 if __name__ == "__main__":

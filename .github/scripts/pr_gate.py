@@ -47,6 +47,7 @@ LABEL_NO_VISUAL = "gate: no visual"
 LABEL_SKIP = "gate: skip"
 
 COMMENT_MARKER = "<!-- pr-gate -->"
+GATE_WORKFLOW = "pr-gate.yml"
 DEFAULT_REPOSITORY = "danieldaeschle/rusty-teams"
 
 
@@ -308,6 +309,16 @@ def run_gate(github: GitHub, number: int, enforce: bool) -> bool:
     return is_draft or not missing
 
 
+def rerun_failed_gate(github: GitHub, raw: dict) -> None:
+    """A sweep or an issue label passes the PR, but the red check sits on the head commit's own run: run that again."""
+    sha = urllib.parse.quote(raw["head"]["sha"])
+    runs = github.request("GET", f"/actions/workflows/{GATE_WORKFLOW}/runs?head_sha={sha}&event=pull_request_target&per_page=20")
+    latest = max((runs or {}).get("workflow_runs", []), key=lambda run: run["created_at"], default=None)
+    if latest and latest.get("conclusion") == "failure":
+        github.request("POST", f"/actions/runs/{latest['id']}/rerun")
+        print(f"#{raw['number']}: re-ran the failed gate run {latest['id']}")
+
+
 def dry_run(github: GitHub, number: int) -> int:
     _, pull_request = load_pull_request(github, number)
     missing = check(pull_request)
@@ -335,10 +346,14 @@ def main() -> int:
     number = os.environ.get("PR_NUMBER", "").strip()
     if number:
         return 0 if run_gate(github, int(number), enforce=True) else 1
+    issue = os.environ.get("ISSUE_NUMBER", "").strip()
     failed = []
     for raw in github.paged("/pulls?state=open"):
+        if issue and int(issue) not in linked_issue_numbers(raw.get("body") or ""):
+            continue
         try:
-            run_gate(github, raw["number"], enforce=False)
+            if run_gate(github, raw["number"], enforce=False):
+                rerun_failed_gate(github, raw)
         except urllib.error.HTTPError as error:
             print(f"::warning::#{raw['number']}: {error}")
             failed.append(raw["number"])

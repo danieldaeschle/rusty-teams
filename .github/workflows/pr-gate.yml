@@ -6,15 +6,18 @@ name: PR gate
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  issues:
+    types: [labeled, unlabeled]
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: read
   issues: write
   pull-requests: write
 
 concurrency:
-  group: pr-gate-${{ github.event.pull_request.number || 'all' }}
+  group: pr-gate-${{ github.event.pull_request.number || github.event.issue.number || 'all' }}
   cancel-in-progress: true
 
 jobs:
@@ -22,6 +25,7 @@ jobs:
     name: Ready for review
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    if: github.event_name != 'issues' || github.event.label.name == 'status: accepted'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -33,5 +37,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: python3 -I .github/scripts/pr_gate.py
 
