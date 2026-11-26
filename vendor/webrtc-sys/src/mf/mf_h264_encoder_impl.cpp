@@ -40,6 +40,18 @@ bool ContainsIdrNal(const uint8_t* data, size_t size) {
   return false;
 }
 
+// Hardware encoders (AMD's amdh264enc64) copy the NV12 input in 16-row and
+// 16-column blocks and read past a buffer sized to the exact frame.
+constexpr uint32_t kEncoderBlock = 16;
+
+uint32_t EvenSize(int size) {
+  return size > 0 ? static_cast<uint32_t>(size) & ~1u : 0;
+}
+
+uint32_t AlignedSize(uint32_t size) {
+  return (size + kEncoderBlock - 1) / kEncoderBlock * kEncoderBlock;
+}
+
 }  // namespace
 
 MFH264EncoderImpl::MFH264EncoderImpl(const Environment& env,
@@ -257,8 +269,8 @@ int32_t MFH264EncoderImpl::InitEncode(const VideoCodec* inst,
   }
   mf_started_ = true;
 
-  width_ = inst->width;
-  height_ = inst->height;
+  width_ = EvenSize(inst->width);
+  height_ = EvenSize(inst->height);
   max_fps_ = std::max<uint32_t>(inst->maxFramerate, 1);
   target_bps_ = std::max<uint32_t>(inst->startBitrate * 1000, 150000);
   frame_index_ = 0;
@@ -556,11 +568,17 @@ int32_t MFH264EncoderImpl::Encode(
     return WEBRTC_VIDEO_CODEC_ENCODER_FAILURE;
   }
 
-  if (static_cast<uint32_t>(i420->width()) != width_ ||
-      static_cast<uint32_t>(i420->height()) != height_) {
+  const uint32_t frame_width = EvenSize(i420->width());
+  const uint32_t frame_height = EvenSize(i420->height());
+  if (frame_width < 2 || frame_height < 2) {
+    return WEBRTC_VIDEO_CODEC_NO_OUTPUT;
+  }
+  if (frame_width != width_ || frame_height != height_) {
     // Resolution changed dynamically: re-init MFT or fall back cleanly.
-    width_ = static_cast<uint32_t>(i420->width());
-    height_ = static_cast<uint32_t>(i420->height());
+    width_ = frame_width;
+    height_ = frame_height;
+    RTC_LOG(LS_INFO) << "MFH264: input size changed to " << width_ << "x"
+                     << height_;
     mft_.Reset();
     codec_api_.Reset();
     event_gen_.Reset();
@@ -583,9 +601,11 @@ int32_t MFH264EncoderImpl::Encode(
   }
 
   const uint32_t nv12_size = width_ * height_ * 3 / 2;
+  const uint32_t padded_size =
+      AlignedSize(width_) * AlignedSize(height_) * 3 / 2;
   ComPtr<IMFMediaBuffer> in_buffer;
   ComPtr<IMFSample> in_sample;
-  if (FAILED(MFCreateMemoryBuffer(nv12_size, &in_buffer)) ||
+  if (FAILED(MFCreateMemoryBuffer(padded_size, &in_buffer)) ||
       FAILED(MFCreateSample(&in_sample))) {
     return WEBRTC_VIDEO_CODEC_ENCODER_FAILURE;
   }
@@ -594,6 +614,7 @@ int32_t MFH264EncoderImpl::Encode(
   if (FAILED(in_buffer->Lock(&dst, nullptr, nullptr)) || !dst) {
     return WEBRTC_VIDEO_CODEC_ENCODER_FAILURE;
   }
+  std::memset(dst + nv12_size, 0, padded_size - nv12_size);
   uint8_t* dst_y = dst;
   uint8_t* dst_uv = dst + width_ * height_;
   libyuv::I420ToNV12(i420->DataY(), i420->StrideY(), i420->DataU(),

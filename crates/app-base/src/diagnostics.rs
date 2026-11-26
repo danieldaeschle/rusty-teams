@@ -21,7 +21,8 @@ const OWN_CRATE_PREFIXES: [&str; 10] = [
     "teams",
 ];
 
-const WEBRTC_AUDIO_MARKERS: [&str; 5] = [
+const WEBRTC_KEPT_MARKERS: [&str; 6] = [
+    "MFH264",
     "AdmProxy",
     "audio_device",
     "core_audio",
@@ -265,7 +266,7 @@ fn keeps_webrtc_line(level: log::Level, text: &str) -> bool {
     {
         return true;
     }
-    WEBRTC_AUDIO_MARKERS
+    WEBRTC_KEPT_MARKERS
         .iter()
         .any(|marker| text.contains(marker))
         && !WEBRTC_SKIPPED.iter().any(|skipped| text.contains(skipped))
@@ -283,6 +284,14 @@ fn is_endpoint_dump(text: &str) -> bool {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn hardware_encoder_lines_are_kept() {
+        assert!(keeps_webrtc_line(
+            log::Level::Info,
+            "(mf_h264_encoder_impl.cc:250): MFH264: initialized 868x488 @30fps"
+        ));
+    }
 
     #[test]
     fn audio_lines_are_kept_and_endpoint_dumps_and_noise_are_skipped() {
