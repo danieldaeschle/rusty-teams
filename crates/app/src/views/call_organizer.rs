@@ -94,7 +94,7 @@ fn lobby_list(app: &Entity<AppState>, guests: &[(String, String)]) -> Div {
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .child(truncated(name, LOBBY_NAME_LIMIT)),
                 )
                 .child(
@@ -704,7 +704,7 @@ fn focus_chip(label: &'static str, glyph: IconName, background: Hsla, foreground
         .rounded_full()
         .bg(background)
         .text_color(foreground)
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .child(icon(glyph, 13., foreground))
         .child(label)
@@ -817,7 +817,7 @@ pub fn render_focus_stage(
                 .rounded(px(6.))
                 .bg(hsla(0., 0., 0., 0.6))
                 .text_color(theme::white())
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(name.clone())
                 .when(muted, |plate| {
@@ -864,7 +864,7 @@ pub fn captions_hint_chip(model: &CallModel) -> Option<AnyElement> {
                     .rounded_full()
                     .bg(hsla(0., 0., 0., CAPTION_BACKGROUND))
                     .text_color(theme::white())
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .child(text),
             )
             .into_any_element(),

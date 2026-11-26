@@ -417,7 +417,7 @@ impl CalendarView {
                     })
                     .child(
                         div()
-                            .text_size(px(20.))
+                            .text_size(theme::text_title())
                             .line_height(px(24.))
                             .text_color(number_color)
                             .when(is_today, |number| number.font_weight(FontWeight::SEMIBOLD))
@@ -425,7 +425,7 @@ impl CalendarView {
                     )
                     .child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(name_color)
                             .truncate()
                             .child(weekday_name(day.date.weekday(), WeekdayWidth::Full)),
@@ -474,7 +474,7 @@ impl CalendarView {
                                 .items_center()
                                 .rounded(px(6.))
                                 .bg(event_fill(event_look(&event), color))
-                                .text_size(px(12.))
+                                .text_size(theme::text_small())
                                 .truncate()
                                 .cursor_pointer()
                                 .child(event_title(&event))
@@ -653,7 +653,7 @@ impl CalendarView {
                                     .pr(px(8.))
                                     .flex()
                                     .justify_end()
-                                    .text_size(px(11.))
+                                    .text_size(theme::text_caption())
                                     .text_color(theme::text_muted())
                                     .when(hour > 0, |label| {
                                         label.child(hour_label(hour, twelve_hour))
@@ -760,7 +760,7 @@ fn load_notices(
                 .flex_none()
                 .px(px(16.))
                 .pb(px(6.))
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .child(tr("calendar.view.loading")),
         );
@@ -786,7 +786,7 @@ fn load_notices(
                 .items_center()
                 .rounded(px(6.))
                 .bg(theme::red_tint())
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text())
                 .child(
                     div()

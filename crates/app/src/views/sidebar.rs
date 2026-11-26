@@ -134,7 +134,7 @@ impl Render for DragGhost {
             .bg(theme::surface_raised())
             .border_1()
             .border_color(theme::accent())
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::text())
             .child(self.title.clone())
     }
@@ -385,7 +385,7 @@ fn local_preview_row(preview: &LocalPreview, color: Hsla) -> Div {
         .overflow_hidden()
         .gap(px(4.))
         .items_center()
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .text_color(color);
     match preview {
         LocalPreview::Draft(text) => row
@@ -772,14 +772,14 @@ impl SidebarView {
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(14.))
+                            .text_size(theme::text_body())
                             .text_color(theme::text())
                             .child(tr("sidebar.new_chat")),
                     )
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(12.5))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child(tr("sidebar.draft")),
                     ),
@@ -835,7 +835,7 @@ impl SidebarView {
                     .flex_1()
                     .min_w_0()
                     .truncate()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_soft())
                     .child(section.name.clone()),
@@ -883,7 +883,7 @@ impl SidebarView {
             .child(
                 div()
                     .flex_1()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_soft())
                     .child(tr("sidebar.quick_views")),
@@ -928,7 +928,7 @@ impl SidebarView {
             .child(symbol(glyph, QUICK_ICON_SIZE, theme::text_soft()))
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text())
                     .child(view.title()),
             )
@@ -956,7 +956,7 @@ impl SidebarView {
             .items_center()
             .rounded(px(6.))
             .cursor_pointer()
-            .text_size(px(12.5))
+            .text_size(theme::text_small())
             .text_color(theme::accent_text())
             .hover(|row| row.bg(theme::row_hover()))
             .child(label)
@@ -995,7 +995,7 @@ impl SidebarView {
             .flex_1()
             .min_w_0()
             .truncate()
-            .text_size(px(14.))
+            .text_size(theme::text_body())
             .font_weight(if unread {
                 FontWeight::BOLD
             } else {
@@ -1008,7 +1008,7 @@ impl SidebarView {
             .flex_none()
             .gap(px(4.))
             .items_center()
-            .text_size(px(11.))
+            .text_size(theme::text_caption())
             .text_color(if unread {
                 theme::accent_text()
             } else {
@@ -1029,7 +1029,7 @@ impl SidebarView {
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
-                    .text_size(px(12.5))
+                    .text_size(theme::text_small())
                     .text_color(theme::accent_text())
                     .child(div().truncate().child(format!("Proposal from {agent}"))),
             ),
@@ -1041,7 +1041,7 @@ impl SidebarView {
                     .overflow_hidden()
                     .gap(px(4.))
                     .items_center()
-                    .text_size(px(12.5))
+                    .text_size(theme::text_small())
                     .when(italic, |preview| preview.italic())
                     .text_color(preview_color)
                     .child(div().truncate().child(text))
@@ -1282,7 +1282,7 @@ impl SidebarView {
                         .h(px(HINT_HEIGHT))
                         .flex()
                         .items_center()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .italic()
                         .text_color(theme::text_faint())
                         .child(EMPTY_FOLDER_HINT),
@@ -1316,7 +1316,7 @@ impl SidebarView {
                     .h(px(SEE_MORE_HEIGHT))
                     .flex()
                     .items_center()
-                    .text_size(px(12.5))
+                    .text_size(theme::text_small())
                     .italic()
                     .text_color(theme::text_faint())
                     .child(tr("sidebar.loading_older")),
@@ -1400,7 +1400,7 @@ impl SidebarView {
                                     .flex_1()
                                     .min_w_0()
                                     .truncate()
-                                    .text_size(px(13.5))
+                                    .text_size(theme::text_label())
                                     .font_weight(name_weight(name_style))
                                     .text_color(name_color(name_style))
                                     .child(format!("{} / {}", team.name, channel.name)),
@@ -1409,7 +1409,7 @@ impl SidebarView {
                             .child(
                                 div()
                                     .flex_none()
-                                    .text_size(px(11.))
+                                    .text_size(theme::text_caption())
                                     .text_color(if unread {
                                         theme::accent_text()
                                     } else {
@@ -1427,7 +1427,7 @@ impl SidebarView {
                                     .flex_1()
                                     .min_w_0()
                                     .truncate()
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_muted())
                                     .child(team.name.clone()),
                             )
@@ -1458,7 +1458,7 @@ impl SidebarView {
             .px(px(16.))
             .flex()
             .items_center()
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text_soft())
             .child(label.into())
@@ -1517,7 +1517,7 @@ impl SidebarView {
                         .flex_1()
                         .min_w_0()
                         .truncate()
-                        .text_size(px(13.5))
+                        .text_size(theme::text_label())
                         .font_weight(name_weight(name_style))
                         .text_color(name_color(name_style))
                         .child(entry.team.name.clone()),
@@ -1603,7 +1603,7 @@ impl SidebarView {
             .rounded(px(8.))
             .cursor_pointer()
             .hover(|row| row.bg(theme::row_hover()))
-            .text_size(px(13.5))
+            .text_size(theme::text_label())
             .text_color(theme::accent_text())
             .child(if open {
                 tr("sidebar.see_fewer_channels")
@@ -1644,7 +1644,7 @@ impl SidebarView {
             ))
             .child(
                 div()
-                    .text_size(px(12.5))
+                    .text_size(theme::text_small())
                     .text_color(theme::text_muted())
                     .child(label),
             )
@@ -1689,7 +1689,7 @@ impl SidebarView {
                         div()
                             .min_w_0()
                             .truncate()
-                            .text_size(px(13.5))
+                            .text_size(theme::text_label())
                             .font_weight(name_weight(name_style))
                             .text_color(name_color(name_style))
                             .child(channel.name.clone()),
@@ -1706,7 +1706,7 @@ impl SidebarView {
             .child(
                 div()
                     .flex_none()
-                    .text_size(px(11.))
+                    .text_size(theme::text_caption())
                     .text_color(theme::text_muted())
                     .child(channel_activity(channel)),
             )

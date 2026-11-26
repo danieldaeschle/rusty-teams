@@ -24,7 +24,7 @@ fn text_button(id: ElementId, label: &'static str) -> Stateful<Div> {
     bar_button(id)
         .w_auto()
         .px(px(8.))
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .text_color(theme::text_soft())
         .child(label)
 }

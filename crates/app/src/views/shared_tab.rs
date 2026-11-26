@@ -104,7 +104,7 @@ fn segment(
         .py(px(4.))
         .rounded(px(6.))
         .cursor_pointer()
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .font_weight(if active {
             FontWeight::SEMIBOLD
         } else {
@@ -194,7 +194,7 @@ fn crumb_trail(path: &LibraryPath, run: &SharedRun) -> Div {
                 .py(px(2.))
                 .rounded(px(4.))
                 .truncate()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .font_weight(if current {
                     FontWeight::SEMIBOLD
                 } else {
@@ -232,7 +232,7 @@ fn column_header() -> Div {
         .px(px(SIDE_PADDING))
         .gap(px(12.))
         .items_center()
-        .text_size(px(11.5))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_faint())
         .child(column(None).pl(px(BADGE_SIZE + 8.)).child("Name"))
@@ -278,14 +278,14 @@ fn entry_row(
         .child(
             div()
                 .truncate()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text())
                 .child(entry.name.clone()),
         )
         .children(download.map(|label| {
             div()
                 .flex_none()
-                .text_size(px(11.5))
+                .text_size(theme::text_caption())
                 .text_color(theme::accent_text())
                 .child(label)
         }));
@@ -298,7 +298,7 @@ fn entry_row(
         .gap(px(12.))
         .items_center()
         .cursor_pointer()
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .text_color(theme::text_muted())
         .hover(|row| row.bg(theme::row_hover()))
         .on_click(move |_, window, cx| open_run(SharedCommand::Open(index), window, cx))
@@ -381,7 +381,7 @@ fn centered() -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .text_color(theme::text_muted())
 }
 
@@ -413,7 +413,7 @@ fn new_folder_row(input: &Entity<InputState>) -> Div {
         )
         .child(
             div()
-                .text_size(px(11.5))
+                .text_size(theme::text_caption())
                 .text_color(theme::text_faint())
                 .child("Enter to create, Esc to cancel"),
         )
@@ -497,7 +497,7 @@ pub fn render_library(view: LibraryView, run: &SharedRun) -> AnyElement {
             div()
                 .px(px(SIDE_PADDING))
                 .pb(px(6.))
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::accent_text())
                 .child(status.to_owned())
         }))
@@ -520,7 +520,7 @@ fn chip(
         .py(px(4.))
         .rounded_full()
         .cursor_pointer()
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .bg(if active {
             theme::accent()
         } else {
@@ -588,7 +588,7 @@ pub fn item_row(
         (!item.post_label.is_empty()).then(|| format!("\u{201c}{}\u{201d}", item.post_label));
     let source = h_flex()
         .gap(px(4.))
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .text_color(theme::text_muted())
         .child(format!("{} in", item.author))
         .children(post.map(|label| {
@@ -622,7 +622,7 @@ pub fn item_row(
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text())
                         .child(item.name().to_owned()),
                 )
@@ -631,7 +631,7 @@ pub fn item_row(
         .children(download.map(|label| {
             div()
                 .flex_none()
-                .text_size(px(11.5))
+                .text_size(theme::text_caption())
                 .text_color(theme::accent_text())
                 .child(label)
         }))
@@ -662,7 +662,7 @@ pub fn render_messages(view: MessagesView, run: &SharedRun) -> AnyElement {
                             .px(px(SIDE_PADDING))
                             .pt(px(12.))
                             .pb(px(4.))
-                            .text_size(px(11.5))
+                            .text_size(theme::text_caption())
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::text_faint())
                             .child(group.label()),

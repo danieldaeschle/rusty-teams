@@ -80,7 +80,7 @@ pub struct RecapView<'a> {
 fn section(title: &'static str) -> Div {
     v_flex().w_full().flex_none().gap(px(10.)).child(
         div()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(theme::text())
             .child(title),
@@ -89,7 +89,7 @@ fn section(title: &'static str) -> Div {
 
 fn muted(text: impl Into<SharedString>) -> Div {
     div()
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .text_color(theme::text_muted())
         .child(text.into())
 }
@@ -152,7 +152,7 @@ fn picker(view: &RecapView, offset: FixedOffset, today: NaiveDate, run: &RecapRu
                         .py(px(4.))
                         .rounded_full()
                         .cursor_pointer()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .bg(if active {
                             theme::accent()
                         } else {
@@ -178,7 +178,7 @@ fn recording_card(details: &RecordingDetails) -> Div {
         .right(px(12.))
         .bottom(px(10.))
         .justify_between()
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .text_color(gpui_kit::white())
         .child(
             div().child(
@@ -224,7 +224,7 @@ fn recording_section(view: &RecapView, run: &RecapRun) -> Div {
                 .map(|expires_at| days_until_expiry(expires_at, view.now));
             let expiry = days.map(|days| {
                 div()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(if expiry_is_urgent(days) {
                         theme::amber()
                     } else {
@@ -315,12 +315,12 @@ fn turn_row(turn: &TranscriptTurn, query: &str) -> Div {
         .flex_none()
         .gap(px(12.))
         .items_start()
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .child(
             div()
                 .w(px(TIME_WIDTH))
                 .flex_none()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_faint())
                 .child(clock_label(turn.start_seconds as u64)),
         )
@@ -414,7 +414,7 @@ fn attendance_row(record: &AttendanceRecord, offset: FixedOffset) -> Div {
         .w_full()
         .flex_none()
         .gap(px(12.))
-        .text_size(px(12.5))
+        .text_size(theme::text_small())
         .child(
             div()
                 .w(px(NAME_COLUMN))
@@ -437,7 +437,7 @@ fn attendance_header() -> Div {
         .w_full()
         .flex_none()
         .gap(px(12.))
-        .text_size(px(11.5))
+        .text_size(theme::text_caption())
         .text_color(theme::text_faint())
         .child(cell("Name", NAME_COLUMN))
         .child(cell("Joined", ATTENDANCE_COLUMN))
@@ -472,7 +472,7 @@ fn files_section(view: &RecapView) -> Option<Div> {
             .child(
                 div()
                     .px(px(SIDE_PADDING))
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
                     .child("Files"),
@@ -494,7 +494,7 @@ pub fn render_recap(view: RecapView, run: &RecapRun) -> AnyElement {
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(13.))
+            .text_size(theme::text_label())
             .text_color(theme::text_muted())
             .child(EMPTY_RECAP)
             .into_any_element()

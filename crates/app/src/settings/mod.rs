@@ -7,6 +7,7 @@ mod calls;
 mod chats;
 mod devices;
 mod dialog;
+mod font_picker;
 mod general;
 mod help;
 mod mcp;

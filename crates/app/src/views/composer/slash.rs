@@ -217,7 +217,7 @@ fn row(index: usize, command: SlashCommand, selected: bool) -> Stateful<Div> {
                 .w(px(NAME_WIDTH))
                 .flex_none()
                 .truncate()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text())
                 .child(format!("/{}", command.name())),
@@ -227,7 +227,7 @@ fn row(index: usize, command: SlashCommand, selected: bool) -> Stateful<Div> {
                 .flex_1()
                 .min_w_0()
                 .truncate()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .child(command.description()),
         )
@@ -238,7 +238,7 @@ fn label(text: &'static str) -> Div {
         .h(px(HEADER_HEIGHT))
         .px(px(8.))
         .items_center()
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_muted())
         .child(text)
@@ -274,7 +274,7 @@ pub fn render(
                     .flex_none()
                     .px(px(8.))
                     .items_center()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text_muted())
                     .child(NO_RESULTS),
             )

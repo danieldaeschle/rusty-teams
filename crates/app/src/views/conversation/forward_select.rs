@@ -137,7 +137,7 @@ impl ConversationView {
                             .child(
                                 div()
                                     .truncate()
-                                    .text_size(px(13.))
+                                    .text_size(theme::text_label())
                                     .text_color(theme::text())
                                     .child(selected_count_label(count)),
                             ),
@@ -166,7 +166,7 @@ fn next_button(enabled: bool, cx: &mut Context<ConversationView>) -> Stateful<Di
         .rounded(px(BUTTON_RADIUS))
         .bg(theme::accent())
         .text_color(theme::on_accent())
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .font_weight(FontWeight::SEMIBOLD)
         .child(NEXT_LABEL);
     if enabled {

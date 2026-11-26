@@ -67,7 +67,7 @@ pub(super) fn answer_button(
         .rounded_full()
         .bg(fill)
         .text_color(ink)
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .font_weight(FontWeight::SEMIBOLD)
         .cursor_pointer()
         .hover(|button| button.opacity(0.85))
@@ -171,14 +171,14 @@ impl Render for RingView {
                                 )
                                 .child(
                                     div()
-                                        .text_size(px(12.5))
+                                        .text_size(theme::text_small())
                                         .text_color(theme::text_muted())
                                         .child(entry.subtitle()),
                                 )
                                 .when(ends_current, |column| {
                                     column.child(
                                         div()
-                                            .text_size(px(12.))
+                                            .text_size(theme::text_small())
                                             .text_color(theme::amber())
                                             .child(ENDS_CURRENT_CALL),
                                     )

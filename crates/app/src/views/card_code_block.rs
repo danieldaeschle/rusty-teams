@@ -60,7 +60,7 @@ pub(super) fn code_block_view(
                 .py(px(HEADER_PADDING_Y))
                 .border_b_1()
                 .border_color(theme::code_header_border())
-                .text_size(px(11.5))
+                .text_size(theme::text_caption())
                 .text_color(theme::text_muted())
                 .child(block.language.clone().unwrap_or_default())
                 .child(
@@ -121,7 +121,7 @@ pub(super) fn code_block_view(
                     .py(px(HEADER_PADDING_Y))
                     .border_t_1()
                     .border_color(theme::code_header_border())
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .text_color(theme::accent_text())
                     .cursor_pointer()
                     .hover(|footer| footer.bg(theme::row_hover()))

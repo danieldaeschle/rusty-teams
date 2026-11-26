@@ -31,7 +31,7 @@ pub(super) fn render_notes_space(directory: &Directory, start: &StartInfo) -> An
                 .max_w(px(NOTES_SPACE_TEXT_WIDTH))
                 .child(
                     div()
-                        .text_size(px(16.))
+                        .text_size(theme::text_heading())
                         .font_weight(FontWeight::BOLD)
                         .text_color(theme::text())
                         .child(NOTES_SPACE_TITLE),
@@ -39,7 +39,7 @@ pub(super) fn render_notes_space(directory: &Directory, start: &StartInfo) -> An
                 .child(
                     div()
                         .text_center()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text_muted())
                         .child(NOTES_SPACE_TEXT),
                 ),

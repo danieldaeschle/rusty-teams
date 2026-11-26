@@ -37,7 +37,7 @@ pub fn field(
         .gap(px(6.))
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text_soft())
                 .child(label),
@@ -46,7 +46,7 @@ pub fn field(
         .children(hint)
         .children(problem.map(|problem| {
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::red_soft())
                 .child(problem)
         }))
@@ -54,7 +54,7 @@ pub fn field(
 
 pub fn hint(text: &'static str) -> AnyElement {
     div()
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .text_color(theme::text_faint())
         .child(text)
         .into_any_element()
@@ -112,7 +112,7 @@ pub fn raised_button(id: &'static str, label: &'static str) -> Stateful<Div> {
         .cursor_pointer()
         .bg(theme::surface_raised())
         .hover(|button| button.bg(theme::popup_hover()))
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .child(label)
 }
 
@@ -162,7 +162,7 @@ pub fn section_header(title: String, trailing: Option<AnyElement>) -> Div {
         .px(px(PAGE_PADDING))
         .pt(px(16.))
         .pb(px(6.))
-        .text_size(px(11.))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::text_faint())
         .child(title)

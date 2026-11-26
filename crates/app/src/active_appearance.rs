@@ -2,7 +2,7 @@ use gpui_kit::*;
 use store::Store;
 
 use crate::appearance::{self, AppIcon, AppearanceSettings, SystemTheme, ThemeChoice};
-use crate::theme::{self, ColorScheme};
+use crate::theme::{self, AccentPreset, ColorScheme};
 use crate::zoom;
 
 #[derive(Default)]
@@ -12,6 +12,12 @@ pub struct ActiveAppearance {
 }
 
 impl Global for ActiveAppearance {}
+
+/// Changes when text measures differently, so views that keep row heights measure again.
+#[derive(Default)]
+pub struct TextMetricsRevision(u32);
+
+impl Global for TextMetricsRevision {}
 
 pub fn system_theme(appearance: WindowAppearance) -> SystemTheme {
     SystemTheme {
@@ -27,14 +33,16 @@ pub fn install(store: &Store, cx: &mut App) {
     let settings = appearance::load(store);
     let system = system_theme(cx.window_appearance());
     theme::set_active_scheme(settings.color_scheme.id);
+    theme::set_active_accent(settings.accent);
     theme::set_active_shade(settings.theme.shade(system));
+    theme::set_chosen_fonts(settings.ui_font.clone(), settings.code_font.clone());
     zoom::set_factor(settings.zoom);
     cx.set_global(ActiveAppearance { settings, system });
 }
 
 pub fn current(cx: &App) -> AppearanceSettings {
     cx.try_global::<ActiveAppearance>()
-        .map(|active| active.settings)
+        .map(|active| active.settings.clone())
         .unwrap_or_default()
 }
 
@@ -54,8 +62,10 @@ fn restyle(cx: &mut App) {
     let active = cx.global::<ActiveAppearance>();
     let shade = active.settings.theme.shade(active.system);
     let scheme = active.settings.color_scheme.id;
-    if theme::scheme().id != scheme || theme::shade() != shade {
+    let accent = active.settings.accent;
+    if theme::scheme().id != scheme || theme::shade() != shade || theme::active_accent() != accent {
         theme::set_active_scheme(scheme);
+        theme::set_active_accent(accent);
         theme::set_active_shade(shade);
         theme::apply(cx);
     }
@@ -65,6 +75,44 @@ fn restyle(cx: &mut App) {
 pub fn set_color_scheme(scheme: &'static ColorScheme, store: &Store, cx: &mut App) {
     let settings = AppearanceSettings {
         color_scheme: scheme,
+        ..current(cx)
+    };
+    store_settings(settings, store, cx);
+    restyle(cx);
+}
+
+fn apply_fonts(settings: AppearanceSettings, store: &Store, cx: &mut App) {
+    theme::set_chosen_fonts(settings.ui_font.clone(), settings.code_font.clone());
+    store_settings(settings, store, cx);
+    theme::apply(cx);
+    let revision = cx
+        .try_global::<TextMetricsRevision>()
+        .map_or(0, |revision| revision.0);
+    cx.set_global(TextMetricsRevision(revision.wrapping_add(1)));
+    cx.refresh_windows();
+}
+
+/// Chooses the interface font. `None` returns to the default.
+pub fn set_ui_font(font: Option<SharedString>, store: &Store, cx: &mut App) {
+    let settings = AppearanceSettings {
+        ui_font: font,
+        ..current(cx)
+    };
+    apply_fonts(settings, store, cx);
+}
+
+/// Chooses the font for code. `None` returns to the automatic choice.
+pub fn set_code_font(font: Option<SharedString>, store: &Store, cx: &mut App) {
+    let settings = AppearanceSettings {
+        code_font: font,
+        ..current(cx)
+    };
+    apply_fonts(settings, store, cx);
+}
+
+pub fn set_accent(accent: AccentPreset, store: &Store, cx: &mut App) {
+    let settings = AppearanceSettings {
+        accent,
         ..current(cx)
     };
     store_settings(settings, store, cx);

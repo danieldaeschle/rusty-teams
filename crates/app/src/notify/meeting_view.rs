@@ -139,7 +139,7 @@ impl Render for MeetingToastView {
                                     h_flex()
                                         .gap(px(6.))
                                         .items_center()
-                                        .text_size(px(12.5))
+                                        .text_size(theme::text_small())
                                         .text_color(theme::text_muted())
                                         .when(live, |row| {
                                             row.child(

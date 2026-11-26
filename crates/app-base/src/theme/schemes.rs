@@ -1,6 +1,8 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
+use super::accent::AccentPreset;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Shade {
     #[default]
@@ -198,7 +200,7 @@ pub const RUSTY_TEAMS: ColorScheme = ColorScheme {
         text_strong: 0xe4e4e7,
         text_soft: 0xd4d4d8,
         text_muted: 0xa1a1a6,
-        text_faint: 0x8e8e93,
+        text_faint: 0x939398,
         accent: 0xce6a3b,
         accent_text: 0xe08a5c,
         accent_soft: 0xf5c4a5,
@@ -241,7 +243,7 @@ pub const RUSTY_TEAMS: ColorScheme = ColorScheme {
         text_strong: 0x27272a,
         text_soft: 0x3f3f46,
         text_muted: 0x5f5f66,
-        text_faint: 0x6e6e76,
+        text_faint: 0x686870,
         accent: 0xb4501f,
         accent_text: 0xa84a1d,
         accent_soft: 0x8f3d17,
@@ -289,9 +291,9 @@ pub const TEAMS: ColorScheme = ColorScheme {
         text_strong: 0xe0e0e0,
         text_soft: 0xd6d6d6,
         text_muted: 0xadadad,
-        text_faint: 0x999999,
+        text_faint: 0x9b9b9b,
         accent: 0x5b5fc7,
-        accent_text: 0x7f85f5,
+        accent_text: 0x8a90ff,
         accent_soft: 0xaab1fa,
         accent_strong: 0x444791,
         on_accent: 0xffffff,
@@ -332,7 +334,7 @@ pub const TEAMS: ColorScheme = ColorScheme {
         text_strong: 0x333333,
         text_soft: 0x424242,
         text_muted: 0x616161,
-        text_faint: 0x707070,
+        text_faint: 0x6a6a6a,
         accent: 0x5b5fc7,
         accent_text: 0x5b5fc7,
         accent_soft: 0x4f52b2,
@@ -418,6 +420,7 @@ pub const SCHEMES: [&ColorScheme; 2] = [&RUSTY_TEAMS, &TEAMS];
 
 static ACTIVE_SCHEME: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE_SHADE: AtomicU8 = AtomicU8::new(0);
+static ACTIVE_ACCENT: AtomicU8 = AtomicU8::new(0);
 
 thread_local! {
     static THREAD_SCHEME: Cell<Option<usize>> = const { Cell::new(None) };
@@ -452,8 +455,22 @@ pub fn active_shade() -> Shade {
         .unwrap_or_else(|| Shade::from_index(ACTIVE_SHADE.load(Ordering::Relaxed)))
 }
 
+pub fn active_accent() -> AccentPreset {
+    AccentPreset::from_index(ACTIVE_ACCENT.load(Ordering::Relaxed))
+}
+
+pub fn set_active_accent(accent: AccentPreset) {
+    ACTIVE_ACCENT.store(accent.index() as u8, Ordering::Relaxed);
+}
+
+/// The palette in use. Accent presets only apply to the default scheme.
 pub fn active_palette() -> &'static Palette {
-    active_scheme().palette(active_shade())
+    let scheme = active_scheme();
+    if scheme.id == default_scheme().id {
+        active_accent().palette(active_shade())
+    } else {
+        scheme.palette(active_shade())
+    }
 }
 
 pub fn set_active_scheme(id: &str) {
@@ -521,7 +538,7 @@ mod tests {
 
     #[test]
     fn teams_scheme_uses_the_teams_brand_ramp_in_both_shades() {
-        assert_eq!(TEAMS.dark.accent_text, 0x7f85f5);
+        assert_eq!(TEAMS.dark.accent_text, 0x8a90ff);
         assert_eq!(TEAMS.dark.bubble_own, 0x2f2f4a);
         assert_eq!(TEAMS.dark.surface, 0x1f1f1f);
         assert_eq!(TEAMS.light.accent, 0x5b5fc7);
@@ -586,7 +603,7 @@ mod tests {
     #[test]
     fn text_stays_readable_on_every_surface_of_every_palette() {
         for (scheme, palette) in palettes() {
-            let grounds = [
+            let chrome = [
                 palette.background,
                 palette.surface,
                 palette.reply_surface,
@@ -594,20 +611,20 @@ mod tests {
                 palette.surface_raised,
                 palette.popup,
                 palette.bubble_other,
-                palette.bubble_own,
             ];
             let checks = [
-                ("foreground", palette.foreground, 4.5),
-                ("text_soft", palette.text_soft, 4.5),
-                ("text_muted", palette.text_muted, 3.),
-                ("text_faint", palette.text_faint, 2.5),
-                ("accent_text", palette.accent_text, 3.),
+                ("foreground", palette.foreground, true),
+                ("text_soft", palette.text_soft, true),
+                ("text_muted", palette.text_muted, true),
+                ("accent_text", palette.accent_text, true),
+                ("text_faint", palette.text_faint, false),
             ];
-            for (name, text, minimum) in checks {
-                for ground in grounds {
+            for (name, text, on_own_bubble) in checks {
+                let own = on_own_bubble.then_some(palette.bubble_own);
+                for ground in chrome.into_iter().chain(own) {
                     let ratio = contrast(text, ground);
                     assert!(
-                        ratio >= minimum,
+                        ratio >= 4.5,
                         "{} {:?}: {name} #{text:06x} on #{ground:06x} is {ratio:.2}",
                         scheme.id,
                         palette.shade
@@ -621,7 +638,7 @@ mod tests {
                 palette.shade
             );
             assert!(
-                contrast(palette.own_meta, palette.bubble_own) >= 3.,
+                contrast(palette.own_meta, palette.bubble_own) >= 4.5,
                 "{} {:?}: own_meta",
                 scheme.id,
                 palette.shade

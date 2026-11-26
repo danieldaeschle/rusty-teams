@@ -112,7 +112,7 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
         .child(
             div()
                 .flex_none()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .text_color(theme::text_muted())
                 .child("Pinned"),
         )
@@ -120,7 +120,7 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
             banner.child(
                 div()
                     .flex_none()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text())
                     .child(author),
@@ -131,7 +131,7 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
                 .flex_1()
                 .min_w_0()
                 .truncate()
-                .text_size(px(13.))
+                .text_size(theme::text_label())
                 .text_color(theme::text_soft())
                 .child(preview.unwrap_or_else(|| FALLBACK_PREVIEW.to_owned())),
         )
@@ -140,7 +140,7 @@ pub fn render_pin_banner(data: PinBannerData, actions: PinBannerActions) -> AnyE
                 .child(
                     div()
                         .flex_none()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(position_label(position, total)),
                 )

@@ -80,6 +80,9 @@ fn search_terms(section: SettingsSection) -> Vec<String> {
             tr("settings.appearance.first_day.title"),
             tr("settings.appearance.theme"),
             tr("settings.appearance.color_scheme"),
+            tr("settings.appearance.accent"),
+            tr("settings.appearance.ui_font"),
+            tr("settings.appearance.code_font"),
             tr("settings.appearance.app_icon"),
         ],
         SettingsSection::Chats => vec![
@@ -254,7 +257,7 @@ pub fn render_nav(
             div()
                 .mx(px(2. * NAV_PADDING_X))
                 .mb(px(18.))
-                .text_size(px(20.))
+                .text_size(theme::text_title())
                 .line_height(px(26.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text())
@@ -282,7 +285,7 @@ pub fn render_nav(
                         div()
                             .px(px(2. * NAV_PADDING_X))
                             .py(px(ITEM_PADDING_Y))
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text_muted())
                             .child(tr("settings.search.no_results")),
                     )
@@ -304,7 +307,7 @@ pub fn render_nav(
                                 .px(px(2. * NAV_PADDING_X))
                                 .pt(px(12.))
                                 .pb(px(6.))
-                                .text_size(px(12.))
+                                .text_size(theme::text_small())
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(theme::text_muted())
                                 .child("RUSTY TEAMS"),
@@ -354,7 +357,7 @@ fn nav_item(
         .items_center()
         .rounded(px(ITEM_RADIUS))
         .cursor_pointer()
-        .text_size(px(14.))
+        .text_size(theme::text_body())
         .line_height(px(ITEM_LINE_HEIGHT))
         .when(active, |item| {
             item.bg(theme::popup_hover()).text_color(theme::text())
@@ -430,6 +433,9 @@ mod tests {
             SettingsSection::Appearance => &[
                 "settings.appearance.theme",
                 "settings.appearance.color_scheme",
+                "settings.appearance.accent",
+                "settings.appearance.ui_font",
+                "settings.appearance.code_font",
                 "settings.appearance.app_icon",
             ],
             SettingsSection::Chats => &[

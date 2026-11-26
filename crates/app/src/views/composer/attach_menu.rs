@@ -396,7 +396,7 @@ impl Composer {
             .child(symbol("cloud", 16., theme::text_soft()))
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text())
                     .child(ATTACH_CLOUD_LABEL),
             )
@@ -414,7 +414,7 @@ impl Composer {
             .child(symbol("upload", 16., theme::text_soft()))
             .child(
                 div()
-                    .text_size(px(13.))
+                    .text_size(theme::text_label())
                     .text_color(theme::text())
                     .child(UPLOAD_LABEL),
             )
@@ -445,7 +445,7 @@ impl Composer {
                     div()
                         .px(px(SIDE_INSET))
                         .pt(px(6.))
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text())
                         .child(title),
@@ -468,7 +468,7 @@ impl Composer {
         div()
             .px(MENU_ITEM_PADDING_X)
             .py(px(10.))
-            .text_size(px(12.))
+            .text_size(theme::text_small())
             .text_color(theme::text_soft())
             .child(text)
             .into_any_element()
@@ -500,14 +500,14 @@ impl Composer {
                     .min_w_0()
                     .child(
                         div()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text())
                             .truncate()
                             .child(file.name.clone()),
                     )
                     .children(file.last_opened.map(|opened| {
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_soft())
                             .child(opened_label(opened, now))
                     })),

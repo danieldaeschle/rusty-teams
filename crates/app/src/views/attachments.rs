@@ -153,7 +153,7 @@ fn image_view(
             .child(icon(IconName::Image, 24., theme::text_muted()))
             .child(
                 div()
-                    .text_size(px(11.))
+                    .text_size(theme::text_caption())
                     .text_color(theme::text_muted())
                     .child("Loading image"),
             )
@@ -238,7 +238,7 @@ pub fn file_badge(kind: FileKind, size: f32) -> Div {
         .rounded(px(7.))
         .bg(theme::color(style.color))
         .text_color(gpui_kit::white())
-        .text_size(px(10.5))
+        .text_size(theme::text_caption())
         .font_weight(FontWeight::BOLD)
         .when(style.label.is_empty(), |badge| {
             badge.child(icon(IconName::File, 16., gpui_kit::white()))
@@ -293,7 +293,7 @@ fn save_button(
     match look.percent {
         Some(percent) => button.child(
             div()
-                .text_size(px(11.))
+                .text_size(theme::text_caption())
                 .text_color(theme::text_muted())
                 .child(downloads::percent_label(percent)),
         ),
@@ -396,14 +396,14 @@ fn file_view(
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .text_color(theme::text())
                         .child(card.name.clone()),
                 )
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .text_color(theme::text_muted())
                         .child(file_subtitle(card)),
                 ),

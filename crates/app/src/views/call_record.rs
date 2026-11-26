@@ -154,7 +154,7 @@ fn choice_chip(
         .rounded_full()
         .bg(background)
         .text_color(foreground)
-        .text_size(px(13.))
+        .text_size(theme::text_label())
         .when(!selected, |chip| {
             chip.hover(|chip| chip.bg(theme::row_hover()))
         })
@@ -168,7 +168,7 @@ fn section(title: &'static str, chips: Vec<Stateful<Div>>) -> Div {
         .gap(px(8.))
         .child(
             div()
-                .text_size(px(12.))
+                .text_size(theme::text_small())
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::text_muted())
                 .child(title),

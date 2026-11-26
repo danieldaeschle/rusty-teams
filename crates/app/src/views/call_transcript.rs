@@ -82,7 +82,7 @@ impl TranscriptPanel {
                     .rounded_full()
                     .bg(theme::accent())
                     .text_color(theme::white())
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .font_weight(FontWeight::SEMIBOLD)
                     .cursor_pointer()
                     .child(icon(IconName::ArrowDown, 13., theme::white()))
@@ -119,19 +119,23 @@ impl Render for TranscriptPanel {
                                 div()
                                     .min_w_0()
                                     .truncate()
-                                    .text_size(px(13.))
+                                    .text_size(theme::text_label())
                                     .font_weight(FontWeight::BOLD)
                                     .child(entry.speaker.clone()),
                             )
                             .child(
                                 div()
                                     .flex_none()
-                                    .text_size(px(11.))
+                                    .text_size(theme::text_caption())
                                     .text_color(theme::text_muted())
                                     .child(clock_label(entry.offset)),
                             ),
                     )
-                    .child(div().text_size(px(13.)).child(entry.text.clone()))
+                    .child(
+                        div()
+                            .text_size(theme::text_label())
+                            .child(entry.text.clone()),
+                    )
                     .into_any_element()
             })
             .collect();
@@ -173,7 +177,7 @@ impl Render for TranscriptPanel {
                     .children(rows)
                     .children(hint.map(|text| {
                         div()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::text_muted())
                             .child(text)
                     })),

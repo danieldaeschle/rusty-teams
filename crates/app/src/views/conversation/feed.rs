@@ -23,7 +23,7 @@ const FEED_CARD_TOP: f32 = 12.;
 const REPLY_PLACEHOLDER: &str = "Reply in thread";
 
 pub(super) struct FeedStash {
-    scroller: Entity<MessageScrollerState>,
+    pub(super) scroller: Entity<MessageScrollerState>,
     rows: Rc<RefCell<Vec<Row>>>,
     near_top: bool,
 }

@@ -85,7 +85,7 @@ fn members_panel(
                     .px(px(EDGE_PADDING))
                     .flex()
                     .items_center()
-                    .text_size(px(12.))
+                    .text_size(theme::text_small())
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::text_muted())
                     .child(format!("People ({})", rows.len())),
@@ -195,14 +195,14 @@ fn member_row(
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .text_color(theme::text())
                         .child(row.name.clone()),
                 )
                 .when(row.is_self, |column| {
                     column.child(
                         div()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(theme::text_muted())
                             .child("You"),
                     )
@@ -261,7 +261,7 @@ fn action_row(id: &'static str, icon_name: IconName, label: &'static str) -> Sta
         .gap(MENU_ICON_LABEL_GAP)
         .items_center()
         .rounded(px(ACTION_RADIUS))
-        .text_size(px(14.))
+        .text_size(theme::text_body())
         .text_color(theme::text())
         .child(
             div()

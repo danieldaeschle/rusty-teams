@@ -139,7 +139,7 @@ pub fn link_preview_card(
                     div()
                         .line_clamp(2)
                         .text_ellipsis()
-                        .text_size(px(13.))
+                        .text_size(theme::text_label())
                         .font_weight(FontWeight::SEMIBOLD)
                         .text_color(theme::text_strong())
                         .child(title),
@@ -148,14 +148,14 @@ pub fn link_preview_card(
                     div()
                         .line_clamp(2)
                         .text_ellipsis()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child(description)
                 }))
                 .child(
                     div()
                         .truncate()
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .text_color(theme::text_muted())
                         .child(preview.domain()),
                 ),
@@ -176,7 +176,7 @@ pub fn meeting_join_chip(id: String, url: String) -> AnyElement {
         .items_center()
         .rounded_full()
         .bg(theme::accent())
-        .text_size(px(12.))
+        .text_size(theme::text_small())
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::on_accent())
         .cursor_pointer()

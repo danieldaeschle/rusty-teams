@@ -360,7 +360,7 @@ impl AgentsSettings {
                             .flex_1()
                             .min_w(px(0.))
                             .truncate()
-                            .text_size(px(12.))
+                            .text_size(theme::text_small())
                             .text_color(color)
                             .child(text)
                     }))
@@ -369,7 +369,7 @@ impl AgentsSettings {
                         div()
                             .id("agent-delete")
                             .cursor_pointer()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::red_soft())
                             .child("Delete")
                             .on_click(move |_, _, cx| {
@@ -436,7 +436,7 @@ impl AgentsSettings {
                         .bg(theme::row_hover())
                         .hover(|chip| chip.bg(theme::surface_raised()))
                         .font_family(cx.theme().mono_font_family.clone())
-                        .text_size(px(11.))
+                        .text_size(theme::text_caption())
                         .text_color(theme::accent_text())
                         .child(format!("{{{placeholder}}}"))
                         .on_click(move |_, window, cx| {
@@ -507,13 +507,13 @@ impl AgentsSettings {
                             .flex_1()
                             .child(
                                 div()
-                                    .text_size(px(14.))
+                                    .text_size(theme::text_body())
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Ask for extra instructions"),
                             )
                             .child(
                                 div()
-                                    .text_size(px(12.))
+                                    .text_size(theme::text_small())
                                     .text_color(theme::text_muted())
                                     .child("Dialog before each run"),
                             ),
@@ -537,7 +537,7 @@ impl AgentsSettings {
                         div()
                             .id("action-delete")
                             .cursor_pointer()
-                            .text_size(px(13.))
+                            .text_size(theme::text_label())
                             .text_color(theme::red_soft())
                             .child("Delete")
                             .on_click(move |_, _, cx| {
@@ -563,13 +563,13 @@ pub(super) fn resume_toggle(resume: bool, settings: Entity<AgentsSettings>) -> S
                 .flex_1()
                 .child(
                     div()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .font_weight(FontWeight::SEMIBOLD)
                         .child("Resume interrupted runs"),
                 )
                 .child(
                     div()
-                        .text_size(px(12.))
+                        .text_size(theme::text_small())
                         .text_color(theme::text_muted())
                         .child("Continue running agents after the app restarts"),
                 ),

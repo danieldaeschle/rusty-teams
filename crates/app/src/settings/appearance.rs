@@ -1,14 +1,18 @@
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-use super::rows::{Choice, ROW_INSET, caption, control_row, select_with_width, titled};
+use super::font_picker::{FontPicker, FontTarget};
+use super::rows::{
+    Choice, ROW_INSET, caption, control_row, select_with_width, text_button, titled,
+};
 use crate::active_appearance;
 use crate::active_locale;
 use crate::app_state::AppState;
 use crate::appearance::{AppIcon, ThemeChoice};
 use crate::i18n::tr;
-use crate::theme::{self, Palette};
+use crate::theme::{self, AccentPreset, Palette};
 use crate::views::title_bar::app_icon_image;
 use app_base::ui_locale::LocalePreference;
 
@@ -23,6 +27,9 @@ const RADIO_SIZE: f32 = 16.;
 const RADIO_DOT_SIZE: f32 = 8.;
 const THEME_SELECT_WIDTH: f32 = 240.;
 const LANGUAGE_SELECT_WIDTH: f32 = 240.;
+const SWATCH_SIZE: f32 = 24.;
+const SWATCH_DOT_SIZE: f32 = 8.;
+const SWATCH_GAP: f32 = 8.;
 
 fn language_label(pref: LocalePreference) -> String {
     match pref {
@@ -31,6 +38,19 @@ fn language_label(pref: LocalePreference) -> String {
         LocalePreference::German => tr("settings.appearance.language.german"),
     }
 }
+fn accent_label(preset: AccentPreset) -> String {
+    match preset {
+        AccentPreset::Rust => tr("settings.appearance.accent_preset.rust"),
+        AccentPreset::Amber => tr("settings.appearance.accent_preset.amber"),
+        AccentPreset::Emerald => tr("settings.appearance.accent_preset.emerald"),
+        AccentPreset::Cyan => tr("settings.appearance.accent_preset.cyan"),
+        AccentPreset::Blue => tr("settings.appearance.accent_preset.blue"),
+        AccentPreset::Violet => tr("settings.appearance.accent_preset.violet"),
+        AccentPreset::Pink => tr("settings.appearance.accent_preset.pink"),
+        AccentPreset::Red => tr("settings.appearance.accent_preset.red"),
+    }
+}
+
 fn app_icon_detail() -> String {
     #[cfg(windows)]
     {
@@ -42,7 +62,7 @@ fn app_icon_detail() -> String {
     }
 }
 
-pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
+pub fn render(app: &Entity<AppState>, picker: &Entity<FontPicker>, cx: &App) -> Div {
     let current = active_appearance::current(cx);
     let locale_pref = active_locale::current_preference(cx);
     let language_choices = LocalePreference::ALL
@@ -66,6 +86,14 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
         .on_click(move |_, _, cx| {
             let store = app.read(cx).store.clone();
             active_appearance::set_color_scheme(scheme, &store, cx);
+        })
+    });
+    let uses_accent = current.color_scheme.id == theme::default_scheme().id;
+    let accent_swatches = AccentPreset::ALL.into_iter().map(|preset| {
+        let app = app.clone();
+        accent_swatch(preset, preset == current.accent).on_click(move |_, _, cx| {
+            let store = app.read(cx).store.clone();
+            active_appearance::set_accent(preset, &store, cx);
         })
     });
     let icon_tiles = AppIcon::ALL.into_iter().map(|icon| {
@@ -124,12 +152,71 @@ pub fn render(app: &Entity<AppState>, cx: &App) -> Div {
             tr("settings.appearance.color_scheme_detail"),
             scheme_tiles,
         ))
+        .when(uses_accent, |column| {
+            column.child(control_row(
+                tr("settings.appearance.accent"),
+                tr("settings.appearance.accent_detail"),
+                h_flex()
+                    .flex_none()
+                    .gap(px(SWATCH_GAP))
+                    .children(accent_swatches),
+            ))
+        })
+        .child(caption(tr("settings.caption.text")))
+        .child(font_row(
+            FontTarget::Interface,
+            tr("settings.appearance.ui_font"),
+            tr("settings.appearance.ui_font_detail"),
+            current.ui_font.clone(),
+            picker,
+            cx,
+        ))
+        .child(font_row(
+            FontTarget::Code,
+            tr("settings.appearance.code_font"),
+            tr("settings.appearance.code_font_detail"),
+            current.code_font.clone(),
+            picker,
+            cx,
+        ))
         .child(caption(tr("settings.caption.app_icon")))
         .child(choice_group(
             tr("settings.appearance.app_icon"),
             app_icon_detail(),
             icon_tiles,
         ))
+}
+
+fn font_row(
+    target: FontTarget,
+    title: String,
+    detail: String,
+    font: Option<SharedString>,
+    picker: &Entity<FontPicker>,
+    cx: &App,
+) -> Div {
+    let id = match target {
+        FontTarget::Interface => "settings-ui-font",
+        FontTarget::Code => "settings-code-font",
+    };
+    let label = font.unwrap_or_else(|| tr("settings.appearance.default_font").into());
+    let open_list = {
+        let picker = picker.clone();
+        move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
+            picker.update(cx, |picker, cx| picker.toggle(target, window, cx));
+        }
+    };
+    control_row(
+        title,
+        detail,
+        v_flex()
+            .flex_none()
+            .items_end()
+            .child(text_button(id, label).on_click(open_list))
+            .when(picker.read(cx).target() == Some(target), |column| {
+                column.child(picker.clone())
+            }),
+    )
 }
 
 fn choice_group(
@@ -173,7 +260,7 @@ fn tile(id: SharedString, label: &'static str, selected: bool, preview: Div) -> 
                 .justify_between()
                 .child(
                     div()
-                        .text_size(px(14.))
+                        .text_size(theme::text_body())
                         .line_height(px(20.))
                         .text_color(theme::text())
                         .child(label),
@@ -202,6 +289,34 @@ fn radio(selected: bool) -> Div {
                     .size(px(RADIO_DOT_SIZE))
                     .rounded_full()
                     .bg(theme::accent()),
+            )
+        })
+}
+
+fn accent_swatch(preset: AccentPreset, selected: bool) -> Stateful<Div> {
+    let palette = preset.palette(theme::shade());
+    let label: SharedString = accent_label(preset).into();
+    div()
+        .id(SharedString::from(format!(
+            "settings-accent-{}",
+            preset.key()
+        )))
+        .size(px(SWATCH_SIZE))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .cursor_pointer()
+        .bg(theme::color(palette.accent))
+        .hover(|swatch| swatch.opacity(0.85))
+        .tooltip(move |window, cx| Tooltip::new(label.clone()).build(window, cx))
+        .when(selected, |swatch| {
+            swatch.child(
+                div()
+                    .size(px(SWATCH_DOT_SIZE))
+                    .rounded_full()
+                    .bg(theme::color(palette.on_accent)),
             )
         })
 }
