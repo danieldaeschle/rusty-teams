@@ -25,7 +25,7 @@ jobs:
     name: Ready for review
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event_name != 'issues' || github.event.label.name == 'status: accepted'
+    if: ${{ github.event_name != 'issues' || github.event.label.name == 'status: accepted' }}
     steps:
       - uses: actions/checkout@v6
         with:
