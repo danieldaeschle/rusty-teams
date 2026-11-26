@@ -120,16 +120,25 @@ pub(crate) fn installed_in(
                 Some((name.to_owned(), path))
             })
             .collect(),
-        Platform::Linux => LINUX_CHROME_NAMES
-            .iter()
-            .chain(&LINUX_FIREFOX_NAMES)
-            .filter_map(|name| {
-                let path = std::env::split_paths(path_variable)
+        Platform::Linux => {
+            let mut found = Vec::new();
+            let mut seen = Vec::new();
+            for name in LINUX_CHROME_NAMES.iter().chain(LINUX_FIREFOX_NAMES.iter()) {
+                let Some(path) = std::env::split_paths(path_variable)
                     .map(|directory| directory.join(name))
-                    .find(|path| exists(path))?;
-                Some(((*name).to_owned(), path))
-            })
-            .collect(),
+                    .find(|path| exists(path))
+                else {
+                    continue;
+                };
+                let key = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                if seen.contains(&key) {
+                    continue;
+                }
+                seen.push(key);
+                found.push(((*name).to_owned(), path));
+            }
+            found
+        }
         Platform::Windows | Platform::Wsl => Vec::new(),
     };
     found
@@ -198,12 +207,33 @@ fn bundle_id(executable: &Path) -> Option<String> {
 }
 
 /// The installed browser named like the desktop entry `xdg-settings` reports, as in `firefox.desktop`.
+/// Edge Stable's desktop file is `microsoft-edge.desktop` while the executable is
+/// `microsoft-edge-stable`. Brave's desktop file is `brave-browser.desktop` while the
+/// executable on some distributions is `brave`.
 fn desktop_entry_match<'a>(
     entry: &str,
     installed: &'a [InstalledBrowser],
 ) -> Option<&'a InstalledBrowser> {
     let stem = entry.trim().trim_end_matches(".desktop");
-    installed.iter().find(|browser| browser.name == stem)
+    let names: &[&str] = match stem {
+        "microsoft-edge" => &[
+            "microsoft-edge",
+            "microsoft-edge-stable",
+            "microsoft-edge-beta",
+            "microsoft-edge-dev",
+        ],
+        "brave-browser" => &[
+            "brave",
+            "brave-browser",
+            "brave-browser-stable",
+            "brave-browser-beta",
+            "brave-browser-nightly",
+        ],
+        other => return installed.iter().find(|browser| browser.name == other),
+    };
+    names
+        .iter()
+        .find_map(|name| installed.iter().find(|browser| browser.name == *name))
 }
 
 #[cfg(test)]
@@ -263,6 +293,38 @@ mod tests {
         let found = desktop_entry_match("firefox.desktop\n", &installed).unwrap();
         assert_eq!(found.engine, Engine::Firefox);
         assert!(desktop_entry_match("org.gnome.Epiphany.desktop", &installed).is_none());
+    }
+
+    #[test]
+    fn lists_edge_and_brave_and_matches_their_desktop_files() {
+        let root = Path::new("/usr/bin");
+        let installed = installed_in(
+            Platform::Linux,
+            None,
+            &std::env::join_paths([root]).unwrap(),
+            &|path| {
+                path == root.join("microsoft-edge-stable")
+                    || path == root.join("brave")
+                    || path == root.join("firefox")
+            },
+        );
+        let names: Vec<&str> = installed
+            .iter()
+            .map(|browser| browser.name.as_str())
+            .collect();
+        assert_eq!(names, ["microsoft-edge-stable", "brave", "firefox"]);
+        assert_eq!(
+            desktop_entry_match("microsoft-edge.desktop\n", &installed)
+                .map(|browser| browser.name.as_str()),
+            Some("microsoft-edge-stable")
+        );
+        assert_eq!(
+            desktop_entry_match("brave-browser.desktop", &installed)
+                .map(|browser| browser.name.as_str()),
+            Some("brave")
+        );
+        assert_eq!(installed[0].engine, Engine::Chromium);
+        assert_eq!(installed[1].engine, Engine::Chromium);
     }
 
     #[test]
