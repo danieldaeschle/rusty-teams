@@ -23,6 +23,7 @@ pub mod speed_dial;
 pub mod target;
 pub mod view_actions;
 pub mod week;
+pub mod work_plan;
 
 pub use app_call_model::{
     agenda, background, bubbles, calendar_list, calendar_now, calendar_prefs, caption_style, demo,

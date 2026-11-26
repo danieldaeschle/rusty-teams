@@ -64,10 +64,11 @@ pub use caldav::{
 };
 pub use calendar::{
     Attendee, AttendeeResponseCounts, BusyTime, Calendar, CalendarEvent, CalendarSource,
-    CreatedEvent, DialIn, EventAttendee, HomeCalendar, NewEvent, PersonSchedule, Reminder, Repeat,
-    Reply, ResponseType, ShowAs, apply_event_details, join_info_text, meet_now_join_url,
-    merge_calendar_events, new_event_body, new_event_body_with_join, normalize_join_url,
-    parse_calendar_events, parse_created_event, strip_html, truncate_preview,
+    ColleagueLocation, CreatedEvent, DialIn, EventAttendee, HomeCalendar, NewEvent, PersonSchedule,
+    Reminder, Repeat, Reply, ResponseType, ShowAs, WorkPlanDay, WorkPlanLocation,
+    apply_event_details, join_info_text, meet_now_join_url, merge_calendar_events, new_event_body,
+    new_event_body_with_join, normalize_join_url, parse_calendar_events, parse_created_event,
+    strip_html, truncate_preview,
 };
 pub use calllog::{CallDirection, CallLogEntry, CallOutcome};
 pub use cards::{

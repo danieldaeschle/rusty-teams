@@ -9,6 +9,7 @@ mod availability;
 mod merge;
 mod reminders;
 mod schedule;
+mod work_plan;
 
 pub use availability::{BusyTime, PersonSchedule, parse_schedules};
 pub use merge::{HomeCalendar, merge_calendar_events, normalize_join_url};
@@ -17,6 +18,7 @@ pub use schedule::{
     Attendee, CreatedEvent, NewEvent, Repeat, Reply, new_event_body, new_event_body_with_join,
     parse_created_event,
 };
+pub use work_plan::{ColleagueLocation, WorkPlanDay, WorkPlanLocation, parse_work_plan};
 
 const QUERY_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%SZ";
 const NAIVE_TIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";

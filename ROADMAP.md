@@ -154,7 +154,7 @@ Feature parity with the Microsoft Teams desktop client.
 |---|---|---|
 | Presence dots (live push) | Done |  |
 | Last known presence at start | Done |  |
-| Set own status and status message | Done | Avatar menu like Teams: 6 states with duration, reset, status message with clear-after and "show when people message me", work location Office or Remote for today |
+| Set own status and status message | Done | Avatar menu like Teams: 6 states with duration, reset, status message with clear-after and "show when people message me", work location Office or Remote for today; the calendar's day headers show the Outlook work plan (office, remote) per day and change it, today also checks in |
 | Profile card | Done | Click a name, avatar or mention: presence, status message or out of office, work location, local time, contact, manager and direct reports; Chat, Email, Copy email |
 
 ## Look and settings
