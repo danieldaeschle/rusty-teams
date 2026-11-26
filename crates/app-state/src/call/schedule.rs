@@ -10,7 +10,8 @@ use crate::runtime;
 
 const AGENDA_KEYS: [&str; 4] = ["body", "bodyContent", "bodyContentType", "bodyPreview"];
 const HALF_HOUR_MINUTES: i64 = 30;
-const DEFAULT_LENGTH_MINUTES: i64 = 30;
+/// Length of a new meeting when nothing else sets it (Teams: 30 minutes).
+pub const DEFAULT_LENGTH_MINUTES: i64 = 30;
 const READ_ONLY_MESSAGE: &str = "Meetings cannot be scheduled in read-only mode.";
 const RESPONSE_FAILED_NOTICE: &str = "Could not send your response";
 const DELETE_FAILED_NOTICE: &str = "Could not delete the meeting";

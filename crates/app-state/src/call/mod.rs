@@ -27,8 +27,8 @@ pub mod week;
 pub use app_call_model::{
     agenda, background, bubbles, calendar_list, calendar_now, calendar_prefs, caption_style, demo,
     end_screen, fullscreen, health, media, mic, model, options_dialog, people, preview,
-    record_rights, recording_menu, report, ring, share_view, stage_layout, stage_split, transcript,
-    view_settings, week_grid,
+    record_rights, recording_menu, report, ring, share_view, slot_select, stage_layout,
+    stage_split, transcript, view_settings, week_grid,
 };
 
 pub use actions::{

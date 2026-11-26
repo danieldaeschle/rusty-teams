@@ -23,6 +23,7 @@ pub mod recording_menu;
 pub mod report;
 pub mod ring;
 pub mod share_view;
+pub mod slot_select;
 pub mod stage_layout;
 pub mod stage_split;
 pub mod transcript;

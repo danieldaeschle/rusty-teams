@@ -1,5 +1,5 @@
 use chatsvc::Repeat;
-use chrono::{Local, Utc};
+use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::date_picker::DatePicker;
@@ -43,8 +43,13 @@ struct MeetingForm {
 }
 
 impl MeetingForm {
-    fn new(state: Entity<AppState>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (start_moment, end_moment) = default_window(Utc::now(), &Local);
+    fn new(
+        state: Entity<AppState>,
+        when: Option<(NaiveDateTime, NaiveDateTime)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let (start_moment, end_moment) = when.unwrap_or_else(|| default_window(Utc::now(), &Local));
         let title = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr("calls.meeting.title_placeholder"))
         });
@@ -244,13 +249,36 @@ pub fn open_new_meeting(state: Entity<AppState>, window: &mut Window, cx: &mut A
     open_new_meeting_with(state, Vec::new(), window, cx);
 }
 
+/// New meeting with the date and times already set, e.g. from a block picked on the grid.
+pub fn open_new_meeting_at(
+    state: Entity<AppState>,
+    date: NaiveDate,
+    start: NaiveTime,
+    end: NaiveTime,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let when = (date.and_time(start), date.and_time(end));
+    open_meeting_form(state, Vec::new(), Some(when), window, cx);
+}
+
 pub fn open_new_meeting_with(
     state: Entity<AppState>,
     people: Vec<Pick>,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let form = cx.new(|cx| MeetingForm::new(state, window, cx));
+    open_meeting_form(state, people, None, window, cx);
+}
+
+fn open_meeting_form(
+    state: Entity<AppState>,
+    people: Vec<Pick>,
+    when: Option<(NaiveDateTime, NaiveDateTime)>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let form = cx.new(|cx| MeetingForm::new(state, when, window, cx));
     if !people.is_empty() {
         let draft = form.read(cx).people.clone();
         draft.update(cx, |draft, cx| draft.set_chips(people, cx));

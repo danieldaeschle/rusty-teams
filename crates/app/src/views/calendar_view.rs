@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use app_base::format::{self, WeekdayWidth, clock_format, weekday_name};
 use chatsvc::{CalendarEvent, ResponseType, join_info_text};
-use chrono::{DateTime, Datelike, Local, NaiveDate, Offset, Timelike, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, Offset, Timelike, Utc};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -17,7 +17,7 @@ use super::calendar_month::month_grid;
 use super::calendar_picker;
 use super::join_dialog::open_join_with_id;
 use super::meeting_proposal_card::meeting_proposal_cards;
-use super::new_meeting_dialog::open_new_meeting;
+use super::new_meeting_dialog::{open_new_meeting, open_new_meeting_at};
 use super::rsvp_menu::rsvp_menu;
 use super::scroll_edge::scroll_offset;
 use crate::app_state::AppState;
@@ -25,6 +25,8 @@ use crate::call::calendar_now::{
     DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION, hour_height,
     now_scroll_offset_y, offset_differs, shows_hour_grid, work_start_scroll_offset_y,
 };
+use crate::call::schedule::DEFAULT_LENGTH_MINUTES;
+use crate::call::slot_select::{SlotSelection, minute_at};
 use crate::call::week::CalendarLoadFailure;
 use crate::call::week_grid::{
     CalendarSpan, EventLook, WeekBlock, WeekDay, WeekLayout, calendar_index, event_look,
@@ -75,6 +77,16 @@ const TODAY_MARK_HEIGHT: f32 = 3.;
 const NOW_DOT_SIZE: f32 = 8.;
 const CLOCK_TICK: Duration = Duration::from_secs(30);
 const CHROME_HEIGHT: f32 = HEADER_HEIGHT + DAY_HEADER_HEIGHT + ALL_DAY_HEIGHT;
+const SELECTION_FILL_OPACITY: f32 = 0.24;
+/// Height below which the picked block drops its time label.
+const SELECTION_LABEL_HEIGHT: f32 = 18.;
+
+/// A left press on an empty slot that is still held; the block grows from `anchor`.
+#[derive(Debug, Clone, Copy)]
+struct SlotDrag {
+    date: NaiveDate,
+    anchor: i64,
+}
 
 pub struct CalendarView {
     state: Entity<AppState>,
@@ -87,6 +99,11 @@ pub struct CalendarView {
     /// Row height of one hour and minor lines per hour, from the time scale.
     hour_height: f32,
     steps_per_hour: usize,
+    /// Block of empty slots picked on the hour grid for a new meeting.
+    slot_selection: Option<SlotSelection>,
+    slot_drag: Option<SlotDrag>,
+    /// Focus for the hour grid, so Escape can drop the picked block.
+    grid_focus: FocusHandle,
     _observation: Subscription,
     _agent_observation: Option<Subscription>,
 }
@@ -106,6 +123,9 @@ impl CalendarView {
             clock_running: false,
             hour_height: hour_height(Default::default()),
             steps_per_hour: 2,
+            slot_selection: None,
+            slot_drag: None,
+            grid_focus: cx.focus_handle(),
             _observation: observation,
             _agent_observation: agent_observation,
         }
@@ -221,11 +241,232 @@ impl CalendarView {
     fn on_grid_scroll_wheel(
         &mut self,
         _event: &ScrollWheelEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.follow_now.note_manual_scroll();
+        if self.slot_drag.is_some() {
+            // A wheel turn moves the grid under a still pointer; follow it once the
+            // new offset is in.
+            cx.on_next_frame(window, |view, window, cx| {
+                view.drag_slot_to(window.mouse_position(), cx)
+            });
+        }
         cx.notify();
+    }
+
+    fn step_minutes(&self) -> i64 {
+        60 / self.steps_per_hour.max(1) as i64
+    }
+
+    /// Grid step under a window position; the day's columns scroll together, so the
+    /// scroll container's top plus its offset is where midnight sits.
+    fn minute_at_position(&self, position: Point<Pixels>) -> i64 {
+        let content_top =
+            f32::from(self.scroll.bounds().top()) + f32::from(scroll_offset(&self.scroll).y);
+        minute_at(
+            f32::from(position.y) - content_top,
+            self.hour_height,
+            self.step_minutes(),
+        )
+    }
+
+    fn one_slot(&self, date: NaiveDate, position: Point<Pixels>) -> SlotSelection {
+        let minute = self.minute_at_position(position);
+        SlotSelection::between(date, minute, minute, self.step_minutes())
+    }
+
+    /// Left press on an empty slot: start picking a block, or a double click opens
+    /// New meeting at that slot with the default meeting length, as Teams does.
+    fn press_slot(
+        &mut self,
+        date: NaiveDate,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let slot = self.one_slot(date, event.position);
+        if event.click_count >= 2 {
+            self.clear_slot_selection(cx);
+            let meeting =
+                SlotSelection::starting_at(date, slot.start_minute, DEFAULT_LENGTH_MINUTES);
+            open_meeting_for(self.state.clone(), meeting, window, cx);
+            return;
+        }
+        self.slot_drag = Some(SlotDrag {
+            date,
+            anchor: slot.start_minute,
+        });
+        self.slot_selection = Some(slot);
+        cx.notify();
+    }
+
+    fn drag_slot_to(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(drag) = self.slot_drag else {
+            return;
+        };
+        let minute = self.minute_at_position(position);
+        let selection = SlotSelection::between(drag.date, drag.anchor, minute, self.step_minutes());
+        if self.slot_selection != Some(selection) {
+            self.slot_selection = Some(selection);
+            cx.notify();
+        }
+    }
+
+    fn end_slot_drag(&mut self, cx: &mut Context<Self>) {
+        if self.slot_drag.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Right press on an empty slot: keep the picked block when the press is inside
+    /// it, otherwise pick just that slot, so the menu always has a block to use.
+    fn right_press_slot(
+        &mut self,
+        date: NaiveDate,
+        event: &MouseDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        self.slot_drag = None;
+        let minute = self.minute_at_position(event.position);
+        if !self
+            .slot_selection
+            .is_some_and(|selection| selection.contains(date, minute))
+        {
+            self.slot_selection = Some(self.one_slot(date, event.position));
+        }
+        cx.notify();
+    }
+
+    fn clear_slot_selection(&mut self, cx: &mut Context<Self>) {
+        self.slot_drag = None;
+        if self.slot_selection.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// While a block is being picked, follow the pointer outside the grid and over
+    /// meetings too. Releases are caught on the grid itself (see `grid`), whose
+    /// listeners already exist when the press lands.
+    fn slot_drag_listener(&self, cx: &Context<Self>) -> impl IntoElement {
+        let view = cx.entity().downgrade();
+        canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                let moved = view.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                    if !phase.bubble() {
+                        return;
+                    }
+                    let held = event.pressed_button == Some(MouseButton::Left);
+                    moved
+                        .update(cx, |view, cx| {
+                            if held {
+                                view.drag_slot_to(event.position, cx);
+                            } else {
+                                view.end_slot_drag(cx);
+                            }
+                        })
+                        .ok();
+                });
+            },
+        )
+        .absolute()
+        .size_full()
+    }
+
+    /// Invisible layer under a day's meetings that takes presses on empty slots.
+    fn slot_layer(&self, date: NaiveDate, cx: &Context<Self>) -> impl IntoElement {
+        let (menu_view, menu_state) = (cx.entity().downgrade(), self.state.clone());
+        div()
+            .id(SharedString::from(format!("calendar-slots-{date}")))
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            // Capture runs before the context menu notes which element to give focus
+            // back to, so Escape reaches the grid after the menu closes.
+            .capture_any_mouse_down(cx.listener(|view, _: &MouseDownEvent, window, cx| {
+                window.focus(&view.grid_focus, cx)
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |view, event: &MouseDownEvent, window, cx| {
+                    view.press_slot(date, event, window, cx)
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |view, event: &MouseDownEvent, _, cx| {
+                    view.right_press_slot(date, event, cx)
+                }),
+            )
+            .context_menu(move |menu, _, _| {
+                let (view, state) = (menu_view.clone(), menu_state.clone());
+                menu.item(
+                    PopupMenuItem::new(tr("calendar.view.new_meeting"))
+                        .icon(IconName::Plus)
+                        .on_click(move |_, window, cx| {
+                            let picked = view
+                                .update(cx, |view, cx| {
+                                    let picked = view.slot_selection;
+                                    view.clear_slot_selection(cx);
+                                    picked
+                                })
+                                .ok()
+                                .flatten();
+                            match picked {
+                                Some(picked) => open_meeting_for(state.clone(), picked, window, cx),
+                                None => open_new_meeting(state.clone(), window, cx),
+                            }
+                        }),
+                )
+            })
+    }
+
+    /// The picked block: an accent fill and bar, with its times when there is room.
+    fn selection_block(&self, selection: &SlotSelection) -> Div {
+        let row = self.hour_height;
+        let top = selection.start_minute as f32 / 60. * row;
+        let height = (selection.end_minute - selection.start_minute) as f32 / 60. * row;
+        // The times New meeting will open with, so the label and the form agree.
+        let label = selection
+            .form_times(grid_offset(), &Local)
+            .label(clock_format());
+        div()
+            .absolute()
+            .top(px(top))
+            .h(px(height))
+            .left_0()
+            .right_0()
+            .px(px(BLOCK_GAP))
+            .child(
+                h_flex()
+                    .size_full()
+                    .items_start()
+                    .overflow_hidden()
+                    .rounded(px(6.))
+                    .bg(theme::accent().opacity(SELECTION_FILL_OPACITY))
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(STATUS_BAR_WIDTH))
+                            .h_full()
+                            .bg(theme::accent()),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .pl(px(5.))
+                            .pr(px(4.))
+                            .text_size(px(11.))
+                            .line_height(px(16.))
+                            .text_color(theme::accent_text())
+                            .truncate()
+                            .when(height >= SELECTION_LABEL_HEIGHT, |text| text.child(label)),
+                    ),
+            )
     }
 
     fn header(
@@ -536,6 +777,8 @@ impl CalendarView {
                 "calendar-event-{}-{}",
                 event.object_id, day
             )))
+            // Presses on a meeting must not reach the empty-slot layer under it.
+            .block_mouse_except_scroll()
             .absolute()
             .top(px(top))
             .h(px(height))
@@ -631,13 +874,33 @@ impl CalendarView {
         let now_top = now_minute as f32 / 60. * row;
         let today_shown = days.iter().any(|day| day.date == today);
         let minute_y = |minute: i64| minute as f32 / 60. * row;
+        let selection = self.slot_selection;
+        let dragging = self.slot_drag.is_some();
         div()
             .id("calendar-grid")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
+            .track_focus(&self.grid_focus)
+            .on_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" && view.slot_selection.is_some() {
+                    view.clear_slot_selection(cx);
+                    cx.stop_propagation();
+                }
+            }))
             .on_scroll_wheel(cx.listener(Self::on_grid_scroll_wheel))
+            // Inside the grid, or outside it and over meetings (whose hitboxes block
+            // the grid's): either way a left release ends the drag.
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|view, _: &MouseUpEvent, _, cx| view.end_slot_drag(cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|view, _: &MouseUpEvent, _, cx| view.end_slot_drag(cx)),
+            )
+            .when(dragging, |grid| grid.child(self.slot_drag_listener(cx)))
             .child(
                 h_flex()
                     .h(px(total_height))
@@ -687,6 +950,7 @@ impl CalendarView {
                             .h_full()
                             .border_l_1()
                             .border_color(theme::border())
+                            .child(self.slot_layer(day.date, cx))
                             .children(shading)
                             .children((1..24 * steps).map(|step| {
                                 let line = div()
@@ -701,6 +965,11 @@ impl CalendarView {
                                     line.bg(theme::border().opacity(MINOR_LINE_OPACITY))
                                 }
                             }))
+                            .children(
+                                selection
+                                    .filter(|selection| selection.date == day.date)
+                                    .map(|selection| self.selection_block(&selection)),
+                            )
                             .children(day.blocks.iter().map(|block| {
                                 self.event_block(
                                     block,
@@ -745,6 +1014,22 @@ impl CalendarView {
                     })),
             )
     }
+}
+
+/// The one UTC offset the hour grid lays every shown day out with.
+fn grid_offset() -> FixedOffset {
+    Local::now().offset().fix()
+}
+
+/// New meeting for a block picked on the grid.
+fn open_meeting_for(
+    state: Entity<AppState>,
+    picked: SlotSelection,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let form = picked.form_times(grid_offset(), &Local);
+    open_new_meeting_at(state, form.date, form.start, form.end, window, cx);
 }
 
 /// Loading line and one notice per failed source, under the calendar header.
@@ -958,11 +1243,18 @@ impl Render for CalendarView {
         let send_response = state.rsvp_send_response;
         let failures = state.calendar_week.failures.clone();
         let loading = state.calendar_week.loading && events.is_empty();
-        let offset = Local::now().offset().fix();
+        let offset = grid_offset();
         let span = state.calendar_week.span;
         let layout = state.calendar_layout();
         let dates = state.calendar_dates();
         let days = week_days(&events, &dates, offset);
+        // A picked block goes away once its day scrolls out of view or Month shows.
+        if self.slot_selection.is_some_and(|picked| {
+            span == CalendarSpan::Month || !picked.fits(&dates, self.step_minutes())
+        }) {
+            self.slot_selection = None;
+            self.slot_drag = None;
+        }
         let today = Local::now().date_naive();
         let now = Utc::now();
         let accounts = state.calendar_accounts();
