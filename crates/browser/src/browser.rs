@@ -296,6 +296,45 @@ impl Browser {
             .unwrap_or(false)
     }
 
+    /// True when the Teams page can use a token: an opened sealed cache entry, or a still-valid
+    /// access token. Key names alone do not count.
+    pub async fn teams_sign_in_ready(&self) -> bool {
+        let Ok(tabs) = self.tabs().await else {
+            return false;
+        };
+        let Some(tab) = targets::app_tab(&tabs, App::Teams) else {
+            return false;
+        };
+        if tab.parked {
+            return false;
+        }
+        let expression = crate::sign_in_ready::PAGE_EXPRESSION;
+        if let Some(bidi) = &self.inner.bidi {
+            let evaluate = tokio::time::timeout(
+                self.inner.timeouts.probe,
+                bidi.evaluate(&tab.id, expression),
+            );
+            return match evaluate.await {
+                Ok(Ok(value)) => crate::sign_in_ready::sign_in_ready_from_page(&value),
+                _ => false,
+            };
+        }
+        let url = format!(
+            "ws://127.0.0.1:{}/devtools/page/{}",
+            self.inner.config.port, tab.id
+        );
+        let params = json!({
+            "expression": expression,
+            "returnByValue": true,
+            "awaitPromise": true
+        });
+        cdp_call(&url, "Runtime.evaluate", params, self.inner.timeouts.probe)
+            .await
+            .ok()
+            .and_then(|value| value.pointer("/result/value").cloned())
+            .is_some_and(|value| crate::sign_in_ready::sign_in_ready_from_page(&value))
+    }
+
     pub async fn login_window(&self) -> Result<(), BrowserError> {
         let _guard = self.inner.operation.lock().await;
         if self.is_visible_managed() && self.is_running().await {
