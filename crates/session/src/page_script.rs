@@ -23,6 +23,28 @@ pub fn token_acquirer_script() -> String {
 }
 
 impl Session {
+    /// Acquires an access token through the current transport.
+    pub async fn access_token(
+        &self,
+        app: App,
+        scope: &Scope,
+        force_refresh: bool,
+    ) -> Result<String> {
+        if !self.transport.supports_tabs() {
+            return self
+                .transport
+                .native_token(scope, self.tenant(), force_refresh)
+                .await;
+        }
+        match self
+            .run_with_token(app, scope, "return token;", &Value::Null, force_refresh)
+            .await?
+        {
+            Value::String(token) => Ok(token),
+            _ => Err(Error::Cdp("token lookup gave no text".into())),
+        }
+    }
+
     /// Opens a dedicated CDP connection to the app tab. Events of the tab arrive on the stream.
     pub async fn subscribe(&self, app: App) -> Result<(TabControl, TabEvents)> {
         if !self.transport.supports_tabs() {
@@ -37,7 +59,7 @@ impl Session {
     }
 
     /// Runs `body` inside the app tab after the token lookup of the fetch script.
-    /// `body` is an async function body that sees `token` and `args`; the token never leaves the page.
+    /// `body` is an async function body that sees `token` and `args`.
     pub async fn run_with_token(
         &self,
         app: App,
@@ -46,14 +68,6 @@ impl Session {
         args: &Value,
         force_refresh: bool,
     ) -> Result<Value> {
-        if body.trim() == "return token;"
-            && let Some(auth) = &self.native_auth
-        {
-            return auth
-                .token(scope, self.tenant(), force_refresh)
-                .await
-                .map(Value::String);
-        }
         if !self.transport.supports_tabs() {
             return Err(Error::NativePageRequired);
         }

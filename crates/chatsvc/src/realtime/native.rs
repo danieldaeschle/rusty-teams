@@ -37,7 +37,6 @@ const MAX_PRESENCE_FIELD: usize = 128;
 const MAX_SENDER_NAME: usize = 256;
 const MAX_RESOURCE_TYPE: usize = 64;
 const MAX_LOSS_DETAIL: usize = 200;
-const TOKEN_BODY: &str = "return token;";
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -371,21 +370,12 @@ impl NativeTrouter {
     }
 
     pub(super) async fn token(&mut self) -> session::Result<String> {
-        let value = self
+        let token = self
             .session
-            .run_with_token(
-                App::Teams,
-                &ic3_scope(),
-                TOKEN_BODY,
-                &json!({}),
-                self.force_refresh,
-            )
+            .access_token(App::Teams, &ic3_scope(), self.force_refresh)
             .await?;
         self.force_refresh = false;
-        value
-            .as_str()
-            .map(str::to_owned)
-            .ok_or_else(|| session::Error::Cdp("token lookup gave no text".into()))
+        Ok(token)
     }
 
     pub(super) async fn run(mut self, mut stop: oneshot::Receiver<oneshot::Sender<()>>) {

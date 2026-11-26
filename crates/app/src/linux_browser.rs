@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, watch};
+use tokio::sync::{Notify, mpsc, watch};
 
 use crate::backend::BackendEvent;
 use crate::browser_sign_in::BrowserSignInState;
@@ -62,27 +62,24 @@ struct HideAfterLogin {
     stable: u32,
 }
 
+fn teams_ready(status: &browser::Status) -> bool {
+    status.running
+        && status.mode == browser::Mode::Visible
+        && status.login_state == browser::LoginState::NotRequired
+        && status
+            .tabs
+            .iter()
+            .any(|tab| tab.app == Some(browser::App::Teams) && !tab.parked)
+}
+
 impl HideAfterLogin {
     fn reset(&mut self) {
         self.stable = 0;
     }
 
     fn step(&mut self, status: Option<&browser::Status>, has_msal_cache: bool) -> bool {
-        let Some(status) = status else {
-            self.stable = 0;
-            return false;
-        };
-        if !status.running || status.mode != browser::Mode::Visible {
+        if !status.is_some_and(teams_ready) || !has_msal_cache {
             self.reset();
-            return false;
-        }
-        let teams_loaded = status.login_state == browser::LoginState::NotRequired
-            && status
-                .tabs
-                .iter()
-                .any(|tab| tab.app == Some(browser::App::Teams) && !tab.parked);
-        if !teams_loaded || !has_msal_cache {
-            self.stable = 0;
             return false;
         }
         self.stable += 1;
@@ -92,6 +89,16 @@ impl HideAfterLogin {
         }
         false
     }
+
+    async fn settled(
+        &mut self,
+        browser: &browser::Browser,
+        status: Option<&browser::Status>,
+    ) -> bool {
+        let has_msal_cache =
+            status.is_some_and(teams_ready) && browser.teams_has_msal_cache().await;
+        self.step(status, has_msal_cache)
+    }
 }
 
 /// Moves a managed visible browser back to headless once Teams sign-in completes.
@@ -100,7 +107,7 @@ async fn hide_after_login(browser: browser::Browser, headless_notify: Arc<Notify
     loop {
         tokio::time::sleep(HIDE_POLL).await;
         if browser.is_busy() {
-            tracker.stable = 0;
+            tracker.reset();
             continue;
         }
         if !browser.is_visible_managed() {
@@ -108,21 +115,7 @@ async fn hide_after_login(browser: browser::Browser, headless_notify: Arc<Notify
             continue;
         }
         let status = browser.status().await.ok();
-        let has_msal_cache = match status.as_ref() {
-            Some(status)
-                if status.running
-                    && status.mode == browser::Mode::Visible
-                    && status.login_state == browser::LoginState::NotRequired
-                    && status
-                        .tabs
-                        .iter()
-                        .any(|tab| tab.app == Some(browser::App::Teams) && !tab.parked) =>
-            {
-                browser.teams_has_msal_cache().await
-            }
-            _ => false,
-        };
-        if tracker.step(status.as_ref(), has_msal_cache) {
+        if tracker.settled(&browser, status.as_ref()).await {
             log::info!("Teams sign-in finished: moving the browser to the background");
             publish_sign_in(BrowserSignInState::Finishing);
             if let Err(error) = browser.headless().await {
@@ -136,216 +129,91 @@ async fn hide_after_login(browser: browser::Browser, headless_notify: Arc<Notify
     }
 }
 
-/// Native authentication normally starts from its saved refresh credential. If Microsoft requires
-/// a sign-in, this transport reuses the application's normal browser flow, imports the resulting
-/// Teams credential, closes the browser, and exposes the native credential provider.
-struct NativeLoginTransport {
-    browser: Mutex<Option<browser::Browser>>,
-    config: session::NativeAuthConfig,
-    auth: Mutex<Option<Arc<session::NativeAuth>>>,
-    initialize: AsyncMutex<()>,
-}
-
-impl NativeLoginTransport {
-    fn new(refresh_token_file: impl Into<PathBuf>) -> Self {
-        NativeLoginTransport {
-            browser: Mutex::new(None),
-            config: session::NativeAuthConfig::teams(refresh_token_file),
-            auth: Mutex::new(None),
-            initialize: AsyncMutex::new(()),
+async fn wait_for_login(browser: &browser::Browser) -> session::Result<String> {
+    let mut tracker = HideAfterLogin::default();
+    let mut credential_attempts = 0;
+    loop {
+        tokio::time::sleep(HIDE_POLL).await;
+        if browser.is_busy() {
+            tracker.reset();
+            continue;
         }
-    }
-
-    fn sign_in_browser(&self) -> session::Result<browser::Browser> {
-        if let Ok(saved) = self.browser.lock()
-            && let Some(browser) = saved.as_ref()
-        {
-            return Ok(browser.clone());
+        let status = browser.status().await.ok();
+        if status.as_ref().is_some_and(|status| !status.running) {
+            return Err(session::Error::LoginRequired(
+                "the sign-in window was closed before sign-in finished".into(),
+            ));
         }
-
-        let detected = browser::Browser::detect().map_err(|error| {
-            session::Error::NativeAuth(format!("could not locate a sign-in browser: {error}"))
-        })?;
-        let _ = LINUX_BROWSER.set(detected.clone());
-        if let Ok(mut saved) = self.browser.lock() {
-            *saved = Some(detected.clone());
-        }
-        Ok(detected)
-    }
-
-    fn saved_auth(&self) -> Option<Arc<session::NativeAuth>> {
-        self.auth
-            .lock()
-            .ok()
-            .and_then(|auth| auth.as_ref().cloned())
-    }
-
-    fn replace_auth(&self, auth: Option<Arc<session::NativeAuth>>) {
-        if let Ok(mut saved) = self.auth.lock() {
-            *saved = auth;
-        }
-    }
-
-    async fn load_auth(&self) -> session::Result<Arc<session::NativeAuth>> {
-        let auth = Arc::new(session::NativeAuth::new(self.config.clone())?);
-        auth.check().await?;
-        Ok(auth)
-    }
-
-    async fn wait_for_login(browser: &browser::Browser) -> session::Result<String> {
-        let mut tracker = HideAfterLogin::default();
-        let mut credential_attempts = 0;
-        loop {
-            tokio::time::sleep(HIDE_POLL).await;
-            if browser.is_busy() {
-                tracker.reset();
-                continue;
-            }
-            if !browser.is_running().await {
-                return Err(session::Error::LoginRequired(
-                    "the sign-in window was closed before sign-in finished".into(),
-                ));
-            }
-            let status = browser.status().await.ok();
-            let has_msal_cache = match status.as_ref() {
-                Some(status)
-                    if status.running
-                        && status.mode == browser::Mode::Visible
-                        && status.login_state == browser::LoginState::NotRequired
-                        && status
-                            .tabs
-                            .iter()
-                            .any(|tab| tab.app == Some(browser::App::Teams) && !tab.parked) =>
-                {
-                    browser.teams_has_msal_cache().await
-                }
-                _ => false,
-            };
-            if tracker.step(status.as_ref(), has_msal_cache) {
-                match browser
-                    .teams_refresh_token(session::TEAMS_WEB_CLIENT_ID)
-                    .await
-                {
-                    Ok(credential) => return Ok(credential),
-                    Err(error) => {
-                        credential_attempts += 1;
-                        if credential_attempts >= CREDENTIAL_READ_ATTEMPTS {
-                            return Err(session::Error::NativeAuth(format!(
-                                "could not import the signed-in Teams credential: {error}"
-                            )));
-                        }
+        if tracker.settled(browser, status.as_ref()).await {
+            match browser
+                .teams_refresh_token(session::TEAMS_WEB_CLIENT_ID)
+                .await
+            {
+                Ok(credential) => return Ok(credential),
+                Err(error) => {
+                    credential_attempts += 1;
+                    if credential_attempts >= CREDENTIAL_READ_ATTEMPTS {
+                        return Err(session::Error::NativeAuth(format!(
+                            "could not import the signed-in Teams credential: {error}"
+                        )));
                     }
                 }
             }
         }
     }
-
-    async fn interactive_auth(&self) -> session::Result<Arc<session::NativeAuth>> {
-        let browser = self.sign_in_browser()?;
-        publish_sign_in(BrowserSignInState::Opening);
-        if let Err(error) = browser.login_window().await {
-            let _ = browser.stop().await;
-            return Err(session::Error::NativeAuth(format!(
-                "could not open the sign-in browser: {error}"
-            )));
-        }
-        publish_sign_in(BrowserSignInState::AwaitingSignIn);
-        let credential = Self::wait_for_login(&browser).await;
-        if credential.is_ok() {
-            publish_sign_in(BrowserSignInState::Finishing);
-        }
-        let stopped = browser.stop().await.map_err(|error| {
-            session::Error::NativeAuth(format!(
-                "sign-in finished, but the browser could not be closed: {error}"
-            ))
-        });
-        let credential = credential?;
-        stopped?;
-        let auth = Arc::new(session::NativeAuth::from_refresh_token(
-            self.config.clone(),
-            credential,
-        )?);
-        auth.check().await?;
-        Ok(auth)
-    }
-
-    async fn check_ready(&self) -> session::Result<()> {
-        if let Some(auth) = self.saved_auth() {
-            match auth.check().await {
-                Ok(()) => return Ok(()),
-                Err(session::Error::LoginRequired(_)) => self.replace_auth(None),
-                Err(error) => return Err(error),
-            }
-        }
-
-        let _initializing = self.initialize.lock().await;
-        if let Some(auth) = self.saved_auth() {
-            return auth.check().await;
-        }
-
-        let initial = self.load_auth().await;
-        let auth = match initial {
-            Ok(auth) => auth,
-            Err(session::Error::LoginRequired(_)) => self.interactive_auth().await?,
-            Err(error) => return Err(error),
-        };
-        self.replace_auth(Some(auth));
-        publish_sign_in(BrowserSignInState::Idle);
-        Ok(())
-    }
 }
 
-impl session::Transport for NativeLoginTransport {
-    fn check(&self) -> session::BoxFuture<'_, session::Result<()>> {
-        Box::pin(async move {
-            let result = self.check_ready().await;
-            if let Err(error) = &result {
-                match error {
-                    session::Error::LoginRequired(_) => {
-                        publish_sign_in(BrowserSignInState::Idle)
-                    }
-                    _ => publish_sign_in(BrowserSignInState::Failed(error.to_string())),
-                }
-            }
-            result
-        })
+async fn read_browser_credential() -> session::Result<String> {
+    let browser = match LINUX_BROWSER.get() {
+        Some(browser) => browser.clone(),
+        None => {
+            let browser = browser::Browser::detect().map_err(|error| {
+                session::Error::NativeAuth(format!("could not locate a sign-in browser: {error}"))
+            })?;
+            let _ = LINUX_BROWSER.set(browser.clone());
+            browser
+        }
+    };
+    publish_sign_in(BrowserSignInState::Opening);
+    if let Err(error) = browser.login_window().await {
+        let _ = browser.stop().await;
+        return Err(session::Error::NativeAuth(format!(
+            "could not open the sign-in browser: {error}"
+        )));
     }
+    publish_sign_in(BrowserSignInState::AwaitingSignIn);
+    let credential = wait_for_login(&browser).await;
+    if credential.is_ok() {
+        publish_sign_in(BrowserSignInState::Finishing);
+    }
+    let stopped = browser.stop().await;
+    let credential = credential?;
+    stopped.map_err(|error| {
+        session::Error::NativeAuth(format!(
+            "sign-in finished, but the browser could not be closed: {error}"
+        ))
+    })?;
+    Ok(credential)
+}
 
-    fn open(
-        &self,
-        _app: session::App,
-        _with_events: bool,
-    ) -> session::BoxFuture<'_, session::Result<Option<session::OpenedTab>>> {
-        Box::pin(async { Ok(None) })
-    }
-
-    fn wake(&self, _app: session::App) -> session::BoxFuture<'_, session::Result<()>> {
-        Box::pin(async { Ok(()) })
-    }
-
-    fn diagnose(&self) -> session::BoxFuture<'_, session::Result<session::Diagnosis>> {
-        Box::pin(async { Ok(session::Diagnosis::default()) })
-    }
-
-    fn native_auth(&self) -> Option<Arc<session::NativeAuth>> {
-        self.saved_auth()
-    }
-
-    fn supports_tabs(&self) -> bool {
-        false
-    }
+async fn interactive_sign_in() -> session::Result<String> {
+    let result = read_browser_credential().await;
+    let state = match &result {
+        Ok(_) | Err(session::Error::LoginRequired(_)) => BrowserSignInState::Idle,
+        Err(error) => BrowserSignInState::Failed(error.to_string()),
+    };
+    publish_sign_in(state);
+    result
 }
 
 /// Starts strict native authentication. Browser discovery and launch happen only when the saved
 /// refresh credential needs an interactive renewal.
 pub fn start_native() -> Arc<dyn session::Transport> {
-    let Some(base) = directories::BaseDirs::new() else {
-        return Arc::new(session::NativeTransport::failed(
-            "could not locate the native credential directory",
-        ));
-    };
-    let refresh_token_file = base.data_dir().join(NATIVE_REFRESH_TOKEN_FILE);
-    Arc::new(NativeLoginTransport::new(refresh_token_file))
+    let refresh_token_file =
+        directories::BaseDirs::new().map(|base| base.data_dir().join(NATIVE_REFRESH_TOKEN_FILE));
+    Arc::new(session::NativeAuth::teams(refresh_token_file, || {
+        Box::pin(interactive_sign_in())
+    }))
 }
 
 pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {

@@ -160,16 +160,15 @@ it uses the public Teams Web client which the normal Teams page already uses.
 
 The rotating refresh credential is deliberately stored without encryption in
 the platform data directory as `rusty-teams-native-refresh-token`. On Unix the
-file is forced to mode `0600`, so only the current OS user can read it, but any
-process running as that user can still access it. The credential is never
-printed or written to logs.
+file is created with mode `0600` and replaced atomically on rotation. Processes
+running as the same OS user can still read it. The credential stays out of logs.
 
 The core chat sync, Graph requests, Teams chat service, presence and native
 Trouter connection can run this way. Features which still execute JavaScript in
 the Teams page (notably some call operations and Skype/AMS media operations)
 return an explicit "web page required" error. If the refresh credential is
-revoked, expires, or policy requires MFA/interaction, the normal selected-browser
-login window opens again and is closed automatically after the renewal succeeds.
+revoked, expires, or policy requires interaction, the selected browser opens a
+sign-in window again. Open sessions share the renewed credential.
 No browser cookie database is read by native mode.
 
 ### Google Calendar (optional)

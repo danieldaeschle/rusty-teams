@@ -11,7 +11,6 @@ use crate::app::App;
 use crate::error::{Error, Result};
 use crate::events::TabControl;
 use crate::native::NativeHttp;
-use crate::native_auth::NativeAuth;
 use crate::request::{ApiResponse, Method, Outcome, Request, WireRequest, WireResult};
 use crate::scope::Scope;
 use crate::transport::{CdpTransport, Transport};
@@ -75,7 +74,6 @@ pub struct Session {
     tabs: Arc<HashMap<App, Mutex<Option<TabControl>>>>,
     force_refresh: Arc<AtomicBool>,
     native: Option<Arc<NativeHttp>>,
-    pub(crate) native_auth: Option<Arc<NativeAuth>>,
     tenant: Option<Arc<str>>,
 }
 
@@ -93,10 +91,15 @@ impl Session {
         config: SessionConfig,
     ) -> Result<Self> {
         transport.check().await?;
-        let native_auth = transport.native_auth();
+        let browserless = !transport.supports_tabs();
+        let native = native_http(&config, browserless);
+        if browserless && native.is_none() {
+            return Err(Error::NativeAuth(
+                "could not create the native HTTP client".into(),
+            ));
+        }
         Ok(Session {
-            native: native_http(&config, native_auth.is_some()),
-            native_auth,
+            native,
             tenant: None,
             transport,
             config,
@@ -114,7 +117,11 @@ impl Session {
     /// Tokens are held apart from the home tenant's, so both can run side by side.
     pub fn in_tenant(&self, tenant_id: &str) -> Session {
         Session {
-            native: native_http(&self.config, self.native_auth.is_some()),
+            native: if self.transport.supports_tabs() {
+                native_http(&self.config, false)
+            } else {
+                self.native.clone()
+            },
             force_refresh: Arc::new(AtomicBool::new(false)),
             tenant: Some(tenant_id.to_ascii_lowercase().into()),
             ..self.clone()
@@ -171,9 +178,11 @@ impl Session {
                 // A CAE-revoked token stays unexpired in the app cache, so only a refresh-token grant replaces it.
                 self.force_refresh.store(true, Ordering::SeqCst);
                 forced_here = true;
-                self.reload_all().await;
-                sleep(self.config.unauthorized_reload_wait).await;
-                self.drop_all().await;
+                if self.transport.supports_tabs() {
+                    self.reload_all().await;
+                    sleep(self.config.unauthorized_reload_wait).await;
+                    self.drop_all().await;
+                }
             }
             let mut retry = Vec::new();
             for (&index, answer) in pending.iter().zip(answers) {
