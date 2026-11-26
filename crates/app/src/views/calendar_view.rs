@@ -25,6 +25,7 @@ use crate::call::calendar_now::{
     DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION, hour_height,
     now_scroll_offset_y, offset_differs, shows_hour_grid, work_start_scroll_offset_y,
 };
+use crate::call::schedule::DEFAULT_LENGTH_MINUTES;
 use crate::call::slot_select::{SlotSelection, minute_at};
 use crate::call::week::CalendarLoadFailure;
 use crate::call::week_grid::{
@@ -276,7 +277,7 @@ impl CalendarView {
     }
 
     /// Left press on an empty slot: start picking a block, or a double click opens
-    /// New meeting for the picked block it lands in, else for that slot.
+    /// New meeting at that slot with the default meeting length, as Teams does.
     fn press_slot(
         &mut self,
         date: NaiveDate,
@@ -286,12 +287,10 @@ impl CalendarView {
     ) {
         let slot = self.one_slot(date, event.position);
         if event.click_count >= 2 {
-            let picked = self
-                .slot_selection
-                .filter(|picked| picked.contains(date, slot.start_minute))
-                .unwrap_or(slot);
             self.clear_slot_selection(cx);
-            open_meeting_for(self.state.clone(), picked, window, cx);
+            let meeting =
+                SlotSelection::starting_at(date, slot.start_minute, DEFAULT_LENGTH_MINUTES);
+            open_meeting_for(self.state.clone(), meeting, window, cx);
             return;
         }
         self.slot_drag = Some(SlotDrag {
@@ -1017,7 +1016,6 @@ impl CalendarView {
     }
 }
 
-/// Loading line and one notice per failed source, under the calendar header.
 /// The one UTC offset the hour grid lays every shown day out with.
 fn grid_offset() -> FixedOffset {
     Local::now().offset().fix()
@@ -1034,6 +1032,7 @@ fn open_meeting_for(
     open_new_meeting_at(state, form.date, form.start, form.end, window, cx);
 }
 
+/// Loading line and one notice per failed source, under the calendar header.
 fn load_notices(
     state: &Entity<AppState>,
     failures: &[CalendarLoadFailure],

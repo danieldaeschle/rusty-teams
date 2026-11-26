@@ -45,6 +45,15 @@ impl SlotSelection {
         }
     }
 
+    /// A meeting of `length` minutes from `minute`, cut at the end of the day.
+    pub fn starting_at(date: NaiveDate, minute: i64, length: i64) -> Self {
+        SlotSelection {
+            date,
+            start_minute: minute,
+            end_minute: (minute + length.max(1)).min(MINUTES_PER_DAY),
+        }
+    }
+
     pub fn contains(&self, date: NaiveDate, minute: i64) -> bool {
         self.date == date && (self.start_minute..self.end_minute).contains(&minute)
     }
@@ -196,6 +205,21 @@ mod tests {
             (form.date, form.start, form.end),
             (day(), time(10, 0), time(11, 0))
         );
+    }
+
+    #[test]
+    fn a_double_click_meeting_has_the_default_length_from_its_slot() {
+        // 13:45 on a 15-minute grid, inside or outside a picked block alike.
+        let meeting = SlotSelection::starting_at(day(), 13 * 60 + 45, 30);
+        let form = meeting.form_times(hours(1), &hours(1));
+        assert_eq!((form.start, form.end), (time(13, 45), time(14, 15)));
+        // On an hour grid the meeting is still half an hour.
+        let hourly = SlotSelection::starting_at(day(), 13 * 60, 30);
+        assert_eq!(hourly.form_times(hours(1), &hours(1)).end, time(13, 30));
+        // At the end of the day it stops at midnight, which the form shows as 23:59.
+        let late = SlotSelection::starting_at(day(), 23 * 60 + 45, 30);
+        assert_eq!(late.end_minute, MINUTES_PER_DAY);
+        assert_eq!(late.form_times(hours(1), &hours(1)).end, time(23, 59));
     }
 
     #[test]

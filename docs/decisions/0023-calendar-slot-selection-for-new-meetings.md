@@ -7,7 +7,7 @@ date: 2026-11-25
 
 ## Context
 
-Teams creates a meeting from the calendar grid: select a time range by dragging over empty slots, then New meeting, and the form opens on that range. Microsoft's help only says "Select a timeslot on the calendar or select New". The drag and right-click flow comes from the Teams desktop client. A few details had more than one reasonable answer:
+Teams creates a meeting from the calendar grid: select a time range by dragging over empty slots, then New meeting, and the form opens on that range. Microsoft's help only says "Select a timeslot on the calendar or select New". The drag and right-click flow comes from the Teams desktop client and was checked against the Teams web client in review of #91. A few details had more than one reasonable answer:
 
 - what releasing the drag does: open the form at once, or keep the block for a right-click menu;
 - whether a block may run across days;
@@ -16,7 +16,7 @@ Teams creates a meeting from the calendar grid: select a time range by dragging 
 
 ## Decision
 
-- Releasing the drag keeps the block. Right-click on it shows New meeting. Right-click on an empty slot outside it picks that one slot first. Double-click on an empty slot opens New meeting at once, for the block it lands in or for that slot.
+- Releasing the drag keeps the block. Right-click on it shows New meeting. Right-click on an empty slot outside it picks that one slot first. Double-click on an empty slot opens New meeting at once, starting at that slot with the default meeting length (30 minutes), inside a picked block too. This matches the Teams web client.
 - A block snaps to the time scale and stays in the day the drag started. The New meeting form has one date.
 - A block that ends at 24:00 goes into the form as 23:59 and is labelled that way.
 - The form gets the wall-clock times of the instants the dragged rows stand for on the grid (grid midnight plus minutes, converted to local time), so the meeting lands where it was dragged, also on the far side of a daylight saving switch.
