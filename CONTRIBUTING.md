@@ -8,7 +8,7 @@ Most of this code is written with AI agents, and that is welcome here. Just say 
 |---|---|
 | 1 | Read [GUARDRAILS.md](GUARDRAILS.md): where the app must match Teams and where it may differ. It wins over any habit. |
 | 2 | Check [ROADMAP.md](ROADMAP.md), mainly "Out of scope". Features listed there are not merged. |
-| 3 | Search open pull requests and issues for the same topic. For a feature or anything over 400 changed lines, open an issue first and wait for the `status: accepted` label. |
+| 3 | Search open pull requests and issues for the same topic. For a feature, open an issue first and wait for the `status: accepted` label. |
 | 4 | Read the notes under [docs/decisions/](docs/decisions/README.md) for the area you touch. |
 
 ## AI use
@@ -39,7 +39,7 @@ A bot check (`PR gate`) runs on every PR that is not a draft. Until it passes, t
 | Title | `type(scope): message`, from the user's view |
 | Template | Summary, AI model, Tests and Review filled in, not just the hints |
 | Problem | No `Closes #123`: a Problem section says what is wrong or missing, when a user hits it (steps or when/then) and what should happen instead |
-| Issue first | A `feat` PR or more than 400 changed lines (lockfiles do not count) links an issue labelled `status: accepted` |
+| Issue first | A `feat` PR links an issue labelled `status: accepted` |
 | Screenshot | A change to UI code (`crates/app/src/views/`, `settings/`, `components/`, `widgets/`, `*_view.rs`, `locales/`) shows the changed area with demo data, or ticks "No visible change" with a reason |
 | Tests | What ran and what did not. A change to Windows-only code says whether it was built on Windows |
 | Review | At least two independent reviews, each finding fixed or answered |

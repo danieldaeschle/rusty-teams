@@ -36,7 +36,7 @@ The body has `## Summary`, `## AI model`, `## Tests` and `## Review`, plus `## P
 2. A reviewer must not have written the change. Use a fresh agent session, a subagent, or a review command such as `/code-review` or `/review`. On Copilot, a Copilot code review on the draft PR counts as one.
 3. Fix or answer every valid finding. In `## Review`, write at least two non-empty lines: one line per review (what ran it), then one line per finding: fixed, or not fixed and why.
 4. No `Closes` / `Fixes` / `Resolves` plus `#n` or an issue URL on this repo: write `## Problem` (at least 80 characters). Say what is wrong or missing, when a user hits it (steps or when/then), and what should happen instead. Write `Closes #123` only when that issue exists.
-5. A `feat` PR, or more than 400 changed lines (lockfiles do not count), needs an issue labelled `status: accepted`. A maintainer sets that label. Do not add it yourself. Without it, do not mark the PR ready: say so, or split the change.
+5. A `feat` PR needs an issue labelled `status: accepted`. A maintainer sets that label. Do not add it yourself. Without it, do not mark the PR ready: say so.
 6. A change under `crates/app/src/views/`, `settings/`, `components/`, `widgets/`, a `crates/app/src/*_view.rs` file, or `locales/` needs a screenshot in the body, taken with `cargo run -p app -- --demo` or `scripts/headless-shot.sh`. No visible change: tick `- [x] No visible change` and say why. Never a real account.
 7. In `## Tests`, say what ran and what did not. If the diff touches Windows-only code, say whether you built it on Windows.
 8. No planning folders in the diff (`openspec/`, `.specify/`, `.kiro/`). A `vendor/` change says why in the summary. At most 5 open PRs, drafts included.

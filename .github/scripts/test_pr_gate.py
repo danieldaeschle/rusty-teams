@@ -79,11 +79,9 @@ class GateTests(unittest.TestCase):
         self.assertIn("Issue first", missing_keys(make(title=title, body=body, issue_labels={7: ["enhancement"]})))
         self.assertEqual(check(make(title=title, body=body, issue_labels={7: [LABEL_ACCEPTED]})), [])
 
-    def test_large_fix_needs_accepted_issue_but_lockfile_does_not_count(self):
-        large = [ChangedFile("crates/chatsvc/src/window.rs", 350, 100)]
-        self.assertIn("Issue first", missing_keys(make(files=large)))
-        lock = [BACKEND_FILE, ChangedFile("Cargo.lock", 900, 900)]
-        self.assertEqual(check(make(files=lock)), [])
+    def test_large_fix_needs_no_issue(self):
+        large = [ChangedFile("crates/chatsvc/src/window.rs", 3500, 1000)]
+        self.assertEqual(check(make(files=large)), [])
 
     def test_ui_change_needs_screenshot(self):
         self.assertIn("Screenshot", missing_keys(make(files=[UI_FILE])))
@@ -126,7 +124,6 @@ class DocumentationTests(unittest.TestCase):
 
     def shared_values(self):
         return (
-            f"more than {pr_gate.MAX_CHANGED_LINES} changed lines",
             pr_gate.LABEL_ACCEPTED,
             pr_gate.LABEL_NO_VISUAL,
             pr_gate.LABEL_SKIP,
