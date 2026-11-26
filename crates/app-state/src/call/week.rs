@@ -321,26 +321,17 @@ impl AppState {
             }
             if accounts.has_people() {
                 let calendar = Calendar::new(engine.remote().session());
-                match crate::people_calendar_sync::fetch_people_events(
+                let (events, partial) = crate::people_calendar_sync::fetch_people_events(
                     &calendar, &accounts, from, to,
                 )
-                .await
-                {
-                    Ok((events, partial)) => {
-                        combined.extend(events);
-                        for message in partial {
-                            failures.push(CalendarLoadFailure {
-                                source: CalendarSource::Person,
-                                message,
-                                sign_in: false,
-                            });
-                        }
-                    }
-                    Err(error) => failures.push(CalendarLoadFailure {
+                .await;
+                combined.extend(events);
+                for message in partial {
+                    failures.push(CalendarLoadFailure {
                         source: CalendarSource::Person,
-                        message: error,
+                        message,
                         sign_in: false,
-                    }),
+                    });
                 }
             }
             if accounts.has_ics() {
@@ -447,11 +438,12 @@ pub(crate) fn load_summary(
         count(caldav),
     );
     for failure in failures {
-        line.push_str(&format!(
-            "; {} failed: {}",
-            failure.source.label(),
-            failure.message.chars().take(160).collect::<String>()
-        ));
+        // A person's failure starts with their name, which stays out of the log.
+        let message = match failure.source {
+            CalendarSource::Person => String::new(),
+            _ => failure.message.chars().take(160).collect(),
+        };
+        line.push_str(&format!("; {} failed: {message}", failure.source.label()));
     }
     line
 }

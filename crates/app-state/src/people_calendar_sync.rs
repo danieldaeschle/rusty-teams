@@ -9,13 +9,13 @@ use chatsvc::{Calendar, CalendarEvent, CalendarSource, PersonSchedule, ShowAs};
 /// Graph's getSchedule limit per request.
 const SCHEDULES_PER_REQUEST: usize = 20;
 
-/// Events plus per-person failure messages.
+/// Events plus failure messages, per person or per failed request.
 pub async fn fetch_people_events(
     calendar: &Calendar,
     accounts: &CalendarAccounts,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
-) -> Result<(Vec<CalendarEvent>, Vec<String>), String> {
+) -> (Vec<CalendarEvent>, Vec<String>) {
     let people: Vec<&PersonCalendar> = accounts
         .people_calendars
         .iter()
@@ -25,15 +25,23 @@ pub async fn fetch_people_events(
     let mut failures = Vec::new();
     for chunk in people.chunks(SCHEDULES_PER_REQUEST) {
         let mails: Vec<String> = chunk.iter().map(|person| person.mail.clone()).collect();
-        let schedules = calendar
-            .schedules(&mails, start, end)
-            .await
-            .map_err(|error| error.to_string())?;
+        let schedules = match calendar.schedules(&mails, start, end).await {
+            Ok(schedules) => schedules,
+            Err(error) => {
+                failures.push(error.to_string());
+                continue;
+            }
+        };
         for person in chunk {
             let Some(schedule) = schedules
                 .iter()
                 .find(|schedule| schedule.email.eq_ignore_ascii_case(&person.mail))
             else {
+                failures.push(format!(
+                    "{}: {}",
+                    person.name,
+                    tr("calendar.view.person_missing")
+                ));
                 continue;
             };
             match &schedule.error {
@@ -42,7 +50,7 @@ pub async fn fetch_people_events(
             }
         }
     }
-    Ok((events, failures))
+    (events, failures)
 }
 
 pub fn person_events(person: &PersonCalendar, schedule: &PersonSchedule) -> Vec<CalendarEvent> {

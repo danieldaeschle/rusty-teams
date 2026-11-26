@@ -1572,6 +1572,9 @@ calendar:
     person_away:
       en: Away
       de: Abwesend
+    person_missing:
+      en: no schedule returned
+      de: kein Kalender geliefert
     person_elsewhere:
       en: Working elsewhere
       de: An anderem Ort tätig
