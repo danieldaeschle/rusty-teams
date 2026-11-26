@@ -7,6 +7,7 @@ use gpui_kit::*;
 
 use super::blocks::CODE_PADDING;
 use super::hooks::open_profile_link;
+use super::link_tooltip::LinkTooltip;
 use super::selectable::{HIT_SLOP, PILL_INSET_Y, PILL_OUTSET, Participant, Pill, TIME_ROOM};
 
 const WRAP_TOLERANCE: f32 = 0.5;
@@ -374,6 +375,7 @@ pub struct FlowPrepaint {
     hitbox: Hitbox,
     fragments: Vec<PaintedFragment>,
     lines: Vec<Line>,
+    tooltip: Option<LinkTooltip>,
 }
 
 impl IntoElement for FlowText {
@@ -556,7 +558,7 @@ impl Element for FlowText {
 
     fn prepaint(
         &mut self,
-        _global_id: Option<&GlobalElementId>,
+        global_id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         request: &mut Self::RequestLayoutState,
@@ -619,6 +621,7 @@ impl Element for FlowText {
             hitbox,
             fragments,
             lines: layout.lines.clone(),
+            tooltip: LinkTooltip::prepaint(global_id, !self.links.is_empty(), window),
         }
     }
 
@@ -719,6 +722,22 @@ impl Element for FlowText {
                 .iter()
                 .map(|painted| (painted.layout.clone(), painted.fragment.range.start))
                 .collect();
+            if let Some(tooltip) = &prepaint.tooltip {
+                let (tooltip_layouts, tooltip_links) = (hover_layouts.clone(), self.links.clone());
+                tooltip.paint(
+                    &prepaint.hitbox,
+                    move |position| {
+                        tooltip_layouts.iter().find_map(|(layout, start)| {
+                            let index = layout.index_for_position(position).ok()?;
+                            tooltip_links
+                                .iter()
+                                .find(|(range, _)| range.contains(&(start + index)))
+                                .map(|(_, url)| url.clone())
+                        })
+                    },
+                    window,
+                );
+            }
             let (hover_links, hover_hitbox) = (self.links.clone(), prepaint.hitbox.clone());
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
                 let over_link = hover_hitbox.is_hovered(window)
@@ -781,9 +800,9 @@ mod tests {
     use gpui_kit::base::TextSelection;
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{
-        AnyWindowHandle, AppContext as _, Bounds, Context, HighlightStyle, IntoElement,
-        ParentElement as _, Pixels, Point, Render, Styled as _, TestAppContext, Window,
-        WindowBounds, WindowOptions, div, point, px, size,
+        AnyWindowHandle, AppContext as _, Bounds, Context, HighlightStyle, IntoElement, Modifiers,
+        MouseButton, ParentElement as _, Pixels, Point, Render, Styled as _, TestAppContext,
+        VisualTestContext, Window, WindowBounds, WindowOptions, div, point, px, size,
     };
 
     use super::{FlowLayout, FlowSegment, FlowText, Measured, build_lines, place};
@@ -959,5 +978,122 @@ mod tests {
         });
         assert!(link_x.is_some());
         assert_eq!(cx.opened_url().as_deref(), Some("https://example.com"));
+    }
+
+    struct Links {
+        text: &'static str,
+        links: Vec<(Range<usize>, String)>,
+    }
+
+    impl Render for Links {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(400.)).text_size(px(14.)).child(
+                FlowText::new(
+                    "links",
+                    self.text,
+                    vec![segment(0..self.text.len(), 1., 0.)],
+                )
+                .links(self.links.clone()),
+            )
+        }
+    }
+
+    struct Hover<'a> {
+        window_cx: &'a mut VisualTestContext,
+    }
+
+    impl Hover<'_> {
+        fn open<'a>(
+            cx: &'a mut TestAppContext,
+            text: &'static str,
+            links: &[(Range<usize>, &str)],
+        ) -> Hover<'a> {
+            cx.update(gpui_kit::init);
+            let links = links
+                .iter()
+                .map(|(range, url)| (range.clone(), (*url).to_owned()))
+                .collect();
+            let (_, window_cx) = cx.add_window_view(move |_, _| Links { text, links });
+            Hover { window_cx }
+        }
+
+        /// Moves the mouse to `x` on the first line, optionally holding the left button, and
+        /// waits out the tooltip delay. The tooltip's bounds, if one shows.
+        fn at(&mut self, x: f32, button: Option<MouseButton>) -> Option<Bounds<Pixels>> {
+            let position = point(px(x), px(8.));
+            self.window_cx
+                .simulate_mouse_move(position, button, Modifiers::none());
+            self.window_cx
+                .executor()
+                .advance_clock(std::time::Duration::from_millis(600));
+            self.window_cx.run_until_parked();
+            self.window_cx.debug_bounds("tooltip")
+        }
+
+        fn first_tooltip_x(&mut self, from: u32) -> Option<f32> {
+            (from..400)
+                .map(|x| x as f32)
+                .find(|x| self.at(*x, None).is_some())
+        }
+    }
+
+    #[gpui_kit::test]
+    fn hovering_a_link_shows_its_url_in_a_tooltip(cx: &mut TestAppContext) {
+        let mut hover = Hover::open(cx, TEXT, &[(8..12, "https://example.com")]);
+        assert!(hover.at(2., None).is_none());
+        assert!(hover.first_tooltip_x(40).is_some());
+        assert!(hover.at(2., None).is_none());
+    }
+
+    #[gpui_kit::test]
+    fn a_long_url_tooltip_wraps_inside_its_maximum_width(cx: &mut TestAppContext) {
+        let url = Box::leak(format!("https://example.com/{}", "a".repeat(600)).into_boxed_str());
+        let mut hover = Hover::open(cx, "link", &[(0..4, url)]);
+        let x = hover.first_tooltip_x(0).expect("tooltip over the link");
+        let bounds = hover.at(x, None).expect("tooltip stays");
+        assert!(bounds.size.width < px(560.), "{bounds:?}");
+        assert!(bounds.size.height > px(40.), "{bounds:?}");
+    }
+
+    #[gpui_kit::test]
+    fn moving_onto_the_next_link_shows_that_links_tooltip(cx: &mut TestAppContext) {
+        let mut hover = Hover::open(
+            cx,
+            "aaaaaaaaaabbbbbbbbbb",
+            &[(0..10, "https://a.example"), (10..20, "https://b.example")],
+        );
+        let first = hover.at(4., None).expect("tooltip over the first link");
+        let second = (40..200).map(|x| x as f32).find_map(|x| {
+            hover
+                .at(x, None)
+                .filter(|bounds| bounds.origin.x > first.origin.x + px(20.))
+        });
+        assert!(second.is_some());
+    }
+
+    #[gpui_kit::test]
+    fn no_tooltip_while_dragging_a_selection_over_a_link(cx: &mut TestAppContext) {
+        let mut hover = Hover::open(cx, TEXT, &[(8..12, "https://example.com")]);
+        let link_x = hover.first_tooltip_x(40).expect("tooltip over the link");
+        hover.at(2., None);
+        hover.window_cx.simulate_mouse_down(
+            point(px(2.), px(8.)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        assert!(hover.at(link_x, Some(MouseButton::Left)).is_none());
+        hover.window_cx.simulate_mouse_up(
+            point(px(link_x), px(8.)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        hover.at(link_x + 1., None);
+        assert!(hover.at(link_x, None).is_some());
+    }
+
+    #[gpui_kit::test]
+    fn a_mention_profile_link_has_no_tooltip(cx: &mut TestAppContext) {
+        let mut hover = Hover::open(cx, "@Ada Lovelace", &[(0..13, "teams-profile:8:orgid:x")]);
+        assert_eq!(hover.first_tooltip_x(0), None);
     }
 }

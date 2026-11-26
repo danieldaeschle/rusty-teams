@@ -3652,7 +3652,10 @@ pub struct ElementHoverState {
     pub element: bool,
 }
 
-pub(crate) enum ActiveTooltip {
+/// The tooltip state an element keeps between frames. Public so custom elements can show a
+/// tooltip over part of their content with [register_tooltip_mouse_handlers].
+#[allow(missing_docs)]
+pub enum ActiveTooltip {
     /// Currently delaying before showing the tooltip.
     WaitingForShow { _task: Task<()> },
     /// Tooltip is visible, element was hovered or for hoverable tooltips, the tooltip was hovered.
@@ -3696,7 +3699,8 @@ pub(crate) fn clear_active_tooltip_if_not_hoverable(
     }
 }
 
-pub(crate) fn set_tooltip_on_window(
+/// Puts a visible tooltip on the window. Call it from a custom element's prepaint.
+pub fn set_tooltip_on_window(
     active_tooltip: &Rc<RefCell<Option<ActiveTooltip>>>,
     window: &mut Window,
 ) -> Option<TooltipId> {
@@ -3709,7 +3713,10 @@ pub(crate) fn set_tooltip_on_window(
     Some(window.set_tooltip(tooltip))
 }
 
-pub(crate) fn register_tooltip_mouse_handlers(
+/// Shows and hides a tooltip as the mouse moves, after the usual delay. Call it from a custom
+/// element's paint, with the id [set_tooltip_on_window] returned in prepaint.
+#[allow(clippy::too_many_arguments)]
+pub fn register_tooltip_mouse_handlers(
     active_tooltip: &Rc<RefCell<Option<ActiveTooltip>>>,
     tooltip_id: Option<TooltipId>,
     build_tooltip: Rc<dyn Fn(&mut Window, &mut App) -> Option<(AnyView, bool)>>,

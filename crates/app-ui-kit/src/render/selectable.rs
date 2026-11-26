@@ -10,6 +10,7 @@ use gpui_kit::*;
 
 use super::blocks::{CODE_PADDING, EMOJI_PLACEHOLDER};
 use super::hooks::{open_link, open_profile_link};
+use super::link_tooltip::LinkTooltip;
 
 pub(super) const TIME_ROOM: char = '\u{2007}';
 pub(super) const HIT_SLOP: f32 = 12.;
@@ -272,7 +273,7 @@ impl IntoElement for SelectableRichText {
 
 impl Element for SelectableRichText {
     type RequestLayoutState = Participant;
-    type PrepaintState = Hitbox;
+    type PrepaintState = (Hitbox, Option<LinkTooltip>);
 
     fn id(&self) -> Option<ElementId> {
         Some(self.id.clone())
@@ -318,7 +319,8 @@ impl Element for SelectableRichText {
             .with_text_bounds(vec![bounds])
             .with_rendered_element(handle, window, cx);
         handle.register(registration, window, cx);
-        hitbox
+        let tooltip = LinkTooltip::prepaint(global_id, !self.links.is_empty(), window);
+        (hitbox, tooltip)
     }
 
     fn paint(
@@ -327,7 +329,7 @@ impl Element for SelectableRichText {
         inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         participant: &mut Self::RequestLayoutState,
-        hitbox: &mut Self::PrepaintState,
+        (hitbox, tooltip): &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -388,6 +390,14 @@ impl Element for SelectableRichText {
             CursorStyle::IBeam
         };
         window.set_cursor_style(cursor, hitbox);
+        if let Some(tooltip) = tooltip {
+            let (tooltip_layout, tooltip_links) = (layout.clone(), self.links.clone());
+            tooltip.paint(
+                hitbox,
+                move |position| link_at(&tooltip_layout, &tooltip_links, position),
+                window,
+            );
+        }
         if !self.links.is_empty() {
             let (hover_layout, hover_links, hover_hitbox) =
                 (layout.clone(), self.links.clone(), hitbox.clone());

@@ -2052,7 +2052,77 @@ fn joined_inline(lines: &[DraftLine]) -> String {
         .join("<br>")
 }
 
+/// The official client sends a link whose text is its own URL with the text cut to this many
+/// characters, the last one an ellipsis; the full URL stays in `href` and `title`.
+const LINK_TEXT_LIMIT: usize = 100;
+const LINK_ELLIPSIS: char = '…';
+
+struct ShortenedLinks {
+    content: String,
+    marks: Vec<Mark>,
+    urls: Vec<String>,
+}
+
+/// Shortens the text of each link that spells out its own URL past `LINK_TEXT_LIMIT`.
+fn shortened_links(content: &str, marks: &[Mark]) -> Option<ShortenedLinks> {
+    let mut long: Vec<(Range<usize>, &String)> = marks
+        .iter()
+        .filter_map(|mark| match &mark.kind {
+            MarkKind::Link(url) => {
+                let text = content.get(mark.range.clone())?;
+                let spells_url = text == url || link_url(text).as_ref() == Some(url);
+                (spells_url && text.chars().count() > LINK_TEXT_LIMIT)
+                    .then(|| (mark.range.clone(), url))
+            }
+            _ => None,
+        })
+        .collect();
+    if long.is_empty() {
+        return None;
+    }
+    long.sort_by_key(|(range, _)| range.start);
+    long.dedup();
+    let urls = long.iter().map(|(_, url)| (*url).clone()).collect();
+    let mut text = content.to_owned();
+    let mut marks = marks.to_vec();
+    for (range, _) in long.into_iter().rev() {
+        let kept = content[range.clone()]
+            .char_indices()
+            .nth(LINK_TEXT_LIMIT - 1)
+            .map_or(range.len(), |(offset, _)| offset);
+        let cut = range.start + kept;
+        let end = cut + LINK_ELLIPSIS.len_utf8();
+        text.replace_range(cut..range.end, &LINK_ELLIPSIS.to_string());
+        let moved = |offset: usize| {
+            if offset <= cut {
+                offset
+            } else if offset >= range.end {
+                offset - range.end + end
+            } else {
+                end
+            }
+        };
+        for mark in &mut marks {
+            mark.range = moved(mark.range.start)..moved(mark.range.end);
+        }
+    }
+    marks.retain(|mark| !mark.range.is_empty());
+    Some(ShortenedLinks {
+        content: text,
+        marks,
+        urls,
+    })
+}
+
 fn inline_html(content: &str, marks: &[Mark]) -> String {
+    if let Some(shortened) = shortened_links(content, marks) {
+        return inline_html_exact(&shortened.content, &shortened.marks, &shortened.urls);
+    }
+    inline_html_exact(content, marks, &[])
+}
+
+/// `titled` links carry their URL in `title` too, for the hover a shortened text needs.
+fn inline_html_exact(content: &str, marks: &[Mark], titled: &[String]) -> String {
     let mut boundaries: Vec<usize> = marks
         .iter()
         .flat_map(|mark| [mark.range.start, mark.range.end])
@@ -2081,7 +2151,13 @@ fn inline_html(content: &str, marks: &[Mark]) -> String {
             html.push_str(kind.close_tag());
         }
         for kind in &active[common..] {
-            html.push_str(&kind.open_tag());
+            match kind {
+                MarkKind::Link(url) if titled.contains(url) => {
+                    let url = escape_html(url);
+                    html.push_str(&format!("<a href=\"{url}\" title=\"{url}\">"));
+                }
+                _ => html.push_str(&kind.open_tag()),
+            }
         }
         open.extend(active[common..].iter().copied());
         html.push_str(&escape_html(&content[segment]));
@@ -2992,6 +3068,65 @@ mod tests {
         draft.toggle(0..4, MarkKind::Bold);
         draft.toggle(2..7, MarkKind::Italic);
         assert_eq!(draft.to_html(), "<b>a&lt;<i>b </i></b><i>&amp; c</i>");
+    }
+
+    fn long_url(length: usize) -> String {
+        let head = "https://portal.example/#@contoso/blade/";
+        format!("{head}{}", "a".repeat(length - head.len()))
+    }
+
+    #[test]
+    fn html_shortens_a_long_link_that_shows_its_own_url() {
+        let url = long_url(140);
+        let draft = Draft::from_markdown(&format!("see {url} now"));
+        assert_eq!(
+            draft.to_html(),
+            format!(
+                "see <a href=\"{url}\" title=\"{url}\">{}…</a> now",
+                &url[..99]
+            )
+        );
+        let www = format!("www.{}", &url["https://".len()..]);
+        let draft = Draft::from_markdown(&www);
+        assert_eq!(
+            draft.to_html(),
+            format!(
+                "<a href=\"https://{www}\" title=\"https://{www}\">{}…</a>",
+                &www[..99]
+            )
+        );
+    }
+
+    #[test]
+    fn html_keeps_short_links_and_labels_whole() {
+        let exact = long_url(100);
+        assert_eq!(
+            Draft::from_markdown(&exact).to_html(),
+            format!("<a href=\"{exact}\">{exact}</a>")
+        );
+        let label = "l".repeat(120);
+        let url = long_url(140);
+        assert_eq!(
+            Draft::from_markdown(&format!("[{label}]({url})")).to_html(),
+            format!("<a href=\"{url}\">{label}</a>")
+        );
+    }
+
+    #[test]
+    fn html_shortening_moves_the_marks_after_the_link() {
+        let url = long_url(130);
+        let mut draft = Draft::from_markdown(&format!("{url} tail"));
+        let length = draft.text().len();
+        draft.toggle(90..length, MarkKind::Bold);
+        draft.toggle(120..125, MarkKind::Italic);
+        assert_eq!(
+            draft.to_html(),
+            format!(
+                "<a href=\"{url}\" title=\"{url}\">{}<b>{}…</b></a><b> tail</b>",
+                &url[..90],
+                &url[90..99]
+            )
+        );
     }
 
     #[test]
