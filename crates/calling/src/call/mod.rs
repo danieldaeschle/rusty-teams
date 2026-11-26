@@ -679,6 +679,7 @@ async fn drive(
     };
     let mut layout_plan: OfferPlan;
     let mut direct_video_mid: Option<String> = None;
+    let mut initial_share_mid: Option<String> = None;
     let mut sending_camera = false;
     let mut media_links: BTreeMap<String, String> = BTreeMap::new();
 
@@ -792,6 +793,7 @@ async fn drive(
             .await?;
             layout_plan = answered.remote.plan();
             direct_video_mid = answered.camera_mid.clone();
+            initial_share_mid = answered.receiving_share_mid.clone();
             timeline.record(
                 "setRemoteDescription",
                 format!(
@@ -928,6 +930,10 @@ async fn drive(
     if let (Some(mid), Some(mri)) = (&direct_video_mid, &peer_mri) {
         video.router().set(mid, Some(VideoKey::Person(mri.clone())));
     }
+    if let Some(mid) = &initial_share_mid {
+        video.router().set(mid, Some(VideoKey::Screen));
+        control.send(CallUpdate::ScreenShare(peer_mri.clone()));
+    }
     if sending_camera {
         control.send(CallUpdate::Camera(true));
     }
@@ -991,7 +997,7 @@ async fn drive(
     let mut portal_pending: Option<ShareKind> = None;
     let mut glare_resend: Option<GlareResend> = None;
     let mut deferred_changes: Vec<Change> = Vec::new();
-    let mut remote_direct_share: Option<String> = None;
+    let mut remote_direct_share: Option<String> = initial_share_mid.clone();
     let mut sent_replacement: Option<Replacement> = None;
     let (echo_add_tx, mut echo_add_rx) = mpsc::unbounded_channel::<Result<()>>();
     let mut echo_add_pending = false;

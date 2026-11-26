@@ -309,10 +309,13 @@ impl SlotTable {
             .filter_map(slot)
             .take(RECEIVE_SLOTS)
             .collect();
+        // A folded `applicationsharing-video` line expands to several browser mids; only the last
+        // one carries `x-source-streamid`. Taking the first dropped the whole share slot.
         let screen = streams
             .iter()
-            .find(|stream| stream.role == LineRole::ScreenShare)
-            .and_then(slot);
+            .filter(|stream| stream.role == LineRole::ScreenShare)
+            .filter_map(slot)
+            .next_back();
         SlotTable { people, screen }
     }
 
@@ -602,6 +605,23 @@ mod tests {
         let table = SlotTable::from_streams(&streams);
         let mids: Vec<&str> = table.people.iter().map(|slot| slot.mid.as_str()).collect();
         assert_eq!(mids, vec!["2", "3", "5"]);
+        assert_eq!(
+            table.screen,
+            Some(ReceiveSlot {
+                mid: "11".into(),
+                stream_id: 207
+            })
+        );
+    }
+
+    #[test]
+    fn a_folded_share_line_keeps_its_receive_slot() {
+        let streams = vec![
+            stream("1", LineRole::MainVideo, Some(202)),
+            stream("10", LineRole::ScreenShare, None),
+            stream("11", LineRole::ScreenShare, Some(207)),
+        ];
+        let table = SlotTable::from_streams(&streams);
         assert_eq!(
             table.screen,
             Some(ReceiveSlot {
@@ -903,8 +923,8 @@ mod tests {
             }})
         );
         let small: Value = serde_json::from_str(
-            send_capabilities_body(480, 270, 1, VideoQuality::Auto)
-                ["applyChannelParameters"]["multiChannelParameter"]["mediaParameter"]
+            send_capabilities_body(480, 270, 1, VideoQuality::Auto)["applyChannelParameters"]
+                ["multiChannelParameter"]["mediaParameter"]
                 .as_str()
                 .unwrap(),
         )

@@ -211,7 +211,41 @@ impl VideoReceive {
 
     pub fn reselect(&mut self, roster: &Roster) -> ReceiveChange {
         let mut change = ReceiveChange::default();
-        let Some(requester) = &self.requester else {
+        let requester = self.requester.as_ref();
+
+        // The roster knows who shares even when the mixer did not give us a subscription link.
+        // Keep the stage indicator and route in sync regardless of that link.
+        if let Some(slot) = self.table.screen.clone() {
+            let wanted = roster
+                .screen_share(&self.own_mri)
+                .map(|(mri, source)| Assignment {
+                    mri,
+                    source,
+                    detail: TileDetail::Stage,
+                });
+            if wanted != self.screen_held {
+                let route_after = wanted.as_ref().map(|_| VideoKey::Screen);
+                self.router.set(&slot.mid, route_after.clone());
+                if let Some(requester) = requester {
+                    requester.send(
+                        SourceRequest {
+                            mid: slot.mid,
+                            stream_id: slot.stream_id,
+                            source: wanted.as_ref().map(|assignment| assignment.source),
+                            screen: true,
+                            detail: TileDetail::Stage,
+                            quality: self.quality,
+                        },
+                        route_after,
+                    );
+                }
+                change.screen_sharer =
+                    Some(wanted.as_ref().map(|assignment| assignment.mri.clone()));
+                self.screen_held = wanted;
+            }
+        }
+
+        let Some(requester) = requester else {
             return change;
         };
         let candidates = if self.incoming_enabled {
@@ -251,33 +285,104 @@ impl VideoReceive {
         }
         self.held = next;
         self.refresh_limits = false;
-        if let Some(slot) = &self.table.screen {
-            let wanted = roster
-                .screen_share(&self.own_mri)
-                .map(|(mri, source)| Assignment {
-                    mri,
-                    source,
-                    detail: TileDetail::Stage,
-                });
-            if wanted != self.screen_held {
-                let route_after = wanted.as_ref().map(|_| VideoKey::Screen);
-                self.router.set(&slot.mid, route_after.clone());
-                requester.send(
-                    SourceRequest {
-                        mid: slot.mid.clone(),
-                        stream_id: slot.stream_id,
-                        source: wanted.as_ref().map(|assignment| assignment.source),
-                        screen: true,
-                        detail: TileDetail::Stage,
-                        quality: self.quality,
-                    },
-                    route_after,
-                );
-                change.screen_sharer =
-                    Some(wanted.as_ref().map(|assignment| assignment.mri.clone()));
-                self.screen_held = wanted;
+        change
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::roster::Roster;
+    use crate::video_layout::ReceiveSlot;
+
+    #[test]
+    fn a_remote_share_is_visible_without_a_subscription_link() {
+        let mut roster = Roster::default();
+        roster.apply(&json!({
+            "type": "Delta",
+            "sequenceNumber": 1,
+            "participants": {
+                "8:orgid:b": {
+                    "version": 1,
+                    "state": "active",
+                    "details": {"displayName": "Bo"},
+                    "endpoints": {"ep": {
+                        "call": {"mediaStreams": [{
+                            "type": "applicationsharing-video",
+                            "direction": "sendonly",
+                            "sourceId": 207
+                        }]},
+                        "endpointState": {"state": {"isMuted": false}}
+                    }}
+                }
+            }
+        }));
+        let table = SlotTable {
+            people: Vec::new(),
+            screen: Some(ReceiveSlot {
+                mid: "11".into(),
+                stream_id: 207,
+            }),
+        };
+        let mut receive = VideoReceive::new("8:orgid:a".into(), VideoRouter::default());
+        receive.negotiated(table, None);
+
+        let change = receive.reselect(&roster);
+        assert_eq!(change.screen_sharer, Some(Some("8:orgid:b".into())));
+        assert_eq!(receive.router().key_for("11"), Some(VideoKey::Screen));
+    }
+
+    #[tokio::test]
+    async fn replacement_requester_sends_one_screen_request() {
+        let mut roster = Roster::default();
+        roster.apply(&json!({
+            "type": "Delta",
+            "sequenceNumber": 1,
+            "participants": {
+                "8:orgid:b": {
+                    "version": 1,
+                    "state": "active",
+                    "details": {"displayName": "Bo"},
+                    "endpoints": {"ep": {
+                        "call": {"mediaStreams": [{
+                            "type": "applicationsharing-video",
+                            "direction": "sendonly",
+                            "sourceId": 207
+                        }]},
+                        "endpointState": {"state": {"isMuted": false}}
+                    }}
+                }
+            }
+        }));
+        let table = SlotTable {
+            people: Vec::new(),
+            screen: Some(ReceiveSlot {
+                mid: "11".into(),
+                stream_id: 207,
+            }),
+        };
+        let (queue, mut requests) = mpsc::unbounded_channel::<QueuedRequest>();
+        let requester = SourceRequester {
+            queue,
+            task: tokio::spawn(async {}),
+        };
+        let mut receive = VideoReceive::new("8:orgid:a".into(), VideoRouter::default());
+        receive.negotiated(table, None);
+        receive.reselect(&roster);
+        receive.replace_requester(requester);
+        receive.reselect(&roster);
+
+        let mut total_requests = 0;
+        let mut screen_requests = 0;
+        while let Ok(queued) = requests.try_recv() {
+            total_requests += 1;
+            if queued.request.screen {
+                screen_requests += 1;
             }
         }
-        change
+        assert_eq!(total_requests, 1);
+        assert_eq!(screen_requests, 1);
     }
 }
