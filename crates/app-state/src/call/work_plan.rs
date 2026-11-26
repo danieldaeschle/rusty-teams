@@ -73,7 +73,11 @@ impl AppState {
             return;
         };
         let to = last + Duration::days(1);
-        self.load_colleague_plan(from, to, cx);
+        if self.calendar_week.colleague_days != Some((from, to)) {
+            self.load_colleague_plan(from, to, cx);
+        }
+        self.calendar_week.work_plan_request += 1;
+        let request = self.calendar_week.work_plan_request;
         let receiver = crate::runtime::spawn(async move {
             Calendar::new(engine.remote().session())
                 .work_plan(from, to)
@@ -83,7 +87,7 @@ impl AppState {
             // A plan that does not load leaves the day headers without a location, nothing more.
             if let Ok(Ok(plan)) = receiver.await {
                 this.update(cx, |state, cx| {
-                    if state.calendar_dates().first() == Some(&from) {
+                    if state.calendar_week.work_plan_request == request {
                         state.calendar_week.work_plan = plan;
                         cx.notify();
                     }
@@ -110,8 +114,12 @@ impl AppState {
             // Without the colleagues' plans the menu just lists nobody.
             if let Ok(Ok(plan)) = receiver.await {
                 this.update(cx, |state, cx| {
-                    if state.calendar_dates().first() == Some(&from) {
+                    let dates = state.calendar_dates();
+                    if (dates.first(), dates.last())
+                        == (Some(&from), Some(&(to - Duration::days(1))))
+                    {
                         state.calendar_week.colleague_plan = plan;
+                        state.calendar_week.colleague_days = Some((from, to));
                         cx.notify();
                     }
                 })
@@ -140,6 +148,7 @@ impl AppState {
         }
         let previous = day.clone();
         day.location = location;
+        self.calendar_week.work_plan_request += 1;
         cx.notify();
         if self.mode.demo {
             return;

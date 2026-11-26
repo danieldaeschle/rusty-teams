@@ -12,6 +12,8 @@ const READ_FORMAT: &str = "%Y-%m-%dT%H:%M:%S%.f";
 const GATEWAY_URL: &str = "https://outlook.office.com/outlookgatewayb2/graphql";
 const GATEWAY_RESOURCE: &str = "https://outlook.office.com";
 const PEOPLE_URL: &str = "https://graph.microsoft.com/v1.0/me/people?$top=40&$select=displayName,scoredEmailAddresses,personType";
+/// The schedule lookup's limit per request.
+const SCHEDULES_PER_REQUEST: usize = 20;
 const COLLEAGUES_QUERY: &str = "query GetScheduleWithLocationFWH($input: GetScheduleInput) { getSchedule(request: $input) { schedules { scheduleId flexibleWorkingHours { start { dateTime } workLocationType } } } }";
 
 /// Where the work plan in Outlook puts the user on a day.
@@ -242,26 +244,30 @@ impl<T: CardTransport> Calendar<T> {
         if colleagues.is_empty() {
             return Ok(Vec::new());
         }
-        let mails: Vec<&str> = colleagues.iter().map(|(_, mail)| mail.as_str()).collect();
-        let answer = self
-            .transport
-            .send(
-                Request::with_body(
-                    Method::Post,
+        let mut plan = Vec::new();
+        for chunk in colleagues.chunks(SCHEDULES_PER_REQUEST) {
+            let mails: Vec<&str> = chunk.iter().map(|(_, mail)| mail.as_str()).collect();
+            let answer = self
+                .transport
+                .send(
+                    Request::with_body(
+                        Method::Post,
+                        GATEWAY_URL,
+                        colleagues_body(own_mail, &mails, from, to),
+                    ),
+                    Scope::new(GATEWAY_RESOURCE, ".default"),
+                )
+                .await?;
+            if !answer.is_success() {
+                return Err(Error::Session(session::Error::api(
+                    answer.status,
                     GATEWAY_URL,
-                    colleagues_body(own_mail, &mails, from, to),
-                ),
-                Scope::new(GATEWAY_RESOURCE, ".default"),
-            )
-            .await?;
-        if !answer.is_success() {
-            return Err(Error::Session(session::Error::api(
-                answer.status,
-                GATEWAY_URL,
-                answer.body,
-            )));
+                    answer.body,
+                )));
+            }
+            plan.extend(parse_colleague_locations(&answer.body, chunk));
         }
-        Ok(parse_colleague_locations(&answer.body, &colleagues))
+        Ok(plan)
     }
 
     /// Changes where the user works on one day of the plan.

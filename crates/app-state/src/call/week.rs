@@ -39,6 +39,10 @@ pub struct CalendarWeek {
     pub work_plan: Vec<WorkPlanDay>,
     /// Where the user's closest colleagues plan to work on the shown days.
     pub colleague_plan: Vec<ColleagueLocation>,
+    /// The days the colleague plan was loaded for; other days load it again.
+    pub(super) colleague_days: Option<(NaiveDate, NaiveDate)>,
+    /// Bumped by every work plan load and change, so an older answer cannot overwrite a newer one.
+    pub(super) work_plan_request: u64,
     /// A load was asked for before the session existed; run it once it does.
     pending: bool,
     request: u64,
