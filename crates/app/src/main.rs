@@ -68,6 +68,7 @@ struct Arguments {
     autostart: bool,
     demo_sync: Option<Duration>,
     remote_command: Option<RemoteCommand>,
+    refused_org: Option<String>,
 }
 
 fn parse_arguments() -> Arguments {
@@ -110,6 +111,7 @@ fn parse_arguments() -> Arguments {
             app_base::orgs::OPEN_CONVERSATION_FLAG => {
                 arguments.open_target = input.next().map(OpenTarget::Conversation)
             }
+            app_base::orgs::REFUSED_ORG_FLAG => arguments.refused_org = input.next(),
             "--open-channel" => {
                 arguments.open_target = input
                     .next()
@@ -279,6 +281,16 @@ fn main() {
     let receiver = (!arguments.demo).then(|| {
         let (ui_events, ui_receiver) = tokio::sync::mpsc::unbounded_channel();
         #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if orgs.active_guest().is_none() {
+            linux_browser::close_guest_logins_on_start(
+                orgs.list
+                    .iter()
+                    .filter(|org| org.guest)
+                    .map(|org| org.id.clone())
+                    .collect(),
+            );
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         linux_browser::attach_ui_events(ui_events.clone());
         #[cfg(windows)]
         let transport = transport(
@@ -296,6 +308,7 @@ fn main() {
             !arguments.read_only,
             activity,
             guest_tenant,
+            arguments.refused_org.clone(),
         );
         app_base::runtime::handle().spawn(async move {
             while let Some(event) = backend_events.recv().await {
@@ -332,6 +345,7 @@ fn main() {
                 let mut state = AppState::new(store, mode);
                 state.start_on_channels = arguments.channels_tab;
                 state.orgs = orgs;
+                state.refused_org = arguments.refused_org.clone();
                 state
             });
             views::shell::install_globals(&state, user_input, cx);
@@ -349,6 +363,13 @@ fn main() {
                         let started = std::time::Instant::now();
                         #[cfg(any(target_os = "linux", target_os = "macos"))]
                         linux_browser::note_backend_event(&event);
+                        #[cfg(any(target_os = "linux", target_os = "macos"))]
+                        if let backend::BackendEvent::GuestOrgRefused(tenant_id) = &event
+                            && !state.read_with(cx, |state, _| state.call.is_some())
+                            && linux_browser::request_guest_sign_in(tenant_id)
+                        {
+                            continue;
+                        }
                         state.update(cx, |state, cx| state.apply(event, cx));
                         app_base::diagnostics::record_if_slow(&kind, started.elapsed());
                     }

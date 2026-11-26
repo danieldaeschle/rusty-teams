@@ -996,7 +996,20 @@ impl AppShell {
         } else {
             Phase::Ready
         };
-        self.splash.render(&phase, cx)
+        // A stalled sign-in (window closed, MFA not possible) must not trap a guest org behind the splash.
+        let stalled = matches!(phase, Phase::Loading { running: false, .. });
+        let way_home = stalled
+            .then(|| self.state.read(cx).splash_way_home())
+            .flatten()
+            .map(|label| {
+                super::connection_banner::banner_button("splash-way-home", label)
+                    .debug_selector(|| "shell/splash-way-home".into())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.state.update(cx, |state, cx| state.leave_guest_org(cx))
+                    }))
+                    .into_any_element()
+            });
+        self.splash.render(&phase, way_home, cx)
     }
 
     fn islands(
@@ -1137,6 +1150,9 @@ impl Render for AppShell {
                             }
                             state.retry_live();
                         })
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.state.update(cx, |state, cx| state.leave_guest_org(cx))
                     }),
                 )
             });

@@ -159,7 +159,12 @@ impl Splash {
             .filter(|since| *since < CONTENT_RISE)
     }
 
-    pub fn render(&self, phase: &Phase, cx: &App) -> Option<AnyElement> {
+    pub fn render(
+        &self,
+        phase: &Phase,
+        action: Option<AnyElement>,
+        cx: &App,
+    ) -> Option<AnyElement> {
         let fading = self.hidden_at.map(|hidden_at| hidden_at.elapsed());
         if fading.is_some_and(|since| since >= FADE_OUT) {
             return None;
@@ -196,7 +201,8 @@ impl Splash {
                     .text_size(px(HINT_SIZE))
                     .text_color(theme::text_faint())
                     .children(hint),
-            );
+            )
+            .children(action.map(|action| div().mt(px(12.)).child(action)));
         Some(match fading {
             Some(_) if !still => overlay
                 .with_animation(

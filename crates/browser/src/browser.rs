@@ -90,6 +90,16 @@ pub(crate) fn start_urls() -> Vec<String> {
     APPS.iter().map(|app| app.start_url().to_owned()).collect()
 }
 
+/// Teams opened in a guest tenant, as its deep links do; that tenant's sign-in (e.g. MFA) shows there.
+/// `None` for anything that is not a tenant id.
+pub fn tenant_start_url(tenant_id: &str) -> Option<String> {
+    let is_tenant_id = !tenant_id.is_empty()
+        && tenant_id
+            .chars()
+            .all(|character| character.is_ascii_hexdigit() || character == '-');
+    is_tenant_id.then(|| format!("{}?tenantId={tenant_id}", App::Teams.start_url()))
+}
+
 pub(crate) fn jitter_between(min: Duration, max: Duration, random: u64) -> Duration {
     let span = max.saturating_sub(min).as_millis() as u64;
     if span == 0 {
@@ -297,8 +307,9 @@ impl Browser {
     }
 
     /// True when the Teams page holds a still-valid access token, plain or decrypted from a
-    /// sealed cache entry. Key names and expired unsealed entries do not count.
-    pub async fn teams_sign_in_ready(&self) -> bool {
+    /// sealed cache entry. Key names and expired unsealed entries do not count. `realm` asks for a
+    /// token of that tenant, e.g. a guest tenant whose sign-in is under way.
+    pub async fn teams_sign_in_ready(&self, realm: Option<&str>) -> bool {
         let Ok(tabs) = self.tabs().await else {
             return false;
         };
@@ -308,7 +319,12 @@ impl Browser {
         if tab.parked {
             return false;
         }
-        let expression = crate::sign_in_ready::PAGE_EXPRESSION.as_str();
+        // A realm that is not a tenant id fails the check instead of widening it to any token.
+        if realm.is_some_and(|realm| tenant_start_url(realm).is_none()) {
+            return false;
+        }
+        let expression = crate::sign_in_ready::page_expression(realm);
+        let expression = expression.as_str();
         if let Some(bidi) = &self.inner.bidi {
             let evaluate = tokio::time::timeout(
                 self.inner.timeouts.probe,
@@ -335,14 +351,43 @@ impl Browser {
             .is_some_and(|value| crate::sign_in_ready::sign_in_ready_from_page(&value))
     }
 
+    /// Closes the login pages of `tenants` (Chromium only; Firefox keeps them). Returns how many.
+    pub async fn close_tenant_login_tabs(&self, tenants: &[String]) -> usize {
+        if self.inner.bidi.is_some() || tenants.is_empty() {
+            return 0;
+        }
+        let _guard = self.inner.operation.lock().await;
+        let Ok(response) =
+            http::request(self.inner.config.port, "GET", "/json/list", HTTP_TIMEOUT).await
+        else {
+            return 0;
+        };
+        let mut closed = 0;
+        for id in targets::tenant_login_tab_ids(&response.body, tenants) {
+            let path = format!("/json/close/{id}");
+            if http::request(self.inner.config.port, "GET", &path, HTTP_TIMEOUT)
+                .await
+                .is_ok()
+            {
+                closed += 1;
+            }
+        }
+        closed
+    }
+
     pub async fn login_window(&self) -> Result<(), BrowserError> {
+        self.login_window_at(start_urls()).await
+    }
+
+    /// The visible window, opened on `urls` unless it is already showing.
+    pub async fn login_window_at(&self, urls: Vec<String>) -> Result<(), BrowserError> {
         let _guard = self.inner.operation.lock().await;
         if self.is_visible_managed() && self.is_running().await {
             return Ok(());
         }
         self.inner.wanted.store(true, Ordering::SeqCst);
         self.stop_locked(false).await?;
-        self.launch_with_urls_locked(false, start_urls()).await
+        self.launch_with_urls_locked(false, urls).await
     }
 
     pub async fn headless(&self) -> Result<(), BrowserError> {
@@ -674,6 +719,16 @@ mod tests {
             max,
             random_u64().wrapping_add(seed)
         ))));
+    }
+
+    #[test]
+    fn a_guest_tenant_opens_teams_in_that_tenant_and_nothing_else() {
+        assert_eq!(
+            tenant_start_url("aaaa-01").as_deref(),
+            Some("https://teams.cloud.microsoft/?tenantId=aaaa-01")
+        );
+        assert_eq!(tenant_start_url("x&y"), None);
+        assert_eq!(tenant_start_url(""), None);
     }
 
     #[test]

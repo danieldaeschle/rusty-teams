@@ -244,13 +244,21 @@ impl Session {
                 "the Teams web app is not granted {scope}"
             )));
         }
-        self.reload_all().await;
-        let deadline = Instant::now() + self.config.token_wait;
-        while Instant::now() < deadline {
-            sleep(self.config.token_poll).await;
-            self.drop_all().await;
-            if let Some(results) = self.run_in_any_tab(requests, scope, &mut search).await? {
-                return Ok(results);
+        // A guest tenant's refusal does not heal by waiting, and a reload would reload the home org's tabs.
+        let refused_guest = self.tenant().is_some()
+            && search
+                .refresh_error
+                .as_deref()
+                .is_some_and(crate::error::is_refusal);
+        if !refused_guest {
+            self.reload_all().await;
+            let deadline = Instant::now() + self.config.token_wait;
+            while Instant::now() < deadline {
+                sleep(self.config.token_poll).await;
+                self.drop_all().await;
+                if let Some(results) = self.run_in_any_tab(requests, scope, &mut search).await? {
+                    return Ok(results);
+                }
             }
         }
         let diagnosis = self.transport.diagnose().await?;
@@ -310,9 +318,7 @@ impl Session {
                 if reason.starts_with(NOT_GRANTED_PREFIX) {
                     search.ungranted.insert(app);
                 }
-                search
-                    .refresh_error
-                    .get_or_insert_with(|| format!("{app}: {reason}"));
+                keep_refresh_error(&mut search.refresh_error, &format!("{app}: {reason}"));
             }
         }
         Ok(None)
@@ -388,6 +394,13 @@ fn native_http(config: &SessionConfig) -> Option<Arc<NativeHttp>> {
         .map(Arc::new)
 }
 
+/// The first error, unless a later one is a refusal: that decides what the app does next.
+fn keep_refresh_error(kept: &mut Option<String>, line: &str) {
+    if kept.is_none() || crate::error::is_refusal(line) {
+        *kept = Some(line.to_owned());
+    }
+}
+
 pub(crate) fn retry_wait(header: Option<&str>, default: Duration) -> Duration {
     header
         .and_then(|value| value.trim().parse::<f64>().ok())
@@ -461,6 +474,17 @@ mod tests {
         assert_eq!(tenant_of(&home), Value::Null);
         assert_eq!(tenant_of(&guest), json!("aaaa-guest"));
         assert_eq!(home.tenant(), None);
+    }
+
+    #[test]
+    fn a_refusal_replaces_an_earlier_refresh_error_and_nothing_else_does() {
+        let mut kept = None;
+        keep_refresh_error(&mut kept, "teams: HTTP 0");
+        keep_refresh_error(&mut kept, "outlook: timeout");
+        assert_eq!(kept.as_deref(), Some("teams: HTTP 0"));
+        keep_refresh_error(&mut kept, "outlook: invalid_grant: AADSTS50076");
+        keep_refresh_error(&mut kept, "teams: HTTP 0");
+        assert_eq!(kept.as_deref(), Some("outlook: invalid_grant: AADSTS50076"));
     }
 
     #[test]

@@ -15,7 +15,7 @@ mod watchdog;
 
 pub use bidi::{Bidi, Context, remote_value_to_json};
 pub use bidi_transport::{BidiTransport, session_transport};
-pub use browser::{Browser, RendererState, Status, Timeouts};
+pub use browser::{Browser, RendererState, Status, Timeouts, tenant_start_url};
 pub use config::{
     Config, ConfigInputs, DEFAULT_PORT, Engine, FIREFOX_PROFILE_NAME, PROFILE_NAME, Platform,
     windows_path_to_wsl,
