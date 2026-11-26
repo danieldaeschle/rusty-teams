@@ -25,6 +25,7 @@ pub mod error;
 pub mod framing;
 pub mod health;
 pub mod hold;
+pub mod host_load;
 pub mod join;
 pub mod latest;
 pub mod level;

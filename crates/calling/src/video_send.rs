@@ -306,6 +306,13 @@ impl LocalVideo {
             .map_err(|error| Error::Webrtc(error.to_string()))
     }
 
+    fn outgoing_mut(&mut self, source: SendSource) -> &mut Outgoing {
+        match source {
+            SendSource::Camera => &mut self.camera,
+            SendSource::Screen => &mut self.screen,
+        }
+    }
+
     fn sender_of(&self, source: SendSource) -> Option<RtpSender> {
         let lines = self.lines.as_ref()?;
         match source {
@@ -324,6 +331,13 @@ impl LocalVideo {
             SendSource::Screen => self.sharing(),
         };
         let Some(sender) = self.sender_of(source).filter(|_| sending) else {
+            // The controller often sends the limit before the source exists.
+            // Keep it. A repeat of the same limit is dropped by the filter,
+            // and refresh applies this copy once sending and a frame size exist.
+            self.outgoing_mut(source).requested = Some(RequestedLimits {
+                limits: limits.to_vec(),
+                applied_for: None,
+            });
             return Ok(None);
         };
         let outgoing = match source {
@@ -472,6 +486,19 @@ impl LocalVideo {
         (self.camera_on() && self.blur.active())
             .then(|| self.blur.model())
             .filter(|model| !model.is_empty())
+    }
+
+    pub fn effects_label(&self) -> String {
+        let effects = self.blur.effects();
+        let flag = |on: bool| if on { "on" } else { "off" };
+        format!(
+            "blur={} standout={} framing={} brightness={} soft_focus={}",
+            flag(self.blur.enabled()),
+            flag(self.blur.standout()),
+            flag(effects.auto_framing),
+            flag(effects.adjust_brightness),
+            flag(effects.soft_focus)
+        )
     }
 
     pub fn has_lines(&self) -> bool {
@@ -710,6 +737,7 @@ impl LocalVideo {
         }
         Self::begin_sending_on(&lines.camera, &self.camera.track)?;
         self.camera_preview = false;
+        let _ = self.refresh_send_limits();
         Ok(())
     }
 
@@ -876,6 +904,7 @@ impl LocalVideo {
         }
         Self::begin_sending_on(&share, &self.screen.track)?;
         let _ = self.tune_share(&share.sender());
+        let _ = self.refresh_send_limits();
         Ok(())
     }
 
@@ -924,6 +953,77 @@ mod tests {
         assert!(video.camera_previewing());
         video.stop_camera();
         assert!(!video.camera_previewing() && !video.camera_on());
+    }
+
+    #[tokio::test]
+    async fn a_camera_limit_that_arrived_while_off_is_applied_when_the_camera_starts() {
+        let factory = crate::devices::shared_factory();
+        let peer = factory
+            .create_peer_connection(RtcConfiguration::default())
+            .expect("peer");
+        let camera = peer
+            .add_transceiver_for_media(
+                MediaType::Video,
+                RtpTransceiverInit {
+                    direction: RtpTransceiverDirection::SendRecv,
+                    stream_ids: vec!["camera".into()],
+                    send_encodings: Vec::new(),
+                },
+            )
+            .expect("transceiver");
+        let (updates, _) = tokio::sync::mpsc::unbounded_channel();
+        let mut video = LocalVideo::new(
+            &factory,
+            VideoMode::Pattern,
+            VideoHub::new(updates.clone()),
+            updates,
+        );
+        video
+            .set_lines(VideoLines {
+                camera,
+                share: None,
+            })
+            .expect("lines");
+        let limit = |bitrate: u64| SendLimit {
+            max_fs: Some(920),
+            max_mbps: Some(13_800),
+            max_fps: Some(15.0),
+            max_bitrate: Some(bitrate),
+            keyframe: false,
+            rid: None,
+            ssrc: None,
+        };
+        assert!(
+            video
+                .apply_send_limit(SendSource::Camera, &[limit(600_000)])
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            video
+                .apply_send_limit(SendSource::Camera, &[limit(100_000)])
+                .unwrap()
+                .is_none()
+        );
+        video
+            .start_camera(&DeviceChoice::SystemDefault)
+            .expect("camera");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let refreshed = video.refresh_send_limits();
+        let bitrate = refreshed.iter().find_map(|(source, applied)| {
+            (*source == SendSource::Camera)
+                .then_some(applied)
+                .and_then(|applied| {
+                    applied.as_ref().ok().and_then(|plans| {
+                        plans.as_ref().and_then(|plans| {
+                            plans.first().and_then(|plan| {
+                                plan.limits.as_ref().and_then(|limits| limits.max_bitrate)
+                            })
+                        })
+                    })
+                })
+        });
+        assert_eq!(bitrate, Some(100_000));
     }
 
     #[tokio::test]

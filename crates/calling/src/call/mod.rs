@@ -921,6 +921,7 @@ async fn drive(
     let mut capability = MeetingCapability::default();
     let mut previous_packets = 0u64;
     let mut ticks = 0u32;
+    let mut host_cpu = std::collections::HashMap::new();
     let mut segmentation_model: Option<&'static str> = None;
     let mut health_sampler = HealthSampler::default();
     let mut quality_tracker = QualityTracker::default();
@@ -2803,6 +2804,20 @@ async fn drive(
                         timeline.record("segmentation model", format!("{model}, effects {average_ms:.1} ms per frame"));
                         segmentation_model = Some(model);
                     }
+                }
+                if crate::host_load::recorded_on_this_platform()
+                    && ticks.is_multiple_of(HEALTH_EVERY_TICKS)
+                {
+                    let current = crate::host_load::thread_cpu();
+                    let deltas = crate::host_load::cpu_deltas(&current, &mut host_cpu);
+                    timeline.record(
+                        "host load",
+                        crate::host_load::host_load_line(
+                            &deltas,
+                            &local_video.effects_label(),
+                            crate::host_load::thermal_state(),
+                        ),
+                    );
                 }
                 if ticks.is_multiple_of(HEALTH_EVERY_TICKS) {
                     control.send(CallUpdate::Sample(StatsSample {
