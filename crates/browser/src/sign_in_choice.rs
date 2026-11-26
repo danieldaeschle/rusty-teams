@@ -216,19 +216,8 @@ fn desktop_entry_match<'a>(
 ) -> Option<&'a InstalledBrowser> {
     let stem = entry.trim().trim_end_matches(".desktop");
     let names: &[&str] = match stem {
-        "microsoft-edge" => &[
-            "microsoft-edge",
-            "microsoft-edge-stable",
-            "microsoft-edge-beta",
-            "microsoft-edge-dev",
-        ],
-        "brave-browser" => &[
-            "brave",
-            "brave-browser",
-            "brave-browser-stable",
-            "brave-browser-beta",
-            "brave-browser-nightly",
-        ],
+        "microsoft-edge" => &["microsoft-edge", "microsoft-edge-stable"],
+        "brave-browser" => &["brave", "brave-browser", "brave-browser-stable"],
         other => return installed.iter().find(|browser| browser.name == other),
     };
     names
@@ -325,6 +314,23 @@ mod tests {
         );
         assert_eq!(installed[0].engine, Engine::Chromium);
         assert_eq!(installed[1].engine, Engine::Chromium);
+
+        let channels = installed_in(
+            Platform::Linux,
+            None,
+            &std::env::join_paths([root]).unwrap(),
+            &|path| {
+                path == root.join("microsoft-edge-beta")
+                    || path == root.join("brave-browser-nightly")
+            },
+        );
+        assert!(desktop_entry_match("microsoft-edge.desktop", &channels).is_none());
+        assert!(desktop_entry_match("brave-browser.desktop", &channels).is_none());
+        assert_eq!(
+            desktop_entry_match("microsoft-edge-beta.desktop", &channels)
+                .map(|browser| browser.name.as_str()),
+            Some("microsoft-edge-beta")
+        );
     }
 
     #[test]
