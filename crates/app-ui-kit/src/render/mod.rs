@@ -2,6 +2,7 @@ pub mod blocks;
 pub mod elements;
 mod flow_text;
 pub mod hooks;
+mod link_tooltip;
 mod selectable;
 mod syntax;
 

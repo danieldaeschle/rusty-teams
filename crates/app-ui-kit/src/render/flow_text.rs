@@ -7,6 +7,7 @@ use gpui_kit::*;
 
 use super::blocks::CODE_PADDING;
 use super::hooks::open_profile_link;
+use super::link_tooltip::LinkTooltip;
 use super::selectable::{HIT_SLOP, PILL_INSET_Y, PILL_OUTSET, Participant, Pill, TIME_ROOM};
 
 const WRAP_TOLERANCE: f32 = 0.5;
@@ -374,6 +375,7 @@ pub struct FlowPrepaint {
     hitbox: Hitbox,
     fragments: Vec<PaintedFragment>,
     lines: Vec<Line>,
+    tooltip: Option<LinkTooltip>,
 }
 
 impl IntoElement for FlowText {
@@ -556,7 +558,7 @@ impl Element for FlowText {
 
     fn prepaint(
         &mut self,
-        _global_id: Option<&GlobalElementId>,
+        global_id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         request: &mut Self::RequestLayoutState,
@@ -619,6 +621,7 @@ impl Element for FlowText {
             hitbox,
             fragments,
             lines: layout.lines.clone(),
+            tooltip: LinkTooltip::prepaint(global_id, !self.links.is_empty(), window),
         }
     }
 
@@ -719,6 +722,22 @@ impl Element for FlowText {
                 .iter()
                 .map(|painted| (painted.layout.clone(), painted.fragment.range.start))
                 .collect();
+            if let Some(tooltip) = &prepaint.tooltip {
+                let (tooltip_layouts, tooltip_links) = (hover_layouts.clone(), self.links.clone());
+                tooltip.paint(
+                    &prepaint.hitbox,
+                    move |position| {
+                        tooltip_layouts.iter().find_map(|(layout, start)| {
+                            let index = layout.index_for_position(position).ok()?;
+                            tooltip_links
+                                .iter()
+                                .find(|(range, _)| range.contains(&(start + index)))
+                                .map(|(_, url)| url.clone())
+                        })
+                    },
+                    window,
+                );
+            }
             let (hover_links, hover_hitbox) = (self.links.clone(), prepaint.hitbox.clone());
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
                 let over_link = hover_hitbox.is_hovered(window)
@@ -781,7 +800,7 @@ mod tests {
     use gpui_kit::base::TextSelection;
     use gpui_kit::test::TestWindowExt as _;
     use gpui_kit::{
-        AnyWindowHandle, AppContext as _, Bounds, Context, HighlightStyle, IntoElement,
+        AnyWindowHandle, AppContext as _, Bounds, Context, HighlightStyle, IntoElement, Modifiers,
         ParentElement as _, Pixels, Point, Render, Styled as _, TestAppContext, Window,
         WindowBounds, WindowOptions, div, point, px, size,
     };
@@ -959,5 +978,25 @@ mod tests {
         });
         assert!(link_x.is_some());
         assert_eq!(cx.opened_url().as_deref(), Some("https://example.com"));
+    }
+
+    #[gpui_kit::test]
+    fn hovering_a_link_shows_its_url_in_a_tooltip(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (_, window_cx) = cx.add_window_view(|_, _| Message);
+        let mut tooltip_after_hover = |x: f32| {
+            window_cx.simulate_mouse_move(point(px(x), px(8.)), None, Modifiers::none());
+            window_cx
+                .executor()
+                .advance_clock(std::time::Duration::from_millis(600));
+            window_cx.run_until_parked();
+            window_cx.debug_bounds("tooltip").is_some()
+        };
+        assert!(!tooltip_after_hover(2.));
+        let link_x = (40..400)
+            .map(|x| x as f32)
+            .find(|x| tooltip_after_hover(*x));
+        assert!(link_x.is_some());
+        assert!(!tooltip_after_hover(2.));
     }
 }
