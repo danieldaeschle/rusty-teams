@@ -43,7 +43,7 @@ pub(crate) const PAGE_EXPRESSION: &str = r#"(async () => {
     }
   }
   const now = Date.now();
-  const fresh = (entry) => entry && entry.credentialType === 'AccessToken' && (!entry.tokenType || entry.tokenType === 'Bearer') && Number(entry.expiresOn) * 1000 > now && typeof entry.secret === 'string';
+  const fresh = (entry) => entry && entry.credentialType === 'AccessToken' && (!entry.tokenType || entry.tokenType === 'Bearer') && Number(entry.expiresOn) * 1000 > now && typeof entry.secret === 'string' && entry.secret.length > 0;
   return {opened: openedEntries.length, freshAccess: plain.some(fresh) || openedEntries.some(fresh)};
 })()"#;
 
