@@ -18,5 +18,5 @@ pub use request::{
     ApiResponse, AugloopExchange, AugloopStage, BodyToken, Method, Request, SignalrExchange,
 };
 pub use scope::{GRAPH, IC3, NestedApp, PRESENCE, SPACES, Scope};
-pub use session::{DEFAULT_ENDPOINT, Session, SessionConfig, TabHold};
+pub use session::{DEFAULT_ENDPOINT, Session, SessionConfig, TabHold, UNSEAL_SCRIPT};
 pub use transport::{BoxFuture, CdpTransport, Diagnosis, OpenedTab, Transport};
