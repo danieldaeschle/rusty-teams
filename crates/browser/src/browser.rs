@@ -626,7 +626,7 @@ async fn keep_msal_cache_key(websocket_url: &str) {
         .map_or(0, |elapsed| elapsed.as_secs());
     let outcome = async {
         let cookies = cdp_call(websocket_url, "Storage.getCookies", json!({}), CDP_TIMEOUT).await?;
-        let Some(params) = crate::msal_key::persisted_key_cookies(&cookies, now_secs) else {
+        let Some(params) = session::msal_key::persisted_key_cookies(&cookies, now_secs) else {
             return Ok(());
         };
         cdp_call(websocket_url, "Storage.setCookies", params, CDP_TIMEOUT)
