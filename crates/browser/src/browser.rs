@@ -308,7 +308,7 @@ impl Browser {
         if tab.parked {
             return false;
         }
-        let expression = crate::sign_in_ready::PAGE_EXPRESSION;
+        let expression = crate::sign_in_ready::PAGE_EXPRESSION.as_str();
         if let Some(bidi) = &self.inner.bidi {
             let evaluate = tokio::time::timeout(
                 self.inner.timeouts.probe,
