@@ -4945,7 +4945,13 @@ mod tests {
                 .cx
                 .write_to_clipboard(gpui_kit::ClipboardItem::new_string("**x**".to_owned()));
             typist.press("ctrl-v");
-            assert_eq!(typist.value(), ":) **x**");
+            assert_eq!(
+                typist
+                    .value()
+                    .replace(teams_core::CODE_HEADER_MARK, ""),
+                ":) **x**",
+                "the internal code-header mark is not visible text"
+            );
             let composer = typist.composer.clone();
             assert!(
                 typist
