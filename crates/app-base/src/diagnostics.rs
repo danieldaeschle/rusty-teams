@@ -271,6 +271,30 @@ fn keeps_webrtc_line(level: log::Level, text: &str) -> bool {
         .any(|marker| text.contains(marker))
         && !WEBRTC_SKIPPED.iter().any(|skipped| text.contains(skipped))
         && !is_endpoint_dump(text)
+        && !is_adm_enumeration_dump(text)
+}
+
+/// Pulse logs every device name on each `list_devices` call. Those lines are
+/// the Linux counterpart of the Windows endpoint dump and hide real events.
+fn is_adm_enumeration_dump(text: &str) -> bool {
+    let Some(message) = text
+        .split_once("audio_device_impl.cc:")
+        .and_then(|(_, rest)| rest.split_once("): ").map(|(_, message)| message))
+    else {
+        return false;
+    };
+    const PREFIXES: [&str; 7] = [
+        "PlayoutDeviceName",
+        "RecordingDeviceName",
+        "PlayoutDevices",
+        "RecordingDevices",
+        "output:",
+        "input:",
+        "Initialized",
+    ];
+    PREFIXES
+        .iter()
+        .any(|prefix| message.starts_with(prefix))
 }
 
 fn is_endpoint_dump(text: &str) -> bool {
@@ -298,6 +322,46 @@ mod tests {
         assert!(keeps_webrtc_line(
             log::Level::Debug,
             "(audio_device_impl.cc:123): Init"
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:655): PlayoutDeviceName(0, ...)"
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:632): PlayoutDevices"
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:640): RecordingDevices"
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:648): RecordingDeviceName(1, ...)"
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:664): output: name = Arctis Pro Wireless Game"
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:667): output: guid = "
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:620): Initialized: 1"
+        ));
+        assert!(keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_pulse_linux.cc:1161): disconnected recording"
+        ));
+        assert!(keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_pulse_linux.cc:1366): failed"
+        ));
+        assert!(keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_pulse_linux.cc:1735): PulseAudio terminated"
         ));
         assert!(keeps_webrtc_line(
             log::Level::Debug,
