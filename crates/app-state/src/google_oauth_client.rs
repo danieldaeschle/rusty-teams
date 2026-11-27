@@ -17,7 +17,7 @@ pub enum GoogleClientSave {
 }
 
 pub enum GoogleClientSaveError {
-    /// An id was given and no secret is stored yet.
+    /// An id was given without a secret, and no secret is stored for that id.
     SecretRequired,
     Failed,
 }
@@ -46,7 +46,13 @@ pub async fn resolve(store: &Store) -> Option<GoogleOAuth> {
     let stored_secret = if stored_id.is_empty() {
         String::new()
     } else {
-        load_secret().await.unwrap_or_default()
+        match load_secret().await {
+            Ok(secret) => secret,
+            Err(_) => {
+                log::warn!("saved Google client secret not read from the keyring");
+                String::new()
+            }
+        }
     };
     chatsvc::client_from_stored(Some(stored_id.as_str()), Some(stored_secret.as_str()))
 }
@@ -65,22 +71,21 @@ pub async fn save(
         delete_secret().await?;
         return Ok(GoogleClientSave::Cleared);
     }
-    let stored_secret = if secret.is_empty() {
-        // A secret left in the keyring without a saved id is not kept for a new id.
-        if load_client_id(store).is_empty() {
+    if secret.is_empty() {
+        // The kept secret belongs to the saved id; a new id needs its own secret.
+        if load_client_id(store) != id {
             return Err(GoogleClientSaveError::SecretRequired);
         }
-        match load_secret().await {
-            Ok(existing) if !existing.trim().is_empty() => existing,
-            _ => return Err(GoogleClientSaveError::SecretRequired),
-        }
-    } else {
-        secret.to_owned()
-    };
+        return match load_secret().await {
+            Ok(existing) if !existing.trim().is_empty() => Ok(GoogleClientSave::Saved),
+            _ => Err(GoogleClientSaveError::SecretRequired),
+        };
+    }
+    // Secret before id: a failed keyring write must not leave a new id beside the old secret.
+    store_secret(secret).await?;
     store
         .set_meta(CLIENT_ID_KEY, id)
         .map_err(|_| GoogleClientSaveError::Failed)?;
-    store_secret(&stored_secret).await?;
     Ok(GoogleClientSave::Saved)
 }
 

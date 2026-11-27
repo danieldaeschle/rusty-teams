@@ -287,8 +287,8 @@ settings:
       en: Your client
       de: Eigener Client
     google_client_status_builtin:
-      en: Built-in client
-      de: Eingebauter Client
+      en: Built-in client, or TEAMS_GOOGLE_CLIENT_ID when set
+      de: Eingebauter Client, oder TEAMS_GOOGLE_CLIENT_ID, wenn gesetzt
     google_client_status_missing:
       en: No client yet. Save one here, or use a build that includes one.
       de: Noch kein Client. Hier einen speichern, oder einen Build mit eingebautem Client verwenden.
@@ -316,6 +316,9 @@ settings:
     google_client_cleared:
       en: Cleared. Connect uses the built-in client again.
       de: Zurückgesetzt. Verbinden nutzt wieder den eingebauten Client.
+    google_client_cleared_reconnect:
+      en: Cleared. Connect Google again. Existing tokens belong to the previous client.
+      de: Zurückgesetzt. Google erneut verbinden. Bestehende Tokens gehören zum vorherigen Client.
     google_client_secret_required:
       en: Enter the client secret. A saved secret can be left blank.
       de: Clientschlüssel eintragen. Ein gespeicherter Schlüssel darf leer bleiben.
@@ -329,11 +332,11 @@ settings:
       en: "2. Enable the Google Calendar API."
       de: "2. Google Calendar API aktivieren."
     google_client_guide_3:
-      en: "3. OAuth consent screen: External. Add the calendar and userinfo.email scopes. Add your Google account as a test user, or publish the app."
-      de: "3. OAuth-Zustimmungsbildschirm: Extern. Bereiche calendar und userinfo.email hinzufügen. Das eigene Google-Konto als Testnutzer eintragen oder die App veröffentlichen."
+      en: "3. Google Auth Platform (OAuth consent screen): External. Add the calendar and userinfo.email scopes. Under Audience, add your Google account as a test user, or publish the app."
+      de: "3. Google Auth Platform (OAuth-Zustimmungsbildschirm): Extern. Bereiche calendar und userinfo.email hinzufügen. Unter «Zielgruppe» das eigene Google-Konto als Testnutzer eintragen oder die App veröffentlichen."
     google_client_guide_4:
-      en: "4. Credentials, then OAuth client ID, application type Desktop. Do not set a redirect URI. The app uses http://127.0.0.1 on a free port."
-      de: "4. Anmeldedaten, OAuth-Client-ID, Anwendungstyp Desktop. Keine Redirect-URI setzen. Die App nutzt http://127.0.0.1 mit einem freien Port."
+      en: "4. Clients, then Create client (older consoles: Credentials, OAuth client ID), application type Desktop. Do not set a redirect URI. The app uses http://127.0.0.1 on a free port."
+      de: "4. Clients, dann Client erstellen (ältere Konsolen: Anmeldedaten, OAuth-Client-ID), Anwendungstyp Desktop. Keine Redirect-URI setzen. Die App nutzt http://127.0.0.1 mit einem freien Port."
     google_client_guide_5:
       en: "5. Paste the client ID and client secret here, save, then choose Connect Google."
       de: "5. Client-ID und Clientschlüssel hier eintragen, speichern, dann «Google verbinden»."

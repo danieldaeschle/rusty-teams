@@ -13,6 +13,8 @@ pub struct GoogleClientForm {
     secret: Entity<InputState>,
     saved_id: String,
     secret_present: bool,
+    submits: u64,
+    saving: bool,
 }
 
 impl GoogleClientForm {
@@ -34,6 +36,9 @@ impl GoogleClientForm {
                     return;
                 }
                 form.update_in(cx, |form, window, cx| {
+                    if form.submits > 0 {
+                        return;
+                    }
                     form.secret_present = true;
                     form.secret.update(cx, |input, cx| {
                         input.set_placeholder(
@@ -54,6 +59,8 @@ impl GoogleClientForm {
             secret,
             saved_id,
             secret_present: false,
+            submits: 0,
+            saving: false,
         }
     }
 
@@ -68,6 +75,11 @@ impl GoogleClientForm {
     }
 
     fn submit(&mut self, clear: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving {
+            return;
+        }
+        self.saving = true;
+        self.submits += 1;
         let client_id = if clear {
             String::new()
         } else {
@@ -78,8 +90,6 @@ impl GoogleClientForm {
         } else {
             self.secret.read(cx).value().to_string()
         };
-        self.secret
-            .update(cx, |input, cx| input.set_value("", window, cx));
         let store = self.app.read(cx).store.clone();
         let connected = self.app.read(cx).calendar_accounts().has_google();
         let app = self.app.clone();
@@ -92,10 +102,12 @@ impl GoogleClientForm {
             })
             .await;
             form.update_in(cx, |form, window, cx| {
+                form.saving = false;
                 let notice = match result {
                     Ok(Ok(crate::google_oauth_client::GoogleClientSave::Saved)) => {
                         form.saved_id = saved_label;
                         form.secret_present = true;
+                        secret_field.update(cx, |input, cx| input.set_value("", window, cx));
                         if connected {
                             tr("settings.calendar.google_client_saved_reconnect")
                         } else {
@@ -106,8 +118,15 @@ impl GoogleClientForm {
                         form.saved_id.clear();
                         form.secret_present = false;
                         id_field.update(cx, |input, cx| input.set_value("", window, cx));
-                        secret_field.update(cx, |input, cx| input.set_placeholder("", window, cx));
-                        tr("settings.calendar.google_client_cleared")
+                        secret_field.update(cx, |input, cx| {
+                            input.set_value("", window, cx);
+                            input.set_placeholder("", window, cx);
+                        });
+                        if connected {
+                            tr("settings.calendar.google_client_cleared_reconnect")
+                        } else {
+                            tr("settings.calendar.google_client_cleared")
+                        }
                     }
                     Ok(Err(crate::google_oauth_client::GoogleClientSaveError::SecretRequired)) => {
                         tr("settings.calendar.google_client_secret_required")
@@ -188,7 +207,6 @@ fn guide() -> Div {
     v_flex()
         .w_full()
         .px(px(ROW_INSET))
-        .gap(px(2.))
         .child(guide_line(tr("settings.calendar.google_client_guide_1")))
         .child(guide_line(tr("settings.calendar.google_client_guide_2")))
         .child(guide_line(tr("settings.calendar.google_client_guide_3")))
