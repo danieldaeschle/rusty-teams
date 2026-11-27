@@ -144,6 +144,10 @@ impl DesktopCapturer {
         self.sys_handle.capture_frame();
     }
 
+    pub(crate) fn set_max_frame_rate(&self, max_fps: u32) {
+        self.sys_handle.set_max_frame_rate(max_fps);
+    }
+
     pub(crate) fn start<T>(&mut self, callback: T)
     where
         T: FnMut(Result<DesktopFrame, CaptureError>) + Send + 'static,
@@ -248,6 +252,10 @@ where
             Err(error) => Err(match error {
                 sys_dc::CaptureError::Temporary => CaptureError::Temporary,
                 sys_dc::CaptureError::Permanent => CaptureError::Permanent,
+                sys_dc::CaptureError::StartFailed => CaptureError::StartFailed,
+                sys_dc::CaptureError::StoppedByUser => CaptureError::StoppedByUser,
+                sys_dc::CaptureError::SourceGone => CaptureError::SourceGone,
+                sys_dc::CaptureError::Interrupted => CaptureError::Interrupted,
             }),
         }
     }
@@ -287,4 +295,8 @@ impl CaptureSource {
 pub(crate) enum CaptureError {
     Temporary,
     Permanent,
+    StartFailed,
+    StoppedByUser,
+    SourceGone,
+    Interrupted,
 }

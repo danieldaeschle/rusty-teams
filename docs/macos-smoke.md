@@ -25,7 +25,7 @@ Run on a real Mac (`.app` from `scripts/build-macos.sh` or a release zip). Unit 
 
 ## Packaging
 
-1. Unsigned local build: TCC prompts for mic / camera / screen when first used.
+1. Ad hoc signed local build (no `MACOS_CODESIGN_IDENTITY`): TCC prompts for mic / camera / screen when first used. Each rebuild changes the code hash, so macOS may ask again; `tccutil reset ScreenCapture org.rusty-teams.teams` (or `Camera` / `Microphone`) clears a stale entry.
 2. Signed + notarized build (when `MACOS_CODESIGN_IDENTITY` / `MACOS_NOTARY_PROFILE` are set): Gatekeeper opens without a right-click override.
 
 ## Report

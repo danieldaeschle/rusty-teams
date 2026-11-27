@@ -15,10 +15,14 @@
  */
 
 #pragma once
+#include <cstdint>
 #include <memory>
 
 #include "modules/desktop_capture/desktop_capturer.h"
 #include "rust/cxx.h"
+#if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
+#include "livekit/sck_window_capturer.h"
+#endif
 
 namespace livekit_ffi {
 class DesktopFrame;
@@ -35,8 +39,16 @@ namespace livekit_ffi {
 class DesktopCapturer : public webrtc::DesktopCapturer::Callback,
                         public webrtc::DelegatedSourceListController::Observer {
  public:
+#if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
+  explicit DesktopCapturer(std::unique_ptr<webrtc::DesktopCapturer> capturer,
+                           SckWindowCapturer* sck_window_capturer = nullptr)
+      : capturer(std::move(capturer)),
+        sck_window_capturer(sck_window_capturer),
+        callback(std::nullopt) {}
+#else
   explicit DesktopCapturer(std::unique_ptr<webrtc::DesktopCapturer> capturer)
       : capturer(std::move(capturer)), callback(std::nullopt) {}
+#endif
   ~DesktopCapturer() override;
 
   void OnCaptureResult(webrtc::DesktopCapturer::Result result,
@@ -49,6 +61,9 @@ class DesktopCapturer : public webrtc::DesktopCapturer::Callback,
   bool select_source(uint64_t id) const { return capturer->SelectSource(id); }
   void start(rust::Box<DesktopCapturerCallbackWrapper> callback);
   void capture_frame() const { capturer->CaptureFrame(); }
+  void set_max_frame_rate(uint32_t max_fps) const {
+    capturer->SetMaxFrameRate(max_fps);
+  }
   bool has_delegated_picker() const;
   void observe_picker(rust::Box<PortalPickerCallbackWrapper> callback);
   void ensure_picker_visible();
@@ -58,6 +73,9 @@ class DesktopCapturer : public webrtc::DesktopCapturer::Callback,
   webrtc::DelegatedSourceListController* picker_controller() const;
 
   std::unique_ptr<webrtc::DesktopCapturer> capturer;
+#if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
+  SckWindowCapturer* sck_window_capturer = nullptr;
+#endif
   std::optional<rust::Box<DesktopCapturerCallbackWrapper>> callback;
   std::optional<rust::Box<PortalPickerCallbackWrapper>> picker;
 };
