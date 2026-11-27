@@ -540,3 +540,32 @@ fn org_emoji_keep_their_image_and_name() {
         vec![text(":crying_cat:")]
     );
 }
+
+#[test]
+fn the_teams_code_block_marker_adds_no_empty_line() {
+    let spans = html_to_spans(
+        "<p>before</p><p itemtype=\"http://schema.skype.com/CodeBlockEditor\" id=\"x_codeBlockEditor-1\">&nbsp;</p><pre class=\"language-py\" itemid=\"codeBlockEditor-1\"><code>x</code></pre>",
+    );
+    assert_eq!(
+        spans,
+        [
+            Span::Text("before".into()),
+            Span::LineBreak,
+            Span::CodeBlock {
+                language: Some("py".into()),
+                code: "x".into()
+            }
+        ]
+    );
+}
+
+#[test]
+fn teams_auto_selected_code_keeps_its_language() {
+    let spans = html_to_spans(
+        "<pre class=\"language-python language-was-auto-selected\"><code><span class=\"hljs-keyword\">def</span> f</code></pre>",
+    );
+    assert!(
+        matches!(&spans[..], [Span::CodeBlock { language: Some(language), .. }] if language == "python"),
+        "{spans:?}"
+    );
+}

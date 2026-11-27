@@ -149,6 +149,11 @@ impl DesktopCapturer {
         self.handle.capture_frame();
     }
 
+    /// Sets the target maximum frame rate for the capturer (best effort).
+    pub fn set_max_frame_rate(&mut self, max_fps: u32) {
+        self.handle.set_max_frame_rate(max_fps);
+    }
+
     /// Retrieves a list of available capture sources.
     ///
     /// Returns a list of screens or windows that can be captured, depending
@@ -260,10 +265,18 @@ impl std::fmt::Display for CaptureSource {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureError {
     Temporary,
     Permanent,
+    /// The picker or capture stream failed to start.
+    StartFailed,
+    /// Sharing was stopped from the system UI, such as the macOS menu bar.
+    StoppedByUser,
+    /// The shared source is closed or gone (on macOS 15.2+ it may reopen).
+    SourceGone,
+    /// The OS stopped the capture stream for another reason.
+    Interrupted,
 }
 
 /// Outcome of a desktop-owned source picker.
@@ -282,6 +295,10 @@ fn capture_result_from_sys(
         Err(error) => Err(match error {
             imp_dc::CaptureError::Temporary => CaptureError::Temporary,
             imp_dc::CaptureError::Permanent => CaptureError::Permanent,
+            imp_dc::CaptureError::StartFailed => CaptureError::StartFailed,
+            imp_dc::CaptureError::StoppedByUser => CaptureError::StoppedByUser,
+            imp_dc::CaptureError::SourceGone => CaptureError::SourceGone,
+            imp_dc::CaptureError::Interrupted => CaptureError::Interrupted,
         }),
     }
 }

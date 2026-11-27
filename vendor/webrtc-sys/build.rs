@@ -334,7 +334,7 @@ fn main() {
             println!("cargo:rustc-link-lib=framework=IOSurface");
             println!("cargo:rustc-link-lib=framework=ScreenCaptureKit");
 
-            configure_darwin_sysroot(&mut builder);
+            let sysroot = configure_darwin_sysroot(&mut builder);
 
             builder
                 .file("src/objc_video_factory.mm")
@@ -342,6 +342,29 @@ fn main() {
                 .flag("-stdlib=libc++")
                 .flag("-std=c++20")
                 .flag("-Wno-nullability-completeness");
+
+            let mut sck_builder = cc::Build::new();
+            sck_builder
+                .cpp(true)
+                .file("src/sck_window_capturer.mm")
+                .includes(&[
+                    path::PathBuf::from("./include"),
+                    webrtc_include.clone(),
+                    webrtc_include.join("third_party/abseil-cpp/"),
+                    webrtc_include.join("third_party/libyuv/include/"),
+                    webrtc_include.join("third_party/libc++/"),
+                    webrtc_include.join("sdk/objc"),
+                    webrtc_include.join("sdk/objc/base"),
+                ])
+                .flag(format!("-isysroot{}", sysroot))
+                .flag("-stdlib=libc++")
+                .flag("-std=c++20")
+                .flag("-fobjc-arc")
+                .flag("-Wno-nullability-completeness");
+            for (key, value) in webrtc_sys_build::webrtc_defines() {
+                sck_builder.define(key.as_str(), value.as_deref());
+            }
+            sck_builder.warnings(false).compile("webrtcsys-sck-window");
         }
         "ios" => {
             println!("cargo:rustc-link-lib=framework=Foundation");
@@ -431,7 +454,7 @@ fn get_output_path() -> PathBuf {
     return PathBuf::from(path);
 }
 
-fn configure_darwin_sysroot(builder: &mut cc::Build) {
+fn configure_darwin_sysroot(builder: &mut cc::Build) -> String {
     let target_os = webrtc_sys_build::target_os();
 
     let sdk = match target_os.as_str() {
@@ -454,7 +477,7 @@ fn configure_darwin_sysroot(builder: &mut cc::Build) {
     let sysroot = Command::new("xcrun").args(["--sdk", sdk, "--show-sdk-path"]).output().unwrap();
 
     let sysroot = String::from_utf8_lossy(&sysroot.stdout);
-    let sysroot = sysroot.trim();
+    let sysroot = sysroot.trim().to_owned();
 
     let search_dirs = Command::new("cc").arg("--print-search-dirs").output().unwrap();
 
@@ -468,6 +491,7 @@ fn configure_darwin_sysroot(builder: &mut cc::Build) {
     }
 
     builder.flag(format!("-isysroot{}", sysroot).as_str());
+    sysroot
 }
 
 fn configure_android_sysroot(builder: &mut cc::Build) {

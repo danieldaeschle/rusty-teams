@@ -717,12 +717,26 @@ impl LocalVideo {
         generation: &Arc<AtomicU64>,
         switch_off: CallCommand,
     ) -> impl FnOnce(String) + Send + 'static {
+        let report = self.report_end(notice_key, generation, switch_off);
+        move |reason| report(Some(reason))
+    }
+
+    /// Like `report_failure`, but `None` switches off without a notice: the
+    /// user ended it outside the app.
+    fn report_end(
+        &self,
+        notice_key: &'static str,
+        generation: &Arc<AtomicU64>,
+        switch_off: CallCommand,
+    ) -> impl FnOnce(Option<String>) + Send + 'static {
         let updates = self.updates.clone();
         let commands = self.commands.clone();
         let started = generation.fetch_add(1, Ordering::SeqCst) + 1;
         let generation = generation.clone();
         move |reason| {
-            let _ = updates.send(CallUpdate::Notice(notice_with_detail(notice_key, reason)));
+            if let Some(reason) = reason {
+                let _ = updates.send(CallUpdate::Notice(notice_with_detail(notice_key, reason)));
+            }
             if generation.load(Ordering::SeqCst) == started
                 && let Some(commands) = commands
             {
@@ -865,6 +879,13 @@ impl LocalVideo {
         self.screen.capture = None;
         let mut sink = self.screen_sink();
         let updates = self.updates.clone();
+        // `stop_share` moves the generation on, so only an end the app did not
+        // ask for switches the share off.
+        let ended = self.report_end(
+            SCREEN_SHARE_STOPPED_NOTICE,
+            &self.share_generation,
+            CallCommand::StopShare,
+        );
         let capture = start_portal_capture(
             kind,
             self.share_fps.clone(),
@@ -881,6 +902,7 @@ impl LocalVideo {
                     let _ = commands.send(CallCommand::AbandonPortalShare);
                 }
             },
+            ended,
         )?;
         self.portal_armed = true;
         self.screen.capture = Some(capture);
@@ -911,7 +933,7 @@ impl LocalVideo {
                     source.clone(),
                     self.share_fps.clone(),
                     move |buffer| sink.push(buffer),
-                    self.report_failure(
+                    self.report_end(
                         SCREEN_SHARE_STOPPED_NOTICE,
                         &self.share_generation,
                         CallCommand::StopShare,

@@ -1,11 +1,12 @@
-# Builds per README "Quick start": `cargo build -p app`, plus the universal macOS
-# binary from scripts/build-macos.sh and the Linux packages from
+# Builds per README "Quick start": `cargo build -p app`, plus the Apple Silicon
+# macOS .app from scripts/build-macos.sh and the Linux packages from
 # packaging/linux/package.sh. Tests live in test.yml; this file only packages the
 # artifacts.
 name: Build
 
 # Builds run for tags (the release assets); pushes are tested in test.yml.
 # A `v*` tag also publishes a GitHub release; a tag with `-` (v0.2.0-rc.1) is a pre-release.
+# nightly.yml starts it with workflow_dispatch on a nightly tag.
 on:
   push:
     tags: ['*']
@@ -199,16 +200,15 @@ jobs:
         with:
           key: build
 
-      # scripts/build-macos.sh builds the arm64 and x86_64 slices, lipos them into
-      # one universal binary and wraps it in a .app with the icon (README "Quick
-      # start"); it installs the x86_64 rustup target itself and needs Xcode CLT only.
+      # scripts/build-macos.sh builds the aarch64-apple-darwin binary and wraps
+      # it in a .app with the icon (README "Quick start"); it needs Xcode CLT only.
       - name: Build
         run: scripts/build-macos.sh crates/app teams
 
       - uses: actions/upload-artifact@v7
         with:
           name: teams-macos
-          path: target/universal/release/teams-macos.zip
+          path: target/aarch64-apple-darwin/release/teams-macos.zip
 
   release:
     name: Release
@@ -248,7 +248,11 @@ jobs:
           highlights="$(git log -1 --format=%b "$TAG" | grep -v -e '^Co-Authored-By:' -e 'Workspace version' | sed '/./,$!d' || true)"
           # Notes must never block publishing the assets.
           if ! {
-            if [[ -n "${highlights//[[:space:]]/}" ]]; then
+            # cliff.toml's tag_pattern skips nightly tags: a nightly lists everything since the last release.
+            if [[ "$TAG" == *-nightly.* ]]; then
+              printf 'Nightly build of main at %s. Not a release.\n\n' "$(git rev-parse --short "$TAG")"
+              "$cliff" --config cliff.toml --unreleased --strip all
+            elif [[ -n "${highlights//[[:space:]]/}" ]]; then
               printf '## Highlights\n\n%s\n\n<details>\n<summary>All changes</summary>\n\n' "$highlights"
               "$cliff" --config cliff.toml --current --strip all
               printf '\n</details>\n'
@@ -290,7 +294,7 @@ jobs:
           fi
           take dist/teams-windows-amd64/teams.exe "release/rusty-teams-$ver-windows-amd64.exe" "windows-amd64"
           take dist/teams-windows-arm64/teams.exe "release/rusty-teams-$ver-windows-arm64.exe" "windows-arm64"
-          take dist/teams-macos/teams-macos.zip "release/rusty-teams-$ver-macos-universal.zip" "macos"
+          take dist/teams-macos/teams-macos.zip "release/rusty-teams-$ver-macos-arm64.zip" "macos"
           shopt -s nullglob
           packages=(dist/teams-linux-packages/*)
           if (( ${#packages[@]} )); then

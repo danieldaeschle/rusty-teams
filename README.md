@@ -92,7 +92,7 @@
 |---|---|---|---|
 | Support | Main target | Supported | Supported |
 | Sign-in | Embedded WebView2 | Your browser, headless | Your browser, headless |
-| Download | `.exe` | `.tar.gz`, self-installs to the app menu | Universal `.app` (arm64 + x86_64) |
+| Download | `.exe` | `.tar.gz`, self-installs to the app menu | `.app` (Apple Silicon, macOS 14+) |
 | Tray icon | Yes | StatusNotifierItem | Menu bar |
 | Updates | Quiet download, idle restart | Asks when installed under `~/.local`; otherwise opens the release page | Opens the release page |
 
@@ -131,7 +131,11 @@ The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
 
 ## Quick start
 
-Download the build for your platform from [Releases](https://github.com/danieldaeschle/rusty-teams/releases) and sign in with your work account. Or build it yourself:
+Download the build for your platform from [Releases](https://github.com/danieldaeschle/rusty-teams/releases) and sign in with your work account.
+
+Nightly builds of `main` are pre-releases tagged `v<next version>-nightly.<date>`. A nightly updates to newer nightlies and then to the next release; a release build never offers nightlies.
+
+Or build it yourself:
 
 ```bash
 cargo run --release -p app
@@ -157,7 +161,7 @@ Without these env vars the calendar stays Outlook-only.
 | Linux build needs clang 21+ (libwebrtc's hermetic libc++) + mold (set in `.cargo/config.toml`); sccache shares compiled deps across worktrees | `sudo apt install clang mold sccache`, clang from [apt.llvm.org](https://apt.llvm.org) if the distro one is older than 21 |
 | Against Chrome on a debug port | `cargo run -p app -- --endpoint http://127.0.0.1:9222` |
 | Windows exe from WSL/Linux | `scripts/build-windows.sh crates/app teams` |
-| macOS .app (universal arm64 + x86_64), Xcode CLT only | `scripts/build-macos.sh crates/app teams` |
+| macOS .app (Apple Silicon, macOS 14+), Xcode CLT only | `scripts/build-macos.sh crates/app teams` |
 | Linux AppImage, deb, rpm and tar.gz in `dist/release` (needs [nfpm](https://nfpm.goreleaser.com) for deb/rpm) | `packaging/linux/package.sh` |
 | Tests | `cargo test` |
 | Headless screenshot (Xvfb, xdotool, xclip, mesa-vulkan-drivers) | `cargo build -p app && scripts/headless-shot.sh shot.png -- "mousemove 450 740" "click 1" "type hello"` |
