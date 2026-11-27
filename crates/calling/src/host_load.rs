@@ -69,6 +69,13 @@ pub fn thermal_state() -> &'static str {
 mod macos {
     use super::ThreadCpu;
 
+    unsafe extern "C" {
+        fn mach_port_deallocate(
+            task: libc::mach_port_t,
+            name: libc::mach_port_t,
+        ) -> libc::kern_return_t;
+    }
+
     pub fn thermal_state() -> &'static str {
         let state = objc2_foundation::NSProcessInfo::processInfo().thermalState();
         match state {
@@ -99,13 +106,14 @@ mod macos {
                     &mut info as *mut libc::thread_basic_info as libc::thread_info_t,
                     &mut info_count,
                 );
-                if status != libc::KERN_SUCCESS {
-                    continue;
+                if status == libc::KERN_SUCCESS {
+                    found.push(ThreadCpu {
+                        name: thread_name(thread),
+                        cpu_ms: cpu_ms(&info),
+                    });
                 }
-                found.push(ThreadCpu {
-                    name: thread_name(thread),
-                    cpu_ms: cpu_ms(&info),
-                });
+                // task_threads hands back a send right per thread. Freeing the array does not release those.
+                let _ = mach_port_deallocate(task, thread);
             }
             let bytes = count as libc::vm_size_t
                 * std::mem::size_of::<libc::thread_act_t>() as libc::vm_size_t;
