@@ -143,5 +143,10 @@ mod tests {
             tr("settings.calendar.not_in_build"),
             "Google Kalender ist in diesem Build nicht enthalten."
         );
+        assert_eq!(
+            tr("settings.calendar.google_client_status_own"),
+            "Eigener Client"
+        );
+        assert!(tr("settings.calendar.google_client_guide_5").contains("«Google verbinden»"));
     }
 }

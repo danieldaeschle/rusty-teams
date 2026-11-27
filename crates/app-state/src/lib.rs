@@ -34,6 +34,7 @@ pub mod find_in_chat;
 pub mod forward_selection;
 pub mod gifs;
 pub mod google_calendar_sync;
+pub mod google_oauth_client;
 pub mod ics_sync;
 pub mod image_view_gallery;
 pub mod importance;

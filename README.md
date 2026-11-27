@@ -143,18 +143,16 @@ cargo run --release -p app
 
 ### Google Calendar (optional)
 
-1. Create an OAuth Desktop client in Google Cloud Console with redirect `http://127.0.0.1:<port>/` (loopback; the app picks a free port).
-2. Export before starting the app:
+1. Settings > Calendar accounts > Connect Google.
+2. Finish sign-in in the browser (if Google says the app is not verified, choose Advanced, then continue).
+3. Choose the home calendar and optional dual-write targets.
+
+Release builds bake in the project OAuth Desktop client, so those steps are enough when the client fields are empty. To use your own Desktop client, paste the client ID and client secret on that same page (the page has the short Google Cloud Console guide) and save. A saved pair is used instead of the built-in client and instead of `TEAMS_GOOGLE_CLIENT_ID` / `TEAMS_GOOGLE_CLIENT_SECRET`. Local builds without a built-in client stay Outlook-only until you save a pair or export those variables before `cargo run`:
 
 ```bash
 export TEAMS_GOOGLE_CLIENT_ID="….apps.googleusercontent.com"
-# only if the client has a secret:
 export TEAMS_GOOGLE_CLIENT_SECRET="…"
 ```
-
-3. Settings > Calendar > Connect Google, then choose home calendar and optional dual-write targets.
-
-Without these env vars the calendar stays Outlook-only.
 
 | Task | Command |
 |---|---|
