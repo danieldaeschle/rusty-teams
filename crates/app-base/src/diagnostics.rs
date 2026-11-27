@@ -341,7 +341,7 @@ mod tests {
         ));
         assert!(!keeps_webrtc_line(
             log::Level::Debug,
-            "(audio_device_impl.cc:664): output: name = Arctis Pro Wireless Game"
+            "(audio_device_impl.cc:664): output: name = Headset Game"
         ));
         assert!(!keeps_webrtc_line(
             log::Level::Debug,
