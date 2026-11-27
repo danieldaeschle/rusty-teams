@@ -449,9 +449,12 @@ enum ActiveShareStop {
 
 /// Classifies an error received while a portal share is active.
 ///
-/// Wayland reports a desktop stop and a closed window as `Permanent` after
-/// frames have arrived. macOS uses `StoppedByUser` for the menu-bar stop, so
-/// a later `Permanent` there stays a failure notice.
+/// Wayland reports a desktop stop, a closed window, and a PipeWire or compositor
+/// failure after the first frame all as `Permanent`. Those stay quiet: the portal
+/// does not say which one it was, and a notice would fire on every Stop sharing.
+/// A permanent error before the first frame still shows a notice. macOS uses
+/// `StoppedByUser` for the menu-bar stop, so a later `Permanent` there stays a
+/// failure notice.
 fn active_portal_error(
     error: CaptureError,
     delegated: bool,
