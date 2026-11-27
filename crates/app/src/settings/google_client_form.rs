@@ -26,26 +26,28 @@ impl GoogleClientForm {
         }
         let secret = cx.new(|cx| InputState::new(window, cx));
         secret.update(cx, |input, cx| input.toggle_masked(window, cx));
-        cx.spawn_in(window, async move |form, cx| {
-            let present =
-                crate::runtime::spawn(crate::google_oauth_client::secret_is_stored()).await;
-            if !matches!(present, Ok(true)) {
-                return;
-            }
-            form.update_in(cx, |form, window, cx| {
-                form.secret_present = true;
-                form.secret.update(cx, |input, cx| {
-                    input.set_placeholder(
-                        tr("settings.calendar.google_client_secret_kept"),
-                        window,
-                        cx,
-                    );
-                });
-                cx.notify();
+        if !saved_id.is_empty() {
+            cx.spawn_in(window, async move |form, cx| {
+                let present =
+                    crate::runtime::spawn(crate::google_oauth_client::secret_is_stored()).await;
+                if !matches!(present, Ok(true)) {
+                    return;
+                }
+                form.update_in(cx, |form, window, cx| {
+                    form.secret_present = true;
+                    form.secret.update(cx, |input, cx| {
+                        input.set_placeholder(
+                            tr("settings.calendar.google_client_secret_kept"),
+                            window,
+                            cx,
+                        );
+                    });
+                    cx.notify();
+                })
+                .ok();
             })
-            .ok();
-        })
-        .detach();
+            .detach();
+        }
         GoogleClientForm {
             app,
             client_id,

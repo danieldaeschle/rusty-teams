@@ -66,6 +66,10 @@ pub async fn save(
         return Ok(GoogleClientSave::Cleared);
     }
     let stored_secret = if secret.is_empty() {
+        // A secret left in the keyring without a saved id is not kept for a new id.
+        if load_client_id(store).is_empty() {
+            return Err(GoogleClientSaveError::SecretRequired);
+        }
         match load_secret().await {
             Ok(existing) if !existing.trim().is_empty() => existing,
             _ => return Err(GoogleClientSaveError::SecretRequired),
