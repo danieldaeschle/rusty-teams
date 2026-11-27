@@ -296,8 +296,8 @@ impl Browser {
             .unwrap_or(false)
     }
 
-    /// True when the Teams page can use a token: an opened sealed cache entry, or a still-valid
-    /// access token. Key names alone do not count.
+    /// True when the Teams page holds a still-valid access token, plain or decrypted from a
+    /// sealed cache entry. Key names and expired unsealed entries do not count.
     pub async fn teams_sign_in_ready(&self) -> bool {
         let Ok(tabs) = self.tabs().await else {
             return false;

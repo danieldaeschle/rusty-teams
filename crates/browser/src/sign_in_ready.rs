@@ -1,8 +1,9 @@
-//! Decides that Teams sign-in is finished only when the page can use a token.
+//! Decides that Teams sign-in is finished only when the page holds a fresh access token.
 //!
 //! Local storage key names that contain `accesstoken` or `refreshtoken` are not enough: a wiped
 //! cache still has those names, and treating them as success restarts Chromium and drops the
-//! encryption cookie.
+//! encryption cookie. Merely decrypting sealed entries is not enough either once the encryption
+//! cookie persists across restarts, because an expired session still unseals its old entries.
 
 use serde_json::Value;
 
@@ -47,15 +48,13 @@ pub(crate) const PAGE_EXPRESSION: &str = r#"(async () => {
   return {opened: openedEntries.length, freshAccess: plain.some(fresh) || openedEntries.some(fresh)};
 })()"#;
 
-/// True when the page opened a sealed entry or still holds a valid access token.
-/// A `keyNames` flag is ignored on purpose.
+/// True when the page holds a valid access token, either plain or decrypted from a sealed entry.
+/// Key names and expired unsealed entries are ignored on purpose.
 pub(crate) fn sign_in_ready_from_page(value: &Value) -> bool {
-    let opened = value.get("opened").and_then(Value::as_u64).unwrap_or(0);
-    let fresh_access = value
+    value
         .get("freshAccess")
         .and_then(Value::as_bool)
-        .unwrap_or(false);
-    opened > 0 || fresh_access
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -70,16 +69,19 @@ mod tests {
     }
 
     #[test]
-    fn an_opened_sealed_entry_is_ready() {
-        assert!(sign_in_ready_from_page(
-            &json!({"opened": 1, "freshAccess": false})
+    fn opened_sealed_entries_without_a_fresh_access_token_are_not_ready() {
+        assert!(!sign_in_ready_from_page(
+            &json!({"opened": 3, "freshAccess": false})
         ));
     }
 
     #[test]
-    fn a_fresh_access_token_is_ready_without_sealed_entries() {
+    fn a_fresh_access_token_is_ready_plain_or_sealed() {
         assert!(sign_in_ready_from_page(
             &json!({"opened": 0, "freshAccess": true})
+        ));
+        assert!(sign_in_ready_from_page(
+            &json!({"opened": 2, "freshAccess": true})
         ));
     }
 
