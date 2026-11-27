@@ -356,9 +356,17 @@ impl Session {
         outcome.map(Some)
     }
 
+    /// Whether [`Session::persist_msal_key`] can run on this transport.
+    pub fn can_persist_msal_key(&self) -> bool {
+        self.transport.supports_cdp()
+    }
+
     /// Gives MSAL's session-cookie cache key an expiry so the next start can still read the token
     /// cache. Works over CDP for WebView2 and for a managed Chrome session.
     pub async fn persist_msal_key(&self) -> Result<bool> {
+        if !self.can_persist_msal_key() {
+            return Ok(false);
+        }
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs());
@@ -371,8 +379,12 @@ impl Session {
         let Some(params) = crate::msal_key::persisted_key_cookies(&cookies, now_secs) else {
             return Ok(false);
         };
-        self.cdp_in(App::Teams, "Storage.setCookies", params)
-            .await?;
+        let Some(_) = self
+            .cdp_in(App::Teams, "Storage.setCookies", params)
+            .await?
+        else {
+            return Ok(false);
+        };
         Ok(true)
     }
 

@@ -2,9 +2,10 @@
 //!
 //! MSAL.js encrypts its localStorage cache with a key held in the session cookie
 //! `msal.cache.encryption`. A session cookie dies with the page, so every restart made MSAL create
-//! a new key, drop the cache and ask for sign-in again. Before the page closes, the cookie gets an
-//! expiry instead; the key then sits in the profile next to the cache it protects, which the
-//! profile already holds.
+//! a new key, drop the cache and ask for sign-in again. While the page is signed in, the cookie
+//! gets an expiry instead; the key then sits in the profile next to the cache it protects, which
+//! the profile already holds. The managed Chromium path also does this once more on a graceful
+//! stop as a second chance.
 //!
 //! Trade-off: the key moves from a session cookie into the profile's cookie store, encrypted by
 //! the OS keyring (or the browser's fixed key where no keyring is available). The profile already

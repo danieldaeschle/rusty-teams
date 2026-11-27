@@ -193,6 +193,7 @@ impl Runner {
     ) {
         let mut attached = Some(first);
         let mut backoff = Duration::from_secs(1);
+        let retry_signal = self.config.retry.clone();
         loop {
             let current = match attached.take() {
                 Some(current) => current,
@@ -207,6 +208,12 @@ impl Runner {
                             _ = sleep(backoff) => {}
                             _ = &mut stop => return,
                             _ = self.output.closed() => return,
+                            _ = async {
+                                match &retry_signal {
+                                    Some(signal) => signal.notified().await,
+                                    None => std::future::pending().await,
+                                }
+                            } => backoff = Duration::from_millis(500),
                         }
                         backoff = (backoff * 2).min(self.config.max_reattach_backoff);
                         continue;

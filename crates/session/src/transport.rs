@@ -29,6 +29,12 @@ pub trait Transport: Send + Sync {
 
     fn diagnose(&self) -> BoxFuture<'_, Result<Diagnosis>>;
 
+    /// Whether the transport accepts raw CDP methods. WebDriver BiDi does not, so session-level
+    /// CDP work such as the MSAL cookie must stay off it.
+    fn supports_cdp(&self) -> bool {
+        true
+    }
+
     /// While held the host must not navigate the app on its own (no parking).
     fn hold(&self, _app: App, _held: bool) {}
 }

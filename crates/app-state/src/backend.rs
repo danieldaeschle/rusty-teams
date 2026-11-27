@@ -241,18 +241,23 @@ async fn supervise(
     refresh_loop(engine, events, nudges).await;
 }
 
-/// Gives the MSAL cache key an expiry while the page is signed in, so the next start can read the
-/// token cache. WebView2 drops session cookies with the process just like Chromium does.
+/// Gives the MSAL cache key an expiry once the page is signed in, so the next start can read the
+/// token cache. WebView2 drops session cookies with the process just like Chromium does. One
+/// success is enough: the expiry is renewed on the next start, and repeated CDP calls would wake a
+/// parked WebView2.
 async fn msal_key_loop(session: Session) {
+    if !session.can_persist_msal_key() {
+        return;
+    }
     let mut wait = Duration::from_secs(5);
     loop {
         tokio::time::sleep(wait).await;
         let outcome =
-            tokio::time::timeout(Duration::from_secs(3), session.persist_msal_key()).await;
+            tokio::time::timeout(Duration::from_secs(10), session.persist_msal_key()).await;
         match outcome {
             Ok(Ok(true)) => {
                 crate::diagnostics::record("msal: key cookie persisted");
-                wait = Duration::from_secs(30 * 60);
+                return;
             }
             Ok(Ok(false)) => {
                 wait = (wait * 2).min(Duration::from_secs(300));
