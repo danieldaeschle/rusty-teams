@@ -448,9 +448,18 @@ enum ActiveShareStop {
 }
 
 /// Classifies an error received while a portal share is active.
-fn active_portal_error(error: CaptureError) -> Option<ActiveShareStop> {
+///
+/// Wayland reports a desktop stop and a closed window as `Permanent` after
+/// frames have arrived. macOS uses `StoppedByUser` for the menu-bar stop, so
+/// a later `Permanent` there stays a failure notice.
+fn active_portal_error(
+    error: CaptureError,
+    delegated: bool,
+    seen_frame: bool,
+) -> Option<ActiveShareStop> {
     match error {
         CaptureError::StoppedByUser => Some(ActiveShareStop::Quiet),
+        CaptureError::Permanent if delegated && seen_frame => Some(ActiveShareStop::Quiet),
         CaptureError::StartFailed | CaptureError::Interrupted => {
             Some(ActiveShareStop::Notice("macOS stopped the capture"))
         }
@@ -492,6 +501,7 @@ pub(crate) fn start_portal_capture(
         let gone_mark = gone_since.clone();
         let active_end: Arc<Mutex<Option<ActiveShareStop>>> = Arc::default();
         let end_mark = active_end.clone();
+        let seen_frame = Arc::new(AtomicBool::new(false));
         capturer.start_capture(None, move |result| {
             if !gate.load(Ordering::SeqCst) {
                 let Some(events) = &frame_events else { return };
@@ -506,6 +516,7 @@ pub(crate) fn start_portal_capture(
             }
             match result {
                 Ok(frame) => {
+                    seen_frame.store(true, Ordering::SeqCst);
                     if let Ok(mut since) = gone_mark.lock() {
                         *since = None;
                     }
@@ -526,7 +537,8 @@ pub(crate) fn start_portal_capture(
                     }
                 }
                 Err(error) => {
-                    if let Some(stop_reason) = active_portal_error(error)
+                    if let Some(stop_reason) =
+                        active_portal_error(error, delegated, seen_frame.load(Ordering::SeqCst))
                         && let Ok(mut slot) = end_mark.lock()
                     {
                         slot.get_or_insert(stop_reason);
@@ -682,23 +694,37 @@ mod tests {
     #[test]
     fn active_portal_errors_separate_user_stop_from_failures() {
         assert_eq!(
-            active_portal_error(CaptureError::StoppedByUser),
+            active_portal_error(CaptureError::StoppedByUser, false, false),
             Some(ActiveShareStop::Quiet)
         );
         assert_eq!(
-            active_portal_error(CaptureError::Interrupted),
+            active_portal_error(CaptureError::Interrupted, true, true),
             Some(ActiveShareStop::Notice("macOS stopped the capture"))
         );
         assert_eq!(
-            active_portal_error(CaptureError::StartFailed),
+            active_portal_error(CaptureError::StartFailed, true, true),
             Some(ActiveShareStop::Notice("macOS stopped the capture"))
         );
         assert_eq!(
-            active_portal_error(CaptureError::Permanent),
+            active_portal_error(CaptureError::Permanent, true, true),
+            Some(ActiveShareStop::Quiet)
+        );
+        assert_eq!(
+            active_portal_error(CaptureError::Permanent, true, false),
             Some(ActiveShareStop::Notice("the system stopped the capture"))
         );
-        assert_eq!(active_portal_error(CaptureError::SourceGone), None);
-        assert_eq!(active_portal_error(CaptureError::Temporary), None);
+        assert_eq!(
+            active_portal_error(CaptureError::Permanent, false, true),
+            Some(ActiveShareStop::Notice("the system stopped the capture"))
+        );
+        assert_eq!(
+            active_portal_error(CaptureError::SourceGone, true, true),
+            None
+        );
+        assert_eq!(
+            active_portal_error(CaptureError::Temporary, true, true),
+            None
+        );
     }
 }
 
