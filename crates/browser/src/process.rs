@@ -67,6 +67,7 @@ pub(crate) fn is_chrome_image(image_name: &str) -> bool {
         || lowered.starts_with("google chrome")
         || lowered.starts_with("chromium")
         || lowered.starts_with("microsoft edge")
+        || lowered.starts_with("microsoft-edge")
         || lowered.starts_with("msedge")
         || lowered.starts_with("brave")
         || lowered.starts_with("helium")
@@ -186,6 +187,8 @@ mod tests {
         assert!(is_chrome_image(
             "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
         ));
+        assert!(is_chrome_image("microsoft-edge"));
+        assert!(is_chrome_image("microsoft-edge-stable"));
         assert!(is_chrome_image(
             "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
         ));
