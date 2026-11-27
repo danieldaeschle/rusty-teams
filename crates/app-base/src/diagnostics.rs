@@ -274,8 +274,10 @@ fn keeps_webrtc_line(level: log::Level, text: &str) -> bool {
         && !is_adm_enumeration_dump(text)
 }
 
-/// Pulse logs every device name on each `list_devices` call. Those lines are
-/// the Linux counterpart of the Windows endpoint dump and hide real events.
+/// Device-name lines from each `list_devices` poll. Linux prints the function
+/// name; MSVC prefixes it with `virtual webrtc::AudioDeviceModuleImpl::`.
+/// Numeric `output:` / `input:` lines are return values (`Recording`, `Playing`)
+/// and stay. `Initialized:` is the per-poll flag, not that return value.
 fn is_adm_enumeration_dump(text: &str) -> bool {
     let Some(message) = text
         .split_once("audio_device_impl.cc:")
@@ -283,18 +285,24 @@ fn is_adm_enumeration_dump(text: &str) -> bool {
     else {
         return false;
     };
-    const PREFIXES: [&str; 7] = [
+    let head = adm_function_name(message);
+    const CALLS: [&str; 4] = [
         "PlayoutDeviceName",
         "RecordingDeviceName",
         "PlayoutDevices",
         "RecordingDevices",
-        "output:",
-        "input:",
-        "Initialized",
     ];
-    PREFIXES
-        .iter()
-        .any(|prefix| message.starts_with(prefix))
+    const DUMPS: [&str; 4] = ["output: name", "output: guid", "input: name", "input: guid"];
+    CALLS.iter().any(|prefix| head.starts_with(prefix))
+        || DUMPS.iter().any(|prefix| head.starts_with(prefix))
+        || head.starts_with("Initialized")
+}
+
+/// Drops an optional MSVC `__FUNCTION__` prefix so Linux and Windows share one check.
+fn adm_function_name(message: &str) -> &str {
+    let rest = message.strip_prefix("virtual ").unwrap_or(message);
+    rest.strip_prefix("webrtc::AudioDeviceModuleImpl::")
+        .unwrap_or(rest)
 }
 
 fn is_endpoint_dump(text: &str) -> bool {
@@ -349,7 +357,35 @@ mod tests {
         ));
         assert!(!keeps_webrtc_line(
             log::Level::Debug,
+            "(audio_device_impl.cc:680): input: name = Headset Chat"
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:683): input: guid = "
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
             "(audio_device_impl.cc:620): Initialized: 1"
+        ));
+        assert!(keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:700): output: 1"
+        ));
+        assert!(keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:710): input: 0"
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:655): virtual webrtc::AudioDeviceModuleImpl::PlayoutDeviceName(0, ...)"
+        ));
+        assert!(!keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:632): virtual webrtc::AudioDeviceModuleImpl::PlayoutDevices"
+        ));
+        assert!(keeps_webrtc_line(
+            log::Level::Debug,
+            "(audio_device_impl.cc:635): output: 4"
         ));
         assert!(keeps_webrtc_line(
             log::Level::Debug,
