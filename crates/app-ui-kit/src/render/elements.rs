@@ -1,3 +1,4 @@
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -15,13 +16,17 @@ const INDENT_STEP: f32 = teams_core::INDENT_PIXELS as f32;
 const MARKER_WIDTH: f32 = 18.;
 const WIDE_MARKER_WIDTH: f32 = 26.;
 const BULLETS: [&str; 3] = ["\u{2022}", "\u{25e6}", "\u{25aa}"];
-const CODE_HEADER_MIN_LINES: usize = 3;
-const PLAIN_LANGUAGE: &str = "text";
 const MIN_CONTRAST: f32 = 4.5;
 const HIGHLIGHT_ALPHA: f32 = 0.3;
 const CODE_LINE_PADDING_X: f32 = 6.;
 const CODE_LINE_PADDING_Y: f32 = 4.;
 const CODE_LINE_RADIUS: f32 = 4.;
+const COPIED_SHOWN: std::time::Duration = std::time::Duration::from_millis(1500);
+
+// shortcut: one "Copied" at a time app-wide, which is all a click can produce.
+// The click number lets a later click on the same block keep "Copied" for its full time.
+static COPIED_BLOCK: std::sync::Mutex<Option<(String, u64)>> = std::sync::Mutex::new(None);
+static COPY_CLICKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub const CODE_LINE_TAG: &str = "message/code-line";
 pub const CODE_BLOCK_TAG: &str = "message/code-block";
 
@@ -126,16 +131,38 @@ fn render_code(language: Option<&str>, code: &str, id: String, own: bool, cx: &A
         .into_iter()
         .map(|(range, token)| (range, token_style(token)))
         .collect();
-    let body = div()
+    let numbers = (1..=code.split('\n').count())
+        .map(|number| number.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Lines do not wrap, so the numbers stay beside their lines; a long line scrolls.
+    let body = h_flex()
         .w_full()
-        .px(px(10.))
+        .items_start()
         .py(px(8.))
-        .child(SelectableRichText::new(
-            ElementId::Name(id.clone().into()),
-            code.to_owned(),
-            highlights,
-        ));
-    let show_header = language.is_some() || code.lines().count() >= CODE_HEADER_MIN_LINES;
+        .child(
+            div()
+                .flex_none()
+                .pl(px(10.))
+                .pr(px(10.))
+                .text_right()
+                .text_color(code_meta(own))
+                .child(numbers),
+        )
+        .child(
+            div()
+                .id(ElementId::Name(format!("{id}-lines").into()))
+                .flex_1()
+                .min_w_0()
+                .pr(px(10.))
+                .overflow_x_scroll()
+                .whitespace_nowrap()
+                .child(SelectableRichText::new(
+                    ElementId::Name(id.clone().into()),
+                    code.to_owned(),
+                    highlights,
+                )),
+        );
     v_flex()
         .debug_selector(|| CODE_BLOCK_TAG.into())
         .w_full()
@@ -148,14 +175,15 @@ fn render_code(language: Option<&str>, code: &str, id: String, own: bool, cx: &A
         .font_family(code_font(cx))
         .text_size(px(12.5))
         .line_height(relative(1.5))
-        .when(show_header, |container| {
-            container.child(code_header(
-                language.unwrap_or(PLAIN_LANGUAGE),
-                code,
-                &id,
-                own,
-            ))
-        })
+        .child(code_header(
+            {
+                let id = language.unwrap_or(teams_core::PLAIN_LANGUAGE);
+                teams_core::code_language(id).map_or(id, |language| language.name)
+            },
+            code,
+            &id,
+            own,
+        ))
         .child(body)
         .into_any_element()
 }
@@ -194,18 +222,28 @@ fn code_text(own: bool) -> Hsla {
     }
 }
 
-fn code_header(language: &str, code: &str, id: &str, own: bool) -> Div {
-    let muted = if own {
+fn code_meta(own: bool) -> Hsla {
+    if own {
         theme::own_meta()
     } else {
         theme::text_muted()
-    };
+    }
+}
+
+fn code_header(language: &str, code: &str, id: &str, own: bool) -> Div {
+    let muted = code_meta(own);
     let code = code.to_owned();
+    let copy_id = format!("{id}-copy");
+    let copied = COPIED_BLOCK
+        .lock()
+        .is_ok_and(|block| block.as_ref().is_some_and(|(shown, _)| *shown == copy_id));
     h_flex()
         .w_full()
         .h(px(26.))
         .pl(px(10.))
-        .pr(px(6.))
+        .pr(px(4.))
+        .border_b_1()
+        .border_color(theme::code_frame())
         .justify_between()
         .items_center()
         .font_family(theme::font_family())
@@ -214,23 +252,47 @@ fn code_header(language: &str, code: &str, id: &str, own: bool) -> Div {
         .child(language.to_owned())
         .child(
             h_flex()
-                .id(ElementId::Name(format!("{id}-copy").into()))
-                .h(px(20.))
-                .px(px(6.))
-                .gap(px(4.))
+                .id(ElementId::Name(copy_id.clone().into()))
+                .size(px(20.))
+                .justify_center()
                 .items_center()
                 .rounded(px(4.))
                 .cursor_pointer()
                 .hover(|button| button.bg(theme::inline_code_fill(false)))
-                .on_click(move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(code.clone()))
+                .tooltip(move |window, cx| {
+                    Tooltip::new(if copied { "Copied" } else { "Copy" }).build(window, cx)
                 })
-                .child(symbol("content_copy", 13., muted))
-                .child("Copy"),
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
+                    show_copied(copy_id.clone(), cx);
+                })
+                .child(symbol(
+                    if copied { "check" } else { "content_copy" },
+                    13.,
+                    muted,
+                )),
         )
 }
 
-fn token_style(token: Token) -> HighlightStyle {
+fn show_copied(copy_id: String, cx: &mut App) {
+    let click = COPY_CLICKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut block) = COPIED_BLOCK.lock() {
+        *block = Some((copy_id.clone(), click));
+    }
+    cx.refresh_windows();
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(COPIED_SHOWN).await;
+        let ended = COPIED_BLOCK
+            .lock()
+            .is_ok_and(|mut block| block.take_if(|shown| shown.1 == click).is_some());
+        if ended {
+            cx.update(|cx| cx.refresh_windows());
+        }
+    })
+    .detach();
+}
+
+pub(crate) fn token_style(token: Token) -> HighlightStyle {
     match token {
         Token::Keyword => HighlightStyle {
             color: Some(theme::accent_text()),
@@ -243,6 +305,44 @@ fn token_style(token: Token) -> HighlightStyle {
         Token::Comment => HighlightStyle {
             color: Some(theme::text_faint()),
             font_style: Some(FontStyle::Italic),
+            ..Default::default()
+        },
+        Token::Type => HighlightStyle {
+            color: Some(theme::green()),
+            ..Default::default()
+        },
+        Token::Title => HighlightStyle {
+            color: Some(theme::amber()),
+            ..Default::default()
+        },
+        Token::Tag => HighlightStyle {
+            color: Some(theme::accent_text()),
+            ..Default::default()
+        },
+        Token::Attribute => HighlightStyle {
+            color: Some(theme::amber()),
+            ..Default::default()
+        },
+        Token::Heading => HighlightStyle {
+            color: Some(theme::accent_text()),
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        },
+        Token::Strong => HighlightStyle {
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        },
+        Token::Emphasis => HighlightStyle {
+            font_style: Some(FontStyle::Italic),
+            ..Default::default()
+        },
+        Token::Link => HighlightStyle {
+            color: Some(theme::accent_soft()),
+            underline: Some(UnderlineStyle {
+                thickness: px(1.),
+                color: Some(theme::accent_soft()),
+                wavy: false,
+            }),
             ..Default::default()
         },
     }

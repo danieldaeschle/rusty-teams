@@ -54,10 +54,22 @@ std::unique_ptr<DesktopCapturer> new_desktop_capturer(
   webrtc_options.set_prefer_cursor_embedded(options.include_cursor);
 
   std::unique_ptr<webrtc::DesktopCapturer> capturer = nullptr;
+#if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
+  SckWindowCapturer* sck_window = nullptr;
+#endif
   switch (options.source_type) {
     case SourceType::Window:
+#if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
+      {
+        auto window_capturer = CreateSckWindowCapturer(webrtc_options);
+        sck_window = window_capturer.get();
+        capturer = std::move(window_capturer);
+        break;
+      }
+#else
       capturer = webrtc::DesktopCapturer::CreateWindowCapturer(webrtc_options);
       break;
+#endif
     case SourceType::Screen:
       capturer = webrtc::DesktopCapturer::CreateScreenCapturer(webrtc_options);
       break;
@@ -71,7 +83,11 @@ std::unique_ptr<DesktopCapturer> new_desktop_capturer(
   if (!capturer) {
     return nullptr;
   }
+#if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
+  return std::make_unique<DesktopCapturer>(std::move(capturer), sck_window);
+#else
   return std::make_unique<DesktopCapturer>(std::move(capturer));
+#endif
 }
 
 DesktopCapturer::~DesktopCapturer() {
@@ -153,6 +169,29 @@ void DesktopCapturer::OnCaptureResult(
     default:
       break;
   }
+#if defined(WEBRTC_MAC) && !defined(WEBRTC_IOS)
+  if (sck_window_capturer && ret_result != CaptureResult::Success) {
+    switch (sck_window_capturer->last_status()) {
+      case SckCaptureStatus::kStartFailed:
+        ret_result = CaptureResult::StartFailed;
+        break;
+      case SckCaptureStatus::kStoppedByUser:
+        ret_result = CaptureResult::StoppedByUser;
+        break;
+      case SckCaptureStatus::kWindowGone:
+        ret_result = CaptureResult::SourceGone;
+        break;
+      case SckCaptureStatus::kInterrupted:
+        ret_result = CaptureResult::Interrupted;
+        break;
+      case SckCaptureStatus::kPickerCancelled:
+        ret_result = CaptureResult::ErrorPermanent;
+        break;
+      case SckCaptureStatus::kActive:
+        break;
+    }
+  }
+#endif
   if (callback) {
     (*callback)->on_capture_result(
         ret_result, std::make_unique<DesktopFrame>(std::move(frame)));

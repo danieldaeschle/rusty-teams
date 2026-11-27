@@ -63,6 +63,33 @@ pub struct Outgoing {
     pub banner: Option<AnnouncementBanner>,
 }
 
+/// Teams shows a code block's language and Copy button only when a marker paragraph links to it.
+/// The server adds the `x_` that Teams' own messages show on the marker's id.
+fn link_code_blocks(html: &str) -> String {
+    let mut linked = String::with_capacity(html.len());
+    for (index, part) in html.split("<pre ").enumerate() {
+        if index > 0 {
+            // Derived from the body, so every html() of one message gives the same text.
+            let id = code_block_id(html, index);
+            linked.push_str(&format!(
+                "<p itemtype=\"{}\" id=\"codeBlockEditor-{id}\">&nbsp;</p><pre itemid=\"codeBlockEditor-{id}\" ",
+                teams_core::CODE_BLOCK_ITEMTYPE
+            ));
+        }
+        linked.push_str(part);
+    }
+    linked
+}
+
+fn code_block_id(html: &str, index: usize) -> uuid::Uuid {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    (html, index).hash(&mut hasher);
+    let high = hasher.finish();
+    high.hash(&mut hasher);
+    uuid::Uuid::from_u64_pair(high, hasher.finish())
+}
+
 impl Outgoing {
     /// Without list and quote markers, for previews.
     pub fn text(&self) -> String {
@@ -90,7 +117,10 @@ impl Outgoing {
                 None => {}
             }
         }
-        teams_core::emoticon_tags(&html, crate::emoticons::send_tag)
+        link_code_blocks(&teams_core::emoticon_tags(
+            &html,
+            crate::emoticons::send_tag,
+        ))
     }
 
     pub fn has_attachments(&self) -> bool {
@@ -118,5 +148,32 @@ impl Outgoing {
                 .map(|file| file.reference.clone())
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_code_block_gets_its_own_teams_marker() {
+        let html = "<p>a</p><pre class=\"language-rs\"><code>x</code></pre><pre class=\"language-py\"><code>&lt;pre y</code></pre>";
+        let linked = link_code_blocks(html);
+        let ids: Vec<&str> = linked
+            .split("itemid=\"codeBlockEditor-")
+            .skip(1)
+            .map(|rest| &rest[..36])
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(ids[0], ids[1]);
+        for id in &ids {
+            assert!(linked.contains(&format!(
+                "<p itemtype=\"{}\" id=\"codeBlockEditor-{id}\">&nbsp;</p><pre itemid=\"codeBlockEditor-{id}\" class=",
+                teams_core::CODE_BLOCK_ITEMTYPE
+            )));
+        }
+        assert!(linked.contains("&lt;pre y"));
+        assert_eq!(link_code_blocks(html), linked);
+        assert_eq!(link_code_blocks("<p>no code</p>"), "<p>no code</p>");
     }
 }

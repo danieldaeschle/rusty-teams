@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -16,7 +16,9 @@ use crate::scope::Scope;
 use crate::transport::{CdpTransport, Transport};
 
 pub const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:9222";
-pub(crate) const FETCH_SCRIPT: &str = include_str!("../assets/fetch.js");
+pub const UNSEAL_SCRIPT: &str = include_str!("../assets/unseal.js");
+pub(crate) static FETCH_SCRIPT: LazyLock<String> =
+    LazyLock::new(|| include_str!("../assets/fetch.js").replace("__UNSEAL__", UNSEAL_SCRIPT));
 pub(crate) const NOT_GRANTED_PREFIX: &str = "the app is not granted";
 const MAX_DOWNLOAD_BYTES: u64 = 60 * 1024 * 1024;
 const DEFAULT_CONCURRENCY: usize = 6;
@@ -278,7 +280,7 @@ impl Session {
         search: &mut TokenSearch,
     ) -> Result<Option<Vec<ApiResponse>>> {
         let payload = self.payload(requests, scope);
-        let expression = format!("({FETCH_SCRIPT})({payload})");
+        let expression = format!("({})({payload})", FETCH_SCRIPT.as_str());
         let has_write = requests.iter().any(|request| request.method != Method::Get);
         for app in App::ALL {
             let outcome = match self.evaluate_in(app, &expression).await {

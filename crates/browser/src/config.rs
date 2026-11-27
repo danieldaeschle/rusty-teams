@@ -9,12 +9,25 @@ pub const FIREFOX_PROFILE_NAME: &str = "rusty-teams-firefox";
 pub const DEFAULT_PORT: u16 = 9222;
 const CHROME_RELATIVE: &str = r"Google\Chrome\Application\chrome.exe";
 const WINDOWS_VARIABLES: [&str; 4] = ["LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "TEMP"];
-pub(crate) const LINUX_CHROME_NAMES: [&str; 5] = [
+pub(crate) const LINUX_CHROME_NAMES: &[&str] = &[
     "google-chrome",
     "google-chrome-stable",
     "chromium",
     "chromium-browser",
     "chrome",
+    "microsoft-edge",
+    "microsoft-edge-stable",
+    "microsoft-edge-beta",
+    "microsoft-edge-dev",
+    "brave",
+    "brave-browser",
+    "brave-browser-stable",
+    "brave-browser-beta",
+    "brave-browser-nightly",
+    "helium",
+    "vivaldi",
+    "vivaldi-stable",
+    "vivaldi-snapshot",
 ];
 const MACOS_CHROME_NAMES: [&str; 3] = ["google-chrome", "chromium", "chrome"];
 /// Chromium-based browsers in order of preference; each one gets its own profile, so the user's

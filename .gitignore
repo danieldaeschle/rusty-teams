@@ -15,3 +15,4 @@ docs/design/islands/*
 docs/research/*
 !docs/research/internal-endpoints.md
 dist/
+.DS_Store

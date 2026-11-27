@@ -158,7 +158,7 @@ impl HideAfterLogin {
         self.stable = 0;
     }
 
-    fn step(&mut self, status: Option<&browser::Status>, has_msal_cache: bool) -> bool {
+    fn step(&mut self, status: Option<&browser::Status>, session_ready: bool) -> bool {
         let Some(status) = status else {
             self.stable = 0;
             return false;
@@ -172,7 +172,7 @@ impl HideAfterLogin {
                 .tabs
                 .iter()
                 .any(|tab| tab.app == Some(browser::App::Teams) && !tab.parked);
-        if !teams_loaded || !has_msal_cache {
+        if !teams_loaded || !session_ready {
             self.stable = 0;
             return false;
         }
@@ -199,7 +199,7 @@ async fn hide_after_login(browser: browser::Browser, headless_notify: Arc<Notify
             continue;
         }
         let status = browser.status().await.ok();
-        let has_msal_cache = match status.as_ref() {
+        let session_ready = match status.as_ref() {
             Some(status)
                 if status.running
                     && status.mode == browser::Mode::Visible
@@ -209,11 +209,11 @@ async fn hide_after_login(browser: browser::Browser, headless_notify: Arc<Notify
                         .iter()
                         .any(|tab| tab.app == Some(browser::App::Teams) && !tab.parked) =>
             {
-                browser.teams_has_msal_cache().await
+                browser.teams_sign_in_ready().await
             }
             _ => false,
         };
-        if tracker.step(status.as_ref(), has_msal_cache) {
+        if tracker.step(status.as_ref(), session_ready) {
             log::info!("Teams sign-in finished: moving Chrome to the background");
             publish_sign_in(BrowserSignInState::Finishing);
             if let Err(error) = browser.headless().await {
@@ -539,6 +539,19 @@ mod tests {
         );
         for _ in 0..HIDE_STABLE_CHECKS + 2 {
             assert!(!tracker.step(Some(&stuck_login), true));
+        }
+    }
+
+    #[test]
+    fn key_names_without_a_usable_token_keep_the_window_open() {
+        let mut tracker = HideAfterLogin::default();
+        let teams = status(
+            browser::Mode::Visible,
+            browser::LoginState::NotRequired,
+            vec![tab(Some(browser::App::Teams), false, false)],
+        );
+        for _ in 0..HIDE_STABLE_CHECKS + 2 {
+            assert!(!tracker.step(Some(&teams), false));
         }
     }
 

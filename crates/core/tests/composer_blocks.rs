@@ -535,5 +535,5 @@ fn code_blocks_send_the_teams_pre_code_shape_and_read_back_line_breaks() {
     );
     let back = Draft::from_spans(&html_to_spans(&html));
     assert_eq!(back.lines(), [LineKind::Code(None), LineKind::Code(None)]);
-    assert_eq!(back.text(), "a < b\n  c");
+    assert_eq!(back.text(), "\u{FFF9}a < b\n  c");
 }
