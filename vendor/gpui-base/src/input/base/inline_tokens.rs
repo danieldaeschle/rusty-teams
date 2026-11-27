@@ -14,6 +14,7 @@ pub struct InlineToken {
     text: SharedString,
     label: SharedString,
     block: bool,
+    header: bool,
 }
 
 impl InlineToken {
@@ -24,6 +25,7 @@ impl InlineToken {
             label: text.clone(),
             text,
             block: false,
+            header: false,
         }
     }
     pub fn with_label(mut self, label: impl Into<SharedString>) -> Self {
@@ -37,6 +39,16 @@ impl InlineToken {
     }
     pub fn is_block(&self) -> bool {
         self.block
+    }
+    /// A block token that heads its line: it spans the row without the line indent, and
+    /// the rest of the line starts on the next row, also when it is empty.
+    pub fn header(mut self) -> Self {
+        self.block = true;
+        self.header = true;
+        self
+    }
+    pub fn is_header(&self) -> bool {
+        self.header
     }
     pub fn id(&self) -> &SharedString {
         &self.id

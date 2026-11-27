@@ -25,14 +25,15 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use teams_core::{
-    Draft, DraftLine, Edit, EnterKeyBehavior, FileReference, FormatState, LineKind, LinkPreview,
-    MarkKind, MentionCandidate, MentionInput, OBJECT_MARK, SizeStep, TABLE_MARK, TableEdit,
-    TypingStyle, UpArrowBehavior, UploadedFile, changed_span, has_markdown, link_url, map_offset,
-    reverse_edits,
+    CODE_HEADER_MARK, Draft, DraftLine, Edit, EnterKeyBehavior, FileReference, FormatState,
+    LineKind, LinkPreview, MarkKind, MentionCandidate, MentionInput, OBJECT_MARK, SizeStep,
+    TABLE_MARK, TableEdit, TypingStyle, UpArrowBehavior, UploadedFile, changed_span, has_markdown,
+    link_url, map_offset, reverse_edits,
 };
 
 mod attach_menu;
 mod cloud_picker;
+mod code_language;
 pub(crate) mod delivery;
 mod drafts;
 mod format_menus;
@@ -78,6 +79,7 @@ use crate::runtime;
 use crate::scheduled_rows::scheduled_label;
 use crate::theme::{self, ElevatedSurface as _};
 use crate::typing::OutgoingTyping;
+use code_language::is_code_header_token;
 use format_menus::{FormatPopup, paragraph_label};
 use rule::{is_rule_token, render_rule_token};
 use slash::SlashPopup;
@@ -103,6 +105,15 @@ const COMPOSER_BUTTON_SIZE: f32 = 32.;
 const COMPOSER_BUTTON_INSET: f32 = 6.;
 pub const COMPOSER_BOX_TAG: &str = "composer";
 pub const COMPOSER_ACTIONS_TAG: &str = "composer/actions";
+fn send_divider() -> Div {
+    div()
+        .flex_none()
+        .w(px(1.))
+        .h(px(SEND_DIVIDER_HEIGHT))
+        .ml(px(COMPOSER_BUTTON_INSET))
+        .bg(theme::border())
+}
+
 pub const COMPOSER_STACKED_ACTIONS_TAG: &str = "composer/stacked-actions";
 const STACKED_ACTIONS_WIDTH: f32 = 400.;
 pub const COMPOSER_INPUT_TAG: &str = "composer/input";
@@ -259,6 +270,8 @@ pub struct Composer {
     table_counter: usize,
     table_picker: Option<TablePicker>,
     table_menu: Option<TableMenu>,
+    /// The first line of the code block whose language menu is open.
+    code_language_menu: Option<usize>,
     format_popup: Option<FormatPopup>,
     format_overflow: bool,
     format_bar: HashSet<String>,
@@ -536,6 +549,7 @@ impl Composer {
             table_counter: 0,
             table_picker: None,
             table_menu: None,
+            code_language_menu: None,
             format_popup: None,
             format_overflow: false,
             format_bar: HashSet::new(),
@@ -635,6 +649,8 @@ impl Composer {
         self.report_typing(!value.trim().is_empty(), cx);
         let previous = std::mem::replace(&mut self.previous_value, value.clone());
         if previous != value {
+            // The menu names its block by line, which an edit can move.
+            self.code_language_menu = None;
             let (start, old_end, new_end) = changed_span(&previous, &value);
             self.shift_anchors(start, old_end, new_end);
         }
@@ -920,6 +936,7 @@ impl Composer {
         ranges.set(style.ranges, cx);
         self.input.update(cx, |state, cx| {
             state.set_line_indents(style.indents, cx);
+            state.set_line_labels(style.labels, theme::text_faint(), cx);
             state.set_hanging_indents(style.markers, cx);
         });
     }
@@ -938,6 +955,7 @@ impl Composer {
         });
         self.previous_value = draft.text().to_owned();
         self.draft = draft;
+        self.code_language_menu = None;
         self.pending_style = None;
         self.conversion = None;
         self.pasted_markdown = None;
@@ -1487,7 +1505,7 @@ impl Composer {
         let text = if selected.contains(TABLE_MARK) {
             Draft::from_lines(&lines).plain_text()
         } else {
-            selected.replace(OBJECT_MARK, "")
+            selected.replace([OBJECT_MARK, CODE_HEADER_MARK], "")
         };
         if text.is_empty() {
             return true;
@@ -3103,11 +3121,18 @@ impl Render for Composer {
             .children(attach)
             .children(self.render_rewrite_button(cx))
             .children(self.render_plus_button(cx));
+        // Teams gives a code block the full width and keeps the actions right, beside Send.
+        let below_code = self
+            .draft
+            .lines()
+            .iter()
+            .any(|kind| matches!(kind, LineKind::Code(_)));
         let stacked = !post_layout
-            && self
-                .composer_bounds
-                .get()
-                .is_some_and(|bounds| f32::from(bounds.size.width) < STACKED_ACTIONS_WIDTH);
+            && (below_code
+                || self
+                    .composer_bounds
+                    .get()
+                    .is_some_and(|bounds| f32::from(bounds.size.width) < STACKED_ACTIONS_WIDTH));
         let mut send = Some(send);
         let (row_actions, stacked_actions, post_footer) = if post_layout {
             (
@@ -3133,6 +3158,15 @@ impl Render for Composer {
                     .unwrap_or(false)
             })
             .token(move |context, _, cx| {
+                if context.is_block() && is_code_header_token(context.token()) {
+                    let weak = tokens_composer.clone();
+                    let (at, width) = (context.range().start, context.available_width());
+                    if let Ok(header) = tokens_composer
+                        .read_with(cx, |this, _| this.render_code_header(weak, at, width))
+                    {
+                        return header;
+                    }
+                }
                 if context.is_block() && is_rule_token(context.token()) {
                     return render_rule_token(
                         context.available_width(),
@@ -3515,7 +3549,10 @@ impl Render for Composer {
                 }
             }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
-                if this.table_picker.take().is_some() || this.table_menu.take().is_some() {
+                if this.table_picker.take().is_some()
+                    || this.table_menu.take().is_some()
+                    || this.code_language_menu.take().is_some()
+                {
                     cx.notify();
                     cx.stop_propagation();
                     return;
@@ -3576,6 +3613,7 @@ impl Render for Composer {
                     .children(self.render_slash_popup(cx))
                     .children(self.render_emoji_popup(window, cx))
                     .children(self.render_toolbar(focused, cx))
+                    .children(self.render_code_language_menu(cx))
                     .children(self.render_schedule(cx))
                     .children(self.render_delivery_menu(cx))
                     .children(self.render_plus_menu(cx))
@@ -3655,15 +3693,7 @@ impl Render for Composer {
                                     )
                                     .children(row_actions)
                                     .when_some(send.filter(|_| !post_layout), |row, send| {
-                                        row.child(
-                                            div()
-                                                .flex_none()
-                                                .w(px(1.))
-                                                .h(px(SEND_DIVIDER_HEIGHT))
-                                                .ml(px(COMPOSER_BUTTON_INSET))
-                                                .bg(theme::border()),
-                                        )
-                                        .child(send)
+                                        row.child(send_divider()).child(send)
                                     }),
                             )
                             .children(stacked_actions.map(|(actions, send)| {
@@ -3673,8 +3703,12 @@ impl Render for Composer {
                                     .items_center()
                                     .px(px(COMPOSER_BUTTON_INSET))
                                     .pb(px(COMPOSER_BUTTON_INSET))
+                                    .when(below_code, |row| row.child(div().flex_1()))
                                     .child(actions)
-                                    .child(div().flex_1())
+                                    .when(!below_code, |row| row.child(div().flex_1()))
+                                    .when(below_code && send.is_some(), |row| {
+                                        row.child(send_divider())
+                                    })
                                     .children(send)
                             }))
                             .children(post_footer),
@@ -4778,16 +4812,132 @@ mod tests {
         }
 
         #[gpui_kit::test]
+        fn backspace_after_a_fence_gives_it_back_for_a_language(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("```");
+            assert_eq!(typist.draft().lines(), [teams_core::LineKind::Code(None)]);
+            typist.press("backspace");
+            assert_eq!(typist.value(), "```");
+            typist.type_text("py");
+            typist.press("enter");
+            assert_eq!(
+                typist.draft().lines(),
+                [teams_core::LineKind::Code(Some("python".into()))]
+            );
+        }
+
+        #[gpui_kit::test]
+        fn the_language_picker_in_the_header_sets_the_whole_code_block(cx: &mut TestAppContext) {
+            use gpui_kit::VisualTestContext;
+
+            use super::super::code_language::{CODE_LANGUAGE_ROW_TAG, CODE_LANGUAGE_TAG};
+
+            let mut typist = typist(cx);
+            typist.type_text("x");
+            typist.press("shift-enter");
+            typist.type_text("```");
+            typist.type_text("a");
+            typist.press("enter");
+            typist.type_text("b");
+            let composer = typist.composer.clone();
+            let handle = typist.handle;
+            let mut visual = VisualTestContext::from_window(handle, typist.cx);
+            visual.update(|window, cx| window.render_frame(cx));
+            let header = visual
+                .debug_bounds(CODE_LANGUAGE_TAG)
+                .expect("a header on the block");
+            visual.simulate_click(header.center(), Default::default());
+            visual.run_until_parked();
+            assert_eq!(
+                composer.read_with(&visual, |composer, _| composer.code_language_menu),
+                Some(1)
+            );
+            visual.update(|window, cx| window.render_frame(cx));
+            let row = visual
+                .debug_bounds(Box::leak(
+                    format!("{CODE_LANGUAGE_ROW_TAG}dart").into_boxed_str(),
+                ))
+                .expect("Dart in the open menu");
+            visual.simulate_click(row.center(), Default::default());
+            visual.run_until_parked();
+            let draft = composer.read_with(&visual, |composer, _| composer.draft.clone());
+            let dart = teams_core::LineKind::Code(Some("dart".into()));
+            assert_eq!(draft.lines(), [teams_core::LineKind::Text, dart.clone(), dart]);
+            assert_eq!(
+                draft.to_html(),
+                "x<pre class=\"language-dart skipProofing\" spellcheck=\"false\"><code>a<br>b</code></pre>"
+            );
+        }
+
+        #[gpui_kit::test]
+        fn code_typed_after_picking_a_language_is_highlighted(cx: &mut TestAppContext) {
+            let mut typist = typist(cx);
+            typist.type_text("```");
+            let composer = typist.composer.clone();
+            typist.act(|window, cx| {
+                composer.update(cx, |composer, cx| {
+                    composer.choose_code_language(0, "python", window, cx)
+                })
+            });
+            typist.type_text("def f():");
+            typist.press("enter");
+            typist.type_text("class A: pass");
+            let draft = typist.draft();
+            assert_eq!(
+                draft.lines()[1],
+                teams_core::LineKind::Code(Some("python".into()))
+            );
+            let style = super::super::draft_style(&draft, "Mono".into());
+            let words: Vec<_> = style
+                .text
+                .iter()
+                .map(|decoration| &draft.text()[decoration.range.clone()])
+                .collect();
+            for keyword in ["def", "class", "pass"] {
+                assert!(words.contains(&keyword), "{keyword} in {words:?}");
+            }
+        }
+
+        #[gpui_kit::test]
+        fn copied_code_leaves_its_header_behind_and_escape_closes_the_picker(
+            cx: &mut TestAppContext,
+        ) {
+            let mut typist = typist(cx);
+            typist.type_text("x");
+            typist.press("shift-enter");
+            typist.type_text("```");
+            typist.type_text("a");
+            let composer = typist.composer.clone();
+            let (input, end) = typist.cx.update(|cx| {
+                let composer = composer.read(cx);
+                (composer.input.clone(), composer.draft.text().len())
+            });
+            typist.act(|_, cx| {
+                input.update(cx, |state, cx| state.set_selected_range(0..end, cx));
+                composer.update(cx, |composer, cx| {
+                    composer.copy_selection(cx);
+                    composer.code_language_menu = Some(1);
+                })
+            });
+            let copied = typist.cx.read_from_clipboard().and_then(|item| item.text());
+            assert_eq!(copied.as_deref(), Some("x\na"));
+            typist.press("escape");
+            assert_eq!(
+                typist.cx.update(|cx| composer.read(cx).code_language_menu),
+                None
+            );
+        }
+
+        #[gpui_kit::test]
         fn delete_at_a_code_line_end_joins_without_padding(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
             typist.type_text("```");
-            typist.press("enter");
             typist.type_text("a");
             typist.press("enter");
             typist.type_text("b");
             typist.press("up end delete");
             assert_eq!(
-                typist.outgoing().html(),
+                typist.outgoing().draft.to_html(),
                 "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>ab</code></pre>"
             );
         }
@@ -4797,7 +4947,6 @@ mod tests {
         fn copied_code_has_no_padding_in_the_plain_text(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
             typist.type_text("```");
-            typist.press("enter");
             typist.type_text("  x");
             typist.press("ctrl-a ctrl-c");
             let text = typist.cx.read_from_clipboard().and_then(|item| item.text());
@@ -4939,7 +5088,6 @@ mod tests {
         fn code_blocks_take_markdown_and_smileys_literally(cx: &mut TestAppContext) {
             let mut typist = typist(cx);
             typist.type_text("```");
-            typist.press("enter");
             typist.type_text(":) ");
             typist
                 .cx
@@ -4954,7 +5102,7 @@ mod tests {
             );
             let outgoing = typist.outgoing();
             assert_eq!(
-                outgoing.html(),
+                outgoing.draft.to_html(),
                 "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>:) **x**</code></pre>"
             );
         }

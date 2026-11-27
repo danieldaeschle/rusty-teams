@@ -171,6 +171,7 @@ impl Composer {
             self.sync_table_view(&id, &table, window, cx);
         }
         self.sync_rules(window, cx);
+        self.sync_code_headers(window, cx);
     }
 
     fn sync_table_view(

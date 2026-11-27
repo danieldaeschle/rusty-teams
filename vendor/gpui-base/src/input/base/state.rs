@@ -365,6 +365,9 @@ pub struct InputBaseState<M: InputModeKind> {
     /// Real per-frame bounds of the placed token elements, keyed by token
     /// start offset; used for hover payloads and stale-hover reconciliation.
     pub(super) token_bounds: std::collections::HashMap<usize, Bounds<Pixels>>,
+    /// Text painted right-aligned in the indent before a byte offset, e.g. line numbers.
+    pub(super) line_labels: Vec<(usize, SharedString)>,
+    pub(super) line_label_color: gpui::Hsla,
     /// The currently hovered token: its entered span, last measured bounds,
     /// and UTF-16 range as of entry. Retained so hover exit can still be
     /// delivered when the token is removed, replaced, scrolled out, or
@@ -733,6 +736,8 @@ impl<M: InputModeKind> InputBaseState<M> {
             document_revision: 0,
             token_presentation: Default::default(),
             token_bounds: Default::default(),
+            line_labels: Vec::new(),
+            line_label_color: gpui::Hsla::default(),
             hovered_token: None,
             pending_token_hover_exits: Vec::new(),
             token_layout_cache: None,
@@ -11204,6 +11209,23 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
         markers.dedup_by_key(|marker| self.text.offset_to_point(marker.start).row);
         self.display_map.set_hanging_indents(markers.into(), cx);
         cx.notify();
+    }
+
+    /// Each label is painted right-aligned before its byte offset, in `color`, on the row
+    /// that shows the offset; meant for the line indent. Set them again on change.
+    pub fn set_line_labels(
+        &mut self,
+        mut labels: Vec<(usize, SharedString)>,
+        color: gpui::Hsla,
+        cx: &mut Context<Self>,
+    ) {
+        labels.retain(|(offset, _)| *offset <= self.text.len());
+        labels.sort_by_key(|(offset, _)| *offset);
+        if labels != self.line_labels || color != self.line_label_color {
+            self.line_labels = labels;
+            self.line_label_color = color;
+            cx.notify();
+        }
     }
 
     /// Every row of the line starting at each byte offset starts `indent` further right,
