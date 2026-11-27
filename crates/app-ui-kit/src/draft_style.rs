@@ -5,14 +5,16 @@ use gpui_kit::*;
 use teams_core::{Draft, FontSize, LineKind, MarkKind, SizeStep};
 
 use crate::render::blocks::{Script, StyleFlags};
-use crate::render::elements::{highlight_fill, readable_on};
+use crate::render::elements::{highlight_fill, readable_on, token_style};
+use crate::render::syntax;
 use app_base::theme;
 
 const CODE_PILL_RADIUS: f32 = 4.;
 const CODE_BLOCK_RADIUS: f32 = 6.;
 const QUOTE_BAR_WIDTH: f32 = 3.;
 const QUOTE_INDENT: f32 = 12.;
-const CODE_INDENT: f32 = 10.;
+/// Room before code lines: the line numbers sit in it.
+pub const CODE_INDENT: f32 = 36.;
 const LIST_LEVEL_INDENT: f32 = 18.;
 const HEADING_SCALES: [f32; 3] = [1.6, 1.35, 1.15];
 const INDENT_STEP: f32 = teams_core::INDENT_PIXELS as f32;
@@ -24,6 +26,8 @@ pub struct DraftStyle {
     pub ranges: Vec<RangeDecoration>,
     pub markers: Vec<Range<usize>>,
     pub indents: Vec<(usize, Pixels)>,
+    /// Code line numbers, each before the start of its line's content.
+    pub labels: Vec<(usize, SharedString)>,
 }
 
 fn line_indent(kind: &LineKind) -> f32 {
@@ -111,6 +115,34 @@ fn block_range(draft: &Draft, lines: Range<usize>) -> Range<usize> {
     line_ranges[lines.start].start..line_ranges[lines.end - 1].end
 }
 
+/// A code line cut where its tokens start and end, so no two decorations overlap: the
+/// input does not say which of two overlapping ones in a collection wins.
+fn code_pieces(
+    line: Range<usize>,
+    tokens: &[(Range<usize>, HighlightStyle)],
+) -> impl Iterator<Item = (Range<usize>, HighlightStyle)> {
+    let plain = color(theme::text_strong());
+    let mut pieces = Vec::new();
+    let mut at = line.start;
+    for (range, style) in tokens {
+        let range = range.start.max(line.start)..range.end.min(line.end);
+        if range.start >= range.end || range.start < at {
+            continue;
+        }
+        if at < range.start {
+            pieces.push((at..range.start, plain));
+        }
+        let mut style = *style;
+        style.color = style.color.or(plain.color);
+        pieces.push((range.clone(), style));
+        at = range.end;
+    }
+    if at < line.end {
+        pieces.push((at..line.end, plain));
+    }
+    pieces.into_iter()
+}
+
 pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
     let mut text = Vec::new();
     let mut ranges = Vec::new();
@@ -152,6 +184,7 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
             text.push(decoration);
         }
     }
+    let mut labels = Vec::new();
     let kinds = draft.lines();
     let mut index = 0;
     while index < kinds.len() {
@@ -161,10 +194,32 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
                 .iter()
                 .take_while(|other| *other == kind)
                 .count();
+        // From after the header mark, so line one reads as a line start.
+        let tokens: Vec<(Range<usize>, HighlightStyle)> = match kind {
+            LineKind::Code(Some(language)) => {
+                let block =
+                    draft.content_range(index).start..block_range(draft, index..run_end).end;
+                syntax::highlight(&draft.text()[block.clone()], language)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(range, token)| {
+                        (
+                            block.start + range.start..block.start + range.end,
+                            token_style(token),
+                        )
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
         for line in index..run_end {
             let marker = draft.marker_range(line);
             let content = draft.content_range(line);
-            if !marker.is_empty() {
+            if matches!(kind, LineKind::Code(_)) {
+                labels.push((content.start, (line - index + 1).to_string().into()));
+            }
+            // A code block's header sits on its own row, so it hangs nothing.
+            if !marker.is_empty() && !matches!(kind, LineKind::Code(_)) {
                 markers.push(marker.clone());
                 if kind.is_list() {
                     text.push(TextDecoration::new(marker, color(theme::text_soft())));
@@ -177,10 +232,11 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
                 LineKind::Quote => {
                     text.push(TextDecoration::new(content, color(theme::text_soft())))
                 }
-                LineKind::Code(_) => text.push(
-                    TextDecoration::new(content, color(theme::text_strong()))
-                        .with_font_family(mono.clone()),
-                ),
+                LineKind::Code(_) => {
+                    text.extend(code_pieces(content, &tokens).map(|(range, style)| {
+                        TextDecoration::new(range, style).with_font_family(mono.clone())
+                    }))
+                }
                 LineKind::Heading(level) => text.push(heading_decoration(content, *level)),
                 _ => {}
             }
@@ -190,6 +246,7 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
                 RangeDecoration::new(block_range(draft, index..run_end))
                     .with_style(RangeDecorationStyle::Block)
                     .with_color(theme::code_surface())
+                    .with_border(theme::code_frame())
                     .with_radius(px(CODE_BLOCK_RADIUS)),
             ),
             LineKind::Quote => Some(
@@ -208,6 +265,7 @@ pub fn draft_style(draft: &Draft, mono: SharedString) -> DraftStyle {
         ranges,
         markers,
         indents,
+        labels,
     }
 }
 
@@ -252,7 +310,7 @@ mod tests {
             [
                 (starts[1].start, gpui_kit::px(18.)),
                 (starts[2].start, gpui_kit::px(12.)),
-                (starts[3].start, gpui_kit::px(10.)),
+                (starts[3].start, gpui_kit::px(36.)),
             ]
         );
         assert!(!draft.text().contains('\u{2003}'));
@@ -269,6 +327,58 @@ mod tests {
         let empty_line_start = draft.line_ranges()[1].start;
         assert!(block.contains(&empty_line_start) || block.end == empty_line_start);
         assert!(block.end < draft.line_ranges()[2].start);
+    }
+
+    #[test]
+    fn code_with_a_language_is_highlighted_while_typing() {
+        let draft = Draft::from_lines(&[
+            line(LineKind::Code(Some("go".into())), "x // y"),
+            line(LineKind::Code(Some("go".into())), "z"),
+        ]);
+        let style = draft_style(&draft, "Mono".into());
+        let ranges: Vec<_> = style.text.iter().map(|d| d.range.clone()).collect();
+        // "x " plain, the comment, then "z": all after the 3-byte header mark.
+        assert_eq!(ranges[..2], [3..5, 5..9]);
+        assert_eq!(
+            draft_style(
+                &Draft::from_lines(&[line(LineKind::Code(None), "x // y")]),
+                "Mono".into()
+            )
+            .text
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn the_first_code_line_starts_a_line_for_the_highlighter() {
+        let draft = Draft::from_lines(&[line(LineKind::Code(Some("markdown".into())), "# h")]);
+        let style = draft_style(&draft, "Mono".into());
+        assert_eq!(&draft.text()[style.text[0].range.clone()], "# h");
+    }
+
+    #[test]
+    fn python_keywords_are_highlighted_in_the_composer() {
+        let draft = Draft::from_lines(&[
+            line(LineKind::Code(Some("python".into())), "def f():"),
+            line(LineKind::Code(Some("python".into())), "class A:"),
+        ]);
+        let style = draft_style(&draft, "Mono".into());
+        let words: Vec<_> = style
+            .text
+            .iter()
+            .map(|d| &draft.text()[d.range.clone()])
+            .collect();
+        assert!(
+            words.contains(&"def") && words.contains(&"class"),
+            "{words:?}"
+        );
+        let mut ranges: Vec<_> = style.text.iter().map(|d| d.range.clone()).collect();
+        ranges.sort_by_key(|range| range.start);
+        assert!(
+            ranges.windows(2).all(|pair| pair[0].end <= pair[1].start),
+            "{ranges:?}"
+        );
     }
 
     #[test]

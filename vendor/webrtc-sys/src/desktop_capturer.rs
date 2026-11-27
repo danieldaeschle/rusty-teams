@@ -44,6 +44,10 @@ pub mod ffi {
         Success,
         ErrorTemporary,
         ErrorPermanent,
+        StartFailed,
+        StoppedByUser,
+        SourceGone,
+        Interrupted,
     }
 
     unsafe extern "C++" {
@@ -54,6 +58,7 @@ pub mod ffi {
 
         fn new_desktop_capturer(options: DesktopCapturerOptions) -> UniquePtr<DesktopCapturer>;
         fn capture_frame(self: &DesktopCapturer);
+        fn set_max_frame_rate(self: &DesktopCapturer, max_fps: u32);
         fn get_source_list(self: &DesktopCapturer) -> Vec<Source>;
         fn select_source(self: &DesktopCapturer, id: u64) -> bool;
         fn start(self: Pin<&mut DesktopCapturer>, callback: Box<DesktopCapturerCallbackWrapper>);
@@ -92,10 +97,14 @@ pub mod ffi {
 
 impl_thread_safety!(ffi::DesktopCapturer, Send + Sync);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureError {
     Temporary,
     Permanent,
+    StartFailed,
+    StoppedByUser,
+    SourceGone,
+    Interrupted,
 }
 
 pub trait DesktopCapturerCallback: Send {
@@ -119,6 +128,18 @@ impl DesktopCapturerCallbackWrapper {
             }
             CaptureResult::ErrorPermanent => {
                 self.callback.on_capture_result(Err(CaptureError::Permanent))
+            }
+            CaptureResult::StartFailed => {
+                self.callback.on_capture_result(Err(CaptureError::StartFailed))
+            }
+            CaptureResult::StoppedByUser => {
+                self.callback.on_capture_result(Err(CaptureError::StoppedByUser))
+            }
+            CaptureResult::SourceGone => {
+                self.callback.on_capture_result(Err(CaptureError::SourceGone))
+            }
+            CaptureResult::Interrupted => {
+                self.callback.on_capture_result(Err(CaptureError::Interrupted))
             }
             _ => self.callback.on_capture_result(Err(CaptureError::Permanent)),
         }

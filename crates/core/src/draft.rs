@@ -12,6 +12,8 @@ pub const MAX_DEPTH: u8 = 2;
 pub const MAX_HEADING: u8 = 3;
 pub const OBJECT_MARK: char = '\u{FFFC}';
 pub const RULE_MARK: char = '\u{FFFA}';
+/// The marker of a code block's first line: the composer shows the block's header there.
+pub const CODE_HEADER_MARK: char = '\u{FFF9}';
 pub const MAX_INDENT: u8 = 8;
 pub const INDENT_PIXELS: u32 = 40;
 pub const RULE_HTML: &str = "<hr>";
@@ -783,6 +785,20 @@ impl Draft {
             return None;
         }
         let before = &self.text[content.start..cursor];
+        // Teams opens the block on the third backtick; undo gives back the fence for ```lang + Enter.
+        if self.lines[index] == LineKind::Text && before == FENCE && cursor == content.end {
+            self.splice(content.clone(), "", &[]);
+            let cursor = self.set_line_kind(index, LineKind::Code(None), None, content.start);
+            // A block of the same language right below joins this one under its header.
+            let cursor = self.repair(cursor);
+            return Some((
+                cursor,
+                TypingStyle {
+                    at: cursor,
+                    ..TypingStyle::default()
+                },
+            ));
+        }
         if self.lines[index] == LineKind::Text
             && let Some((kind, number)) = line_shortcut(before)
         {
@@ -880,7 +896,8 @@ impl Draft {
             LineKind::Text => {
                 let language = fence_language(&self.text[content.clone()])?;
                 self.splice(content.clone(), "", &[]);
-                Some(self.set_line_kind(index, LineKind::Code(language), None, content.start))
+                let cursor = self.set_line_kind(index, LineKind::Code(language), None, content.start);
+                Some(self.repair(cursor))
             }
             LineKind::Heading(_) | LineKind::Table(_) | LineKind::Rule => None,
             LineKind::Indent(_) if !shift => None,
@@ -900,10 +917,17 @@ impl Draft {
                 Some(cursor + 1)
             }
             LineKind::Code(_) => {
+                // The third Enter leaves: two empty lines end the block, one stays code.
                 let last_of_block = self.lines.get(index + 1) != Some(&kind);
-                let block_continues_above = index > 0 && self.lines[index - 1] == kind;
-                if content.is_empty() && last_of_block && block_continues_above && !shift {
-                    return Some(self.set_line_kind(index, LineKind::Text, None, cursor));
+                let empty_line_above = index >= 2
+                    && self.lines[index - 1] == kind
+                    && self.lines[index - 2] == kind
+                    && self.content_range(index - 1).is_empty();
+                if content.is_empty() && last_of_block && empty_line_above && !shift {
+                    let above = self.line_ranges()[index - 1].start;
+                    self.splice(above..content.start, "", &[]);
+                    let cursor = self.set_line_kind(index - 1, LineKind::Text, None, above);
+                    return Some(self.repair(cursor));
                 }
                 self.splice(cursor..cursor, "\n", &[]);
                 Some(cursor + 1)
@@ -985,10 +1009,9 @@ impl Draft {
         match &kind {
             LineKind::Text | LineKind::Indent(_) | LineKind::Rule => None,
             LineKind::Code(_) => {
-                let first_of_block = index == 0 || self.lines[index - 1] != kind;
-                (cursor == line.start && first_of_block).then(|| {
-                    self.lines[index] = LineKind::Text;
-                    cursor
+                (cursor <= content.start && self.first_of_block(index)).then(|| {
+                    let cursor = self.set_line_kind(index, LineKind::Text, None, cursor);
+                    self.repair(cursor)
                 })
             }
             LineKind::Table(_) => None,
@@ -1151,6 +1174,36 @@ impl Draft {
             }
         }
         self.repair(0);
+    }
+
+    /// The lines of the code block at `cursor`: the run of code lines with one language.
+    pub fn code_block_at(&self, cursor: usize) -> Option<Range<usize>> {
+        let index = self.line_at(cursor);
+        let kind = self.lines.get(index)?;
+        if !matches!(kind, LineKind::Code(_)) {
+            return None;
+        }
+        let start = self.lines[..index]
+            .iter()
+            .rposition(|other| other != kind)
+            .map_or(0, |before| before + 1);
+        let end = index
+            + self.lines[index..]
+                .iter()
+                .take_while(|other| *other == kind)
+                .count();
+        Some(start..end)
+    }
+
+    /// Only the header marks change: a block that now matches the next one merges with it.
+    pub fn set_code_language(&mut self, cursor: usize, language: Option<String>) {
+        if let Some(block) = self.code_block_at(cursor) {
+            self.journal = Journal::default();
+            for kind in &mut self.lines[block] {
+                *kind = LineKind::Code(language.clone());
+            }
+            self.repair(cursor);
+        }
     }
 
     pub fn table(&self, index: usize) -> Option<&Table> {
@@ -1451,7 +1504,8 @@ impl Draft {
                     let language = language.as_deref().unwrap_or(PLAIN_LANGUAGE);
                     html.push_str(&format!(
                         "<pre class=\"language-{} skipProofing\" spellcheck=\"false\"><code>",
-                        escape_html(&language.to_ascii_lowercase())
+                        // Teams' ids are case-sensitive: `dockerFile`.
+                        escape_html(language)
                     ));
                     let code = run
                         .iter()
@@ -1718,9 +1772,46 @@ impl Draft {
                     })
                     .unwrap_or(1),
             },
+            LineKind::Code(_) if self.first_of_block(index) => {
+                return CODE_HEADER_MARK.to_string();
+            }
             _ => 1,
         };
         marker_text(kind, number)
+    }
+
+    fn first_of_block(&self, index: usize) -> bool {
+        index == 0 || self.lines[index - 1] != self.lines[index]
+    }
+
+    /// Only the first line of a code block holds the header mark.
+    fn repair_code_headers(&mut self, mut cursor: usize) -> usize {
+        let stray: Vec<usize> = self
+            .text
+            .match_indices(CODE_HEADER_MARK)
+            .map(|(at, _)| at)
+            .filter(|at| {
+                let index = self.line_at(*at);
+                !matches!(self.lines[index], LineKind::Code(_))
+                    || !self.first_of_block(index)
+                    || self.line_ranges()[index].start != *at
+            })
+            .collect();
+        for at in stray.into_iter().rev() {
+            let mark = at..at + CODE_HEADER_MARK.len_utf8();
+            self.splice(mark.clone(), "", &[]);
+            if cursor > at {
+                cursor -= (cursor - at).min(mark.len());
+            }
+        }
+        for index in 0..self.lines.len() {
+            if matches!(self.lines[index], LineKind::Code(_)) {
+                let marker = self.marker_range(index);
+                let expected = self.expected_marker(index, None);
+                cursor = self.replace_marker(marker, &expected, cursor);
+            }
+        }
+        cursor
     }
 
     fn set_line_kind(
@@ -1798,6 +1889,7 @@ impl Draft {
     /// List items whose marker was edited away become text; numbered items are renumbered.
     fn repair(&mut self, cursor: usize) -> usize {
         let mut cursor = self.repair_objects(cursor);
+        cursor = self.repair_code_headers(cursor);
         for index in 0..self.lines.len() {
             let kind = self.lines[index].clone();
             if !kind.is_list() {
@@ -1858,6 +1950,7 @@ fn marker_len(kind: &LineKind, line: &str) -> usize {
             }
         }
         LineKind::Numbered(_) => numbered_marker(line).map_or(0, |(length, _)| length),
+        LineKind::Code(_) if line.starts_with(CODE_HEADER_MARK) => CODE_HEADER_MARK.len_utf8(),
         _ => 0,
     }
 }
@@ -1892,7 +1985,14 @@ fn fence_language(line: &str) -> Option<Option<String>> {
     let valid = info
         .chars()
         .all(|character| character.is_alphanumeric() || "+#-_.".contains(character));
-    valid.then(|| (!info.is_empty()).then(|| info.to_lowercase()))
+    valid.then(|| teams_language(info))
+}
+
+/// The id Teams knows for a typed language, so ```py sends `language-python`; Plain Text is none.
+fn teams_language(info: &str) -> Option<String> {
+    let id = crate::code_language(info)
+        .map_or_else(|| info.to_lowercase(), |language| language.id.to_owned());
+    (!info.is_empty() && id != crate::PLAIN_LANGUAGE).then_some(id)
 }
 
 fn valid_inner(inner: &str) -> bool {
@@ -3037,15 +3137,24 @@ mod tests {
 
     #[test]
     fn fence_and_enter_open_a_code_block_that_enter_continues() {
-        let mut draft = typed_draft("```rust");
+        let mut draft = Draft::plain("```rust");
         let cursor = draft.break_line(draft.text().len(), false).unwrap();
-        assert_eq!((draft.text(), cursor), ("", 0));
+        assert_eq!((draft.text(), cursor), ("\u{FFF9}", 3));
         assert_eq!(draft.lines(), [LineKind::Code(Some("rust".into()))]);
         typed(&mut draft, "fn x() {}");
         let cursor = draft.break_line(draft.text().len(), false).unwrap();
         assert_eq!(draft.lines().len(), 2);
-        assert_eq!(draft.break_line(cursor, false), Some(cursor));
+        let cursor = draft.break_line(cursor, false).unwrap();
+        assert_eq!(draft.lines().len(), 3, "one empty line stays code");
+        assert_eq!(draft.lines()[2], LineKind::Code(Some("rust".into())));
+        let end = draft.break_line(cursor, false).unwrap();
+        assert_eq!(
+            draft.lines().len(),
+            2,
+            "the third Enter drops both empty lines"
+        );
         assert_eq!(draft.lines()[1], LineKind::Text);
+        assert_eq!(end, draft.line_ranges()[1].start);
         assert_eq!(
             draft.to_html(),
             "<pre class=\"language-rust skipProofing\" spellcheck=\"false\"><code>fn x() {}</code></pre>"
@@ -3053,12 +3162,70 @@ mod tests {
     }
 
     #[test]
+    fn a_fence_opens_a_code_block_only_alone_on_a_plain_line() {
+        assert_eq!(typed_draft("a ```").lines(), [LineKind::Text]);
+        assert_eq!(typed_draft("> ```").lines(), [LineKind::Quote]);
+        let mut draft = Draft::plain("x");
+        draft.apply_edit("```x", 3, None);
+        assert!(draft.convert_typed(3).is_none());
+        assert_eq!(draft.text(), "```x");
+    }
+
+    #[test]
+    fn a_language_goes_to_the_whole_code_block_at_the_cursor_only() {
+        let mut draft = Draft::from_markdown("```\na\nb\n```\nx\n```\nc\n```");
+        draft.set_code_language(0, Some("go".into()));
+        assert_eq!(
+            draft.lines(),
+            [
+                LineKind::Code(Some("go".into())),
+                LineKind::Code(Some("go".into())),
+                LineKind::Text,
+                LineKind::Code(None),
+            ]
+        );
+        assert_eq!(draft.code_block_at(draft.text().find('b').unwrap()), Some(0..2));
+        assert_eq!(draft.code_block_at(draft.text().len() - 1), Some(3..4));
+        draft.set_code_language(draft.text().find('x').unwrap(), Some("c".into()));
+        assert_eq!(draft.lines()[2], LineKind::Text);
+        assert!(draft.to_html().starts_with("<pre class=\"language-go "));
+    }
+
+    #[test]
+    fn the_block_keeps_its_first_line_when_enter_leaves_it() {
+        let mut draft = typed_draft("```");
+        let cursor = draft.break_line(draft.text().len(), false).unwrap();
+        let cursor = draft.break_line(cursor, false).unwrap();
+        draft.break_line(cursor, false).unwrap();
+        assert_eq!(draft.lines(), [LineKind::Code(None), LineKind::Text]);
+    }
+
+    #[test]
+    fn a_fence_above_a_block_of_its_language_joins_it_under_one_header() {
+        let mut draft = Draft::from_markdown("x\n```python\nb\n```");
+        let fenced = format!("```python{}", &draft.text()[1..]);
+        draft.apply_edit(&fenced, "```python".len(), None);
+        draft.break_line("```python".len(), false).unwrap();
+        assert_eq!(draft.text().matches(CODE_HEADER_MARK).count(), 1);
+        assert!(draft.to_html().contains("language-python"));
+        let docker = Draft::from_lines(&[DraftLine {
+            kind: LineKind::Code(Some("dockerFile".into())),
+            number: None,
+            content: "FROM x".into(),
+            marks: Vec::new(),
+        }]);
+        assert!(docker.to_html().starts_with("<pre class=\"language-dockerFile "));
+    }
+
+    #[test]
     fn markdown_inside_code_stays_literal() {
         let mut draft = typed_draft("```");
-        let cursor = draft.break_line(3, false).unwrap();
-        assert_eq!(cursor, 0);
+        assert_eq!(
+            (draft.text(), draft.lines()),
+            ("\u{FFF9}", &[LineKind::Code(None)][..])
+        );
         typed(&mut draft, "a **b**");
-        assert_eq!(draft.text(), "a **b**");
+        assert_eq!(draft.text(), "\u{FFF9}a **b**");
         assert!(draft.marks().is_empty());
     }
 
@@ -3142,7 +3309,7 @@ mod tests {
              <blockquote>q1<br>q2</blockquote>\
              <ul><li>a<ul><li>b</li></ul></li></ul>\
              <ol><li>x</li><li>y</li></ol>\
-             <pre class=\"language-py skipProofing\" spellcheck=\"false\"><code>print(1)</code></pre>"
+             <pre class=\"language-python skipProofing\" spellcheck=\"false\"><code>print(1)</code></pre>"
         );
     }
 
@@ -3346,7 +3513,7 @@ mod tests {
     #[test]
     fn code_lines_hold_only_their_content() {
         let mut draft = Draft::from_markdown("```\nlet a = 1;\n\u{2003}b\n```");
-        assert_eq!(draft.text(), "let a = 1;\n\u{2003}b");
+        assert_eq!(draft.text(), "\u{FFF9}let a = 1;\n\u{2003}b");
         assert_eq!(
             draft.to_html(),
             "<pre class=\"language-plaintext skipProofing\" spellcheck=\"false\"><code>let a = 1;<br>\u{2003}b</code></pre>"
@@ -3367,7 +3534,7 @@ mod tests {
 
     #[test]
     fn code_indentation_is_kept_on_paste_split_and_send() {
-        let mut draft = typed_draft("```py");
+        let mut draft = Draft::plain("```py");
         let cursor = draft.break_line(draft.text().len(), false).unwrap();
         let pasted = "def f():\n    return 1";
         let mut next = draft.text().to_owned();
@@ -3375,10 +3542,10 @@ mod tests {
         draft.apply_edit(&next, cursor + pasted.len(), None);
         assert_eq!(
             draft.to_html(),
-            "<pre class=\"language-py skipProofing\" spellcheck=\"false\"><code>def f():<br>    return 1</code></pre>"
+            "<pre class=\"language-python skipProofing\" spellcheck=\"false\"><code>def f():<br>    return 1</code></pre>"
         );
         let mut split = Draft::from_markdown("```\n   a    b\n```");
-        let after_a = "   a".len();
+        let after_a = "\u{FFF9}   a".len();
         split.break_line(after_a, false).unwrap();
         assert_eq!(
             split.to_html(),
