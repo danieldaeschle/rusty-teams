@@ -205,6 +205,8 @@ pub(crate) struct InlineMetric {
     pub(crate) range: Range<usize>,
     pub(crate) width: Pixels,
     pub(crate) height: Option<Pixels>,
+    /// A header token: what follows it on its line starts a row, even when nothing does.
+    pub(crate) opens_row: bool,
 }
 
 fn block_rows_of(
@@ -737,7 +739,10 @@ impl TextWrapper {
                 let wrap_width =
                     (wrap_width - line_indent_at(&line_indents, line_start)).max(px(1.));
                 let line_indented = line_indent_at(&line_indents, line_start) > px(0.);
-                measured_wrap_boundaries(
+                let header_ends_line = tokens
+                    .iter()
+                    .any(|token| token.opens_row && token.range.end == line_str.len());
+                let mut boundaries = measured_wrap_boundaries(
                     line_str,
                     wrap_width,
                     wrapping_indent,
@@ -756,7 +761,14 @@ impl TextWrapper {
                         }
                         width + shape(offset..range.end)
                     },
-                )
+                );
+                if header_ends_line && boundaries.last().is_none_or(|last| last.ix < line_str.len()) {
+                    boundaries.push(gpui::Boundary {
+                        ix: line_str.len(),
+                        next_indent: 0,
+                    });
+                }
+                boundaries
             },
             &mut |line_start, rows| {
                 if !has_scaled {
@@ -1014,10 +1026,8 @@ impl TextWrapper {
                 }
             }
 
-            // Reset of the line
-            if prev_boundary_ix < line.len() || prev_boundary_ix == 0 {
-                wrapped_lines.push(prev_boundary_ix..line.len());
-            }
+            // Reset of the line; a boundary at the end (after a header token) opens an empty row.
+            wrapped_lines.push(prev_boundary_ix..line.len());
 
             let mut blocks =
                 block_rows_of(&self.inline_metrics, line_start, line.len(), &wrapped_lines);
@@ -1736,6 +1746,7 @@ mod tests {
                     range: token.clone(),
                     width: px(32.),
                     height: None,
+                    opens_row: false,
                 }]),
                 cx,
             );

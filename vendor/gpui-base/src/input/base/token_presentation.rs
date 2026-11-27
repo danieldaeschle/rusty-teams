@@ -235,7 +235,12 @@ impl<M: InputModeKind> InputBaseState<M> {
             disabled: self.disabled,
             readonly: self.readonly,
             line_height,
-            available_width: width,
+            // A header spans its row up to where block decorations end.
+            available_width: if span.token().is_header() {
+                width + super::element::RIGHT_MARGIN
+            } else {
+                width
+            },
         }
     }
     /// The token starting at `start`, paired with the listener that opens it.

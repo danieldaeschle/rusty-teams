@@ -1863,6 +1863,7 @@ impl<M: InputModeKind> TextElement<M> {
                                 range: span.range(),
                                 width: token_size.width,
                                 height: span.token().is_block().then_some(token_size.height),
+                                opens_row: span.token().is_header(),
                             })
                     })
                     .collect();
@@ -2102,11 +2103,16 @@ impl<M: InputModeKind> TextElement<M> {
                 {
                     let baseline_offset =
                         layout.lines[ix].inline_offset_at(position.y, layout.line_height);
+                    let header_shift = if span.token().is_header() {
+                        state.display_map.line_indent(start)
+                    } else {
+                        px(0.)
+                    };
                     placements.push((
                         state.token_context(span, layout.line_height, width),
                         bounds.origin
                             + position
-                            + point(layout.line_number_width, y + baseline_offset),
+                            + point(layout.line_number_width - header_shift, y + baseline_offset),
                     ));
                 }
             }
@@ -2142,6 +2148,60 @@ impl<M: InputModeKind> TextElement<M> {
                 .update(cx, |state, _| state.reconcile_token_hover());
         }
         out
+    }
+
+    fn paint_line_labels(
+        &self,
+        line: &LineLayout,
+        row: usize,
+        origin: Point<Pixels>,
+        layout: &LastLayout,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        const GAP: f32 = 8.;
+        let state = self.state.read(cx);
+        if state.line_labels.is_empty() {
+            return;
+        }
+        let start = state.text.line_start_offset(row);
+        let end = state.text.line_end_offset(row);
+        let first = state
+            .line_labels
+            .partition_point(|(offset, _)| *offset < start);
+        let style = window.text_style();
+        let font_size = style.font_size.to_pixels(window.rem_size());
+        let labels: Vec<_> = state.line_labels[first..]
+            .iter()
+            .take_while(|(offset, _)| *offset <= end)
+            .cloned()
+            .collect();
+        let color = state.line_label_color;
+        for (offset, label) in labels {
+            let Some(position) = line.position_for_index(offset - start, layout, false) else {
+                continue;
+            };
+            let run = TextRun {
+                len: label.len(),
+                font: style.font(),
+                color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let shaped = window
+                .text_system()
+                .shape_line(label, font_size, &[run], None);
+            let x = position.x - px(GAP) - shaped.width;
+            _ = shaped.paint(
+                origin + point(x, position.y),
+                layout.line_height,
+                TextAlign::Left,
+                None,
+                window,
+                cx,
+            );
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3409,6 +3469,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 window,
                 cx,
             );
+            self.paint_line_labels(line, row, p, &prepaint.last_layout, window, cx);
             offset_y += line.size(line_height).height;
 
             if Some(row) == prepaint.current_row {
