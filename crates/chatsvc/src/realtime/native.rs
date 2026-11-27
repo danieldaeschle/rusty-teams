@@ -322,6 +322,7 @@ pub(super) struct NativeTrouter {
     pub endpoint_id: String,
     force_refresh: bool,
     retry: u32,
+    retry_signal: Option<Arc<Notify>>,
     ack_counter: u64,
     surl: String,
     registered_at: Option<Instant>,
@@ -353,6 +354,7 @@ impl NativeTrouter {
         activity: watch::Receiver<bool>,
         resend: Arc<Notify>,
     ) -> Self {
+        let retry_signal = config.retry.clone();
         NativeTrouter {
             session,
             config,
@@ -364,6 +366,7 @@ impl NativeTrouter {
             endpoint_id: uuid::Uuid::new_v4().to_string(),
             force_refresh: false,
             retry: 0,
+            retry_signal,
             ack_counter: 0,
             surl: String::new(),
             registered_at: None,
@@ -389,6 +392,7 @@ impl NativeTrouter {
     }
 
     pub(super) async fn run(mut self, mut stop: oneshot::Receiver<oneshot::Sender<()>>) {
+        let retry_signal = self.retry_signal.clone();
         loop {
             let connected = tokio::select! {
                 connected = self.connect() => connected,
@@ -422,6 +426,12 @@ impl NativeTrouter {
                             }
                             return;
                         }
+                        _ = async {
+                            match &retry_signal {
+                                Some(signal) => signal.notified().await,
+                                None => std::future::pending().await,
+                            }
+                        } => self.retry = 0,
                         _ = self.output.closed() => return,
                     }
                 }

@@ -188,6 +188,7 @@ async fn supervise(
         }
     };
     tokio::spawn(org_list(home.clone(), guest_tenant.clone(), events.clone()));
+    tokio::spawn(msal_key_loop(home.clone()));
     // Calls stay on the home tenant's registration, like rings for the home org while a guest org is open.
     // Chat files of a guest org go to the home OneDrive: the guest tenant has none.
     let (session, home_drive) = match &guest_tenant {
@@ -238,6 +239,34 @@ async fn supervise(
     tokio::spawn(pins_loop(session, events.clone()));
     tokio::spawn(presence_resubscribe_loop(engine.clone()));
     refresh_loop(engine, events, nudges).await;
+}
+
+/// Gives the MSAL cache key an expiry while the page is signed in, so the next start can read the
+/// token cache. WebView2 drops session cookies with the process just like Chromium does.
+async fn msal_key_loop(session: Session) {
+    let mut wait = Duration::from_secs(5);
+    loop {
+        tokio::time::sleep(wait).await;
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(3), session.persist_msal_key()).await;
+        match outcome {
+            Ok(Ok(true)) => {
+                crate::diagnostics::record("msal: key cookie persisted");
+                wait = Duration::from_secs(30 * 60);
+            }
+            Ok(Ok(false)) => {
+                wait = (wait * 2).min(Duration::from_secs(300));
+            }
+            Ok(Err(error)) => {
+                crate::diagnostics::record(format!("msal: key cookie not persisted: {error}"));
+                wait = (wait * 2).min(Duration::from_secs(300));
+            }
+            Err(_) => {
+                crate::diagnostics::record("msal: key cookie persistence timed out");
+                wait = (wait * 2).min(Duration::from_secs(300));
+            }
+        }
+    }
 }
 
 /// Fetches the account's organizations once per start, retried a few times while sign-in settles,
@@ -352,6 +381,7 @@ async fn realtime_loop(
         let _ = events.send(BackendEvent::Live(LiveState::Connecting));
         let config = RealtimeConfig {
             initially_active: *activity.borrow(),
+            retry: Some(live_retry.clone()),
             ..RealtimeConfig::default()
         };
         match Realtime::start_with(&session, config).await {
@@ -398,6 +428,12 @@ async fn realtime_loop(
                             let _ = events.send(BackendEvent::Typing(typing));
                         }
                         RealtimeEvent::Status(status) => {
+                            if status.kind != StatusKind::Connected {
+                                crate::diagnostics::record(format!(
+                                    "live: {:?} {}",
+                                    status.kind, status.detail
+                                ));
+                            }
                             let _ = events.send(BackendEvent::Live(live_state_for(status.kind)));
                             if let Some(signal) = link_signal_for(status.kind) {
                                 let _ = link.send(signal);
@@ -425,7 +461,8 @@ async fn realtime_loop(
                 let _ = events.send(BackendEvent::Live(LiveState::Reconnecting));
                 let _ = link.send(LinkSignal::Disconnected);
             }
-            Err(_) => {
+            Err(error) => {
+                crate::diagnostics::record(format!("live: start failed: {error}"));
                 let _ = events.send(BackendEvent::Live(LiveState::Failed));
                 let _ = link.send(LinkSignal::Disconnected);
             }

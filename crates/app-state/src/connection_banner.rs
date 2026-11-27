@@ -67,7 +67,10 @@ pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> Banner
     };
     match kind {
         BannerKind::Connecting => text("auth.banner.connecting"),
-        BannerKind::Reconnecting => text("auth.banner.reconnecting"),
+        BannerKind::Reconnecting => BannerText {
+            action: Some(app_base::ui_locale::tr("common.retry")),
+            ..text("auth.banner.reconnecting")
+        },
         BannerKind::Offline => BannerText {
             detail: last_sync.map(|time| {
                 app_base::ui_locale::tr("auth.banner.last_synced").replace(
@@ -81,6 +84,7 @@ pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> Banner
             ..text("auth.banner.offline")
         },
         BannerKind::SignIn => {
+            #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(unused_mut))]
             let mut banner = text("auth.banner.sign_in");
             // Windows signs in through the embedded view. The managed window exists
             // only on Linux and macOS, so other platforms get no button.
@@ -311,6 +315,7 @@ mod tests {
                 .action
                 .is_some()
         );
+        assert!(banner_text(BannerKind::Reconnecting, None).action.is_some());
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         assert!(banner_text(BannerKind::SignIn, None).action.is_some());
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]

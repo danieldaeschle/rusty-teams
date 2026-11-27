@@ -2,6 +2,7 @@ mod app;
 mod error;
 mod events;
 mod http;
+pub mod msal_key;
 mod native;
 mod page_script;
 mod request;

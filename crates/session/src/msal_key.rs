@@ -1,18 +1,19 @@
-//! Keeps the key of the Teams token cache across browser restarts (issue #84).
+//! Keeps the key of the Teams token cache across app restarts (issue #84).
 //!
 //! MSAL.js encrypts its localStorage cache with a key held in the session cookie
-//! `msal.cache.encryption`. A session cookie dies with the process, so every restart (headless
-//! hand-over, login window, hung renderer, app exit) made MSAL create a new key, drop the cache
-//! and ask for sign-in again. Before Chromium stops, the cookie gets an expiry instead; the key
-//! then sits in the profile next to the cache it protects, which the profile already holds.
+//! `msal.cache.encryption`. A session cookie dies with the page, so every restart made MSAL create
+//! a new key, drop the cache and ask for sign-in again. Before the page closes, the cookie gets an
+//! expiry instead; the key then sits in the profile next to the cache it protects, which the
+//! profile already holds.
 //!
 //! Trade-off: the key moves from a session cookie into the profile's cookie store, encrypted by
-//! the OS keyring (or Chromium's fixed key where no keyring is available). The profile already
+//! the OS keyring (or the browser's fixed key where no keyring is available). The profile already
 //! holds the equally powerful ESTS cookies that keep the session alive, so this is a conscious
 //! choice, not a new credential at rest.
 
-use serde_json::{Map, Value, json};
 use std::collections::HashSet;
+
+use serde_json::{Map, Value, json};
 
 /// The cookie MSAL.js reads its cache encryption key from; only its name and value matter to it.
 const MSAL_KEY_COOKIE: &str = "msal.cache.encryption";
@@ -37,7 +38,7 @@ const CARRIED_FIELDS: [&str; 10] = [
 /// `Storage.setCookies` parameters for the current MSAL key cookies. Duplicates by
 /// `(domain, path, partitionKey)` are collapsed, preferring host-only cookies over stale domain
 /// cookies that could otherwise shadow the active key.
-pub(crate) fn persisted_key_cookies(get_cookies: &Value, now_secs: u64) -> Option<Value> {
+pub fn persisted_key_cookies(get_cookies: &Value, now_secs: u64) -> Option<Value> {
     let expires = now_secs + KEY_LIFETIME_SECS;
     let mut candidates: Vec<&Value> = get_cookies["cookies"]
         .as_array()?
