@@ -38,16 +38,12 @@ impl Gathered {
         gathering_settled(self.complete.load(Ordering::SeqCst), since_udp_relay)
     }
 
-    /// Waits until gathering is settled or `limit` elapses. The full gather cap
-    /// seals gathering; a shorter accept budget leaves it open for a later offer.
-    pub(super) async fn candidates_for(&self, limit: Duration) -> Vec<String> {
+    pub(super) async fn candidates(&self) -> Vec<String> {
         let waited = Instant::now();
-        while !self.settled() && waited.elapsed() < limit {
+        while !self.settled() && waited.elapsed() < GATHERING_LIMIT {
             tokio::time::sleep(GATHERING_POLL).await;
         }
-        if limit >= GATHERING_LIMIT {
-            self.complete.store(true, Ordering::SeqCst);
-        }
+        self.complete.store(true, Ordering::SeqCst);
         self.waited_ms
             .store(waited.elapsed().as_millis() as u64, Ordering::SeqCst);
         self.candidates.lock().expect("candidates lock").clone()
@@ -67,21 +63,8 @@ pub(super) async fn direct_sdp(
     gathered: Option<&Gathered>,
     kind: SdpKind,
 ) -> Result<String> {
-    direct_sdp_within(teams_sdp, gathered, kind, GATHERING_LIMIT).await
-}
-
-pub(super) async fn direct_sdp_within(
-    teams_sdp: &str,
-    gathered: Option<&Gathered>,
-    kind: SdpKind,
-    gather_limit: Duration,
-) -> Result<String> {
     match gathered {
-        Some(gathered) => with_candidates(
-            teams_sdp,
-            &gathered.candidates_for(gather_limit).await,
-            kind,
-        ),
+        Some(gathered) => with_candidates(teams_sdp, &gathered.candidates().await, kind),
         None => Ok(teams_sdp.to_owned()),
     }
 }
@@ -367,7 +350,6 @@ pub(super) async fn answer_offer(
     sending_share_mid: Option<String>,
     camera_on: bool,
     gathered: Option<&Gathered>,
-    gather_limit: Duration,
 ) -> Result<AnsweredMedia> {
     answer_offer_with(
         peer,
@@ -380,7 +362,6 @@ pub(super) async fn answer_offer(
         gathered,
         false,
         false,
-        gather_limit,
     )
     .await
 }
@@ -397,7 +378,6 @@ pub(super) async fn answer_offer_with(
     gathered: Option<&Gathered>,
     keep_receive_slots: bool,
     mixer: bool,
-    gather_limit: Duration,
 ) -> Result<AnsweredMedia> {
     let remote = from_teams_offer(teams_offer)?;
     let description = parse_sdp(&remote.browser_sdp, SdpType::Offer)?;
@@ -506,8 +486,7 @@ pub(super) async fn answer_offer_with(
     Ok(AnsweredMedia {
         remote,
         offer_sdp: teams_offer.to_owned(),
-        answer_sdp: direct_sdp_within(&signaled.sdp, gathered, SdpKind::Answer, gather_limit)
-            .await?,
+        answer_sdp: direct_sdp(&signaled.sdp, gathered, SdpKind::Answer).await?,
         camera_mid,
         receiving_share_mid,
     })

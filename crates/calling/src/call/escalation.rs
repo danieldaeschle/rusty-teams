@@ -144,7 +144,6 @@ pub(super) async fn answer_on_new_peer(
         None,
         true,
         true,
-        GATHERING_LIMIT,
     )
     .await?;
     Ok((session, answered))

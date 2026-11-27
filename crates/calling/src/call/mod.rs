@@ -144,8 +144,6 @@ const SAME_PEER_ANSWER_LIMIT: Duration = Duration::from_secs(40);
 const SAME_PEER_LATE_GRACE: Duration = Duration::from_secs(15);
 const GATHERING_LIMIT: Duration = Duration::from_secs(5);
 const RELAY_SETTLE: Duration = Duration::from_millis(200);
-/// Incoming 1:1 answers send as soon as a relay has settled, without waiting out the gather cap.
-const INCOMING_ACCEPT_GATHER: Duration = RELAY_SETTLE;
 const GATHERING_POLL: Duration = Duration::from_millis(50);
 const NEXT_PEER_LIMIT: Duration = Duration::from_secs(40);
 const GLARE_RESEND_LIMIT: Duration = Duration::from_secs(3);
@@ -809,11 +807,6 @@ async fn drive(
                 None,
                 false,
                 one_to_one.then_some(&current.gathered),
-                if one_to_one {
-                    INCOMING_ACCEPT_GATHER
-                } else {
-                    GATHERING_LIMIT
-                },
             )
             .await?;
             layout_plan = answered.remote.plan();
@@ -1544,7 +1537,6 @@ async fn drive(
                                     gathered,
                                     keep_slots,
                                     keep_slots,
-                                    GATHERING_LIMIT,
                                 )
                                 .await
                                 {
@@ -3085,12 +3077,6 @@ fn far_future() -> Instant {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn an_incoming_answer_uses_the_short_gather_budget() {
-        assert!(INCOMING_ACCEPT_GATHER < GATHERING_LIMIT);
-        assert_eq!(INCOMING_ACCEPT_GATHER, RELAY_SETTLE);
-    }
-
-    #[test]
     fn a_missing_call_on_accept_while_connecting_is_a_cancel() {
         let gone = Error::Signaling(
             "POST acceptance answered HTTP 404 {\"Message\":\"The requested call does not exist.\"}"
@@ -3290,7 +3276,6 @@ mod tests {
             None,
             false,
             None,
-            GATHERING_LIMIT,
         )
         .await;
         peer.close();
