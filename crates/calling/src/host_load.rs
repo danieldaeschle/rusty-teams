@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
-/// One named thread and the CPU time it has used since the process started, in milliseconds.
+/// One thread and the CPU time it has used since the process started, in milliseconds.
+/// `id` is the kernel thread id, not the Mach port and not the pthread name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadCpu {
+    pub id: u64,
     pub name: String,
     pub cpu_ms: u64,
 }
@@ -11,33 +13,44 @@ pub fn recorded_on_this_platform() -> bool {
     cfg!(target_os = "macos")
 }
 
-/// CPU used since the previous sample. The first sample reports the time already used.
-pub fn cpu_deltas(
-    current: &[ThreadCpu],
-    previous: &mut HashMap<String, u64>,
-) -> Vec<(String, u64)> {
+/// CPU used since the previous sample, summed by thread name. The first sample reports the
+/// time already used. Threads that share a name (tokio workers) stay separate in `previous`
+/// and add up on the line.
+pub fn cpu_deltas(current: &[ThreadCpu], previous: &mut HashMap<u64, u64>) -> Vec<(String, u64)> {
     let mut seen = Vec::with_capacity(current.len());
-    let mut deltas = Vec::with_capacity(current.len());
+    let mut totals: HashMap<String, u64> = HashMap::new();
     for thread in current {
-        let before = previous.get(&thread.name).copied().unwrap_or(0);
-        deltas.push((thread.name.clone(), thread.cpu_ms.saturating_sub(before)));
-        previous.insert(thread.name.clone(), thread.cpu_ms);
-        seen.push(thread.name.clone());
+        let before = previous.get(&thread.id).copied().unwrap_or(0);
+        *totals.entry(thread.name.clone()).or_default() += thread.cpu_ms.saturating_sub(before);
+        previous.insert(thread.id, thread.cpu_ms);
+        seen.push(thread.id);
     }
-    previous.retain(|name, _| seen.iter().any(|kept| kept == name));
+    previous.retain(|id, _| seen.contains(id));
+    let mut deltas: Vec<(String, u64)> = totals.into_iter().collect();
     deltas.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
     deltas
 }
 
+const SHOWN_THREADS: usize = 8;
+
 pub fn host_load_line(deltas: &[(String, u64)], effects: &str, thermal: &str) -> String {
-    let threads = if deltas.is_empty() {
+    let active: Vec<_> = deltas.iter().filter(|(_, cpu_ms)| *cpu_ms > 0).collect();
+    let threads = if active.is_empty() {
         "no thread cpu".to_owned()
     } else {
-        deltas
+        let shown = active.len().min(SHOWN_THREADS);
+        let mut parts: Vec<String> = active[..shown]
             .iter()
             .map(|(name, cpu_ms)| format!("{name} {cpu_ms}ms"))
-            .collect::<Vec<_>>()
-            .join(", ")
+            .collect();
+        if active.len() > SHOWN_THREADS {
+            let rest: u64 = active[SHOWN_THREADS..]
+                .iter()
+                .map(|(_, cpu_ms)| *cpu_ms)
+                .sum();
+            parts.push(format!("others {rest}ms"));
+        }
+        parts.join(", ")
     };
     format!("{threads}; {effects}; thermal {thermal}")
 }
@@ -83,7 +96,7 @@ mod macos {
             objc2_foundation::NSProcessInfoThermalState::Fair => "fair",
             objc2_foundation::NSProcessInfoThermalState::Serious => "serious",
             objc2_foundation::NSProcessInfoThermalState::Critical => "critical",
-            _ => "nominal",
+            _ => "unknown",
         }
     }
 
@@ -106,8 +119,11 @@ mod macos {
                     &mut info as *mut libc::thread_basic_info as libc::thread_info_t,
                     &mut info_count,
                 );
-                if status == libc::KERN_SUCCESS {
+                if status == libc::KERN_SUCCESS
+                    && let Some(id) = thread_id(thread)
+                {
                     found.push(ThreadCpu {
+                        id,
                         name: thread_name(thread),
                         cpu_ms: cpu_ms(&info),
                     });
@@ -129,6 +145,26 @@ mod macos {
             seconds.saturating_mul(1000) + micros / 1000
         };
         part(info.user_time).saturating_add(part(info.system_time)) as u64
+    }
+
+    /// Stable across samples. The Mach port from `task_threads` is reused after
+    /// `mach_port_deallocate`, so it cannot key the previous sample.
+    fn thread_id(thread: libc::thread_act_t) -> Option<u64> {
+        unsafe {
+            let mut info: libc::thread_identifier_info = std::mem::zeroed();
+            let mut count = libc::THREAD_IDENTIFIER_INFO_COUNT;
+            let status = libc::thread_info(
+                thread,
+                libc::THREAD_IDENTIFIER_INFO,
+                &mut info as *mut libc::thread_identifier_info as libc::thread_info_t,
+                &mut count,
+            );
+            if status == libc::KERN_SUCCESS && info.thread_id != 0 {
+                Some(info.thread_id)
+            } else {
+                None
+            }
+        }
     }
 
     fn thread_name(thread: libc::thread_act_t) -> String {
@@ -165,10 +201,12 @@ mod tests {
         let first = cpu_deltas(
             &[
                 ThreadCpu {
+                    id: 1,
                     name: "camera".into(),
                     cpu_ms: 40,
                 },
                 ThreadCpu {
+                    id: 2,
                     name: "camera effects".into(),
                     cpu_ms: 5,
                 },
@@ -187,10 +225,12 @@ mod tests {
         let second = cpu_deltas(
             &[
                 ThreadCpu {
+                    id: 1,
                     name: "camera".into(),
                     cpu_ms: 90,
                 },
                 ThreadCpu {
+                    id: 2,
                     name: "camera effects".into(),
                     cpu_ms: 5,
                 },
@@ -200,6 +240,57 @@ mod tests {
         assert_eq!(
             second,
             vec![("camera".into(), 50), ("camera effects".into(), 0)]
+        );
+    }
+
+    #[test]
+    fn shared_thread_names_sum_and_idle_threads_fold_out_of_the_line() {
+        let mut previous = HashMap::new();
+        let first = cpu_deltas(
+            &[
+                ThreadCpu {
+                    id: 10,
+                    name: "teams-net".into(),
+                    cpu_ms: 5_000,
+                },
+                ThreadCpu {
+                    id: 11,
+                    name: "teams-net".into(),
+                    cpu_ms: 300,
+                },
+            ],
+            &mut previous,
+        );
+        assert_eq!(first, vec![("teams-net".into(), 5_300)]);
+        let second = cpu_deltas(
+            &[
+                ThreadCpu {
+                    id: 10,
+                    name: "teams-net".into(),
+                    cpu_ms: 5_300,
+                },
+                ThreadCpu {
+                    id: 11,
+                    name: "teams-net".into(),
+                    cpu_ms: 800,
+                },
+            ],
+            &mut previous,
+        );
+        assert_eq!(second, vec![("teams-net".into(), 800)]);
+        let mut busy = Vec::new();
+        for index in 0..10 {
+            busy.push((format!("t{index}"), 10 - index));
+        }
+        busy.push(("idle".into(), 0));
+        let line = host_load_line(
+            &busy,
+            "blur=off standout=off framing=off brightness=off soft_focus=off",
+            "unknown",
+        );
+        assert_eq!(
+            line,
+            "t0 10ms, t1 9ms, t2 8ms, t3 7ms, t4 6ms, t5 5ms, t6 4ms, t7 3ms, others 3ms; blur=off standout=off framing=off brightness=off soft_focus=off; thermal unknown"
         );
     }
 

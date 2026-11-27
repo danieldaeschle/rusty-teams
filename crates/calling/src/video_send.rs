@@ -418,6 +418,24 @@ impl LocalVideo {
         refreshed
     }
 
+    /// Applies a limit that was waiting for this source and writes it on the call report.
+    /// The drive loop only records a refresh it performs itself.
+    fn record_refreshed_send_limits(&mut self) {
+        let Some(timeline) = self.timeline.clone() else {
+            self.refresh_send_limits();
+            return;
+        };
+        for (source, refreshed) in self.refresh_send_limits() {
+            match refreshed {
+                Ok(Some(plans)) => {
+                    timeline.record("send limits", format!("{source:?} {plans:?}"));
+                }
+                Ok(None) => {}
+                Err(error) => timeline.record("send limits failed", error.to_string()),
+            }
+        }
+    }
+
     fn set_layers(sender: &RtpSender, plans: &[LayerPlan], nudge: f64) -> Result<()> {
         let mut parameters = sender.parameters();
         for encoding in &mut parameters.encodings {
@@ -737,7 +755,7 @@ impl LocalVideo {
         }
         Self::begin_sending_on(&lines.camera, &self.camera.track)?;
         self.camera_preview = false;
-        let _ = self.refresh_send_limits();
+        self.record_refreshed_send_limits();
         Ok(())
     }
 
@@ -904,7 +922,7 @@ impl LocalVideo {
         }
         Self::begin_sending_on(&share, &self.screen.track)?;
         let _ = self.tune_share(&share.sender());
-        let _ = self.refresh_send_limits();
+        self.record_refreshed_send_limits();
         Ok(())
     }
 
