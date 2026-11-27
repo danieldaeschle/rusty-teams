@@ -22,6 +22,7 @@ mod chat_paging;
 mod chat_send;
 mod chat_settings_sync;
 mod cloud_files;
+mod code_languages;
 mod copilot;
 mod default_reactions;
 mod download;
@@ -137,15 +138,16 @@ pub use chatsvc::{
     TranslationStatus, TranslationTrigger, authoring_patch, behavior_patch, language_code,
     parse_language_settings, target_patch,
 };
+pub use code_languages::{CODE_LANGUAGES, CodeLanguage, PLAIN_LANGUAGE, code_language};
 pub use default_reactions::{
     DEFAULT_REACTION_SLOTS, TEAMS_DEFAULT_REACTIONS, default_reactions,
     store_account_default_reactions,
 };
 pub use download::LibraryFile;
 pub use draft::{
-    Draft, DraftLine, Edit, FormatState, INDENT_PIXELS, LineKind, MAX_DEPTH, MAX_INDENT, Mark,
-    MarkKind, OBJECT_MARK, RULE_MARK, SizeStep, TypingStyle, changed_span, has_markdown, link_url,
-    map_offset, reverse_edits,
+    CODE_HEADER_MARK, Draft, DraftLine, Edit, FormatState, INDENT_PIXELS, LineKind, MAX_DEPTH,
+    MAX_INDENT, Mark, MarkKind, OBJECT_MARK, RULE_MARK, SizeStep, TypingStyle, changed_span,
+    has_markdown, link_url, map_offset, reverse_edits,
 };
 pub use emoticon_tags::{EmoticonTag, emoticon_tags};
 pub use engine::{Delta, Me, SidebarSummary, SyncConfig, SyncEngine};
@@ -188,7 +190,7 @@ pub use receipts::{ReceiptReader, ReceiptState};
 pub use remote::{ChatsPage, DeltaPage, Remote, RemotePage};
 pub use scheduled::NOTES_CHAT_ID;
 pub use skin_tone::{skin_tone, store_account_skin_tone};
-pub use spans::{FontSize, Span, html_to_spans};
+pub use spans::{CODE_BLOCK_ITEMTYPE, FontSize, Span, html_to_spans};
 pub use store::{ConversationHit, HIGHLIGHT_END, HIGHLIGHT_START, SearchHit};
 pub use stored::{
     AttachmentInfo, FileCard, FileKind, ImageKind, ImageRef, MentionInfo, PROFILE_LINK_PREFIX,

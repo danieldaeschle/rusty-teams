@@ -24,8 +24,12 @@ const TAB_EMOJI_SIZE: f32 = 12.5;
 const ENTRY_EMOJI_SIZE: f32 = 17.;
 const PILL_TEXT_SIZE: f32 = 12.;
 const PILL_GAP: f32 = 3.;
+// Emoji fonts draw their glyphs below the centre of the line box: measured 0.5-1 px (Noto Color
+// Emoji) and 1-2 px (Segoe UI Emoji) at 14 px. A line box shorter by twice the lift raises the
+// baseline by the lift.
+const EMOJI_LIFT: f32 = 0.07;
 const FACE_SIZE: f32 = 18.;
-const FACE_RING: f32 = 1.5;
+const FACE_RING: f32 = 1.;
 const FACE_OVERLAP: f32 = 6.;
 const POPOVER_WIDTH: f32 = 290.;
 const POPOVER_MAX_HEIGHT: f32 = 320.;
@@ -81,7 +85,7 @@ fn reaction_emoji(glyph: &str, label: &str, size: f32, directory: &Directory) ->
             .h(px(size))
             .text_size(px(size))
             .font_family(theme::EMOJI_FONT_FAMILY)
-            .line_height(px(size))
+            .line_height(px(size - 2. * (size * EMOJI_LIFT).round()))
             .child(label.to_owned())
             .into_any_element();
     };

@@ -9,6 +9,7 @@ pub const SHARE_QUEUED_NOTICE: &str = "calls.notice.share_queued";
 pub const SHARE_REFUSED_NOTICE: &str = "calls.notice.share_refused";
 pub const NOT_CONNECTED_FOR_VIDEO: &str = "calls.notice.video_starts_once_connected";
 pub const PORTAL_UNAVAILABLE_NOTICE: &str = "calls.notice.portal_unavailable";
+pub const SHARE_SOURCE_GONE_NOTICE: &str = "calls.notice.share_source_gone";
 pub const CALL_TRANSFERRED_NOTICE: &str = "calls.notice.call_transferred";
 pub const TRANSFER_FAILED_NOTICE: &str = "calls.notice.transfer_failed";
 pub const RECORDING_JOIN_FAILED_NOTICE: &str = "calls.notice.recording_join_failed";
@@ -75,6 +76,7 @@ mod tests {
             "calls.notice.video_starts_once_connected"
         );
         assert_eq!(PORTAL_UNAVAILABLE_NOTICE, "calls.notice.portal_unavailable");
+        assert_eq!(SHARE_SOURCE_GONE_NOTICE, "calls.notice.share_source_gone");
         assert_eq!(CALL_TRANSFERRED_NOTICE, "calls.notice.call_transferred");
         assert_eq!(TRANSFER_FAILED_NOTICE, "calls.notice.transfer_failed");
         assert_eq!(
