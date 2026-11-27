@@ -1,7 +1,8 @@
 //! Linux and macOS notification and ringtone playback.
 //!
 //! On Linux the saved call output is a Pulse sink description or name. Tones go to that
-//! sink. cpal remains the macOS lookup and the fallback when Pulse cannot play.
+//! sink. When the Pulse daemon is not running, Linux uses the same cpal lookup as macOS.
+//! A sink that disappears while a tone is playing falls back to the system default.
 
 use std::collections::HashSet;
 use std::io::Cursor;
@@ -9,9 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
-#[cfg(not(target_os = "linux"))]
-use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::Source;
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
 
 const SOUND_BYTES: &[u8] = include_bytes!("../../../../app/assets/sounds/notification.mp3");
 const POLL: Duration = Duration::from_millis(20);
@@ -140,7 +140,6 @@ fn open_default_and_play(bytes: Vec<u8>, looped: bool, stop: &AtomicBool) -> Res
     play_on_rodio(&mut sink, bytes, looped, stop)
 }
 
-#[cfg(not(target_os = "linux"))]
 fn open_sink() -> Result<rodio::MixerDeviceSink, String> {
     let chosen = SOUND_OUTPUT
         .lock()
@@ -307,7 +306,9 @@ fn play_linux(bytes: Vec<u8>, looped: bool, stop: &AtomicBool) -> Result<(), Str
                         Ok(()) => return Ok(()),
                         Err(error)
                             if error.starts_with("pulse open ")
-                                || error.starts_with("pulse cannot play") =>
+                                || error.starts_with("pulse cannot play")
+                                || error.starts_with("pulse write")
+                                || error.starts_with("pulse drain") =>
                         {
                             note_missing_once(
                                 &key,
@@ -325,10 +326,14 @@ fn play_linux(bytes: Vec<u8>, looped: bool, stop: &AtomicBool) -> Result<(), Str
                     );
                 }
             }
-            None => note_missing_once(
-                &format!("pulse:{key}"),
-                format!("sound: pulse unavailable for {key:?}, using system default"),
-            ),
+            None => {
+                note_missing_once(
+                    &format!("pulse:{key}"),
+                    format!("sound: pulse unavailable for {key:?}, trying the device list"),
+                );
+                let mut sink = open_sink()?;
+                return play_on_rodio(&mut sink, bytes, looped, stop);
+            }
         }
     }
     open_default_and_play(bytes, looped, stop)
