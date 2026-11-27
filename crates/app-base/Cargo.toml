@@ -46,6 +46,8 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 x11rb = { version = "0.13", features = ["shape"] }
 ksni = { version = "0.3", features = ["blocking"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
+libpulse-binding = "2.30.1"
+libpulse-simple-binding = "2.29.0"
 
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 tray-icon = { version = "0.21", default-features = false }
