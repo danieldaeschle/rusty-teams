@@ -131,7 +131,11 @@ The remaining gaps are planned, see [ROADMAP.md](ROADMAP.md).
 
 ## Quick start
 
-Download the build for your platform from [Releases](https://github.com/danieldaeschle/rusty-teams/releases) and sign in with your work account. Or build it yourself:
+Download the build for your platform from [Releases](https://github.com/danieldaeschle/rusty-teams/releases) and sign in with your work account.
+
+Nightly builds of `main` are pre-releases tagged `v<next version>-nightly.<date>`. A nightly updates to newer nightlies and then to the next release; a release build never offers nightlies.
+
+Or build it yourself:
 
 ```bash
 cargo run --release -p app

@@ -1,0 +1,32 @@
+# Nightly pre-release of main (.github/scripts/nightly.py): tags v<next minor>.0-nightly.<UTC yyyymmddhhmm>
+# and dispatches build.yml for that tag, which publishes it as a pre-release. Skips a day without commits
+# and keeps the newest seven nightlies.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Tag and build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I .github/scripts/nightly.py
