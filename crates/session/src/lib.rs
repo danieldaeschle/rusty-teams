@@ -9,7 +9,10 @@ mod scope;
 mod session;
 mod transport;
 
-pub use app::{App, Target, find_app_tab, has_login_tab, is_login_url};
+pub use app::{
+    App, MCAS_SUFFIX, Target, behind_mcas, find_app_tab, has_login_tab, is_login_url,
+    set_behind_mcas,
+};
 pub use error::{Error, Result};
 pub use events::{TabChannel, TabCommand, TabControl, TabEvent, TabEvents};
 pub use native::ensure_crypto_provider;

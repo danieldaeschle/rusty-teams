@@ -86,6 +86,31 @@ pub struct Browser {
     inner: Arc<Inner>,
 }
 
+/// Marker that Teams runs behind the MCAS proxy, next to the mode file
+/// (`rusty-teams-chrome.mode` gives `rusty-teams-chrome.mcas`).
+fn mcas_marker(config: &Config) -> std::path::PathBuf {
+    config.mode_file.with_extension("mcas")
+}
+
+fn write_mcas_marker(marker: &std::path::Path) -> std::io::Result<()> {
+    std::fs::write(marker, "mcas")
+}
+
+/// A marker that is gone already is fine.
+fn remove_mcas_marker(marker: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::remove_file(marker) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// Start URLs without the MCAS proxy, for the interactive sign-in window.
+pub(crate) fn direct_start_urls() -> Vec<String> {
+    APPS.iter()
+        .map(|app| app.direct_start_url().to_owned())
+        .collect()
+}
+
 pub(crate) fn start_urls() -> Vec<String> {
     APPS.iter().map(|app| app.start_url().to_owned()).collect()
 }
@@ -120,6 +145,8 @@ impl Browser {
         timeouts: Timeouts,
     ) -> Browser {
         let bidi = (config.engine == Engine::Firefox).then(|| Bidi::new(config.port));
+        // the marker on disk is the truth, also for a second Browser in the same process
+        session::set_behind_mcas(mcas_marker(&config).exists());
         Browser {
             inner: Arc::new(Inner {
                 bidi,
@@ -202,12 +229,47 @@ impl Browser {
     }
 
     pub async fn tabs(&self) -> Result<Vec<Tab>, BrowserError> {
-        if let Some(bidi) = &self.inner.bidi {
-            return bidi.tabs().await;
+        let tabs = if let Some(bidi) = &self.inner.bidi {
+            bidi.tabs().await?
+        } else {
+            let response =
+                http::request(self.inner.config.port, "GET", "/json/list", HTTP_TIMEOUT).await?;
+            targets::parse_tabs(&response.body)?
+        };
+        self.note_mcas(&tabs);
+        Ok(tabs)
+    }
+
+    /// Once Teams shows up behind the MCAS proxy, later launches and parking go there too.
+    /// The marker next to the mode file keeps that across app restarts.
+    fn note_mcas(&self, tabs: &[Tab]) {
+        if session::behind_mcas() || !targets::has_mcas_app_tab(tabs) {
+            return;
         }
-        let response =
-            http::request(self.inner.config.port, "GET", "/json/list", HTTP_TIMEOUT).await?;
-        targets::parse_tabs(&response.body)
+        log::info!("Teams runs behind the Defender for Cloud Apps proxy: using the proxied origin");
+        session::set_behind_mcas(true);
+        let marker = mcas_marker(&self.inner.config);
+        if let Err(error) = write_mcas_marker(&marker) {
+            log::warn!(
+                "could not remember the MCAS proxy in {}: {error}",
+                marker.display()
+            );
+        }
+    }
+
+    /// Teams signed in on its own host, so the MCAS proxy is not needed (anymore).
+    fn forget_mcas(&self) {
+        if !session::behind_mcas() {
+            return;
+        }
+        log::info!(
+            "Teams signed in without the Defender for Cloud Apps proxy: using the plain origin"
+        );
+        session::set_behind_mcas(false);
+        let marker = mcas_marker(&self.inner.config);
+        if let Err(error) = remove_mcas_marker(&marker) {
+            log::warn!("could not remove {}: {error}", marker.display());
+        }
     }
 
     pub async fn ensure_running(&self) -> Result<(), BrowserError> {
@@ -308,6 +370,16 @@ impl Browser {
         if tab.parked {
             return false;
         }
+        let ready = self.page_sign_in_ready(tab).await;
+        // only forget when no tab at all is proxied, else a plain tab next to a proxied one
+        // would flip the flag on every poll
+        if ready && !targets::has_mcas_app_tab(&tabs) {
+            self.forget_mcas();
+        }
+        ready
+    }
+
+    async fn page_sign_in_ready(&self, tab: &Tab) -> bool {
         let expression = crate::sign_in_ready::PAGE_EXPRESSION.as_str();
         if let Some(bidi) = &self.inner.bidi {
             let evaluate = tokio::time::timeout(
@@ -342,7 +414,10 @@ impl Browser {
         }
         self.inner.wanted.store(true, Ordering::SeqCst);
         self.stop_locked(false).await?;
-        self.launch_with_urls_locked(false, start_urls()).await
+        // the window starts on the plain host, behind MCAS the sign-in redirects to the proxy
+        // by itself. So a user who is not behind MCAS anymore gets the plain origin back.
+        self.launch_with_urls_locked(false, direct_start_urls())
+            .await
     }
 
     pub async fn headless(&self) -> Result<(), BrowserError> {
@@ -679,5 +754,19 @@ mod tests {
     #[test]
     fn only_teams_starts() {
         assert_eq!(start_urls(), ["https://teams.cloud.microsoft/"]);
+    }
+
+    #[test]
+    fn mcas_marker_sits_next_to_the_mode_file_and_comes_and_goes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mode_file = dir.path().join("rusty-teams-chrome.mode");
+        let marker = mode_file.with_extension("mcas");
+        assert!(marker.ends_with("rusty-teams-chrome.mcas"));
+        write_mcas_marker(&marker).unwrap();
+        assert!(marker.exists());
+        remove_mcas_marker(&marker).unwrap();
+        assert!(!marker.exists());
+        // removing twice is not an error
+        remove_mcas_marker(&marker).unwrap();
     }
 }

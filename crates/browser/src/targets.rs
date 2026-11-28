@@ -8,6 +8,22 @@ use crate::error::BrowserError;
 const LOGIN_HOSTS: [&str; 2] = ["login.microsoftonline.com", "login.live.com"];
 /// Outlook tabs earlier versions opened next to Teams; nothing uses them any more.
 const RETIRED_HOSTS: [&str; 2] = ["outlook.office.com", "outlook.cloud.microsoft"];
+/// The real app host, also when a MCAS session proxy sits in front of it
+/// (teams.cloud.microsoft.mcas.ms is teams.cloud.microsoft).
+fn unproxied_host(host: &str) -> &str {
+    host.strip_suffix(session::MCAS_SUFFIX).unwrap_or(host)
+}
+
+/// True when an app tab is served through the MCAS proxy.
+pub(crate) fn has_mcas_app_tab(tabs: &[Tab]) -> bool {
+    tabs.iter().any(|tab| {
+        tab.app.is_some()
+            && tab
+                .host
+                .as_deref()
+                .is_some_and(|host| unproxied_host(host) != host)
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -20,7 +36,14 @@ pub const APPS: [App; 1] = [App::Teams];
 impl App {
     pub fn start_url(self) -> &'static str {
         match self {
-            App::Teams => "https://teams.cloud.microsoft/",
+            App::Teams => session::App::Teams.start_url(),
+        }
+    }
+
+    /// The start URL on the app's own host, never through the MCAS proxy.
+    pub fn direct_start_url(self) -> &'static str {
+        match self {
+            App::Teams => session::App::Teams.direct_start_url(),
         }
     }
 
@@ -127,6 +150,7 @@ pub(crate) fn tab_from_url(id: String, url: &str) -> Tab {
     let secure = https_host(url);
     let app = secure
         .as_deref()
+        .map(unproxied_host)
         .and_then(|host| APPS.into_iter().find(|app| app.hosts().contains(&host)));
     let login = secure
         .as_deref()
@@ -255,6 +279,27 @@ mod tests {
             app_tab(&tabs, App::Teams).map(|tab| tab.id.as_str()),
             Some("T")
         );
+    }
+
+    #[test]
+    fn mcas_proxied_teams_host_is_teams() {
+        let list = r#"[
+          {"id":"M","type":"page","url":"https://teams.cloud.microsoft.mcas.ms/"},
+          {"id":"P","type":"page","url":"https://teams.cloud.microsoft.mcas.ms/robots.txt"},
+          {"id":"E","type":"page","url":"https://teams.cloud.microsoft.evil.example/"},
+          {"id":"N","type":"page","url":"https://evil.mcas.ms/"}
+        ]"#;
+        let tabs = parse_tabs(list.as_bytes()).unwrap();
+        assert_eq!(tabs[0].app, Some(App::Teams));
+        assert!(!tabs[0].parked);
+        assert_eq!(tabs[1].app, Some(App::Teams));
+        assert!(tabs[1].parked);
+        assert_eq!(tabs[2].app, None);
+        assert_eq!(tabs[3].app, None);
+        assert_eq!(login_state(&tabs), LoginState::NotRequired);
+        assert!(has_mcas_app_tab(&tabs[..1]));
+        assert!(!has_mcas_app_tab(&tabs[3..]));
+        assert!(!has_mcas_app_tab(&parse_tabs(LIST.as_bytes()).unwrap()));
     }
 
     fn page(id: &str, url: &str) -> Tab {

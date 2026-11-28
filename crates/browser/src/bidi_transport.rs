@@ -52,7 +52,7 @@ impl BidiTransport {
 }
 
 fn is_app_url(app: App, url: &str) -> bool {
-    app.origins().iter().any(|origin| url.starts_with(origin))
+    app.is_app_url(url)
 }
 
 fn no_browser(error: BrowserError) -> Error {
