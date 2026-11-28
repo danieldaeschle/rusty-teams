@@ -334,6 +334,60 @@ impl Session {
         .to_string()
     }
 
+    /// Runs one CDP method in the app tab, opening the tab when needed.
+    pub(crate) async fn cdp_in(
+        &self,
+        app: App,
+        method: &str,
+        params: Value,
+    ) -> Result<Option<Value>> {
+        let mut slot = self.tabs[&app].lock().await;
+        if slot.is_none() {
+            let Some((control, _)) = self.transport.open(app, false).await? else {
+                return Ok(None);
+            };
+            *slot = Some(control);
+        }
+        let control = slot.as_ref().expect("connection set above");
+        let outcome = control.call(method, params).await;
+        if outcome.is_err() {
+            *slot = None;
+        }
+        outcome.map(Some)
+    }
+
+    /// Whether [`Session::persist_msal_key`] can run on this transport.
+    pub fn can_persist_msal_key(&self) -> bool {
+        self.transport.supports_cdp()
+    }
+
+    /// Gives MSAL's session-cookie cache key an expiry so the next start can still read the token
+    /// cache. Works over CDP for WebView2 and for a managed Chrome session.
+    pub async fn persist_msal_key(&self) -> Result<bool> {
+        if !self.can_persist_msal_key() {
+            return Ok(false);
+        }
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let Some(cookies) = self
+            .cdp_in(App::Teams, "Storage.getCookies", json!({}))
+            .await?
+        else {
+            return Ok(false);
+        };
+        let Some(params) = crate::msal_key::persisted_key_cookies(&cookies, now_secs) else {
+            return Ok(false);
+        };
+        let Some(_) = self
+            .cdp_in(App::Teams, "Storage.setCookies", params)
+            .await?
+        else {
+            return Ok(false);
+        };
+        Ok(true)
+    }
+
     pub(crate) async fn evaluate_in(&self, app: App, expression: &str) -> Result<Option<Value>> {
         let mut slot = self.tabs[&app].lock().await;
         if slot.is_none() {

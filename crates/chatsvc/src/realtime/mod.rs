@@ -40,6 +40,8 @@ pub struct RealtimeConfig {
     pub ringable: bool,
     pub initially_active: bool,
     pub native: bool,
+    /// Wakes the native reconnect backoff early, e.g. from the banner's Retry action.
+    pub retry: Option<Arc<Notify>>,
 }
 
 /// Page globals of one Trouter client; a second client in the same tab needs its own names.
@@ -74,6 +76,7 @@ impl Default for RealtimeConfig {
             ringable: false,
             initially_active: false,
             native: std::env::var_os("TEAMS_PAGE_TROUTER").is_none(),
+            retry: None,
         }
     }
 }

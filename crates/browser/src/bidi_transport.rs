@@ -67,6 +67,10 @@ fn protocol(error: BrowserError) -> Error {
 }
 
 impl Transport for BidiTransport {
+    fn supports_cdp(&self) -> bool {
+        false
+    }
+
     fn check(&self) -> BoxFuture<'_, Result<()>> {
         Box::pin(async move { self.contexts().await.map(drop) })
     }
