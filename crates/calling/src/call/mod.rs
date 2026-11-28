@@ -439,6 +439,12 @@ impl CallEngine {
                 advance(&mut state, CallSignal::LocalLeave, &control);
                 None
             }
+            Err(error)
+                if accept_found_no_call(&error) && matches!(state, CallState::Connecting) =>
+            {
+                advance(&mut state, CallSignal::LocalLeave, &control);
+                None
+            }
             Err(error) => {
                 advance(&mut state, CallSignal::Error(error.to_string()), &control);
                 Some(error)
@@ -469,6 +475,18 @@ impl CallEngine {
             None => Ok(report),
         }
     }
+}
+
+/// Teams answers 404 when the caller already hung up. While we are still connecting
+/// that is a cancelled ring, not a failed call.
+pub(super) fn accept_found_no_call(error: &Error) -> bool {
+    let Error::Signaling(reason) = error else {
+        return false;
+    };
+    let reason = reason.to_ascii_lowercase();
+    reason.contains("post acceptance")
+        && reason.contains("http 404")
+        && reason.contains("does not exist")
 }
 
 async fn setup_step<T, E>(
@@ -3073,6 +3091,23 @@ fn far_future() -> Instant {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_missing_call_on_accept_while_connecting_is_a_cancel() {
+        let gone = Error::Signaling(
+            "POST acceptance answered HTTP 404 {\"Message\":\"The requested call does not exist.\"}"
+                .into(),
+        );
+        assert!(accept_found_no_call(&gone));
+        let other = Error::Signaling("POST acceptance answered HTTP 500 boom".into());
+        assert!(!accept_found_no_call(&other));
+        let roster = Error::Signaling(
+            "POST roster answered HTTP 404 {\"Message\":\"The requested call does not exist.\"}"
+                .into(),
+        );
+        assert!(!accept_found_no_call(&roster));
+        assert!(!accept_found_no_call(&Error::Cancelled));
+    }
+
     #[test]
     fn gathering_settles_shortly_after_a_udp_relay_or_when_complete() {
         assert!(!gathering_settled(false, None));
