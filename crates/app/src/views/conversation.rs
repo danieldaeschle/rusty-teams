@@ -1890,6 +1890,7 @@ impl ConversationView {
         self.rebuild_generation += 1;
         let generation = self.rebuild_generation;
         let store = self.app.read(cx).store.clone();
+        let date_style = app_base::format::current_date_style();
         cx.spawn(async move |this, cx| {
             let (plan, loaded) = cx
                 .background_spawn(async move {
@@ -1905,6 +1906,8 @@ impl ConversationView {
             };
             let (plan, loaded, context, built) = cx
                 .background_spawn(async move {
+                    // The regional format is per thread: without it the times fall back to 24 h.
+                    app_base::format::set_date_style(date_style);
                     let built = build_rows(&plan, &loaded, &context);
                     (plan, loaded, context, built)
                 })
