@@ -166,12 +166,15 @@ impl RenderEnv {
             let (view, key, handle) = (view.clone(), message.key.clone(), window.window_handle());
             boxed(move |cx| {
                 let (view, key) = (view.clone(), key.clone());
-                handle
-                    .update(cx, move |_, window, cx| {
-                        view.update(cx, |this, cx| this.retry(&key, window, cx))
-                            .ok();
-                    })
-                    .ok();
+                // The click runs inside this window's update, which `handle.update` cannot reenter.
+                cx.defer(move |cx| {
+                    handle
+                        .update(cx, move |_, window, cx| {
+                            view.update(cx, |this, cx| this.retry(&key, window, cx))
+                                .ok();
+                        })
+                        .ok();
+                });
             })
         });
         let scheduled = view.upgrade().and_then(|entity| {

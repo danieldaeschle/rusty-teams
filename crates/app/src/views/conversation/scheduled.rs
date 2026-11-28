@@ -435,29 +435,34 @@ impl ConversationView {
         cx: &App,
     ) -> Option<ScheduledRowActions> {
         let draft_id = draft_id_of(&row.key)?.to_owned();
+        // These links run inside this window's update, which `handle.update` cannot reenter: defer it.
         let handle = window.window_handle();
         let link = |run: fn(&mut Self, &str, &mut Window, &mut Context<Self>)| -> RowAction {
             let (view, draft_id) = (view.clone(), draft_id.clone());
             Some(Box::new(move |cx: &mut App| {
                 let (view, draft_id) = (view.clone(), draft_id.clone());
-                handle
-                    .update(cx, move |_, window, cx| {
-                        view.update(cx, |this, cx| run(this, &draft_id, window, cx))
-                            .ok();
-                    })
-                    .ok();
+                cx.defer(move |cx| {
+                    handle
+                        .update(cx, move |_, window, cx| {
+                            view.update(cx, |this, cx| run(this, &draft_id, window, cx))
+                                .ok();
+                        })
+                        .ok();
+                });
             }))
         };
         let retry: RowAction = {
             let view = view.clone();
             Some(Box::new(move |cx: &mut App| {
                 let view = view.clone();
-                handle
-                    .update(cx, move |_, window, cx| {
-                        view.update(cx, |this, cx| this.retry_scheduled(window, cx))
-                            .ok();
-                    })
-                    .ok();
+                cx.defer(move |cx| {
+                    handle
+                        .update(cx, move |_, window, cx| {
+                            view.update(cx, |this, cx| this.retry_scheduled(window, cx))
+                                .ok();
+                        })
+                        .ok();
+                });
             }))
         };
         let action = |run: fn(&mut Self, &str, &mut Window, &mut Context<Self>)| -> Action {
