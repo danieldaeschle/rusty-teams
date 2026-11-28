@@ -39,9 +39,20 @@ pub struct TokenBundle {
 }
 
 /// Runtime env wins; otherwise the value baked in at compile time (`option_env!`).
-/// Empty strings count as missing. Used by Connect and token refresh.
+/// Empty strings count as missing. Used when Settings has no saved pair.
 pub fn client_id_from_env() -> Option<GoogleOAuth> {
+    client_from_stored(None, None)
+}
+
+/// A saved id and secret win only together. Otherwise the same order as
+/// [`client_id_from_env`]: runtime env, then the compiled client.
+pub fn client_from_stored(
+    stored_id: Option<&str>,
+    stored_secret: Option<&str>,
+) -> Option<GoogleOAuth> {
     resolve_oauth(
+        stored_id,
+        stored_secret,
         std::env::var(GOOGLE_CLIENT_ID_ENV).ok().as_deref(),
         std::env::var(GOOGLE_CLIENT_SECRET_ENV).ok().as_deref(),
         option_env!("TEAMS_GOOGLE_CLIENT_ID"),
@@ -50,11 +61,21 @@ pub fn client_id_from_env() -> Option<GoogleOAuth> {
 }
 
 fn resolve_oauth(
+    stored_id: Option<&str>,
+    stored_secret: Option<&str>,
     runtime_id: Option<&str>,
     runtime_secret: Option<&str>,
     compile_id: Option<&str>,
     compile_secret: Option<&str>,
 ) -> Option<GoogleOAuth> {
+    if let (Some(client_id), Some(client_secret)) =
+        (first_non_empty(stored_id), first_non_empty(stored_secret))
+    {
+        return Some(GoogleOAuth {
+            client_id,
+            client_secret,
+        });
+    }
     let client_id = first_non_empty(runtime_id).or_else(|| first_non_empty(compile_id))?;
     let client_secret = first_non_empty(runtime_secret)
         .or_else(|| first_non_empty(compile_secret))
@@ -208,6 +229,8 @@ mod tests {
     #[test]
     fn resolve_prefers_runtime_over_compile() {
         let oauth = resolve_oauth(
+            None,
+            None,
             Some("runtime-id"),
             Some("runtime-secret"),
             Some("compile-id"),
@@ -220,22 +243,74 @@ mod tests {
 
     #[test]
     fn resolve_falls_back_to_compile_when_runtime_empty() {
-        let oauth =
-            resolve_oauth(Some("  "), None, Some("compile-id"), Some("compile-secret")).unwrap();
+        let oauth = resolve_oauth(
+            None,
+            None,
+            Some("  "),
+            None,
+            Some("compile-id"),
+            Some("compile-secret"),
+        )
+        .unwrap();
         assert_eq!(oauth.client_id, "compile-id");
         assert_eq!(oauth.client_secret, "compile-secret");
     }
 
     #[test]
     fn resolve_returns_none_when_both_missing() {
-        assert!(resolve_oauth(None, None, None, None).is_none());
-        assert!(resolve_oauth(Some(""), None, Some("  "), None).is_none());
+        assert!(resolve_oauth(None, None, None, None, None, None).is_none());
+        assert!(resolve_oauth(None, None, Some(""), None, Some("  "), None).is_none());
     }
 
     #[test]
     fn resolve_allows_missing_secret() {
-        let oauth = resolve_oauth(Some("cid"), None, None, None).unwrap();
+        let oauth = resolve_oauth(None, None, Some("cid"), None, None, None).unwrap();
         assert_eq!(oauth.client_id, "cid");
         assert!(oauth.client_secret.is_empty());
+    }
+
+    #[test]
+    fn stored_pair_wins_over_runtime_and_compile() {
+        let oauth = resolve_oauth(
+            Some(" stored-id "),
+            Some(" stored-secret "),
+            Some("runtime-id"),
+            Some("runtime-secret"),
+            Some("compile-id"),
+            Some("compile-secret"),
+        )
+        .unwrap();
+        assert_eq!(oauth.client_id, "stored-id");
+        assert_eq!(oauth.client_secret, "stored-secret");
+    }
+
+    #[test]
+    fn stored_id_without_secret_does_not_override() {
+        let oauth = resolve_oauth(
+            Some("stored-id"),
+            Some("  "),
+            Some("runtime-id"),
+            Some("runtime-secret"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(oauth.client_id, "runtime-id");
+        assert_eq!(oauth.client_secret, "runtime-secret");
+    }
+
+    #[test]
+    fn stored_secret_without_id_does_not_override() {
+        let oauth = resolve_oauth(
+            Some(""),
+            Some("stored-secret"),
+            None,
+            None,
+            Some("compile-id"),
+            Some("compile-secret"),
+        )
+        .unwrap();
+        assert_eq!(oauth.client_id, "compile-id");
+        assert_eq!(oauth.client_secret, "compile-secret");
     }
 }

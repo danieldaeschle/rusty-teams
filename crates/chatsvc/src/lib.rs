@@ -90,9 +90,9 @@ pub use forward::{ForwardResult, MAX_FORWARD_MESSAGES};
 pub use gifs::{Gif, Gifs};
 pub use google_calendar::{
     AuthPending, GoogleCalendar, GoogleEventDraft, GoogleOAuth, TokenBundle, allocate_redirect_uri,
-    client_id_from_env, exchange_code, google_event_body, google_rsvp_query, google_rsvp_status,
-    parse_calendar_list, parse_google_events, refresh_access_token, rrule_for_repeat,
-    wait_for_code,
+    client_from_stored, client_id_from_env, exchange_code, google_event_body, google_rsvp_query,
+    google_rsvp_status, parse_calendar_list, parse_google_events, refresh_access_token,
+    rrule_for_repeat, wait_for_code,
 };
 pub use ical::{
     CalDavEventDraft, build_vevent, exclude_occurrence_from_ics, expand_events, parse_calendar,

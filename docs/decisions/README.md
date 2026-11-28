@@ -39,5 +39,6 @@ Statuses: `proposed`, `accepted`, `superseded`.
 | [0021](0021-linux-packages.md) | Linux releases also ship an AppImage, a deb and an rpm |
 | [0022](0022-linux-parks-the-idle-teams-tab.md) | Linux parks the idle Teams tab in a Chromium browser |
 | [0023](0023-calendar-slot-selection-for-new-meetings.md) | Picking empty calendar slots for a new meeting |
+| [0024](0024-google-oauth-client-in-settings.md) | A saved Google OAuth client in Settings overrides the built-in client |
 
-Records `0001` to `0021` are the decisions already shipped. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.
+Records `0001` to `0021` are the decisions already shipped. `0024` is proposed. `0001` follows Daniel's call-window note in `GUARDRAILS.md`.

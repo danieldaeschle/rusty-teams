@@ -309,6 +309,7 @@ impl AppState {
                             account_id.ok_or_else(|| "Google account missing".to_owned())?;
                         let calendar = calendar_id.unwrap_or_else(|| "primary".to_owned());
                         let result = crate::google_calendar_sync::delete_google_event(
+                            &store,
                             &mut accounts,
                             &account,
                             &calendar,
@@ -554,6 +555,7 @@ impl AppState {
                             account_id.ok_or_else(|| "Google account missing".to_owned())?;
                         let calendar = calendar_id.unwrap_or_else(|| "primary".to_owned());
                         let result = crate::google_calendar_sync::respond_google_event(
+                            &store,
                             &mut accounts,
                             &account,
                             &calendar,

@@ -9,7 +9,8 @@ mod write;
 pub use loopback::{allocate_redirect_uri, wait_for_code};
 pub use merge::{merge_calendar_events, normalize_join_url};
 pub use oauth::{
-    AuthPending, GoogleOAuth, TokenBundle, client_id_from_env, exchange_code, refresh_access_token,
+    AuthPending, GoogleOAuth, TokenBundle, client_from_stored, client_id_from_env, exchange_code,
+    refresh_access_token,
 };
 pub use parse::{parse_calendar_list, parse_google_events};
 pub use write::{

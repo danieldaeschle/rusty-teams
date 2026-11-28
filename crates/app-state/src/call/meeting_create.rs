@@ -47,6 +47,7 @@ pub async fn create_across_targets(
     for target in targets {
         match write_target(
             launcher.as_ref(),
+            store.as_ref(),
             &mut accounts,
             &target,
             &event,
@@ -82,6 +83,7 @@ pub async fn create_across_targets(
 
 async fn write_target(
     launcher: &CallLauncher,
+    store: &Store,
     accounts: &mut CalendarAccounts,
     target: &CalendarRef,
     event: &NewEvent,
@@ -102,6 +104,7 @@ async fn write_target(
             let mut draft = GoogleEventDraft::from(event);
             draft.join_url = Some(join_url.to_owned());
             crate::google_calendar_sync::insert_google_event(
+                store,
                 accounts,
                 &target.account_id,
                 calendar_id,

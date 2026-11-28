@@ -32,6 +32,7 @@ pub fn render_view(app: &Entity<AppState>, cx: &App) -> Div {
 
 pub fn render_accounts(
     app: &Entity<AppState>,
+    google_client: Option<&Entity<super::google_client_form::GoogleClientForm>>,
     caldav: Option<&Entity<super::caldav_form::CalDavForm>>,
     ics: Option<&Entity<super::caldav_form::IcsForm>>,
     cx: &App,
@@ -40,8 +41,11 @@ pub fn render_accounts(
     let pending = app.read(cx).google_connect_pending().is_some();
     let mut body = v_flex()
         .w_full()
-        .child(caption(tr("settings.calendar.section_google")))
-        .child(connect_row(app, accounts.has_google(), pending));
+        .child(caption(tr("settings.calendar.section_google")));
+    if let Some(form) = google_client {
+        body = body.child(form.clone());
+    }
+    body = body.child(connect_row(app, accounts.has_google(), pending));
     for account in &accounts.google_accounts {
         body = body.child(account_block(app, account, &accounts));
     }

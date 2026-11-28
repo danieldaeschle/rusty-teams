@@ -8,8 +8,8 @@ use store::{
 use uuid::Uuid;
 
 use chatsvc::{
-    GoogleCalendar, GoogleOAuth, allocate_redirect_uri, client_id_from_env, exchange_code,
-    parse_calendar_list, wait_for_code,
+    GoogleCalendar, GoogleOAuth, allocate_redirect_uri, exchange_code, parse_calendar_list,
+    wait_for_code,
 };
 
 use crate::app_state::AppState;
@@ -264,17 +264,16 @@ impl AppState {
             self.reopen_google_connect(cx);
             return;
         }
-        let Some(oauth) = client_id_from_env() else {
-            self.raise_notice(tr("settings.calendar.not_in_build"), None, cx);
-            return;
-        };
         let store = self.store.clone();
         self.google_connect_generation = self.google_connect_generation.wrapping_add(1);
         let generation = self.google_connect_generation;
         cx.spawn(async move |this, cx| {
             let prepared = runtime::spawn({
-                let oauth = oauth.clone();
+                let store = store.clone();
                 async move {
+                    let oauth = crate::google_oauth_client::resolve(&store)
+                        .await
+                        .ok_or_else(|| tr("settings.calendar.not_in_build"))?;
                     let (redirect_uri, listener) = allocate_redirect_uri()
                         .await
                         .map_err(|error| error.to_string())?;

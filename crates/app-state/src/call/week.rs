@@ -265,6 +265,7 @@ impl AppState {
             let mut google_count = None;
             if accounts.has_google() {
                 match crate::google_calendar_sync::fetch_google_events(
+                    &store,
                     &mut fetched_accounts,
                     from,
                     to,

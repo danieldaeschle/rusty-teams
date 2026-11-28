@@ -1,18 +1,19 @@
 use chrono::{DateTime, Utc};
-use store::{CalendarAccounts, GoogleTokenSet};
+use store::{CalendarAccounts, GoogleTokenSet, Store};
 
 use chatsvc::{
-    CalendarEvent, GoogleCalendar, GoogleEventDraft, GoogleOAuth, Reply, client_id_from_env,
-    google_rsvp_status, refresh_access_token,
+    CalendarEvent, GoogleCalendar, GoogleEventDraft, GoogleOAuth, Reply, google_rsvp_status,
+    refresh_access_token,
 };
 
 /// Refresh tokens when needed and load events from every selected Google calendar.
 pub async fn fetch_google_events(
+    store: &Store,
     accounts: &mut CalendarAccounts,
     start: DateTime<Utc>,
     end: DateTime<Utc>,
 ) -> Result<(Vec<CalendarEvent>, Vec<String>), String> {
-    let Some(oauth) = client_id_from_env() else {
+    let Some(oauth) = crate::google_oauth_client::resolve(store).await else {
         // Connected accounts but no client id compiled in: say so instead of an empty week.
         if accounts.has_google() {
             return Err(missing_client_id());
@@ -86,12 +87,15 @@ fn remember_account_error(errors: &mut Vec<String>, error: String) {
 }
 
 pub async fn insert_google_event(
+    store: &Store,
     accounts: &mut CalendarAccounts,
     account_id: &str,
     calendar_id: &str,
     draft: &GoogleEventDraft,
 ) -> Result<(), String> {
-    let oauth = client_id_from_env().ok_or_else(|| missing_client_id())?;
+    let oauth = crate::google_oauth_client::resolve(store)
+        .await
+        .ok_or_else(|| missing_client_id())?;
     let index = accounts
         .google_accounts
         .iter()
@@ -109,6 +113,7 @@ pub async fn insert_google_event(
 }
 
 pub async fn respond_google_event(
+    store: &Store,
     accounts: &mut CalendarAccounts,
     account_id: &str,
     calendar_id: &str,
@@ -116,7 +121,9 @@ pub async fn respond_google_event(
     reply: Reply,
     send_updates: bool,
 ) -> Result<(), String> {
-    let oauth = client_id_from_env().ok_or_else(|| missing_client_id())?;
+    let oauth = crate::google_oauth_client::resolve(store)
+        .await
+        .ok_or_else(|| missing_client_id())?;
     let index = accounts
         .google_accounts
         .iter()
@@ -138,13 +145,16 @@ pub async fn respond_google_event(
 }
 
 pub async fn delete_google_event(
+    store: &Store,
     accounts: &mut CalendarAccounts,
     account_id: &str,
     calendar_id: &str,
     event_id: &str,
     send_updates: bool,
 ) -> Result<(), String> {
-    let oauth = client_id_from_env().ok_or_else(|| missing_client_id())?;
+    let oauth = crate::google_oauth_client::resolve(store)
+        .await
+        .ok_or_else(|| missing_client_id())?;
     let index = accounts
         .google_accounts
         .iter()

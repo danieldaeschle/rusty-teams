@@ -36,8 +36,11 @@ const CALENDAR_VIEW_TERMS: [&str; 5] = [
     "settings.calendar.weekend",
 ];
 
-const CALENDAR_ACCOUNTS_TERMS: [&str; 9] = [
+const CALENDAR_ACCOUNTS_TERMS: [&str; 12] = [
     "settings.calendar.google_title",
+    "settings.calendar.google_client_id",
+    "settings.calendar.google_client_secret",
+    "settings.calendar.google_client_guide_1",
     "settings.calendar.connect_button",
     "settings.calendar.caldav_title",
     "settings.calendar.caldav_connect",
@@ -454,6 +457,8 @@ mod tests {
             include_str!("calendar.rs"),
             "\n",
             include_str!("caldav_form.rs"),
+            "\n",
+            include_str!("google_client_form.rs"),
         );
         let pages = [
             (SettingsSection::General, include_str!("general.rs")),

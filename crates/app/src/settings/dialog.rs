@@ -8,6 +8,7 @@ use gpui_kit::*;
 
 use super::caldav_form::{CalDavForm, IcsForm};
 use super::devices::DevicesView;
+use super::google_client_form::GoogleClientForm;
 use super::help::HelpView;
 use super::mcp::McpView;
 use super::nav::{NavLayout, NavSearch, first_match, label, matches, render_nav};
@@ -69,6 +70,7 @@ pub struct SettingsDialog {
     help: Option<Entity<HelpView>>,
     mcp: Option<Entity<McpView>>,
     agents: Option<Entity<AgentsSettings>>,
+    google_client: Option<Entity<GoogleClientForm>>,
     caldav: Option<Entity<CalDavForm>>,
     ics: Option<Entity<IcsForm>>,
     body_scroll: ScrollHandle,
@@ -111,6 +113,7 @@ impl SettingsDialog {
             help: None,
             mcp: None,
             agents: None,
+            google_client: None,
             caldav: None,
             ics: None,
             body_scroll: ScrollHandle::new(),
@@ -158,6 +161,10 @@ impl SettingsDialog {
                 .map(|runs| cx.new(|cx| AgentsSettings::new(runs, cx)));
         }
         if section == SettingsSection::CalendarAccounts {
+            if self.google_client.is_none() {
+                let app = self.app.clone();
+                self.google_client = Some(cx.new(|cx| GoogleClientForm::new(app, window, cx)));
+            }
             if self.caldav.is_none() {
                 let app = self.app.clone();
                 self.caldav = Some(cx.new(|cx| CalDavForm::new(app, window, cx)));
@@ -219,10 +226,14 @@ impl SettingsDialog {
             SettingsSection::Chats => chats::render(&self.app, cx).into_any_element(),
             SettingsSection::Calls => calls::render(&self.center, cx).into_any_element(),
             SettingsSection::Calendar => calendar::render_view(&self.app, cx).into_any_element(),
-            SettingsSection::CalendarAccounts => {
-                calendar::render_accounts(&self.app, self.caldav.as_ref(), self.ics.as_ref(), cx)
-                    .into_any_element()
-            }
+            SettingsSection::CalendarAccounts => calendar::render_accounts(
+                &self.app,
+                self.google_client.as_ref(),
+                self.caldav.as_ref(),
+                self.ics.as_ref(),
+                cx,
+            )
+            .into_any_element(),
             SettingsSection::Devices => self
                 .devices
                 .clone()

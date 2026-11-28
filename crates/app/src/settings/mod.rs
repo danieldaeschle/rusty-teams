@@ -8,6 +8,7 @@ mod chats;
 mod devices;
 mod dialog;
 mod general;
+mod google_client_form;
 mod help;
 mod mcp;
 mod nav;
