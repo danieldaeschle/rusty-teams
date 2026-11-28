@@ -69,7 +69,8 @@ pub fn set_date_locale(locale: Option<&str>) {
     set_date_style(locale.map(date_style));
 }
 
-fn current_date_style() -> Option<DateStyle> {
+/// The style set on this thread; work moved to another thread sets it there with [`set_date_style`].
+pub fn current_date_style() -> Option<DateStyle> {
     DATE_STYLE.with(Cell::get)
 }
 
