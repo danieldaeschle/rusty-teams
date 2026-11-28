@@ -16,6 +16,7 @@ Run on a real Mac (`.app` from `scripts/build-macos.sh` or a release zip). Unit 
 3. Pick a display or window: share banner shows; stop share leaves the call up.
 4. Cancel the picker: no share, call stays connected, no error toast.
 5. Prefer a second person for 1:1 ring / accept when available (ROADMAP still Partial without that).
+6. Camera on, no blur, standout, auto framing, brightness, or soft focus, and no share, for one minute. The call report (`host load`, every two seconds) names the threads that used CPU, says those effects are off, and states thermal state `nominal`, `fair`, `serious`, or `critical`. The next capture change follows the hottest thread in that report. This minute is the gate; it is not a substitute for guessing a GPU path.
 
 ## Desktop integration
 
