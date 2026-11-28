@@ -141,7 +141,7 @@ impl Inline {
     pub fn with_trailing_room(&self, width_in_spaces: usize) -> Inline {
         let mut padded = self.clone();
         padded.push(
-            &"\u{2007}".repeat(width_in_spaces),
+            &super::selectable::TIME_ROOM.to_string().repeat(width_in_spaces),
             StyleFlags::default(),
             None,
         );

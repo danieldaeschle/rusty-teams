@@ -87,7 +87,8 @@ const IMPORTANCE_LABEL_SIZE: f32 = 12.;
 const IMPORTANCE_LINE_HEIGHT: f32 = 16.;
 const COMPACT_IMPORTANCE_LINE_HEIGHT: f32 = 14.;
 pub(super) const BUBBLE_PADDING_X: f32 = 12.;
-const FIGURE_SPACE_WIDTH: f32 = 7.4;
+/// Advance of the no-break space that reserves the time's room: 489/2000 em in Google Sans Flex Regular at `BODY_SIZE`.
+const TIME_ROOM_WIDTH: f32 = 3.3;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const RECEIPT_FADE_PERIOD: Duration = Duration::from_millis(600);
 pub const JUMP_HIGHLIGHT_PERIOD: Duration = Duration::from_millis(2400);
@@ -643,7 +644,7 @@ fn meta_room(row: &MessageRow, own: bool, saved: bool) -> usize {
     if own {
         width += META_CHECK_SIZE + 4.;
     }
-    (width / FIGURE_SPACE_WIDTH).ceil() as usize
+    (width / TIME_ROOM_WIDTH).ceil() as usize
 }
 
 fn with_meta_room(blocks: &[Block], room: usize) -> Option<Vec<Block>> {
