@@ -91,6 +91,7 @@ impl AppState {
                             .post_follows
                             .states
                             .insert(post_key(&channel, &root), *follow_state);
+                        cx.emit(crate::app_state::AppEvent::Directory);
                         cx.notify();
                     }
                 }
@@ -124,6 +125,7 @@ impl AppState {
             PostFollowState::ExplicitUnfollow
         };
         self.post_follows.states.insert(key.clone(), next);
+        cx.emit(crate::app_state::AppEvent::Directory);
         cx.notify();
         let Some(engine) = engine_or_demo else {
             self.raise_notice(follow_notice(followed).to_owned(), None, cx);
@@ -145,6 +147,7 @@ impl AppState {
                     Some(previous) => state.post_follows.states.insert(key, previous),
                     None => state.post_follows.states.remove(&key),
                 };
+                cx.emit(crate::app_state::AppEvent::Directory);
                 cx.notify();
             },
             Some(follow_notice(followed)),

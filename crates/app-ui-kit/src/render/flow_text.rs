@@ -1,4 +1,6 @@
 use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -285,11 +287,13 @@ fn compute_layout(
 ) -> FlowLayout {
     let mut measure = |range: &Range<usize>, scale: f32| {
         let runs = text_runs(&typography.style, segments, range);
-        let line = window.text_system().shape_line(
-            SharedString::from(text[range.clone()].to_owned()),
+        let line = window.text_system().shape_line_by_hash(
+            text_hash(&text[range.clone()]),
+            range.end - range.start,
             typography.font_size * scale,
             &runs,
             None,
+            || SharedString::from(text[range.clone()].to_owned()),
         );
         let height = typography.line_height * scale;
         Measured {
@@ -299,9 +303,14 @@ fn compute_layout(
     };
     let strut = {
         let runs = vec![typography.style.clone().to_run(1)];
-        let line = window
-            .text_system()
-            .shape_line(" ".into(), typography.font_size, &runs, None);
+        let line = window.text_system().shape_line_by_hash(
+            text_hash(" "),
+            1,
+            typography.font_size,
+            &runs,
+            None,
+            || " ".into(),
+        );
         Measured {
             width: Pixels::ZERO,
             baseline: (typography.line_height - line.ascent - line.descent) / 2. + line.ascent,
@@ -321,6 +330,74 @@ fn compute_layout(
         typography.font_size,
         wrap_width,
     )
+}
+
+const LAYOUT_CACHE: usize = 64;
+
+thread_local! {
+    static LAYOUTS: RefCell<(HashMap<u64, Rc<FlowLayout>>, VecDeque<u64>)> =
+        RefCell::new((HashMap::new(), VecDeque::new()));
+}
+
+fn text_hash(text: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn pixel_bits(pixels: Pixels) -> u32 {
+    f32::from(pixels).to_bits()
+}
+
+fn layout_key(
+    text: &str,
+    segments: &[FlowSegment],
+    typography: &Typography,
+    wrap_width: Option<Pixels>,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    wrap_width.map(pixel_bits).hash(&mut hasher);
+    pixel_bits(typography.font_size).hash(&mut hasher);
+    pixel_bits(typography.line_height).hash(&mut hasher);
+    pixel_bits(typography.rem_size).hash(&mut hasher);
+    typography.style.font_weight.0.to_bits().hash(&mut hasher);
+    format!("{:?}", typography.style.font_family).hash(&mut hasher);
+    for segment in segments {
+        segment.range.hash(&mut hasher);
+        segment.scale.to_bits().hash(&mut hasher);
+        segment.raise.to_bits().hash(&mut hasher);
+        segment.family.hash(&mut hasher);
+        format!("{:?}", segment.highlight).hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn cached_layout(
+    text: &str,
+    segments: &[FlowSegment],
+    typography: &Typography,
+    wrap_width: Option<Pixels>,
+    window: &mut Window,
+) -> Rc<FlowLayout> {
+    let key = layout_key(text, segments, typography, wrap_width);
+    if let Some(hit) = LAYOUTS.with(|cache| cache.borrow().0.get(&key).cloned()) {
+        return hit;
+    }
+    let layout = Rc::new(compute_layout(
+        text, segments, typography, wrap_width, window,
+    ));
+    LAYOUTS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.0.insert(key, layout.clone());
+        cache.1.push_back(key);
+        while cache.1.len() > LAYOUT_CACHE {
+            if let Some(old) = cache.1.pop_front() {
+                cache.0.remove(&old);
+            }
+        }
+    });
+    layout
 }
 
 pub struct FlowText {
@@ -540,9 +617,9 @@ impl Element for FlowText {
                     AvailableSpace::Definite(width) => Some(width),
                     _ => None,
                 });
-                let layout = compute_layout(&text, &segments, &typography, wrap_width, window);
+                let layout = cached_layout(&text, &segments, &typography, wrap_width, window);
                 let size = layout.size;
-                *measured.borrow_mut() = Some(Rc::new(layout));
+                *measured.borrow_mut() = Some(layout);
                 size
             }
         });
@@ -575,13 +652,13 @@ impl Element for FlowText {
             {
                 layout
             }
-            _ => Rc::new(compute_layout(
+            _ => cached_layout(
                 &self.text,
                 &self.segments,
                 &typography,
                 Some(bounds.size.width),
                 window,
-            )),
+            ),
         };
         let mut fragments = Vec::with_capacity(layout.fragments.len());
         for fragment in &layout.fragments {

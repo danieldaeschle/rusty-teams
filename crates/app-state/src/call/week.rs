@@ -365,9 +365,13 @@ impl AppState {
                 let previous = std::mem::take(&mut state.calendar_week.events);
                 let mut events = keep_failed_sources(&previous, events, &failures);
                 retain_peek_details(&previous, &mut events);
+                let changed = events != previous || state.calendar_week.failures != failures;
                 state.calendar_week.events = events;
                 state.calendar_week.failures = failures;
-                cx.notify();
+                if changed {
+                    cx.emit(crate::app_state::AppEvent::CallHistory);
+                    cx.notify();
+                }
             })
             .ok();
         })

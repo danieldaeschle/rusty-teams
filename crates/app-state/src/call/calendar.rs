@@ -20,6 +20,9 @@ impl AppState {
         // Agenda / reminders poll — must not replace calendar_week.events.
         // That window is only ~today+7d; overwriting wiped earlier days in the
         // visible week/month and made entries "vanish" after delete or poll.
+        if self.calendar_events == events {
+            return;
+        }
         self.calendar_events = events;
         self.calls_list.invalidate();
         cx.emit(AppEvent::CallHistory);

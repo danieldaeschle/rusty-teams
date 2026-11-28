@@ -8,7 +8,7 @@ use super::call_end_view::render_call_end;
 use super::call_pop_out::zoom_listener;
 use super::call_stage::render_stage_overlay;
 use super::call_view::render_call_view;
-use super::conversation::ConversationView;
+use super::conversation::{ConversationView, hosted_conversation};
 use super::prejoin_view::PrejoinView;
 use super::shortcuts::{
     HangUpCall, OpenLobbyList, PushToTalk, ToggleCallCamera, ToggleCallFullscreen, ToggleCallHand,
@@ -220,7 +220,10 @@ impl Render for CallWindowView {
         window.set_window_title(&title);
         let window_width = f32::from(window.viewport_size().width);
         let stage_width = window_width - 2. * ISLAND_GAP;
-        let chat_panel = self.call_chat.as_ref().map(|(_, view)| view.clone().into());
+        let chat_panel = self
+            .call_chat
+            .as_ref()
+            .map(|(_, view)| hosted_conversation(view.clone(), cx).into_any_element());
         let stage = render_call_view(&self.app, state, chat_panel, fullscreen, stage_width)
             .or_else(|| render_call_end(&self.app, state))
             .or_else(|| {

@@ -4,7 +4,7 @@ use app_ui_kit::layout::ISLAND_GAP;
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
 
-use super::conversation::ConversationView;
+use super::conversation::{ConversationView, hosted_conversation};
 use super::shell::AppShell;
 use crate::app_state::{AppState, Selection, selection_title};
 use crate::theme;
@@ -45,13 +45,13 @@ impl ChatPopOutView {
 }
 
 impl Render for ChatPopOutView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .id("chat-pop-out")
             .size_full()
             .p(px(ISLAND_GAP))
             .bg(theme::background())
-            .child(self.conversation.clone())
+            .child(hosted_conversation(self.conversation.clone(), cx))
     }
 }
 

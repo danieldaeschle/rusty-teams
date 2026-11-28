@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1215,7 +1218,43 @@ fn rules_for(language: &str) -> Option<Rules> {
     Some(Rules::Code(grammar))
 }
 
+const HIGHLIGHT_CACHE: usize = 64;
+
+thread_local! {
+    static HIGHLIGHTS: RefCell<(
+        HashMap<(u64, usize, u64), Option<Vec<(Range<usize>, Token)>>>,
+        VecDeque<(u64, usize, u64)>,
+    )> = RefCell::new((HashMap::new(), VecDeque::new()));
+}
+
+fn highlight_key(language: &str, code: &str) -> (u64, usize, u64) {
+    let mut language_hash = std::collections::hash_map::DefaultHasher::new();
+    language.hash(&mut language_hash);
+    let mut code_hash = std::collections::hash_map::DefaultHasher::new();
+    code.hash(&mut code_hash);
+    (language_hash.finish(), code.len(), code_hash.finish())
+}
+
 pub fn highlight(code: &str, language: &str) -> Option<Vec<(Range<usize>, Token)>> {
+    let key = highlight_key(language, code);
+    if let Some(hit) = HIGHLIGHTS.with(|cache| cache.borrow().0.get(&key).cloned()) {
+        return hit;
+    }
+    let value = highlight_uncached(code, language);
+    HIGHLIGHTS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.0.insert(key, value.clone());
+        cache.1.push_back(key);
+        while cache.1.len() > HIGHLIGHT_CACHE {
+            if let Some(old) = cache.1.pop_front() {
+                cache.0.remove(&old);
+            }
+        }
+    });
+    value
+}
+
+fn highlight_uncached(code: &str, language: &str) -> Option<Vec<(Range<usize>, Token)>> {
     Some(match rules_for(language)? {
         Rules::Code(grammar) => highlight_code(code, grammar),
         Rules::Markup => highlight_markup(code),

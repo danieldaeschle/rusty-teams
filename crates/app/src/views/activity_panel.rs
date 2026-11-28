@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::rc::Rc;
@@ -20,7 +21,7 @@ use crate::agent_api::{
     self,
     pending::{PendingKind, PendingProposal, conversation_label as proposal_conversation_label},
 };
-use crate::app_state::{AppState, chat_title};
+use crate::app_state::{AppEvent, AppState, chat_title};
 use crate::chat_filter::{FEWER_FILTERS, MORE_FILTERS};
 use crate::data::is_one_on_one;
 use crate::format;
@@ -67,6 +68,18 @@ pub struct ActivityPanel {
 
 impl EventEmitter<ActivityPanelEvent> for ActivityPanel {}
 
+fn activity_event(event: &AppEvent) -> bool {
+    matches!(
+        event,
+        AppEvent::Activity
+            | AppEvent::Sidebar
+            | AppEvent::Directory
+            | AppEvent::Messages(_)
+            | AppEvent::Saved
+            | AppEvent::Selection
+    )
+}
+
 impl ActivityPanel {
     pub fn activity(&self) -> Entity<ActivityCenter> {
         self.activity.clone()
@@ -78,7 +91,11 @@ impl ActivityPanel {
         cx: &mut Context<Self>,
     ) -> Self {
         let observations = [
-            cx.observe(&app, |_, _, cx| cx.notify()),
+            cx.subscribe(&app, |_, _, event: &AppEvent, cx| {
+                if activity_event(event) {
+                    cx.notify();
+                }
+            }),
             cx.observe(&activity, |_, _, cx| cx.notify()),
         ];
         let filter = app
@@ -749,13 +766,39 @@ fn headline_wraps(headline: String, text_width: f32, window: &mut Window) -> boo
     if text_width <= 0. {
         return false;
     }
+    let key = (text_hash(&headline), text_width.to_bits());
+    if let Some(cached) = HEADLINE_WRAPS.with(|cache| cache.borrow().get(&key).copied()) {
+        return cached;
+    }
     let mut run = window.text_style().to_run(headline.len());
     run.font.weight = FontWeight::SEMIBOLD;
+    let text = headline.clone();
     let width = window
         .text_system()
-        .shape_line(headline.into(), px(13.), &[run], None)
+        .shape_line_by_hash(text_hash(&text), text.len(), px(13.), &[run], None, || {
+            text.into()
+        })
         .width;
-    f32::from(width) > text_width
+    let wraps = f32::from(width) > text_width;
+    HEADLINE_WRAPS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() > 256 {
+            cache.clear();
+        }
+        cache.insert(key, wraps);
+    });
+    wraps
+}
+
+fn text_hash(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+thread_local! {
+    static HEADLINE_WRAPS: RefCell<HashMap<(u64, u32), bool>> = RefCell::new(HashMap::new());
 }
 
 fn location_line(entry: &Entry, sidebar: &Sidebar) -> Option<String> {

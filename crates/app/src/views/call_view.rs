@@ -1349,7 +1349,7 @@ fn folded_controls(state: &AppState, call: &ActiveCall, fullscreen: bool) -> Fol
 pub fn render_call_view(
     app: &Entity<AppState>,
     state: &AppState,
-    chat: Option<AnyView>,
+    chat: Option<AnyElement>,
     fullscreen: bool,
     island_width: f32,
 ) -> Option<AnyElement> {
@@ -1563,7 +1563,7 @@ fn fullscreen_chrome(id: &'static str, app: &Entity<AppState>, content: Div) -> 
         .child(content)
 }
 
-fn chat_panel(app: &Entity<AppState>, chat: AnyView) -> AnyElement {
+fn chat_panel(app: &Entity<AppState>, chat: impl IntoElement) -> AnyElement {
     let app = app.clone();
     side_panel(
         "call-chat-panel",

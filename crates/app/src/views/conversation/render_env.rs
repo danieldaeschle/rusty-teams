@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use gpui_kit::*;
@@ -218,7 +218,7 @@ impl RenderEnv {
             .filter(|_| actionable)
             .map(|entity| {
                 let this = entity.read(cx);
-                let mine = message
+                let mine: HashSet<String> = message
                     .reactions
                     .iter()
                     .filter(|chip| chip.mine)
@@ -234,13 +234,21 @@ impl RenderEnv {
                                 .as_ref()
                                 .map(|refresh| (index, refresh.action.clone()))
                         });
-                let menu = this.message_menu(message, mine, refresh, view.clone(), cx);
-                let react = menu.react.clone();
                 let visible = this.toolbar_visible(&message.key, cx);
+                let menu = visible
+                    .then(|| this.message_menu(message, mine.clone(), refresh, view.clone(), cx));
+                let react = menu
+                    .as_ref()
+                    .map(|menu| menu.react.clone())
+                    .unwrap_or_else(|| this.reaction_handler(&message.key, view.clone()));
                 let controls = (!message.reactions.is_empty())
                     .then(|| this.reaction_controls(&message.key, view.clone()));
-                let adder = (!message.reactions.is_empty()).then(|| menu.reaction_adder());
-                (visible.then_some(menu), Some(react), controls, adder)
+                let adder = (!message.reactions.is_empty()).then(|| {
+                    menu.as_ref()
+                        .map(|menu| menu.reaction_adder())
+                        .unwrap_or_else(|| this.reaction_adder(&message.key, mine, view.clone()))
+                });
+                (menu, Some(react), controls, adder)
             })
             .unwrap_or((None, None, None, None));
         let right_click_opens_actions = self.app.read(cx).actions_on_right_click;
