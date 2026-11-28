@@ -13,7 +13,7 @@ use super::call_pop_out::zoom_listener;
 use super::calls_page::CallsPage;
 use super::chat_pop_out;
 use super::connection_banner::render_connection_banner;
-use super::conversation::ConversationView;
+use super::conversation::{ConversationView, hosted_conversation};
 use super::dialog_overlay::render_task_dialog;
 use super::forward_dialog::{ForwardDialog, ForwardDialogEvent};
 use super::image_viewer::{ImageViewer, ImageViewerEvent};
@@ -194,6 +194,8 @@ pub struct AppShell {
     quick_pane: Entity<QuickViewPane>,
     manage_team_page: Entity<ManageTeamPage>,
     calls_page: Entity<CallsPage>,
+    calendar_shown: bool,
+    calls_shown: bool,
     shown_quick_view: Option<QuickView>,
     conversation: Entity<ConversationView>,
     switcher: Option<Entity<Switcher>>,
@@ -221,6 +223,29 @@ pub struct AppShell {
     _escape_observation: Subscription,
     _activation_observation: Subscription,
     _appearance_observation: Subscription,
+}
+
+fn shell_event(event: &AppEvent) -> bool {
+    matches!(
+        event,
+        AppEvent::Status
+            | AppEvent::Sidebar
+            | AppEvent::Selection
+            | AppEvent::Directory
+            | AppEvent::TaskDialog
+            | AppEvent::Forward
+            | AppEvent::ImageViewer
+            | AppEvent::StatusMessage
+            | AppEvent::CalendarEventPeek
+            | AppEvent::Settings(_)
+            | AppEvent::Profile
+            | AppEvent::Ring
+            | AppEvent::MissedCall(_)
+            | AppEvent::MeetingReminder
+            | AppEvent::LiveMeeting
+            | AppEvent::OrgMessage(_)
+            | AppEvent::CallHistory
+    )
 }
 
 impl AppShell {
@@ -392,7 +417,9 @@ impl AppShell {
                 if matches!(event, AppEvent::Profile) {
                     this.open_profile_card(window, cx);
                 }
-                cx.notify();
+                if shell_event(event) {
+                    cx.notify();
+                }
             });
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
@@ -451,6 +478,8 @@ impl AppShell {
             quick_pane,
             manage_team_page,
             calls_page,
+            calendar_shown: false,
+            calls_shown: false,
             shown_quick_view: None,
             conversation,
             switcher: None,
@@ -560,6 +589,11 @@ impl AppShell {
             let update_exe = paths.update_exe.clone();
             cx.background_spawn(async move { updater::prescan(&update_exe) })
                 .detach();
+            cx.notify();
+            return;
+        }
+        if self.update != UpdateStatus::Ready {
+            return;
         }
         let conversation = self.conversation.read(cx);
         let idle = updater::is_idle(IdleInputs {
@@ -572,7 +606,19 @@ impl AppShell {
         if idle && cfg!(not(target_os = "linux")) {
             self.restart_into_update(cx);
         }
-        cx.notify();
+    }
+
+    fn sync_shown(&mut self, calendar_open: bool, calls_open: bool, cx: &mut Context<Self>) {
+        if self.calendar_shown != calendar_open {
+            self.calendar_shown = calendar_open;
+            self.calendar
+                .update(cx, |calendar, cx| calendar.set_shown(calendar_open, cx));
+        }
+        if self.calls_shown != calls_open {
+            self.calls_shown = calls_open;
+            self.calls_page
+                .update(cx, |page, cx| page.set_shown(calls_open, cx));
+        }
     }
 
     fn restart_into_update(&mut self, cx: &mut Context<Self>) {
@@ -1006,6 +1052,7 @@ impl AppShell {
         quick_view_open: bool,
         calls_open: bool,
         manage_team_open: bool,
+        cx: &App,
     ) -> Div {
         h_flex()
             .debug_selector(|| "shell/islands".into())
@@ -1049,11 +1096,7 @@ impl AppShell {
                     .clone()
                     .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
                     .into_any_element(),
-                _ => self
-                    .conversation
-                    .clone()
-                    .cached(StyleRefinement::default().flex_1().min_w_0().h_full())
-                    .into_any_element(),
+                _ => hosted_conversation(self.conversation.clone(), cx).into_any_element(),
             })
     }
 }
@@ -1107,12 +1150,13 @@ impl Render for AppShell {
         let chats_tab = self.sidebar.read(cx).tab() == SidebarTab::Chats;
         let calls_tab = self.sidebar.read(cx).tab() == SidebarTab::Calls;
         let splash = self.render_splash(cx);
-        let state = self.state.read(cx);
         let calendar_open = calendar_tab;
-        let quick_view_open = chats_tab && state.quick_view.is_some();
-        let manage_team_open = !calendar_tab && !calls_tab && state.manage_team.is_some();
         let calls_open = calls_tab;
         let show_sidebar = !calendar_open && !calls_open;
+        self.sync_shown(calendar_open, calls_open, cx);
+        let state = self.state.read(cx);
+        let quick_view_open = chats_tab && state.quick_view.is_some();
+        let manage_team_open = !calendar_tab && !calls_tab && state.manage_team.is_some();
         let banner = state
             .connection_banner_text()
             .filter(|_| !self.splash.is_up())
@@ -1368,6 +1412,7 @@ impl Render for AppShell {
                             quick_view_open,
                             calls_open,
                             manage_team_open,
+                            cx,
                         ),
                         &self.splash,
                         cx,

@@ -20,7 +20,7 @@ use super::meeting_proposal_card::meeting_proposal_cards;
 use super::new_meeting_dialog::{open_new_meeting, open_new_meeting_at};
 use super::rsvp_menu::rsvp_menu;
 use super::scroll_edge::scroll_offset;
-use crate::app_state::AppState;
+use crate::app_state::{AppEvent, AppState};
 use crate::call::calendar_now::{
     DEFAULT_GRID_VIEWPORT, FollowNow, MANUAL_SCROLL_EPSILON, NOW_BIAS_FRACTION, hour_height,
     now_scroll_offset_y, offset_differs, shows_hour_grid, work_start_scroll_offset_y,
@@ -96,6 +96,7 @@ pub struct CalendarView {
     last_programmatic_offset: f32,
     skip_manual_check: bool,
     clock_running: bool,
+    shown: bool,
     /// Row height of one hour and minor lines per hour, from the time scale.
     hour_height: f32,
     steps_per_hour: usize,
@@ -108,9 +109,25 @@ pub struct CalendarView {
     _agent_observation: Option<Subscription>,
 }
 
+fn calendar_event(event: &AppEvent) -> bool {
+    matches!(
+        event,
+        AppEvent::CallHistory
+            | AppEvent::Settings(_)
+            | AppEvent::Sidebar
+            | AppEvent::Directory
+            | AppEvent::Status
+            | AppEvent::Selection
+    )
+}
+
 impl CalendarView {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
-        let observation = cx.observe(&state, |_, _, cx| cx.notify());
+        let observation = cx.subscribe(&state, |_, _, event: &AppEvent, cx| {
+            if calendar_event(event) {
+                cx.notify();
+            }
+        });
         let agent_observation =
             crate::agent_api::handle(cx).map(|api| cx.observe(&api, |_, _, cx| cx.notify()));
         CalendarView {
@@ -121,6 +138,7 @@ impl CalendarView {
             last_programmatic_offset: 0.,
             skip_manual_check: false,
             clock_running: false,
+            shown: false,
             hour_height: hour_height(Default::default()),
             steps_per_hour: 2,
             slot_selection: None,
@@ -222,7 +240,9 @@ impl CalendarView {
                             view.clock_running = false;
                             return false;
                         }
-                        cx.notify();
+                        if view.shown {
+                            cx.notify();
+                        }
                         true
                     })
                     .unwrap_or(false);
@@ -236,6 +256,16 @@ impl CalendarView {
 
     fn stop_clock(&mut self) {
         self.clock_running = false;
+    }
+
+    pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if self.shown == shown {
+            return;
+        }
+        self.shown = shown;
+        if shown {
+            cx.notify();
+        }
     }
 
     fn on_grid_scroll_wheel(

@@ -835,12 +835,14 @@ impl AppState {
             drop(data::watch_presence(&engine, wanted.clone()));
             let done = data::refresh_presence(&engine, wanted.clone());
             self.on_done(done, cx, move |state, cx| {
-                state.sync_presence();
+                let changed = state.sync_presence();
                 state.announce_followed_changes(cx);
-                state.directory.save_presence(&state.store, &wanted);
+                state.directory.save_presence(&state.store, &changed);
                 state.directory.settle_presence(&wanted);
-                cx.emit(AppEvent::Directory);
-                cx.notify();
+                if !changed.is_empty() {
+                    cx.emit(AppEvent::Directory);
+                    cx.notify();
+                }
             });
         }
     }
@@ -1182,9 +1184,10 @@ impl AppState {
     pub fn apply(&mut self, event: BackendEvent, cx: &mut Context<Self>) {
         match event {
             BackendEvent::Connection(connection) => {
-                if connection != self.connection {
-                    app_base::diagnostics::record(format!("connection: {connection:?}"));
+                if connection == self.connection {
+                    return;
                 }
+                app_base::diagnostics::record(format!("connection: {connection:?}"));
                 self.connection = connection;
                 self.refresh_connection_banner(cx);
                 cx.emit(AppEvent::Status);
@@ -1286,13 +1289,18 @@ impl AppState {
             }
             BackendEvent::Typing(event) => self.apply_typing(event, cx),
             BackendEvent::Live(live) => {
+                if self.live == live {
+                    return;
+                }
                 self.live = live;
                 self.refresh_connection_banner(cx);
                 cx.emit(AppEvent::Status);
             }
             BackendEvent::Orgs(list) => {
-                self.take_org_list(list);
-                cx.notify();
+                if !self.take_org_list(list) {
+                    return;
+                }
+                cx.emit(AppEvent::Status);
             }
             BackendEvent::OrgMessage(message) => {
                 self.org_unread
@@ -1303,6 +1311,9 @@ impl AppState {
                 cx.notify();
             }
             BackendEvent::Favorites(ids) => {
+                if self.favorite_ids == ids {
+                    return;
+                }
                 self.favorite_ids = ids;
                 if !self.mode.demo {
                     self.reload_directory();
@@ -1310,10 +1321,12 @@ impl AppState {
                 cx.emit(AppEvent::Sidebar);
             }
             BackendEvent::Synced(time) => {
-                if self.last_sync.is_none() {
-                    self.refresh_saved(cx);
-                }
+                let first = self.last_sync.is_none();
                 self.last_sync = Some(time);
+                if !first {
+                    return;
+                }
+                self.refresh_saved(cx);
                 cx.emit(AppEvent::Status);
             }
         }

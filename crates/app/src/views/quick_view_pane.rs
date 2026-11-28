@@ -15,7 +15,7 @@ use super::widgets::icon;
 use crate::activity::{ActivityCenter, Entry, Kind};
 use store::Sidebar;
 
-use crate::app_state::{AppState, QuickView, selection_for, selection_title};
+use crate::app_state::{AppEvent, AppState, QuickView, selection_for, selection_title};
 use crate::format;
 use crate::local_previews::LocalPreview;
 use crate::theme;
@@ -148,6 +148,19 @@ pub struct QuickViewPane {
 
 impl EventEmitter<QuickViewEvent> for QuickViewPane {}
 
+fn quick_event(event: &AppEvent) -> bool {
+    matches!(
+        event,
+        AppEvent::Saved
+            | AppEvent::LocalPreviews
+            | AppEvent::Sidebar
+            | AppEvent::Directory
+            | AppEvent::Messages(_)
+            | AppEvent::Selection
+            | AppEvent::Activity
+    )
+}
+
 impl QuickViewPane {
     pub fn new(
         app: Entity<AppState>,
@@ -155,7 +168,11 @@ impl QuickViewPane {
         cx: &mut Context<Self>,
     ) -> Self {
         let observations = [
-            cx.observe(&app, |_, _, cx| cx.notify()),
+            cx.subscribe(&app, |_, _, event: &AppEvent, cx| {
+                if quick_event(event) {
+                    cx.notify();
+                }
+            }),
             cx.observe(&activity, |_, _, cx| cx.notify()),
         ];
         QuickViewPane {

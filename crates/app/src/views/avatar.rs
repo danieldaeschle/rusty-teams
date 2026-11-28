@@ -84,7 +84,8 @@ fn photo_disc(photo: &Arc<AvatarPhoto>, size: f32, radius: f32) -> AnyElement {
                 f32::from(bounds.right()),
                 scale_factor,
             );
-            let Some(texture) = photo.texture(side) else {
+            let Some(texture) = photo.cached_texture(side) else {
+                photo.schedule_texture(side, cx);
                 return;
             };
             if let Some(evicted) = texture.evicted {

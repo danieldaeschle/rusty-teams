@@ -149,7 +149,7 @@ impl AppState {
             month.checked_sub_months(chrono::Months::new(steps.unsigned_abs()))
         };
         self.calendar_mini_month = Some(moved.unwrap_or(month));
-        cx.notify();
+        self.calendar_changed(cx);
     }
 
     pub fn toggle_calendar_group_expanded(&mut self, group: &str, cx: &mut Context<Self>) {
@@ -162,16 +162,24 @@ impl AppState {
         } else {
             self.calendar_expanded_groups.push(group.to_owned());
         }
-        cx.notify();
+        self.calendar_changed(cx);
     }
 
     pub fn request_calendar_scroll_to_now(&mut self, cx: &mut Context<Self>) {
         // Every navigation lands here: the mini month follows the grid again.
         self.calendar_mini_month = None;
         if !crate::call::calendar_now::shows_hour_grid(self.calendar_week.span) {
+            self.calendar_changed(cx);
             return;
         }
         self.calendar_scroll_to_now = self.calendar_scroll_to_now.wrapping_add(1);
+        self.calendar_changed(cx);
+    }
+
+    /// The calendar view only redraws on events. A local change still has to emit one,
+    /// or the grid, the mini month and the group list stay on the previous frame.
+    fn calendar_changed(&mut self, cx: &mut Context<Self>) {
+        cx.emit(crate::app_state::AppEvent::CallHistory);
         cx.notify();
     }
 
@@ -226,7 +234,7 @@ impl AppState {
             events.retain(|event| event.end > from && event.start < to);
             events.sort_by_key(|event| (event.start, event.end));
             self.calendar_week.events = events;
-            cx.notify();
+            self.calendar_changed(cx);
             return;
         }
         // Grid load needs only the signed-in session, never the calling engine.
@@ -237,7 +245,7 @@ impl AppState {
         self.calendar_week.request += 1;
         let request = self.calendar_week.request;
         self.calendar_week.loading = true;
-        cx.notify();
+        self.calendar_changed(cx);
         let store = self.store.clone();
         let receiver = crate::runtime::spawn(async move {
             let started = Instant::now();
@@ -367,7 +375,8 @@ impl AppState {
                 retain_peek_details(&previous, &mut events);
                 state.calendar_week.events = events;
                 state.calendar_week.failures = failures;
-                cx.notify();
+                // The header date changes even when the events do not.
+                state.calendar_changed(cx);
             })
             .ok();
         })

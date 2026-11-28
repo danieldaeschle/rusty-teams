@@ -19,6 +19,7 @@ impl AppState {
         // The mailbox language can move the first day of week.
         self.apply_regional_format();
         self.reanchor_calendar(cx);
+        cx.emit(crate::app_state::AppEvent::CallHistory);
         cx.notify();
     }
 

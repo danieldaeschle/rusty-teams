@@ -13,7 +13,7 @@ use super::avatar::person_avatar;
 use super::new_chat::NewChatDraft;
 use super::scroll_edge::{scroll_offset, with_top_edge};
 use super::widgets::{icon, menu_icon, symbol};
-use crate::app_state::AppState;
+use crate::app_state::{AppEvent, AppState};
 use crate::call::{
     CALL_ROW_HEIGHT, CallRow, EMPTY_HEIGHT, HistoryFilter, ListEntry, SpeedDialEntry,
 };
@@ -294,8 +294,22 @@ pub struct CallsPage {
     people: Entity<NewChatDraft>,
     speed_dial_people: Entity<NewChatDraft>,
     adding_speed_dial: bool,
+    shown: bool,
     scroll: ScrollHandle,
     _observations: [Subscription; 3],
+}
+
+fn calls_event(event: &AppEvent) -> bool {
+    matches!(
+        event,
+        AppEvent::CallHistory
+            | AppEvent::Call
+            | AppEvent::Directory
+            | AppEvent::Sidebar
+            | AppEvent::Status
+            | AppEvent::Selection
+            | AppEvent::Ring
+    )
 }
 
 impl CallsPage {
@@ -306,14 +320,25 @@ impl CallsPage {
         let speed_dial_people =
             cx.new(|cx| NewChatDraft::new(speed_dial_app, window, cx).compact());
         let observations = [
-            cx.observe(&app, |_, _, cx| cx.notify()),
+            cx.subscribe(&app, |_, _, event: &AppEvent, cx| {
+                if calls_event(event) {
+                    cx.notify();
+                }
+            }),
             cx.observe(&people, |_, _, cx| cx.notify()),
             cx.observe(&speed_dial_people, |_, _, cx| cx.notify()),
         ];
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(REFRESH_INTERVAL).await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                let alive = this
+                    .update(cx, |page, cx| {
+                        if page.shown {
+                            cx.notify();
+                        }
+                    })
+                    .is_ok();
+                if !alive {
                     break;
                 }
             }
@@ -324,8 +349,19 @@ impl CallsPage {
             people,
             speed_dial_people,
             adding_speed_dial: false,
+            shown: false,
             scroll: ScrollHandle::new(),
             _observations: observations,
+        }
+    }
+
+    pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        if self.shown == shown {
+            return;
+        }
+        self.shown = shown;
+        if shown {
+            cx.notify();
         }
     }
 

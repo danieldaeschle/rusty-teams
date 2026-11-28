@@ -4,12 +4,13 @@ use gpui_kit::Context;
 use crate::app_state::AppState;
 
 impl AppState {
-    pub(crate) fn take_org_list(&mut self, list: Vec<Org>) {
+    pub(crate) fn take_org_list(&mut self, list: Vec<Org>) -> bool {
         if self.orgs.list == list {
-            return;
+            return false;
         }
         self.orgs.replace_list(list);
         self.save_orgs(&self.orgs);
+        true
     }
 
     /// A guest org has no calendar for the account, like in Teams.

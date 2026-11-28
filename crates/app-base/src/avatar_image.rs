@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 
-use gpui_kit::RenderImage;
+use gpui_kit::{App, RenderImage};
 use image::imageops::FilterType;
 use image::{Frame, ImageFormat, ImageReader, RgbaImage};
 
@@ -13,6 +14,8 @@ pub const TEXTURE_MARGIN: u32 = 2;
 pub struct AvatarPhoto {
     bytes: Vec<u8>,
     textures: Mutex<Vec<(u32, Arc<RenderImage>)>>,
+    decoding: Mutex<HashSet<u32>>,
+    failed: Mutex<HashSet<u32>>,
 }
 
 pub struct Texture {
@@ -42,7 +45,85 @@ impl AvatarPhoto {
         Some(Self {
             bytes,
             textures: Mutex::new(Vec::new()),
+            decoding: Mutex::new(HashSet::new()),
+            failed: Mutex::new(HashSet::new()),
         })
+    }
+
+    pub fn cached_texture(&self, side: u32) -> Option<Texture> {
+        let mut textures = self.textures.lock().ok()?;
+        let position = textures.iter().position(|(cached, _)| *cached == side)?;
+        let entry = textures.remove(position);
+        let image = entry.1.clone();
+        textures.push(entry);
+        Some(Texture {
+            image,
+            evicted: None,
+        })
+    }
+
+    pub fn schedule_texture(self: &Arc<Self>, side: u32, cx: &mut App) {
+        if self
+            .textures
+            .lock()
+            .ok()
+            .is_some_and(|textures| textures.iter().any(|(cached, _)| *cached == side))
+        {
+            return;
+        }
+        if self
+            .failed
+            .lock()
+            .ok()
+            .is_some_and(|failed| failed.contains(&side))
+        {
+            return;
+        }
+        if self
+            .decoding
+            .lock()
+            .ok()
+            .is_none_or(|mut decoding| !decoding.insert(side))
+        {
+            return;
+        }
+        let photo = Arc::clone(self);
+        let bytes = self.bytes.clone();
+        cx.spawn(async move |cx| {
+            let built = cx
+                .background_executor()
+                .spawn(async move {
+                    square_texture(&bytes, side)
+                        .map(|pixels| with_edge_margin(&pixels, TEXTURE_MARGIN))
+                })
+                .await;
+            photo.store(side, built);
+            let _ = cx.update(|cx| cx.refresh_windows());
+        })
+        .detach();
+    }
+
+    fn store(&self, side: u32, pixels: Option<image::RgbaImage>) {
+        if let Some(mut decoding) = self.decoding.lock().ok() {
+            decoding.remove(&side);
+        }
+        let Some(pixels) = pixels else {
+            if let Some(mut failed) = self.failed.lock().ok() {
+                failed.insert(side);
+            }
+            return;
+        };
+        let image = Arc::new(RenderImage::new(vec![Frame::new(pixels)]));
+        let Some(mut textures) = self.textures.lock().ok() else {
+            return;
+        };
+        if textures.iter().any(|(cached, _)| *cached == side) {
+            return;
+        }
+        if textures.len() >= MAX_TEXTURES {
+            textures.remove(0);
+        }
+        textures.push((side, image));
     }
 
     pub fn texture(&self, side: u32) -> Option<Texture> {

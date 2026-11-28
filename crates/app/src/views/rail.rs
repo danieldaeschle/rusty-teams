@@ -8,7 +8,7 @@ use super::sidebar::{SidebarTab, SidebarView};
 use super::widgets::{RAIL_BADGE, badge_pill, filled_icon, icon};
 use crate::activity::ActivityCenter;
 use crate::agents::{AgentRuns, runs_handle};
-use crate::app_state::AppState;
+use crate::app_state::{AppEvent, AppState};
 use crate::i18n::tr;
 use crate::sidebar_model::{any_unread_channel, unread_chat_count};
 use crate::theme;
@@ -173,7 +173,11 @@ impl RailView {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut observations = vec![
-            cx.observe(&state, |_, _, cx| cx.notify()),
+            cx.subscribe(&state, |_, _, event: &AppEvent, cx| {
+                if rail_event(event) {
+                    cx.notify();
+                }
+            }),
             cx.observe(&activity, |_, _, cx| cx.notify()),
             cx.observe(&sidebar, |_, _, cx| cx.notify()),
         ];
@@ -204,6 +208,18 @@ impl RailView {
         let runs = self.runs.as_ref()?;
         crate::agents::agents_enabled(cx).then(|| runs.read(cx).running_count())
     }
+}
+
+fn rail_event(event: &AppEvent) -> bool {
+    matches!(
+        event,
+        AppEvent::Sidebar
+            | AppEvent::Directory
+            | AppEvent::Status
+            | AppEvent::CallHistory
+            | AppEvent::Activity
+            | AppEvent::Selection
+    )
 }
 
 fn badge(badge: RailBadge) -> Option<Div> {

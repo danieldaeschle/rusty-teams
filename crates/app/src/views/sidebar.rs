@@ -359,7 +359,6 @@ pub struct SidebarView {
     last_views: LastViews,
     _activity_observation: Subscription,
     _subscription: Subscription,
-    _state_observation: Subscription,
     _agent_observation: Option<Subscription>,
     _runs_observation: Option<Subscription>,
 }
@@ -430,11 +429,13 @@ impl SidebarView {
                     | AppEvent::Directory
                     | AppEvent::Typing
                     | AppEvent::LocalPreviews
+                    | AppEvent::Messages(_)
+                    | AppEvent::Saved
+                    | AppEvent::Pins(_)
             ) {
                 cx.notify();
             }
         });
-        let state_observation = cx.observe(&state, |_, _, cx| cx.notify());
         let agent_observation =
             crate::agent_api::handle(cx).map(|api| cx.observe(&api, |_, _, cx| cx.notify()));
         let runs_observation = crate::agents::runs_handle(cx).map(|runs| {
@@ -483,7 +484,6 @@ impl SidebarView {
             last_views: LastViews::default(),
             _activity_observation: activity_observation,
             _subscription: subscription,
-            _state_observation: state_observation,
             _agent_observation: agent_observation,
             _runs_observation: runs_observation,
         }
@@ -1466,13 +1466,13 @@ impl SidebarView {
 
     fn team_block(
         &self,
-        mut list: Div,
+        band: &mut ChannelWindow,
         entry: &SidebarTeam,
         hoisted_only: bool,
         selected: Option<&Selection>,
         team_photo: Option<&AvatarState>,
         cx: &mut Context<Self>,
-    ) -> Div {
+    ) {
         let team_id = entry.team.id.clone();
         let expanded =
             self.channel_filter.is_active() || team_expanded(&team_id, &self.collapsed_teams);
@@ -1484,7 +1484,8 @@ impl SidebarView {
             hidden: entry.hidden,
             can_add_channel: entry.rights.add_channel,
         };
-        list = list.child(
+        band.place(
+            TEAM_ROW_HEIGHT,
             h_flex()
                 .id(SharedString::from(format!("team-{team_id}")))
                 .mx(px(6.))
@@ -1540,49 +1541,57 @@ impl SidebarView {
                 }),
         );
         if !expanded {
-            return list;
+            return;
         }
         let is_selected =
             |channel: &ChannelRecord| selected == Some(&Selection::Channel(channel.id.clone()));
         let revealed = self.revealed_channel_teams.contains(&team_id);
         let rows = team_channel_rows(entry, hoisted_only, revealed, is_selected);
         for channel in &rows.shown {
-            list = list.child(self.team_channel_row(
-                channel,
-                is_selected(channel),
-                channel_name_style(
-                    channel_shows_unread(entry, channel),
-                    channel_shown(entry, &channel.id),
+            band.place(
+                CHANNEL_ROW_HEIGHT,
+                self.team_channel_row(
+                    channel,
                     is_selected(channel),
+                    channel_name_style(
+                        channel_shows_unread(entry, channel),
+                        channel_shown(entry, &channel.id),
+                        is_selected(channel),
+                    ),
+                    entry.channel_notifications(&channel.id),
+                    channel_badge(entry, &channel.id),
                 ),
-                entry.channel_notifications(&channel.id),
-                channel_badge(entry, &channel.id),
-            ));
+            );
         }
         if rows.hidden_count == 0 {
-            return list;
+            return;
         }
         for channel in rows.revealed {
-            list = list.child(self.team_channel_row(
-                channel,
-                false,
-                channel_name_style(channel_shows_unread(entry, channel), false, false),
-                entry.channel_notifications(&channel.id),
-                channel_badge(entry, &channel.id),
-            ));
+            band.place(
+                CHANNEL_ROW_HEIGHT,
+                self.team_channel_row(
+                    channel,
+                    false,
+                    channel_name_style(channel_shows_unread(entry, channel), false, false),
+                    entry.channel_notifications(&channel.id),
+                    channel_badge(entry, &channel.id),
+                ),
+            );
         }
         let toggle_id = team_id.clone();
-        list = list.child(self.see_all_channels_row(
-            SharedString::from(format!("hidden-channels-{team_id}")),
-            revealed,
-            cx.listener(move |this, _, _, cx| {
-                if !this.revealed_channel_teams.remove(&toggle_id) {
-                    this.revealed_channel_teams.insert(toggle_id.clone());
-                }
-                cx.notify();
-            }),
-        ));
-        list
+        band.place(
+            CHANNEL_ROW_HEIGHT,
+            self.see_all_channels_row(
+                SharedString::from(format!("hidden-channels-{team_id}")),
+                revealed,
+                cx.listener(move |this, _, _, cx| {
+                    if !this.revealed_channel_teams.remove(&toggle_id) {
+                        this.revealed_channel_teams.insert(toggle_id.clone());
+                    }
+                    cx.notify();
+                }),
+            ),
+        );
     }
 
     fn see_all_channels_row(
@@ -1733,7 +1742,7 @@ impl SidebarView {
         cx.notify();
     }
 
-    fn channels_body(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn channels_body(&self, window_height: f32, cx: &mut Context<Self>) -> AnyElement {
         let (sidebar, pinned_ids, selected, team_photos) = {
             let state = self.state.read(cx);
             let team_photos: HashMap<String, AvatarState> = state
@@ -1765,7 +1774,20 @@ impl SidebarView {
             .iter()
             .map(|entry| team_avatar_key(&entry.team.id))
             .collect();
-        let mut list = v_flex().w_full().pb(px(12.));
+        let top = -f32::from(scroll_offset(&self.channels_scroll).y);
+        let measured: f32 = f32::from(self.channels_scroll.bounds().size.height);
+        let height = if measured > 1. {
+            measured
+        } else {
+            window_height.max(FALLBACK_VIEWPORT)
+        };
+        let mut band = ChannelWindow {
+            from: top - VIEWPORT_MARGIN,
+            to: top + height + VIEWPORT_MARGIN,
+            y: 0.,
+            skipped: 0.,
+            list: v_flex().w_full().pb(px(12.)),
+        };
         let pinned: Vec<(&SidebarTeam, &ChannelRecord)> = pinned_ids
             .iter()
             .filter_map(|id| {
@@ -1779,19 +1801,28 @@ impl SidebarView {
             })
             .collect();
         if !pinned.is_empty() {
-            list = list.child(self.plain_header(tr("sidebar.pinned")));
+            band.place(
+                SECTION_GAP + SECTION_HEIGHT,
+                self.plain_header(tr("sidebar.pinned")),
+            );
             for (entry, channel) in pinned {
                 let is_selected = selected == Some(Selection::Channel(channel.id.clone()));
-                list = list.child(self.channel_row(
-                    &channel.id,
-                    entry,
-                    channel,
-                    is_selected,
-                    team_photos.get(&entry.team.id),
-                ));
+                band.place(
+                    PINNED_CHANNEL_HEIGHT,
+                    self.channel_row(
+                        &channel.id,
+                        entry,
+                        channel,
+                        is_selected,
+                        team_photos.get(&entry.team.id),
+                    ),
+                );
             }
         }
-        list = list.child(self.plain_header(tr("sidebar.teams")));
+        band.place(
+            SECTION_GAP + SECTION_HEIGHT,
+            self.plain_header(tr("sidebar.teams")),
+        );
         let hidden_teams: Vec<&SidebarTeam> =
             sidebar.teams.iter().filter(|entry| entry.hidden).collect();
         for entry in sidebar
@@ -1800,38 +1831,49 @@ impl SidebarView {
             .filter(|entry| !entry.hidden || team_hoisted(entry))
         {
             let team_photo = team_photos.get(&entry.team.id);
-            list = self.team_block(list, entry, entry.hidden, selected.as_ref(), team_photo, cx);
+            self.team_block(
+                &mut band,
+                entry,
+                entry.hidden,
+                selected.as_ref(),
+                team_photo,
+                cx,
+            );
         }
         if !hidden_teams.is_empty() {
             let holds_selection = hidden_teams
                 .iter()
                 .any(|entry| team_holds(entry, selected.as_ref()));
             let open = self.hidden_teams_open || holds_selection;
-            list = list.child(self.reveal_row(
-                "hidden-teams".into(),
-                format!("{} ({})", tr("sidebar.hidden_teams"), hidden_teams.len()),
-                open,
-                10.,
-                cx.listener(|this, _, _, cx| {
-                    this.hidden_teams_open = !this.hidden_teams_open;
-                    cx.notify();
-                }),
-            ));
+            band.place(
+                REVEAL_ROW_HEIGHT,
+                self.reveal_row(
+                    "hidden-teams".into(),
+                    format!("{} ({})", tr("sidebar.hidden_teams"), hidden_teams.len()),
+                    open,
+                    10.,
+                    cx.listener(|this, _, _, cx| {
+                        this.hidden_teams_open = !this.hidden_teams_open;
+                        cx.notify();
+                    }),
+                ),
+            );
             if open {
                 for entry in hidden_teams {
                     let team_photo = team_photos.get(&entry.team.id);
-                    list = self.team_block(list, entry, false, selected.as_ref(), team_photo, cx);
+                    self.team_block(&mut band, entry, false, selected.as_ref(), team_photo, cx);
                 }
             }
         }
         self.request_lazy_data(team_keys, Vec::new(), cx);
+        band.list = with_spacer(band.list, &mut band.skipped);
         let scroll_area = div()
             .id("channels-scroll")
             .flex_1()
             .min_h_0()
             .overflow_y_scrollbar()
             .track_scroll(&self.channels_scroll)
-            .child(list);
+            .child(band.list);
         with_top_edge(scroll_area, &self.channels_scroll, SIDEBAR_SCROLL_DIVIDER).into_any_element()
     }
 }
@@ -2135,13 +2177,35 @@ fn with_spacer(list: Div, skipped_height: &mut f32) -> Div {
     }
 }
 
+struct ChannelWindow {
+    from: f32,
+    to: f32,
+    y: f32,
+    skipped: f32,
+    list: Div,
+}
+
+impl ChannelWindow {
+    fn place(&mut self, height: f32, child: impl IntoElement) {
+        let start = self.y;
+        self.y += height;
+        if start < self.to && self.y > self.from {
+            let list = std::mem::replace(&mut self.list, div());
+            let list = with_spacer(list, &mut self.skipped);
+            self.list = list.child(child);
+        } else {
+            self.skipped += height;
+        }
+    }
+}
+
 impl Render for SidebarView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let window_height = f32::from(window.viewport_size().height);
         let body = match self.tab {
             SidebarTab::Activity => self.activity_panel.clone().into_any_element(),
             SidebarTab::Chats => self.chats_body(window_height, cx),
-            SidebarTab::Channels => self.channels_body(cx),
+            SidebarTab::Channels => self.channels_body(window_height, cx),
             SidebarTab::Agents => match &self.agents_panel {
                 Some(panel) => panel.clone().into_any_element(),
                 None => div().into_any_element(),

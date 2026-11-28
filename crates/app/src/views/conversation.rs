@@ -61,7 +61,7 @@ use super::chat_pop_out;
 use super::composer::{Composer, ComposerEvent, EditPreview, Outgoing, ReplyPreview};
 use super::find_panel::{FIND_PANEL_WIDTH, FindPanel, FindPanelEvent};
 use super::group_name::{GroupNameSlot, group_name_button};
-use super::message_actions::{Action, DelegateEntry, MessageMenu};
+use super::message_actions::{Action, DelegateEntry, MessageMenu, ReactionAdder};
 use super::message_context_menu::OpenContextMenu;
 use super::message_row::{
     AVATAR_GAP, AVATAR_SIZE, JUMP_HIGHLIGHT_PERIOD, render_message_row, render_skeleton_row,
@@ -158,7 +158,11 @@ const TYPING_BOTTOM_GAP: f32 = 8.;
 pub const TYPING_TAG: &str = "shell/islands/main/typing";
 const TYPING_DOT_SIZE: f32 = 5.;
 const TYPING_DOT_COUNT: usize = 3;
+const TYPING_DOT_GAP: f32 = 3.;
 const TYPING_PULSE_PERIOD: Duration = Duration::from_millis(1200);
+/// The pulse is a slow wave. 12 steps per second is enough to read it, and a
+/// focused window would otherwise repaint the dots on every display refresh.
+const TYPING_DOT_FPS: f32 = 12.;
 
 #[derive(Clone, Copy)]
 enum HoverSlot {
@@ -281,6 +285,8 @@ pub struct ConversationView {
     context_serial: u64,
     timeline_bounds: TimelineBounds,
     typing_offset: Cell<f32>,
+    typing_measure: Rc<TypingMeasure>,
+    typing_pulse: Entity<TypingPulse>,
     header_width: Rc<Cell<f32>>,
     toolbar_pinned: Option<String>,
     toolbar_suppressed: Option<String>,
@@ -703,7 +709,6 @@ impl ConversationView {
         let draft = cx.new(|cx| NewChatDraft::new(app.clone(), window, cx));
         let mut subscriptions = vec![
             cx.subscribe_in(&app, window, Self::on_app_event),
-            cx.observe(&app, |_, _, cx| cx.notify()),
             cx.subscribe_in(&composer, window, Self::on_composer_event),
             cx.subscribe_in(&draft, window, Self::on_draft_event),
             cx.subscribe_in(&subject, window, Self::on_subject_event),
@@ -727,6 +732,13 @@ impl ConversationView {
         if let Some(api) = crate::agent_api::handle(cx) {
             subscriptions.push(cx.observe(&api, |this, _, cx| this.sync_reaction_pills(cx)));
         }
+        let typing_measure = Rc::new(TypingMeasure::default());
+        let typing_pulse = cx.new({
+            let typing_measure = typing_measure.clone();
+            |_| TypingPulse {
+                measure: typing_measure,
+            }
+        });
         let mut view = ConversationView {
             group_name: GroupNameSlot::default(),
             app,
@@ -764,6 +776,8 @@ impl ConversationView {
             context_serial: 0,
             timeline_bounds: TimelineBounds::default(),
             typing_offset: Cell::new(TYPING_BOTTOM_GAP),
+            typing_measure,
+            typing_pulse,
             header_width: Rc::default(),
             toolbar_pinned: None,
             toolbar_suppressed: None,
@@ -1098,7 +1112,10 @@ impl ConversationView {
                         .items_center()
                         .rounded_full()
                         .bg(theme::surface_raised())
-                        .child(typing_dots()),
+                        .child(typing_dot_slot(
+                            &self.typing_measure,
+                            self.typing_pulse.clone(),
+                        )),
                 )
                 .into_any_element(),
         )
@@ -3671,6 +3688,45 @@ impl ConversationView {
         });
     }
 
+    fn reaction_handler(&self, key: &str, view: WeakEntity<Self>) -> PickHandler {
+        let key = key.to_owned();
+        Rc::new(move |glyph, _, cx| {
+            view.update(cx, |this, cx| this.toggle_reaction(&key, glyph, cx))
+                .ok();
+        })
+    }
+
+    fn reaction_adder(
+        &self,
+        key: &str,
+        mine: HashSet<String>,
+        view: WeakEntity<Self>,
+    ) -> ReactionAdder {
+        let key_owned = key.to_owned();
+        let pin = {
+            let (view, key) = (view.clone(), key_owned.clone());
+            Rc::new(move |open: bool, _: &mut Window, cx: &mut App| {
+                view.update(cx, |this, cx| this.set_pinned(&key, open, cx))
+                    .ok();
+            })
+        };
+        let done = {
+            let (view, key) = (view.clone(), key_owned.clone());
+            Rc::new(move |_: &mut Window, cx: &mut App| {
+                view.update(cx, |this, cx| this.suppress_toolbar(&key, cx))
+                    .ok();
+            })
+        };
+        ReactionAdder {
+            key: key_owned,
+            picker: self.picker.clone(),
+            react: self.reaction_handler(key, view),
+            done,
+            mine,
+            pin,
+        }
+    }
+
     fn message_menu(
         &self,
         message: &MessageRow,
@@ -4317,6 +4373,7 @@ impl Render for ConversationView {
             .track_focus(&self.focus_handle);
         let drafting = self.draft_active;
         if self.current.is_none() && !drafting {
+            clear_typing_place(&self.typing_measure, &self.typing_pulse, window);
             return root
                 .items_center()
                 .justify_center()
@@ -4352,6 +4409,9 @@ impl Render for ConversationView {
         let comfy = self.app.read(cx).account_chat_settings().message_density
             != teams_core::MessageDensity::Compact;
         let typing_line = self.render_typing_line(cx);
+        if typing_line.is_none() {
+            clear_typing_place(&self.typing_measure, &self.typing_pulse, window);
+        }
         let typing_offset = {
             let scroller = self.scroller.read(cx);
             let last_row = scroller.item_count().checked_sub(1);
@@ -4666,7 +4726,7 @@ impl Render for ConversationView {
                 }
             }));
         let root = root.child(crate::inline_video::sentinel());
-        match copilot_island {
+        let body = match copilot_island {
             Some(island) => h_flex()
                 .size_full()
                 .min_w_0()
@@ -4675,8 +4735,33 @@ impl Render for ConversationView {
                 .child(island)
                 .into_any_element(),
             None => root.into_any_element(),
-        }
+        };
+        // The slot canvas measures against this box, which fills the view. The
+        // pulsing dots are painted by a sibling of the view, not inside it.
+        div()
+            .relative()
+            .size_full()
+            .child(typing_view_origin(&self.typing_measure))
+            .child(body)
+            .into_any_element()
     }
+}
+
+/// Hosts a conversation beside its typing pulse. The pulse is a sibling view:
+/// its animation notifies itself, not the conversation, so a cached transcript
+/// stays on screen while only the dots repaint.
+pub(crate) fn hosted_conversation(
+    conversation: Entity<ConversationView>,
+    cx: &App,
+) -> impl IntoElement {
+    let pulse = conversation.read(cx).typing_pulse.clone();
+    div()
+        .relative()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .child(conversation.cached(StyleRefinement::default().flex_1().min_w_0().h_full()))
+        .child(pulse)
 }
 
 /// Right under the last row like one more message; once that row scrolls below the view it sticks above the composer.
@@ -4694,9 +4779,127 @@ fn typing_bottom_offset(
     under_last_row.max(TYPING_BOTTOM_GAP)
 }
 
+#[derive(Clone, Copy)]
+struct TypingSlot {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
+#[derive(Default)]
+struct TypingMeasure {
+    /// Window origin of the conversation view, sampled while it actually renders.
+    origin: Cell<Option<Point<Pixels>>>,
+    /// Dot-slot rectangle relative to that origin. `None` hides the pulse.
+    place: Cell<Option<TypingSlot>>,
+}
+
+/// The three dots. Kept outside [`ConversationView`] so the repeating animation
+/// dirties this view and the shell, not the transcript.
+struct TypingPulse {
+    measure: Rc<TypingMeasure>,
+}
+
+impl Render for TypingPulse {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .absolute()
+            .when_some(self.measure.place.get(), |dot, slot| {
+                dot.left(px(slot.x))
+                    .top(px(slot.y))
+                    .w(px(slot.w))
+                    .h(px(slot.h))
+                    .child(typing_dots())
+            })
+    }
+}
+
+fn typing_view_origin(measure: &Rc<TypingMeasure>) -> impl IntoElement {
+    let measure = measure.clone();
+    canvas(
+        move |bounds, _, _| measure.origin.set(Some(bounds.origin)),
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .right_0()
+    .bottom_0()
+}
+
+fn typing_dot_span() -> (f32, f32) {
+    let gaps = TYPING_DOT_COUNT.saturating_sub(1) as f32 * TYPING_DOT_GAP;
+    (
+        TYPING_DOT_COUNT as f32 * TYPING_DOT_SIZE + gaps,
+        TYPING_DOT_SIZE,
+    )
+}
+
+fn slot_changed(prev: Option<TypingSlot>, next: TypingSlot) -> bool {
+    let Some(prev) = prev else {
+        return true;
+    };
+    (prev.x - next.x).abs() > 0.5
+        || (prev.y - next.y).abs() > 0.5
+        || (prev.w - next.w).abs() > 0.5
+        || (prev.h - next.h).abs() > 0.5
+}
+
+/// Drops the dots. The pulse is a sibling, so clearing the slot during this
+/// render does not repaint it unless something notifies that view.
+fn clear_typing_place(measure: &TypingMeasure, pulse: &Entity<TypingPulse>, window: &mut Window) {
+    if measure.place.take().is_none() {
+        return;
+    }
+    let pulse = pulse.clone();
+    window.on_next_frame(move |_, cx| {
+        pulse.update(cx, |_, cx| cx.notify());
+    });
+}
+
+/// Invisible stand-in for the dots. Records where they sit so [`TypingPulse`]
+/// can paint them without the conversation rendering again.
+fn typing_dot_slot(measure: &Rc<TypingMeasure>, pulse: Entity<TypingPulse>) -> impl IntoElement {
+    let (width, height) = typing_dot_span();
+    let measure = measure.clone();
+    div()
+        .relative()
+        .w(px(width))
+        .h(px(height))
+        .flex_none()
+        .child(
+            canvas(
+                move |bounds, window, _| {
+                    let Some(origin) = measure.origin.get() else {
+                        return;
+                    };
+                    let next = TypingSlot {
+                        x: f32::from(bounds.origin.x - origin.x),
+                        y: f32::from(bounds.origin.y - origin.y),
+                        w: f32::from(bounds.size.width),
+                        h: f32::from(bounds.size.height),
+                    };
+                    let prev = measure.place.replace(Some(next));
+                    if slot_changed(prev, next) {
+                        let pulse = pulse.clone();
+                        window.on_next_frame(move |_, cx| {
+                            pulse.update(cx, |_, cx| cx.notify());
+                        });
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
+}
+
 fn typing_dots() -> impl IntoElement {
     h_flex()
-        .gap(px(3.))
+        .gap(px(TYPING_DOT_GAP))
         .flex_none()
         .children((0..TYPING_DOT_COUNT).map(|index| {
             let phase_offset = index as f32 / TYPING_DOT_COUNT as f32;
@@ -4706,7 +4909,9 @@ fn typing_dots() -> impl IntoElement {
                 .bg(theme::text_muted())
                 .with_animation(
                     ElementId::NamedInteger("typing-dot".into(), index as u64),
-                    Animation::new(TYPING_PULSE_PERIOD).repeat(),
+                    Animation::new(TYPING_PULSE_PERIOD)
+                        .repeat()
+                        .with_max_fps(TYPING_DOT_FPS),
                     move |dot, delta| {
                         let wave = 1. - ((delta - phase_offset).rem_euclid(1.) * 2. - 1.).abs();
                         dot.opacity(0.3 + 0.7 * wave)
