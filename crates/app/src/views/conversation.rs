@@ -4373,7 +4373,7 @@ impl Render for ConversationView {
             .track_focus(&self.focus_handle);
         let drafting = self.draft_active;
         if self.current.is_none() && !drafting {
-            self.typing_measure.place.set(None);
+            clear_typing_place(&self.typing_measure, &self.typing_pulse, window);
             return root
                 .items_center()
                 .justify_center()
@@ -4410,7 +4410,7 @@ impl Render for ConversationView {
             != teams_core::MessageDensity::Compact;
         let typing_line = self.render_typing_line(cx);
         if typing_line.is_none() {
-            self.typing_measure.place.set(None);
+            clear_typing_place(&self.typing_measure, &self.typing_pulse, window);
         }
         let typing_offset = {
             let scroller = self.scroller.read(cx);
@@ -4844,6 +4844,18 @@ fn slot_changed(prev: Option<TypingSlot>, next: TypingSlot) -> bool {
         || (prev.y - next.y).abs() > 0.5
         || (prev.w - next.w).abs() > 0.5
         || (prev.h - next.h).abs() > 0.5
+}
+
+/// Drops the dots. The pulse is a sibling, so clearing the slot during this
+/// render does not repaint it unless something notifies that view.
+fn clear_typing_place(measure: &TypingMeasure, pulse: &Entity<TypingPulse>, window: &mut Window) {
+    if measure.place.take().is_none() {
+        return;
+    }
+    let pulse = pulse.clone();
+    window.on_next_frame(move |_, cx| {
+        pulse.update(cx, |_, cx| cx.notify());
+    });
 }
 
 /// Invisible stand-in for the dots. Records where they sit so [`TypingPulse`]
