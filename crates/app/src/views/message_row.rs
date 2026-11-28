@@ -87,8 +87,8 @@ const IMPORTANCE_LABEL_SIZE: f32 = 12.;
 const IMPORTANCE_LINE_HEIGHT: f32 = 16.;
 const COMPACT_IMPORTANCE_LINE_HEIGHT: f32 = 14.;
 pub(super) const BUBBLE_PADDING_X: f32 = 12.;
-/// Width of the en space that reserves the time's room, half of `BODY_SIZE` in Google Sans Flex.
-const TIME_ROOM_WIDTH: f32 = BODY_SIZE / 2.;
+/// Advance of the no-break space that reserves the time's room: 489/2000 em in Google Sans Flex Regular at `BODY_SIZE`.
+const TIME_ROOM_WIDTH: f32 = 3.3;
 const PULSE_PERIOD: Duration = Duration::from_millis(1600);
 const RECEIPT_FADE_PERIOD: Duration = Duration::from_millis(600);
 pub const JUMP_HIGHLIGHT_PERIOD: Duration = Duration::from_millis(2400);

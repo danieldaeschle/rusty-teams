@@ -12,8 +12,9 @@ use super::blocks::{CODE_PADDING, EMOJI_PLACEHOLDER};
 use super::hooks::{open_link, open_profile_link};
 use super::link_tooltip::LinkTooltip;
 
-/// En space: Google Sans Flex has no figure space (U+2007), whose fallback left almost no room for the time.
-pub(super) const TIME_ROOM: char = '\u{2002}';
+/// No-break space: it stays on the last word's line (GPUI wraps it as glue), and Google Sans Flex has it,
+/// unlike the figure space (U+2007), whose fallback font left too little room for the time.
+pub(super) const TIME_ROOM: char = '\u{00A0}';
 pub(super) const HIT_SLOP: f32 = 12.;
 
 #[derive(Clone)]
