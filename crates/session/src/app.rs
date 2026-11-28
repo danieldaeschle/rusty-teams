@@ -14,6 +14,7 @@ pub fn set_behind_mcas(enabled: bool) {
     BEHIND_MCAS.store(enabled, Ordering::SeqCst);
 }
 
+/// True when start and park navigation go through the MCAS proxy.
 pub fn behind_mcas() -> bool {
     BEHIND_MCAS.load(Ordering::SeqCst)
 }
@@ -65,14 +66,24 @@ impl App {
 
     pub fn is_park_url(self, url: &str) -> bool {
         // both origins count, a tab parked before the switch must still be seen as parked
-        match self {
-            App::Teams => [
-                "https://teams.cloud.microsoft/robots.txt",
-                "https://teams.cloud.microsoft.mcas.ms/robots.txt",
-            ]
+        [self.park_url_via(false), self.park_url_via(true)]
             .iter()
-            .any(|park| url.starts_with(park)),
-        }
+            .any(|park| url.starts_with(park))
+    }
+
+    /// True when `url` is an https page on one of the app hosts, directly or through the
+    /// MCAS proxy. The host must match exactly, a look-alike host is not the app.
+    pub fn is_app_url(self, url: &str) -> bool {
+        let Ok(parsed) = url::Url::parse(url) else {
+            return false;
+        };
+        let Some(host) = parsed.host_str().filter(|_| parsed.scheme() == "https") else {
+            return false;
+        };
+        let host = host.strip_suffix(MCAS_SUFFIX).unwrap_or(host);
+        self.origins()
+            .iter()
+            .any(|origin| origin.strip_prefix("https://") == Some(host))
     }
 }
 
@@ -101,12 +112,7 @@ pub struct Target {
 
 pub fn find_app_tab(targets: &[Target], app: App) -> Option<&Target> {
     targets.iter().find(|target| {
-        target.kind == "page"
-            && target.websocket_url.is_some()
-            && app
-                .origins()
-                .iter()
-                .any(|origin| target.url.starts_with(origin))
+        target.kind == "page" && target.websocket_url.is_some() && app.is_app_url(&target.url)
     })
 }
 
@@ -180,9 +186,40 @@ mod tests {
             App::Teams.start_url_via(false),
             "https://teams.cloud.microsoft/"
         );
+        assert_eq!(
+            App::Teams.direct_start_url(),
+            App::Teams.start_url_via(false)
+        );
         assert!(App::Teams.is_park_url("https://teams.cloud.microsoft.mcas.ms/robots.txt"));
         assert!(App::Teams.is_park_url("https://teams.cloud.microsoft/robots.txt"));
         assert!(!App::Teams.is_park_url("https://teams.cloud.microsoft.mcas.ms/v2/"));
+    }
+
+    #[test]
+    fn app_urls_need_an_exact_host() {
+        for url in [
+            "https://teams.cloud.microsoft/v2/",
+            "https://teams.microsoft.com/v2/",
+            "https://teams.cloud.microsoft.mcas.ms/",
+            "https://teams.cloud.microsoft.mcas.ms/robots.txt",
+        ] {
+            assert!(App::Teams.is_app_url(url), "{url}");
+        }
+        for url in [
+            "https://teams.cloud.microsoft.evil.example/",
+            "https://teams.cloud.microsoftevil.example/",
+            "https://evil.mcas.ms/",
+            "http://teams.cloud.microsoft/",
+            "https://login.microsoftonline.com/",
+            "about:blank",
+        ] {
+            assert!(!App::Teams.is_app_url(url), "{url}");
+        }
+        let look_alike: Vec<Target> = serde_json::from_str(
+            r#"[{"type":"page","url":"https://teams.cloud.microsoft.evil.example/","webSocketDebuggerUrl":"ws://x/1"}]"#,
+        )
+        .unwrap();
+        assert!(find_app_tab(&look_alike, App::Teams).is_none());
     }
 
     #[test]

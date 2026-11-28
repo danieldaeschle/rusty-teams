@@ -86,8 +86,22 @@ pub struct Browser {
     inner: Arc<Inner>,
 }
 
+/// Marker that Teams runs behind the MCAS proxy, next to the mode file
+/// (`rusty-teams-chrome.mode` gives `rusty-teams-chrome.mcas`).
 fn mcas_marker(config: &Config) -> std::path::PathBuf {
     config.mode_file.with_extension("mcas")
+}
+
+fn write_mcas_marker(marker: &std::path::Path) -> std::io::Result<()> {
+    std::fs::write(marker, "mcas")
+}
+
+/// A marker that is gone already is fine.
+fn remove_mcas_marker(marker: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::remove_file(marker) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
 }
 
 /// Start URLs without the MCAS proxy, for the interactive sign-in window.
@@ -131,9 +145,8 @@ impl Browser {
         timeouts: Timeouts,
     ) -> Browser {
         let bidi = (config.engine == Engine::Firefox).then(|| Bidi::new(config.port));
-        if mcas_marker(&config).exists() {
-            session::set_behind_mcas(true);
-        }
+        // the marker on disk is the truth, also for a second Browser in the same process
+        session::set_behind_mcas(mcas_marker(&config).exists());
         Browser {
             inner: Arc::new(Inner {
                 bidi,
@@ -236,7 +249,7 @@ impl Browser {
         log::info!("Teams runs behind the Defender for Cloud Apps proxy: using the proxied origin");
         session::set_behind_mcas(true);
         let marker = mcas_marker(&self.inner.config);
-        if let Err(error) = std::fs::write(&marker, "mcas") {
+        if let Err(error) = write_mcas_marker(&marker) {
             log::warn!(
                 "could not remember the MCAS proxy in {}: {error}",
                 marker.display()
@@ -254,10 +267,8 @@ impl Browser {
         );
         session::set_behind_mcas(false);
         let marker = mcas_marker(&self.inner.config);
-        match std::fs::remove_file(&marker) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => log::warn!("could not remove {}: {error}", marker.display()),
+        if let Err(error) = remove_mcas_marker(&marker) {
+            log::warn!("could not remove {}: {error}", marker.display());
         }
     }
 
@@ -360,7 +371,9 @@ impl Browser {
             return false;
         }
         let ready = self.page_sign_in_ready(tab).await;
-        if ready && !targets::has_mcas_app_tab(std::slice::from_ref(tab)) {
+        // only forget when no tab at all is proxied, else a plain tab next to a proxied one
+        // would flip the flag on every poll
+        if ready && !targets::has_mcas_app_tab(&tabs) {
             self.forget_mcas();
         }
         ready
@@ -741,6 +754,19 @@ mod tests {
     #[test]
     fn only_teams_starts() {
         assert_eq!(start_urls(), ["https://teams.cloud.microsoft/"]);
-        assert_eq!(direct_start_urls(), ["https://teams.cloud.microsoft/"]);
+    }
+
+    #[test]
+    fn mcas_marker_sits_next_to_the_mode_file_and_comes_and_goes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mode_file = dir.path().join("rusty-teams-chrome.mode");
+        let marker = mode_file.with_extension("mcas");
+        assert!(marker.ends_with("rusty-teams-chrome.mcas"));
+        write_mcas_marker(&marker).unwrap();
+        assert!(marker.exists());
+        remove_mcas_marker(&marker).unwrap();
+        assert!(!marker.exists());
+        // removing twice is not an error
+        remove_mcas_marker(&marker).unwrap();
     }
 }

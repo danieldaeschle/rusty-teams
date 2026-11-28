@@ -21,7 +21,7 @@ pub(crate) fn has_mcas_app_tab(tabs: &[Tab]) -> bool {
             && tab
                 .host
                 .as_deref()
-                .is_some_and(|host| host.ends_with(session::MCAS_SUFFIX))
+                .is_some_and(|host| unproxied_host(host) != host)
     })
 }
 
