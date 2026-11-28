@@ -15,6 +15,33 @@ const POLL_STEP: Duration = Duration::from_millis(100);
 const CHECK_WAIT: Duration = Duration::from_millis(250);
 const HIDE_POLL: Duration = Duration::from_millis(500);
 const HIDE_STABLE_CHECKS: u32 = 4;
+/// A refusal sooner than this after a guest window signed in means the window did not help: leave instead.
+const GUEST_RENEW_GAP: Duration = Duration::from_secs(10 * 60);
+static GUEST_SIGNED_IN_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// Guest tenants whose login pages are stale in this run, because the window shows the home org.
+static STALE_GUEST_LOGINS: OnceLock<Vec<String>> = OnceLock::new();
+
+/// A guest org's sign-in page left open (e.g. after leaving that org) would ask the home org to sign in,
+/// so it is closed whenever the browser comes up. Call before `start`.
+pub fn close_guest_logins_on_start(tenants: Vec<String>) {
+    let _ = STALE_GUEST_LOGINS.set(tenants);
+}
+
+fn close_stale_guest_logins(browser: &browser::Browser) {
+    let Some(tenants) = STALE_GUEST_LOGINS
+        .get()
+        .filter(|tenants| !tenants.is_empty())
+    else {
+        return;
+    };
+    let browser = browser.clone();
+    app_base::runtime::handle().spawn(async move {
+        let closed = browser.close_tenant_login_tabs(tenants).await;
+        if closed > 0 {
+            log::info!("closed {closed} stale guest org sign-in page(s)");
+        }
+    });
+}
 // MSAL key budget (500 ms) + CDP close (up to 3 s) + profile release (2 s) must fit.
 const STOP_TIMEOUT: Duration = Duration::from_secs(6);
 
@@ -22,6 +49,11 @@ static LINUX_BROWSER: OnceLock<browser::Browser> = OnceLock::new();
 static LIVE_RETRY: OnceLock<Mutex<Option<Arc<Notify>>>> = OnceLock::new();
 static UI_EVENTS: OnceLock<mpsc::UnboundedSender<BackendEvent>> = OnceLock::new();
 static LOGIN_LAUNCH: AtomicU8 = AtomicU8::new(LoginLaunch::Idle as u8);
+/// Launches of the guest org's sign-in window per run; a window that showed uses them all up.
+static GUEST_SIGN_IN_TRIES: AtomicU8 = AtomicU8::new(0);
+const GUEST_SIGN_IN_MAX_TRIES: u8 = 2;
+/// Tenant of the guest sign-in in the visible window: it hides only once that tenant has a token.
+static GUEST_SIGN_IN_TENANT: Mutex<Option<String>> = Mutex::new(None);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -115,6 +147,68 @@ pub fn request_login_window(force: bool) {
     });
 }
 
+/// Opens the sign-in window on the guest org's Teams, where its tenant can ask for MFA: one window per
+/// sign-in, with a second launch only when the first failed. A window that signed in allows another one
+/// after GUEST_RENEW_GAP, since Teams web may renew the guest tokens only while it shows that tenant.
+/// `false` when that was used up or cannot be shown, so the caller leaves the guest org instead.
+/// A window that is showing or opening is another sign-in in progress: wait for it, the refusal comes again.
+pub fn request_guest_sign_in(tenant_id: &str) -> bool {
+    let (Some(browser), Some(url)) = (
+        LINUX_BROWSER.get().cloned(),
+        browser::tenant_start_url(tenant_id),
+    ) else {
+        return false;
+    };
+    if browser.is_visible_managed() || browser.is_busy() || login_launch() == LoginLaunch::Opening {
+        return true;
+    }
+    // Taken, not read: one sign-in buys one more window, so a refused renewal cannot reopen it forever.
+    let renew = GUEST_SIGNED_IN_AT.lock().ok().is_some_and(|mut slot| {
+        slot.take_if(|signed_in| signed_in.elapsed() >= GUEST_RENEW_GAP)
+            .is_some()
+    });
+    if renew {
+        GUEST_SIGN_IN_TRIES.store(0, Ordering::SeqCst);
+    }
+    let tries = GUEST_SIGN_IN_TRIES.load(Ordering::SeqCst);
+    if tries >= GUEST_SIGN_IN_MAX_TRIES {
+        return false;
+    }
+    GUEST_SIGN_IN_TRIES.store(tries + 1, Ordering::SeqCst);
+    let tenant = tenant_id.to_owned();
+    LOGIN_LAUNCH.store(LoginLaunch::Opening as u8, Ordering::SeqCst);
+    publish_sign_in(BrowserSignInState::Opening);
+    app_base::runtime::handle().spawn(async move {
+        match browser.login_window_at(vec![url]).await {
+            Ok(()) => {
+                GUEST_SIGN_IN_TRIES.store(GUEST_SIGN_IN_MAX_TRIES, Ordering::SeqCst);
+                LOGIN_LAUNCH.store(LoginLaunch::Shown as u8, Ordering::SeqCst);
+                set_guest_sign_in_tenant(Some(tenant));
+                publish_sign_in(BrowserSignInState::AwaitingSignIn);
+            }
+            Err(error) => {
+                log::warn!("guest org sign-in window failed: {error}");
+                LOGIN_LAUNCH.store(LoginLaunch::Idle as u8, Ordering::SeqCst);
+                publish_sign_in(BrowserSignInState::Failed(error.to_string()));
+            }
+        }
+    });
+    true
+}
+
+fn set_guest_sign_in_tenant(tenant: Option<String>) {
+    if let Ok(mut slot) = GUEST_SIGN_IN_TENANT.lock() {
+        *slot = tenant;
+    }
+}
+
+fn guest_sign_in_tenant() -> Option<String> {
+    GUEST_SIGN_IN_TENANT
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+}
+
 fn login_launch() -> LoginLaunch {
     match LOGIN_LAUNCH.load(Ordering::SeqCst) {
         value if value == LoginLaunch::Opening as u8 => LoginLaunch::Opening,
@@ -196,24 +290,28 @@ async fn hide_after_login(browser: browser::Browser, headless_notify: Arc<Notify
         }
         if !browser.is_visible_managed() {
             tracker.reset();
+            set_guest_sign_in_tenant(None);
             continue;
         }
         let status = browser.status().await.ok();
-        let session_ready = match status.as_ref() {
-            Some(status)
-                if status.running
-                    && status.mode == browser::Mode::Visible
-                    && status.login_state == browser::LoginState::NotRequired
-                    && status
-                        .tabs
-                        .iter()
-                        .any(|tab| tab.app == Some(browser::App::Teams) && !tab.parked) =>
-            {
-                browser.teams_sign_in_ready().await
-            }
-            _ => false,
-        };
+        let guest = guest_sign_in_tenant();
+        let teams_loaded = status.as_ref().is_some_and(|status| {
+            status.running
+                && status.mode == browser::Mode::Visible
+                && status.login_state == browser::LoginState::NotRequired
+                && status
+                    .tabs
+                    .iter()
+                    .any(|tab| tab.app == Some(browser::App::Teams) && !tab.parked)
+        });
+        // During a guest sign-in only a fresh token of the guest tenant counts.
+        let session_ready = teams_loaded && browser.teams_sign_in_ready(guest.as_deref()).await;
         if tracker.step(status.as_ref(), session_ready) {
+            if guest.is_some()
+                && let Ok(mut slot) = GUEST_SIGNED_IN_AT.lock()
+            {
+                *slot = Some(std::time::Instant::now());
+            }
             log::info!("Teams sign-in finished: moving Chrome to the background");
             publish_sign_in(BrowserSignInState::Finishing);
             if let Err(error) = browser.headless().await {
@@ -261,6 +359,7 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
                 publish_sign_in(BrowserSignInState::Failed(error.to_string()));
             }
         }
+        close_stale_guest_logins(&supervisor_browser);
         let _ = init_done_tx.send(true);
         app_base::runtime::handle().spawn(hide_after_login(
             supervisor_browser.clone(),
@@ -295,6 +394,7 @@ pub fn start(endpoint: &str) -> Arc<dyn session::Transport> {
                 }
                 browser::BrowserEvent::Started | browser::BrowserEvent::Restarted => {
                     log::info!("Chrome browser ready on port");
+                    close_stale_guest_logins(&supervisor_browser);
                     if supervisor_browser.is_visible_managed() {
                         publish_sign_in(BrowserSignInState::AwaitingSignIn);
                     }

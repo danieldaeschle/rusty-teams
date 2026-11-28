@@ -142,6 +142,10 @@ pub struct AppState {
     pub orgs: app_base::orgs::Orgs,
     /// Chats with new messages per org that is not open, for the account menu badge.
     pub org_unread: HashMap<String, HashSet<String>>,
+    /// Tenant id of the guest org this start left because Microsoft refused its sign-in; told once online.
+    pub refused_org: Option<String>,
+    /// A failed org restart is told once; the refused guest org asks for it again on every retry.
+    pub(crate) org_restart_failure_shown: bool,
     pub pending_jump: Option<(String, String)>,
     pub cards: CardState,
     pub task_dialog: Option<TaskDialogState>,
@@ -323,6 +327,8 @@ impl AppState {
             start_on_channels: false,
             orgs: app_base::orgs::Orgs::default(),
             org_unread: HashMap::new(),
+            refused_org: None,
+            org_restart_failure_shown: false,
             pending_jump: None,
             cards: CardState::default(),
             task_dialog: None,
@@ -1186,6 +1192,13 @@ impl AppState {
                     app_base::diagnostics::record(format!("connection: {connection:?}"));
                 }
                 self.connection = connection;
+                // Kept until the org list can name the org.
+                if self.connection == ConnectionState::Online
+                    && let Some(tenant_id) = self.refused_org.clone()
+                    && self.announce_refused_org(&tenant_id, cx)
+                {
+                    self.refused_org = None;
+                }
                 self.refresh_connection_banner(cx);
                 cx.emit(AppEvent::Status);
             }
@@ -1293,6 +1306,9 @@ impl AppState {
             BackendEvent::Orgs(list) => {
                 self.take_org_list(list);
                 cx.notify();
+            }
+            BackendEvent::GuestOrgRefused(tenant_id) => {
+                self.leave_refused_guest_org(&tenant_id, cx)
             }
             BackendEvent::OrgMessage(message) => {
                 self.org_unread

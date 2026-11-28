@@ -240,6 +240,33 @@ async fn missing_token_without_login_tab_is_no_fresh_token() {
 }
 
 #[tokio::test]
+async fn a_refused_guest_tenant_fails_at_once_without_waiting_or_reloading() {
+    let refused = json!({"noToken": true, "refreshError": "invalid_grant: AADSTS50076"});
+    let browser = start_browser(vec![refused; 40], TEAMS_TAB.to_vec()).await;
+    let config = SessionConfig {
+        token_wait: Duration::from_secs(30),
+        ..fast_config()
+    };
+    let home = Session::connect_with(&browser.endpoint, config)
+        .await
+        .unwrap();
+    let guest = home.in_tenant("aaaa-01");
+    let started = std::time::Instant::now();
+    let error = guest
+        .request(
+            Method::Get,
+            "https://graph.microsoft.com/v1.0/me",
+            &Scope::graph("User.Read"),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert!(error.refresh_refused(), "{error}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(browser.expressions.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn missing_token_with_login_tab_is_login_required() {
     let missing = json!({"noToken": true, "refreshError": "invalid_grant"});
     let tabs = vec![

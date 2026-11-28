@@ -115,6 +115,34 @@ pub(crate) fn parse_tabs(body: &[u8]) -> Result<Vec<Tab>, BrowserError> {
         .collect())
 }
 
+/// Login pages of these tenants, e.g. a guest org's sign-in left open when the window went home.
+pub(crate) fn tenant_login_tab_ids(body: &[u8], tenants: &[String]) -> Vec<String> {
+    let Ok(targets) = serde_json::from_slice::<Vec<RawTarget>>(body) else {
+        return Vec::new();
+    };
+    targets
+        .into_iter()
+        .filter(|target| target.kind == "page")
+        .filter(|target| {
+            Url::parse(&target.url).is_ok_and(|url| {
+                url.scheme() == "https"
+                    && url
+                        .host_str()
+                        .is_some_and(|host| LOGIN_HOSTS.contains(&host))
+                    && url
+                        .path_segments()
+                        .and_then(|mut parts| parts.next())
+                        .is_some_and(|first| {
+                            tenants
+                                .iter()
+                                .any(|tenant| tenant.eq_ignore_ascii_case(first))
+                        })
+            })
+        })
+        .map(|target| target.id)
+        .collect()
+}
+
 fn https_host(url: &str) -> Option<String> {
     let parsed = Url::parse(url).ok()?;
     (parsed.scheme() == "https").then(|| parsed.host_str().map(str::to_owned))?
@@ -201,6 +229,19 @@ mod tests {
       {"id":"C","type":"browser_ui","url":"chrome://omnibox-popup.top-chrome/"},
       {"id":"D","type":"service_worker","url":"https://teams.cloud.microsoft/sw.js"}
     ]"#;
+
+    #[test]
+    fn only_login_pages_of_the_named_tenants_are_closed() {
+        let list = br#"[
+          {"id":"G","type":"page","url":"https://login.microsoftonline.com/BBBB-02/oauth2/v2.0/authorize?x=1"},
+          {"id":"H","type":"page","url":"https://login.microsoftonline.com/aaaa-01/oauth2/v2.0/authorize"},
+          {"id":"C","type":"page","url":"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"},
+          {"id":"T","type":"page","url":"https://teams.cloud.microsoft/?tenantId=bbbb-02"},
+          {"id":"W","type":"service_worker","url":"https://login.microsoftonline.com/bbbb-02/sw.js"}
+        ]"#;
+        assert_eq!(tenant_login_tab_ids(list, &["bbbb-02".into()]), ["G"]);
+        assert!(tenant_login_tab_ids(b"not json", &["bbbb-02".into()]).is_empty());
+    }
 
     #[test]
     fn parses_version() {

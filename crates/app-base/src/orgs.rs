@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub const ORGS_FILE: &str = "orgs.json";
 /// Start flag that opens one chat once its org has loaded, used when a toast of another org is clicked.
 pub const OPEN_CONVERSATION_FLAG: &str = "--open-conversation";
+/// Start flag that names the guest org whose sign-in Microsoft refused, so the home org can say so.
+pub const REFUSED_ORG_FLAG: &str = "--refused-org";
 const HOME_DATABASE: &str = "cache.sqlite3";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

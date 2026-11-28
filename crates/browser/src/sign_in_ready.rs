@@ -12,8 +12,18 @@ use serde_json::Value;
 /// Page script. Returns `{opened, freshAccess}`. `opened` counts sealed entries decrypted with
 /// the `msal.cache.encryption` cookie. `freshAccess` is a bearer access token whose `expiresOn`
 /// is still in the future, in the clear or among the opened entries.
-pub(crate) static PAGE_EXPRESSION: LazyLock<String> =
+static PAGE_EXPRESSION: LazyLock<String> =
     LazyLock::new(|| PAGE_TEMPLATE.replace("__UNSEAL__", session::UNSEAL_SCRIPT));
+
+/// The page script; with `realm`, only access tokens of that tenant count. Expired guest tokens and
+/// home tokens are already cached during a guest sign-in, so neither may count for it.
+pub(crate) fn page_expression(realm: Option<&str>) -> String {
+    let realm = realm.map(str::to_ascii_lowercase);
+    PAGE_EXPRESSION.replace(
+        "__REALM__",
+        &serde_json::to_string(&realm).unwrap_or_else(|_| "null".into()),
+    )
+}
 
 const PAGE_TEMPLATE: &str = r#"(async () => {
   const sealed = [];
@@ -29,7 +39,8 @@ const PAGE_TEMPLATE: &str = r#"(async () => {
   const unsealEntries = __UNSEAL__;
   const openedEntries = (await unsealEntries(sealed, new Map())).map(([key, entry]) => entry);
   const now = Date.now();
-  const fresh = (entry) => entry && entry.credentialType === 'AccessToken' && (!entry.tokenType || entry.tokenType === 'Bearer') && Number(entry.expiresOn) * 1000 > now && typeof entry.secret === 'string' && entry.secret.length > 0;
+  const realm = __REALM__;
+  const fresh = (entry) => entry && entry.credentialType === 'AccessToken' && (realm === null || String(entry.realm || '').toLowerCase() === realm) && (!entry.tokenType || entry.tokenType === 'Bearer') && Number(entry.expiresOn) * 1000 > now && typeof entry.secret === 'string' && entry.secret.length > 0;
   return {opened: openedEntries.length, freshAccess: plain.some(fresh) || openedEntries.some(fresh)};
 })()"#;
 
@@ -68,6 +79,12 @@ mod tests {
         assert!(sign_in_ready_from_page(
             &json!({"opened": 2, "freshAccess": true})
         ));
+    }
+
+    #[test]
+    fn a_realm_goes_into_the_script_as_a_lowercase_string() {
+        assert!(page_expression(Some("AAAA-01")).contains(r#"const realm = "aaaa-01";"#));
+        assert!(page_expression(None).contains("const realm = null;"));
     }
 
     #[test]

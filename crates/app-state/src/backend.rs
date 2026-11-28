@@ -74,6 +74,8 @@ pub enum BackendEvent {
     Synced(DateTime<Utc>),
     LiveRetry(Arc<Notify>),
     Orgs(Vec<app_base::orgs::Org>),
+    /// Microsoft refused the open guest org's tokens while the home org still signs in.
+    GuestOrgRefused(String),
     OrgMessage(crate::org_watch::OrgMessage),
 }
 
@@ -99,6 +101,7 @@ impl BackendEvent {
             BackendEvent::Synced(_) => "Synced".into(),
             BackendEvent::LiveRetry(_) => "LiveRetry".into(),
             BackendEvent::Orgs(_) => "Orgs".into(),
+            BackendEvent::GuestOrgRefused(_) => "GuestOrgRefused".into(),
             BackendEvent::OrgMessage(_) => "OrgMessage".into(),
         }
     }
@@ -122,6 +125,10 @@ pub fn classify_core_error(error: &teams_core::Error) -> ConnectionState {
         teams_core::Error::Graph(graph::Error::Session(inner)) => classify_session_error(inner),
         other => ConnectionState::Failed(shorten(&other.to_string())),
     }
+}
+
+fn refresh_refused(error: &teams_core::Error) -> bool {
+    matches!(error, teams_core::Error::Graph(graph::Error::Session(inner)) if inner.refresh_refused())
 }
 
 fn image_directory() -> Option<std::path::PathBuf> {
@@ -156,6 +163,7 @@ pub fn start(
     ringable: bool,
     activity: watch::Receiver<bool>,
     guest_tenant: Option<String>,
+    refused_org: Option<String>,
 ) -> mpsc::UnboundedReceiver<BackendEvent> {
     let (sender, receiver) = mpsc::unbounded_channel();
     crate::runtime::handle().spawn(supervise(
@@ -164,6 +172,7 @@ pub fn start(
         ringable,
         activity,
         guest_tenant,
+        refused_org,
         sender,
     ));
     receiver
@@ -175,6 +184,7 @@ async fn supervise(
     ringable: bool,
     activity: watch::Receiver<bool>,
     guest_tenant: Option<String>,
+    refused_org: Option<String>,
     events: EventSender,
 ) {
     let _ = events.send(BackendEvent::Connection(ConnectionState::Connecting));
@@ -187,7 +197,12 @@ async fn supervise(
             }
         }
     };
-    tokio::spawn(org_list(home.clone(), guest_tenant.clone(), events.clone()));
+    tokio::spawn(org_list(
+        home.clone(),
+        guest_tenant.clone(),
+        refused_org,
+        events.clone(),
+    ));
     // Calls stay on the home tenant's registration, like rings for the home org while a guest org is open.
     // Chat files of a guest org go to the home OneDrive: the guest tenant has none.
     let (session, home_drive) = match &guest_tenant {
@@ -234,15 +249,23 @@ async fn supervise(
         live_retry,
     ));
     // A guest has no mailbox in the org it visits, so Outlook is read from the home tenant.
+    let open_guest = guest_tenant.map(|tenant| (tenant, home.clone()));
     tokio::spawn(calendar_loop(home, store.clone(), events.clone()));
     tokio::spawn(pins_loop(session, events.clone()));
     tokio::spawn(presence_resubscribe_loop(engine.clone()));
-    refresh_loop(engine, events, nudges).await;
+    refresh_loop(engine, events, nudges, open_guest).await;
 }
 
 /// Fetches the account's organizations once per start, retried a few times while sign-in settles,
 /// and keeps every org that is not open live for notifications.
-async fn org_list(home: Session, open_guest: Option<String>, events: EventSender) {
+/// `refused_org` was left because its sign-in failed: its token searches would reload the shared Teams tab
+/// on every retry, so it gets no watch until the user opens it again.
+async fn org_list(
+    home: Session,
+    open_guest: Option<String>,
+    refused_org: Option<String>,
+    events: EventSender,
+) {
     for _ in 0..ORG_LIST_ATTEMPTS {
         match chatsvc::list_tenants(&home).await {
             Ok(tenants) => {
@@ -257,7 +280,7 @@ async fn org_list(home: Session, open_guest: Option<String>, events: EventSender
                         Some(open) => *open == org.id,
                         None => !org.guest,
                     };
-                    if !open {
+                    if !open && refused_org.as_deref() != Some(org.id.as_str()) {
                         let session = if org.guest {
                             home.in_tenant(&org.id)
                         } else {
@@ -297,10 +320,12 @@ async fn forward_core_events(engine: Arc<Engine>, events: EventSender) {
     }
 }
 
+/// `open_guest` is the open guest org's tenant id with the home session.
 async fn refresh_loop(
     engine: Arc<Engine>,
     events: EventSender,
     mut nudges: mpsc::UnboundedReceiver<()>,
+    open_guest: Option<(String, Session)>,
 ) {
     let mut interval = tokio::time::interval(REFRESH_INTERVAL);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -331,7 +356,17 @@ async fn refresh_loop(
                 let _ = events.send(BackendEvent::Synced(Utc::now()));
             }
             Err(error) => {
-                let _ = events.send(BackendEvent::Connection(classify_core_error(&error)));
+                // The plain sign-in window shows the home org's Teams and closes again, so the guest org needs its own.
+                let event = match &open_guest {
+                    Some((tenant, home))
+                        if refresh_refused(&error) && chatsvc::list_tenants(home).await.is_ok() =>
+                    {
+                        crate::diagnostics::record(format!("orgs: guest org refused: {error}"));
+                        BackendEvent::GuestOrgRefused(tenant.clone())
+                    }
+                    _ => BackendEvent::Connection(classify_core_error(&error)),
+                };
+                let _ = events.send(event);
                 tokio::time::sleep(CONNECT_RETRY).await;
             }
         }

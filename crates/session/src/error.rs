@@ -38,6 +38,15 @@ impl Error {
             body: Box::new(body),
         }
     }
+
+    /// Microsoft refused the refresh token, e.g. a tenant that wants MFA: only a sign-in page can help.
+    pub fn refresh_refused(&self) -> bool {
+        matches!(self, Error::NoFreshToken { detail, .. } if is_refusal(detail))
+    }
+}
+
+pub(crate) fn is_refusal(reason: &str) -> bool {
+    reason.contains("invalid_grant") || reason.contains("interaction_required")
 }
 
 #[cfg(test)]
@@ -57,6 +66,25 @@ mod tests {
             error.to_string(),
             "HTTP 403: Forbidden (https://graph.microsoft.com/v1.0/me)"
         );
+    }
+
+    #[test]
+    fn a_refused_refresh_is_told_apart_from_a_missing_token() {
+        let refused = |detail: &str| {
+            Error::NoFreshToken {
+                scope: "s".into(),
+                detail: detail.into(),
+            }
+            .refresh_refused()
+        };
+        assert!(refused(
+            " (token refresh failed in teams: invalid_grant: AADSTS50076: MFA)"
+        ));
+        assert!(refused(
+            " (token refresh failed in teams: interaction_required)"
+        ));
+        assert!(!refused(" [teams: https://teams.cloud.microsoft/]"));
+        assert!(!Error::LoginRequired("x".into()).refresh_refused());
     }
 
     #[test]

@@ -15,7 +15,9 @@ const BANNER_ICON_SIZE: f32 = 14.;
 pub fn render_connection_banner(
     banner: BannerText,
     on_retry: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_leave: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let has_leave = banner.leave.is_some();
     h_flex()
         .debug_selector(|| "shell/connection-banner".into())
         .flex_none()
@@ -42,21 +44,32 @@ pub fn render_connection_banner(
                 .text_color(theme::text_muted())
                 .child(detail)
         }))
+        .when_some(banner.leave, |row, label| {
+            row.child(
+                banner_button("connection-banner-leave", label)
+                    .ml_auto()
+                    .on_click(on_leave),
+            )
+        })
         .when_some(banner.action, |row, label| {
             row.child(
-                div()
-                    .id("connection-banner-action")
-                    .flex_none()
-                    .ml_auto()
-                    .px(px(8.))
-                    .py(px(2.))
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::accent_text())
-                    .hover(|button| button.bg(theme::row_hover()))
-                    .child(label)
+                banner_button("connection-banner-action", label)
+                    .when(!has_leave, |button| button.ml_auto())
                     .on_click(on_retry),
             )
         })
+}
+
+pub(crate) fn banner_button(id: &'static str, label: String) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex_none()
+        .px(px(8.))
+        .py(px(2.))
+        .rounded(px(6.))
+        .cursor_pointer()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::accent_text())
+        .hover(|button| button.bg(theme::row_hover()))
+        .child(label)
 }

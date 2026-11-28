@@ -27,6 +27,8 @@ pub struct BannerText {
     pub text: String,
     pub detail: Option<String>,
     pub action: Option<String>,
+    /// "Back to" the home org, while a guest org cannot connect (e.g. its sign-in cannot be finished).
+    pub leave: Option<String>,
 }
 
 /// What is wrong right now; `None` while live or while only missed messages are being synced.
@@ -64,6 +66,7 @@ pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> Banner
         text: app_base::ui_locale::tr(key),
         detail: None,
         action: None,
+        leave: None,
     };
     match kind {
         BannerKind::Connecting => text("auth.banner.connecting"),
@@ -95,6 +98,22 @@ pub fn banner_text(kind: BannerKind, last_sync: Option<DateTime<Utc>>) -> Banner
             ..text("auth.banner.live_unavailable")
         },
     }
+}
+
+/// The way back to the home org, offered while an open guest org cannot connect.
+fn leave_label(kind: BannerKind, orgs: &app_base::orgs::Orgs) -> Option<String> {
+    let stuck = matches!(
+        kind,
+        BannerKind::SignIn | BannerKind::Connecting | BannerKind::Offline
+    );
+    stuck.then(|| back_to_home(orgs)).flatten()
+}
+
+/// "Back to <home org>" while a guest org is open.
+fn back_to_home(orgs: &app_base::orgs::Orgs) -> Option<String> {
+    orgs.active_guest()?;
+    let home = orgs.list.iter().find(|org| !org.guest)?;
+    Some(app_base::ui_locale::tr("auth.banner.back_to_org").replace("%{name}", &home.name))
 }
 
 /// Shows a bad state only once it lasted `SHOW_AFTER`, and keeps a shown banner at least `MIN_VISIBLE`.
@@ -177,10 +196,16 @@ impl AppState {
         }
     }
 
+    /// The splash hides the banner, so a guest org stuck in its sign-in offers the way home there.
+    pub fn splash_way_home(&self) -> Option<String> {
+        back_to_home(&self.orgs)
+    }
+
     pub fn connection_banner_text(&self) -> Option<BannerText> {
-        self.connection_banner
-            .visible()
-            .map(|kind| banner_text(kind, self.last_sync))
+        let kind = self.connection_banner.visible()?;
+        let mut banner = banner_text(kind, self.last_sync);
+        banner.leave = leave_label(kind, &self.orgs);
+        Some(banner)
     }
 
     pub fn retry_live(&mut self) {
@@ -197,11 +222,34 @@ mod tests {
     use chrono::Utc;
 
     use super::{
-        BannerKind, BannerTiming, CONNECTING_SHOW_AFTER, MIN_VISIBLE, SHOW_AFTER, banner_kind,
-        banner_text,
+        BannerKind, BannerTiming, CONNECTING_SHOW_AFTER, MIN_VISIBLE, SHOW_AFTER, back_to_home,
+        banner_kind, banner_text, leave_label,
     };
+
     use crate::backend::{ConnectionState, LiveState};
 
+    #[test]
+    fn a_guest_org_that_cannot_connect_offers_the_way_home() {
+        use app_base::orgs::{Org, Orgs};
+        let org = |id: &str, name: &str, guest| Org {
+            id: id.into(),
+            name: name.into(),
+            guest,
+        };
+        let mut orgs = Orgs {
+            active: Some("bbbb-02".into()),
+            list: vec![org("aaaa-01", "Home", false), org("bbbb-02", "Guest", true)],
+        };
+        let leave = leave_label(BannerKind::SignIn, &orgs).expect("offered");
+        assert!(leave.contains("Home"));
+        assert!(leave_label(BannerKind::Offline, &orgs).is_some());
+        assert!(leave_label(BannerKind::LiveUnavailable, &orgs).is_none());
+        // The splash offers it regardless of the banner kind, which it hides.
+        assert!(back_to_home(&orgs).is_some_and(|label| label.contains("Home")));
+        orgs.active = None;
+        assert!(leave_label(BannerKind::SignIn, &orgs).is_none());
+        assert!(back_to_home(&orgs).is_none());
+    }
     #[test]
     fn a_short_bad_state_never_shows() {
         let mut timing = BannerTiming::default();

@@ -82,6 +82,12 @@ notice:
   generic_detail:
     en: "Something went wrong: %{detail}"
     de: "Etwas ist schiefgelaufen: %{detail}"
+  refused_org_no_sign_in:
+    en: "%{name} asks for a sign-in that Rusty Teams cannot show here yet, so your home organization is open"
+    de: "%{name} verlangt eine Anmeldung, die Rusty Teams hier noch nicht anzeigen kann, darum ist deine Stammorganisation geöffnet"
+  refused_org:
+    en: "Sign-in to %{name} did not finish, so your home organization is open. Switch to %{name} again to retry."
+    de: "Die Anmeldung bei %{name} wurde nicht abgeschlossen, darum ist deine Stammorganisation geöffnet. Wechsle erneut zu %{name}, um es nochmal zu versuchen."
 settings:
   search:
     no_results:
@@ -1773,6 +1779,9 @@ auth:
     sign_in:
       en: Sign-in required. Sign in to Teams in the browser window that opened.
       de: Anmeldung nötig. Melde dich in dem geöffneten Browserfenster bei Teams an.
+    back_to_org:
+      en: "Back to %{name}"
+      de: "Zurück zu %{name}"
     live_unavailable:
       en: Live updates unavailable
       de: Live-Updates nicht verfügbar

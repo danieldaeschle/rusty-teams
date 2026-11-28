@@ -59,6 +59,8 @@
       .filter(entry => !entry.expiresOn || Number(entry.expiresOn) * 1000 > Date.now())
       .sort((first, second) => Number(second.lastUpdatedAt || 0) - Number(first.lastUpdatedAt || 0));
     let refreshError = null;
+    // An earlier refusal (e.g. MFA) is what the app acts on, so a later error does not replace it.
+    const refused = () => /invalid_grant|interaction_required/.test(refreshError || '');
     for (const refreshToken of token ? [] : refreshTokens) {
       const form = new URLSearchParams({
         client_id: refreshToken.clientId, grant_type: 'refresh_token', refresh_token: refreshToken.secret,
@@ -74,13 +76,13 @@
         const response = await fetch(`https://login.microsoftonline.com/${tenant || homeTenant(refreshToken) || 'organizations'}/oauth2/v2.0/token`,
           {method: 'POST', body: form});
         const answer = await response.json();
-        if (!response.ok) { refreshError = [answer.error || `HTTP ${response.status}`, (answer.error_description || '').split(/\r?\n/)[0]].filter(Boolean).join(': '); continue; }
+        if (!response.ok) { if (!refused()) refreshError = [answer.error || `HTTP ${response.status}`, (answer.error_description || '').split(/\r?\n/)[0]].filter(Boolean).join(': '); continue; }
         const scopes = (answer.scope || '').split(' ');
         cache[cacheKey] = {token: answer.access_token, scopes, expires: Date.now() + answer.expires_in * 1000};
         if (grants(scopes)) { token = answer.access_token; break; }
-        refreshError = `the app is not granted ${scope}`;
+        if (!refused()) refreshError = `the app is not granted ${scope}`;
       } catch (error) {
-        refreshError = String(error);
+        if (!refused()) refreshError = String(error);
       }
     }
     return {token, refreshError};
