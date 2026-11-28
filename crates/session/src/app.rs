@@ -1,4 +1,22 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use serde::Deserialize;
+
+/// Defender for Cloud Apps (Conditional Access App Control) proxies the app on `<host>.mcas.ms`.
+pub const MCAS_SUFFIX: &str = ".mcas.ms";
+
+// The MSAL cache lives on the origin the page ran on. Behind MCAS thats the proxied
+// origin, so headless restarts and parking have to go there too, else the cache is empty.
+static BEHIND_MCAS: AtomicBool = AtomicBool::new(false);
+
+/// Sends start and park navigation through the MCAS proxy from now on.
+pub fn set_behind_mcas(enabled: bool) {
+    BEHIND_MCAS.store(enabled, Ordering::SeqCst);
+}
+
+pub fn behind_mcas() -> bool {
+    BEHIND_MCAS.load(Ordering::SeqCst)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum App {
@@ -18,20 +36,43 @@ impl App {
     }
 
     pub fn start_url(self) -> &'static str {
-        match self {
-            App::Teams => "https://teams.cloud.microsoft/",
+        self.start_url_via(behind_mcas())
+    }
+
+    /// The start URL on the app's own host, never through the MCAS proxy.
+    pub fn direct_start_url(self) -> &'static str {
+        self.start_url_via(false)
+    }
+
+    fn start_url_via(self, mcas: bool) -> &'static str {
+        match (self, mcas) {
+            (App::Teams, false) => "https://teams.cloud.microsoft/",
+            (App::Teams, true) => "https://teams.cloud.microsoft.mcas.ms/",
         }
     }
 
     /// A static page on the app origin: keeps the MSAL cache reachable without running the app.
     pub fn park_url(self) -> &'static str {
-        match self {
-            App::Teams => "https://teams.cloud.microsoft/robots.txt",
+        self.park_url_via(behind_mcas())
+    }
+
+    fn park_url_via(self, mcas: bool) -> &'static str {
+        match (self, mcas) {
+            (App::Teams, false) => "https://teams.cloud.microsoft/robots.txt",
+            (App::Teams, true) => "https://teams.cloud.microsoft.mcas.ms/robots.txt",
         }
     }
 
     pub fn is_park_url(self, url: &str) -> bool {
-        url.starts_with(self.park_url())
+        // both origins count, a tab parked before the switch must still be seen as parked
+        match self {
+            App::Teams => [
+                "https://teams.cloud.microsoft/robots.txt",
+                "https://teams.cloud.microsoft.mcas.ms/robots.txt",
+            ]
+            .iter()
+            .any(|park| url.starts_with(park)),
+        }
     }
 }
 
@@ -123,6 +164,25 @@ mod tests {
         let teams = find_app_tab(&parked, App::Teams).unwrap();
         assert!(App::Teams.is_park_url(&teams.url));
         assert!(!App::Teams.is_park_url("https://teams.cloud.microsoft/v2/"));
+    }
+
+    #[test]
+    fn mcas_urls_go_through_the_proxy_and_both_park_urls_count() {
+        assert_eq!(
+            App::Teams.start_url_via(true),
+            "https://teams.cloud.microsoft.mcas.ms/"
+        );
+        assert_eq!(
+            App::Teams.park_url_via(true),
+            "https://teams.cloud.microsoft.mcas.ms/robots.txt"
+        );
+        assert_eq!(
+            App::Teams.start_url_via(false),
+            "https://teams.cloud.microsoft/"
+        );
+        assert!(App::Teams.is_park_url("https://teams.cloud.microsoft.mcas.ms/robots.txt"));
+        assert!(App::Teams.is_park_url("https://teams.cloud.microsoft/robots.txt"));
+        assert!(!App::Teams.is_park_url("https://teams.cloud.microsoft.mcas.ms/v2/"));
     }
 
     #[test]
